@@ -1,11 +1,11 @@
 blank_issues_enabled: false
 contact_links:
   - name: 📚 Documentation
-    url: https://atlasrox.github.io/Phronesis/
+    url: https://atlasrox.github.io/Tribos/
     about: Check our comprehensive documentation first
   - name: 💬 Discussions
-    url: https://github.com/AtlasRoX/phronesis-CS/discussions
+    url: https://github.com/AtlasRoX/trib/discussions
     about: Ask questions and discuss ideas with the community
   - name: 🔒 Security Issues
-    url: https://github.com/AtlasRoX/phronesis-CS/security/advisories/new
+    url: https://github.com/AtlasRoX/trib/security/advisories/new
     about: Report security vulnerabilities privately

@@ -1,10 +1,10 @@
-site_name: Phronesis
+site_name: Tribos
 
 nav:
   - Home: index.md
 
-  - Phronesis:
-      - Introduction: phronesis/intro.md
+  - Tribos:
+      - Introduction: tribos/intro.md
       - Configuration: configuration.md
       - Evaluation: evals.md
       - Scientific Validation: SCIENTIFIC_VALIDATION_AND_ARCHITECTURE.md
@@ -16,9 +16,9 @@ nav:
           - "References: Agent Loop": agentic/references-agent-loop.md
           - "References: Verification, Tools and Data": agentic/references-verification-tools-data.md
       - Agents:
-          - T2AA4P agent: phronesis/agents/main_agent.md
+          - T2AA4P agent: tribos/agents/main_agent.md
       - States:
-          - T2AA4P state: phronesis/states/state_phronesis.md
+          - T2AA4P state: tribos/states/state_tribos.md
 
   - Vivarix:
       - Introduction: vivarix/intro.md
@@ -215,8 +215,8 @@ nav:
       - Project Guidelines:
           - Contributing Guide: CONTRIBUTING.md
 
-repo_url: https://github.com/AtlasRoX/phronesis-CS
-repo_name: ChronoStrider/Phronesis
+repo_url: https://github.com/AtlasRoX/trib
+repo_name: AtlasRoX/trib
 
 theme:
   name: material

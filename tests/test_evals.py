@@ -10,10 +10,10 @@ from typing import Any, List
 
 import pytest
 
-from phronesis.evals import datasets, report, scoring
-from phronesis.evals.cli import main as cli_main
-from phronesis.evals.runner import Evaluator, RunConfig, load_results
-from phronesis.evals.schema import AnswerExpect, CaseResult, Check, EvalCase, RetrievalExpect
+from tribos.evals import datasets, report, scoring
+from tribos.evals.cli import main as cli_main
+from tribos.evals.runner import Evaluator, RunConfig, load_results
+from tribos.evals.schema import AnswerExpect, CaseResult, Check, EvalCase, RetrievalExpect
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -40,7 +40,7 @@ def test_cases_reject_broken_patterns():
 def test_sources_have_no_stray_control_characters():
     """A lost backslash turns a regex's \\b into a backspace, which silently never matches."""
     root = Path(__file__).resolve().parents[1]
-    bad = [str(p.relative_to(root)) for d in ("phronesis", "tests") for p in (root / d).rglob("*.py")
+    bad = [str(p.relative_to(root)) for d in ("tribos", "tests") for p in (root / d).rglob("*.py")
            if any(ch in p.read_text(encoding="utf-8", errors="ignore") for ch in ("\x08", "\x0b", "\x0c"))]
     assert not bad, bad
 
@@ -54,7 +54,7 @@ def test_select_filters_and_samples():
 
 
 def test_external_loaders_read_cached_files(tmp_path, monkeypatch):
-    monkeypatch.setenv("PHRONESIS_EVAL_CACHE", str(tmp_path))
+    monkeypatch.setenv("TRIBOS_EVAL_CACHE", str(tmp_path))
     (tmp_path / "pubmedqa_ori_pqal.json").write_text(json.dumps({
         "123": {"QUESTION": "Does X help?", "final_decision": "yes", "LONG_ANSWER": "It does.", "YEAR": "2010"}}))
     (tmp_path / "litqa2_rows.json").write_text(json.dumps([{

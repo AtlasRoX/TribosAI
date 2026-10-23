@@ -12,7 +12,7 @@ through A2A: id = job id, contextId = thread id, status.state in submitted | wor
 completed | failed | canceled, and the answer as a text artifact once completed. Runs are non-interactive
 (plan approvals are automatic), so `input-required` only appears while a REST client watching the job's
 events holds an approval open. `configuration.blocking: true` waits for the result (bounded by
-`PHRONESIS_A2A_BLOCKING_TIMEOUT_S`, default 300 s). Every method is scoped to the authenticated user; another
+`TRIBOS_A2A_BLOCKING_TIMEOUT_S`, default 300 s). Every method is scoped to the authenticated user; another
 user's task id is TaskNotFound (-32001). Streaming and push notifications are not offered.
 """
 
@@ -35,8 +35,8 @@ from app.backend.routers.mcp import (
     dispatch_rpc,
     parse_body,
 )
-from phronesis.agentic import config as agent_config
-from phronesis.agentic.jobs import JOB_ID_RE, JobError, get_job_manager
+from tribos.agentic import config as agent_config
+from tribos.agentic.jobs import JOB_ID_RE, JobError, get_job_manager
 
 router = APIRouter(tags=["a2a"])
 
@@ -91,7 +91,7 @@ async def agent_card(request: Request) -> Dict[str, Any]:
     info = _server_info()
     return {
         "protocolVersion": A2A_VERSION,
-        "name": "Phronesis",
+        "name": "Tribos",
         "description": (
             "Biomedical research agent: plans and runs evidence searches across literature, knowledge graphs, trials, "
             "drug and variant databases and kinetic models, then returns a verified, cited answer."
@@ -99,14 +99,14 @@ async def agent_card(request: Request) -> Dict[str, Any]:
         "url": f"{base}/a2a",
         "preferredTransport": "JSONRPC",
         "supportedInterfaces": [{"url": f"{base}/a2a", "protocolBinding": "JSONRPC", "protocolVersion": A2A_VERSION}],
-        "provider": {"organization": "Phronesis", "url": base},
+        "provider": {"organization": "Tribos", "url": base},
         "version": info["version"],
         "documentationUrl": f"{base}/docs",
         "capabilities": {"streaming": False, "pushNotifications": False, "stateTransitionHistory": False},
         "defaultInputModes": ["text/plain"],
         "defaultOutputModes": ["text/plain", "text/markdown"],
         "skills": _SKILLS,
-        "securitySchemes": {"bearer": {"type": "http", "scheme": "bearer", "description": "The Phronesis API bearer token (static token or JWT)."}},
+        "securitySchemes": {"bearer": {"type": "http", "scheme": "bearer", "description": "The Tribos API bearer token (static token or JWT)."}},
         "security": [{"bearer": []}],
     }
 
@@ -201,7 +201,7 @@ async def _send_message(user_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
         raise RpcError(INTERNAL_ERROR if exc.status_code != 422 else INVALID_PARAMS, str(exc)) from exc
     config = params.get("configuration") if isinstance(params.get("configuration"), dict) else {}
     if config.get("blocking"):
-        timeout = float(os.getenv("PHRONESIS_A2A_BLOCKING_TIMEOUT_S", "300") or 300)
+        timeout = float(os.getenv("TRIBOS_A2A_BLOCKING_TIMEOUT_S", "300") or 300)
         await manager.wait(job["job_id"], timeout)
     return task_view(manager.get(job["job_id"], user_id) or job)
 

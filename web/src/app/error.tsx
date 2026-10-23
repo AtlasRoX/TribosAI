@@ -26,7 +26,7 @@ export default function ErrorPage({ error, reset }: { error: Error & { digest?: 
     >
       <h1 style={{ margin: 0, fontSize: "18px", fontWeight: 600 }}>Something went wrong</h1>
       <p style={{ margin: 0, maxWidth: "480px", fontSize: "14px", color: "var(--text-muted, #a0a3b8)" }}>
-        Phronesis hit an unexpected error while showing this page. Your investigations are saved in this browser.
+        Tribos hit an unexpected error while showing this page. Your investigations are saved in this browser.
         {error.digest ? ` (Reference: ${error.digest})` : ""}
       </p>
       <div style={{ display: "flex", gap: "8px" }}>

@@ -1,5 +1,5 @@
 """
-Fit the claim-confidence calibration file (phronesis/config/confidence_calibration.json) from REAL labelled claims.
+Fit the claim-confidence calibration file (tribos/config/confidence_calibration.json) from REAL labelled claims.
 
 Usage:
     python scripts/calibrate_confidence.py --labelled claims.jsonl [--out PATH] [--alpha 0.1] [--fit-weights]
@@ -8,7 +8,7 @@ Usage:
 
 Input (--labelled): JSON Lines, one pipeline claim per line, human-labelled:
     {"answer_id": "<id of the answer the claim came from>", "label": 0 | 1,
-     "features": {<the claim_features() dict of phronesis.agentic.confidence for that claim>},
+     "features": {<the claim_features() dict of tribos.agentic.confidence for that claim>},
      "labeller": "<who judged it>", "synthetic": false}
 Rows marked "synthetic": true are rejected: a calibration fitted on invented examples calibrates nothing (AGT-001).
 
@@ -48,13 +48,13 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from phronesis.agentic import calibration_stats as cs  # noqa: E402
-from phronesis.agentic import confidence as conf  # noqa: E402
+from tribos.agentic import calibration_stats as cs  # noqa: E402
+from tribos.agentic import confidence as conf  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("calibrate_confidence")
 
-CONFIG_DIR = Path(__file__).resolve().parent.parent / "phronesis" / "config"
+CONFIG_DIR = Path(__file__).resolve().parent.parent / "tribos" / "config"
 CALIBRATION_OUTPUT = CONFIG_DIR / "confidence_calibration.json"
 FEATURE_NAMES = [k for k in conf.DEFAULT_WEIGHTS if k != "bias"]
 

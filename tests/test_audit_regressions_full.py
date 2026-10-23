@@ -1,5 +1,5 @@
 """
-Complete regression suite for all 22 assertions in Section 8 of Phronesis_Full_Audit_and_Repair_Report.md.
+Complete regression suite for all 22 assertions in Section 8 of Tribos_Full_Audit_and_Repair_Report.md.
 Tests run offline without network or LLM dependencies using real schemas and recording fakes.
 """
 
@@ -14,15 +14,15 @@ from typing import Any, Dict, List
 
 import pytest
 
-from phronesis.agents import authoritative_orchestrator as orch_module
-from phronesis.agents import query_planner as qp
-from phronesis.agents.authoritative_orchestrator import AuthoritativeOrchestrator
-from phronesis.agents.query_context import QueryContext, SimulationPlan, TaskOutcome
-from phronesis.verify.verifier import ClinicalVerifier, DefectSeverity
-from phronesis.tools import registry as registry_module
-from phronesis.tools.registry import BiomedicalToolRegistry, ErrorType, ToolResult
-from phronesis.utils.memory.clinical_memory import ClinicalMemoryEngine
-from phronesis.vivarix.engine import VivarixSimulationEngine
+from tribos.agents import authoritative_orchestrator as orch_module
+from tribos.agents import query_planner as qp
+from tribos.agents.authoritative_orchestrator import AuthoritativeOrchestrator
+from tribos.agents.query_context import QueryContext, SimulationPlan, TaskOutcome
+from tribos.verify.verifier import TribosVerifier, DefectSeverity
+from tribos.tools import registry as registry_module
+from tribos.tools.registry import ToolRegistry, ErrorType, ToolResult
+from tribos.utils.memory.research_memory import ResearchMemoryEngine
+from tribos.vivarix.engine import VivarixSimulationEngine
 from tests.fakes import _called, build_recording_registry, make_offline_orchestrator
 
 
@@ -267,7 +267,7 @@ async def test_case_13_duration_not_extracted_as_disease():
 # 14. Review with indexed clinical terminology: Methods-based design explained
 # =============================================================================
 def test_case_14_review_methods_based_grading():
-    from phronesis.lithoscribe.evidence_grading import grade_publication
+    from tribos.lithoscribe.evidence_grading import grade_publication
 
     art = {
         "title": "Contemporary Management of Thalassemia: A Perspective on Current Standards and the Emergence of FDA-Approved Oral Therapy",
@@ -283,7 +283,7 @@ def test_case_14_review_methods_based_grading():
 # 15. Opposite source negation: Claim marked contradicted
 # =============================================================================
 def test_case_15_opposite_source_negation_contradicted():
-    verifier = ClinicalVerifier()
+    verifier = TribosVerifier()
     doc_text = "In the randomized trial, compound X did not improve overall survival in advanced carcinoma patients."
     tool_results = {
         "lithoscribe": ToolResult(
@@ -304,7 +304,7 @@ def test_case_15_opposite_source_negation_contradicted():
 # 16. Survival number reused as response percentage: Claim rejected
 # =============================================================================
 def test_case_16_survival_number_reused_as_response_rate_rejected():
-    verifier = ClinicalVerifier()
+    verifier = TribosVerifier()
     doc_text = "Median overall survival was 12 months, and the objective response rate was 5% in the intention-to-treat population."
     tool_results = {
         "lithoscribe": ToolResult(
@@ -325,7 +325,7 @@ def test_case_16_survival_number_reused_as_response_rate_rejected():
 # 17. Methods-only source excerpt: No unsupported article-wide absence statement
 # =============================================================================
 def test_case_17_methods_only_excerpt_no_article_wide_absence():
-    verifier = ClinicalVerifier()
+    verifier = TribosVerifier()
     tool_results = {
         "lithoscribe": ToolResult(
             success=True,
@@ -356,7 +356,7 @@ def test_case_17_methods_only_excerpt_no_article_wide_absence():
 # 20. Truncated AnnData: Existing structural rejection retained
 # =============================================================================
 def test_case_20_truncated_anndata_rejected():
-    from phronesis.datasets.validators import ValidationFailure, validate_dataset_upload
+    from tribos.datasets.validators import ValidationFailure, validate_dataset_upload
 
     with tempfile.NamedTemporaryFile(suffix=".h5ad", delete=False) as f:
         f.write(b"\x89HDF\r\n\x1a\n" + b"\x00" * 90)
@@ -375,7 +375,7 @@ def test_case_20_truncated_anndata_rejected():
 # 21. Raw HTML with active content: Sanitized without executable iframe or scripts
 # =============================================================================
 def test_case_21_raw_html_sanitized():
-    from phronesis.agents.prompts import build_evidence_block
+    from tribos.agents.prompts import build_evidence_block
 
     res = ToolResult(
         success=True,

@@ -4,16 +4,16 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from phronesis.agentic.project_memory import _verified, format_memory_block
-from phronesis.extensions.grading import _claim_fits, _DESIGN_WORDS
-from phronesis.lithoscribe.evidence_grading import StudyType, grade_article, legacy_setting
-from phronesis.utils.memory.clinical_memory import (
-    ClinicalMemoryEngine,
+from tribos.agentic.project_memory import _verified, format_memory_block
+from tribos.extensions.grading import _claim_fits, _DESIGN_WORDS
+from tribos.lithoscribe.evidence_grading import StudyType, grade_article, legacy_setting
+from tribos.utils.memory.research_memory import (
+    ResearchMemoryEngine,
     MemoryType,
     VerificationStatus,
     turn_fully_verified,
 )
-from phronesis.utils.memory.project_store import FactInput, ProjectStore
+from tribos.utils.memory.project_store import FactInput, ProjectStore
 
 RCT_TAGS = {"pubType": ["Randomized Controlled Trial", "Clinical Trial, Phase III", "Journal Article"]}
 
@@ -79,13 +79,13 @@ def test_turn_verified_requires_no_unresolved_claims():
     assert turn_fully_verified(True, {"passed": True, "fully_verified": False}) is False
 
 
-def _nodes(mem: ClinicalMemoryEngine, user: str):
+def _nodes(mem: ResearchMemoryEngine, user: str):
     with mem._connect() as conn:
         return conn.execute("SELECT memory_type, content, verification_status, sources_json FROM memory_nodes WHERE user_id = ?", (user,)).fetchall()
 
 
 def test_unverified_turn_stores_tool_evidence_provisional_and_simulation_is_never_verified(tmp_path):
-    mem = ClinicalMemoryEngine(storage_dir=str(tmp_path))
+    mem = ResearchMemoryEngine(storage_dir=str(tmp_path))
     data = {
         "lithoscribe": {"ranked_passages": [{"pmid": "39369609", "passage_text": "median OS 10.2 months"}]},
         "vivarix": {"model_id": "BIOMD0000000010", "final_concentrations": {"Mos": 1.0}},

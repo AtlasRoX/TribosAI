@@ -27,7 +27,7 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
         }}
       >
         <main role="alert">
-          <h1 style={{ margin: 0, fontSize: "18px", fontWeight: 600 }}>Phronesis could not start</h1>
+          <h1 style={{ margin: 0, fontSize: "18px", fontWeight: 600 }}>Tribos could not start</h1>
           <p style={{ maxWidth: "480px", fontSize: "14px", color: "#a0a3b8" }}>
             An unexpected error stopped the application from loading.
             {error.digest ? ` (Reference: ${error.digest})` : ""}

@@ -1,4 +1,4 @@
-"""The declarative settings registry (phronesis/config/settings.py): coverage, accessors, validation, docs check."""
+"""The declarative settings registry (tribos/config/settings.py): coverage, accessors, validation, docs check."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional
 
 import pytest
 
-from phronesis.config import (
+from tribos.config import (
     REGISTRY,
     get_bool,
     get_float,
@@ -22,7 +22,7 @@ from phronesis.config import (
     get_str,
     validate_environment,
 )
-from phronesis.config import settings as S
+from tribos.config import settings as S
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -88,15 +88,15 @@ def test_registry_entries_are_well_formed():
     for name, setting in REGISTRY.items():
         if _gen_module().SECRET_RE.search(name):
             assert setting.secret, name
-    for secret in ("TAVILY_API_KEY", "NVIDIA_API_KEY", "OPENAI_API_KEY", "PHRONESIS_JWT_SECRET", "PHRONESIS_API_TOKENS",
-                   "NVIDIA_NIM_API_KEY", "PHRONESIS_USER_HASH_SALT", "PHRONESIS_EVAL_TOKEN"):
+    for secret in ("TAVILY_API_KEY", "NVIDIA_API_KEY", "OPENAI_API_KEY", "TRIBOS_JWT_SECRET", "TRIBOS_API_TOKENS",
+                   "NVIDIA_NIM_API_KEY", "TRIBOS_USER_HASH_SALT", "TRIBOS_EVAL_TOKEN"):
         assert REGISTRY[secret].secret, secret
 
 
 def test_framework_choices_match_the_agentic_config():
-    from phronesis.agentic import config as agent_config
+    from tribos.agentic import config as agent_config
 
-    assert REGISTRY["PHRONESIS_DEFAULT_FRAMEWORK"].choices == agent_config.ALL_FRAMEWORKS
+    assert REGISTRY["TRIBOS_DEFAULT_FRAMEWORK"].choices == agent_config.ALL_FRAMEWORKS
 
 
 def _literal(node: ast.AST) -> Any:
@@ -109,7 +109,7 @@ def _literal(node: ast.AST) -> Any:
 def test_helper_call_sites_agree_with_the_registry():
     """env_int/env_float/_env_int/_env_float(NAME, default, lo, hi) literals match the registered default and bounds."""
     checked = 0
-    for base in ("phronesis", "app"):
+    for base in ("tribos", "app"):
         for path in (ROOT / base).rglob("*.py"):
             if "tests" in path.parts or "__pycache__" in path.parts:
                 continue
@@ -137,37 +137,37 @@ def test_helper_call_sites_agree_with_the_registry():
 # -- accessors --------------------------------------------------------------------------------------------------------
 
 def test_get_int_defaults_parsing_clamping_and_overrides(monkeypatch, caplog):
-    monkeypatch.delenv("PHRONESIS_JOB_WORKERS", raising=False)
-    assert get_int("PHRONESIS_JOB_WORKERS") == 2
-    monkeypatch.setenv("PHRONESIS_JOB_WORKERS", "  ")
-    assert get_int("PHRONESIS_JOB_WORKERS") == 2
-    monkeypatch.setenv("PHRONESIS_JOB_WORKERS", " 7 ")
-    assert get_int("PHRONESIS_JOB_WORKERS") == 7
-    monkeypatch.setenv("PHRONESIS_JOB_WORKERS", "999")
-    assert get_int("PHRONESIS_JOB_WORKERS") == 16  # registered max
-    assert get_int("PHRONESIS_JOB_WORKERS", max=None) == 999
-    assert get_int("PHRONESIS_JOB_WORKERS", 3, min=1, max=50) == 50
-    monkeypatch.setenv("PHRONESIS_JOB_WORKERS", "0")
-    assert get_int("PHRONESIS_JOB_WORKERS") == 1
-    with caplog.at_level(logging.WARNING, logger="phronesis.config.settings"):
-        monkeypatch.setenv("PHRONESIS_JOB_WORKERS", "two")
-        assert get_int("PHRONESIS_JOB_WORKERS") == 2
-        assert get_int("PHRONESIS_JOB_WORKERS") == 2
-        monkeypatch.setenv("PHRONESIS_JOB_WORKERS", "1.5")
-        assert get_int("PHRONESIS_JOB_WORKERS", 5) == 5
-    bad = [r for r in caplog.records if "PHRONESIS_JOB_WORKERS" in r.getMessage() and "not an integer" in r.getMessage()]
+    monkeypatch.delenv("TRIBOS_JOB_WORKERS", raising=False)
+    assert get_int("TRIBOS_JOB_WORKERS") == 2
+    monkeypatch.setenv("TRIBOS_JOB_WORKERS", "  ")
+    assert get_int("TRIBOS_JOB_WORKERS") == 2
+    monkeypatch.setenv("TRIBOS_JOB_WORKERS", " 7 ")
+    assert get_int("TRIBOS_JOB_WORKERS") == 7
+    monkeypatch.setenv("TRIBOS_JOB_WORKERS", "999")
+    assert get_int("TRIBOS_JOB_WORKERS") == 16  # registered max
+    assert get_int("TRIBOS_JOB_WORKERS", max=None) == 999
+    assert get_int("TRIBOS_JOB_WORKERS", 3, min=1, max=50) == 50
+    monkeypatch.setenv("TRIBOS_JOB_WORKERS", "0")
+    assert get_int("TRIBOS_JOB_WORKERS") == 1
+    with caplog.at_level(logging.WARNING, logger="tribos.config.settings"):
+        monkeypatch.setenv("TRIBOS_JOB_WORKERS", "two")
+        assert get_int("TRIBOS_JOB_WORKERS") == 2
+        assert get_int("TRIBOS_JOB_WORKERS") == 2
+        monkeypatch.setenv("TRIBOS_JOB_WORKERS", "1.5")
+        assert get_int("TRIBOS_JOB_WORKERS", 5) == 5
+    bad = [r for r in caplog.records if "TRIBOS_JOB_WORKERS" in r.getMessage() and "not an integer" in r.getMessage()]
     assert len(bad) == 2  # once per (name, value)
 
 
 def test_get_float_rejects_nan_and_converts_ints(monkeypatch):
-    monkeypatch.setenv("PHRONESIS_JOB_CANCEL_GRACE_S", "nan")
-    assert get_float("PHRONESIS_JOB_CANCEL_GRACE_S") == 20.0
-    monkeypatch.setenv("PHRONESIS_JOB_CANCEL_GRACE_S", "1e9")
-    assert get_float("PHRONESIS_JOB_CANCEL_GRACE_S") == 600.0
-    monkeypatch.setenv("PHRONESIS_JOB_CANCEL_GRACE_S", "2.5")
-    assert get_float("PHRONESIS_JOB_CANCEL_GRACE_S") == 2.5
-    monkeypatch.delenv("PHRONESIS_CONFIDENCE_T", raising=False)
-    assert get_float("PHRONESIS_CONFIDENCE_T") is None  # no registered default
+    monkeypatch.setenv("TRIBOS_JOB_CANCEL_GRACE_S", "nan")
+    assert get_float("TRIBOS_JOB_CANCEL_GRACE_S") == 20.0
+    monkeypatch.setenv("TRIBOS_JOB_CANCEL_GRACE_S", "1e9")
+    assert get_float("TRIBOS_JOB_CANCEL_GRACE_S") == 600.0
+    monkeypatch.setenv("TRIBOS_JOB_CANCEL_GRACE_S", "2.5")
+    assert get_float("TRIBOS_JOB_CANCEL_GRACE_S") == 2.5
+    monkeypatch.delenv("TRIBOS_CONFIDENCE_T", raising=False)
+    assert get_float("TRIBOS_CONFIDENCE_T") is None  # no registered default
     value = get_float("SOME_UNREGISTERED_TEST_VAR", 3)
     assert value == 3.0 and isinstance(value, float)
 
@@ -175,70 +175,70 @@ def test_get_float_rejects_nan_and_converts_ints(monkeypatch):
 def test_get_bool_words_and_fallback(monkeypatch, caplog):
     for word, expected in (("1", True), ("TRUE", True), ("yes", True), ("On", True), ("0", False), ("false", False),
                            ("NO", False), ("off", False)):
-        monkeypatch.setenv("PHRONESIS_SANDBOX", word)
-        assert get_bool("PHRONESIS_SANDBOX") is expected, word
-    monkeypatch.delenv("PHRONESIS_SANDBOX", raising=False)
-    assert get_bool("PHRONESIS_SANDBOX") is False
-    assert get_bool("PHRONESIS_LLM_FALLBACK") is True or "PHRONESIS_LLM_FALLBACK" in os.environ
-    with caplog.at_level(logging.WARNING, logger="phronesis.config.settings"):
-        monkeypatch.setenv("PHRONESIS_SANDBOX", "maybe")
-        assert get_bool("PHRONESIS_SANDBOX") is False
+        monkeypatch.setenv("TRIBOS_SANDBOX", word)
+        assert get_bool("TRIBOS_SANDBOX") is expected, word
+    monkeypatch.delenv("TRIBOS_SANDBOX", raising=False)
+    assert get_bool("TRIBOS_SANDBOX") is False
+    assert get_bool("TRIBOS_LLM_FALLBACK") is True or "TRIBOS_LLM_FALLBACK" in os.environ
+    with caplog.at_level(logging.WARNING, logger="tribos.config.settings"):
+        monkeypatch.setenv("TRIBOS_SANDBOX", "maybe")
+        assert get_bool("TRIBOS_SANDBOX") is False
     assert any("not a boolean" in r.getMessage() for r in caplog.records)
 
 
 def test_get_str_choices_aliases_and_plain_values(monkeypatch):
-    monkeypatch.setenv("PHRONESIS_RELIABILITY", "TRUE")
-    assert get_str("PHRONESIS_RELIABILITY") == "on"  # switch alias
-    monkeypatch.setenv("PHRONESIS_RELIABILITY", "No")
-    assert get_str("PHRONESIS_RELIABILITY") == "off"
-    monkeypatch.setenv("PHRONESIS_RELIABILITY", "sometimes")
-    assert get_str("PHRONESIS_RELIABILITY") == "auto"
-    monkeypatch.setenv("PHRONESIS_NLI", "on")
-    assert get_str("PHRONESIS_NLI") == "auto"
-    monkeypatch.setenv("PHRONESIS_NLI", "LLM")
-    assert get_str("PHRONESIS_NLI") == "llm"
-    monkeypatch.setenv("PHRONESIS_AGENT_PLAN", "1")  # env_flag accepts exactly off|auto|on
-    assert get_str("PHRONESIS_AGENT_PLAN") == "auto"
-    monkeypatch.setenv("PHRONESIS_SYNTHESIS_MODEL", "  some/Model-Id ")
-    assert get_str("PHRONESIS_SYNTHESIS_MODEL") == "some/Model-Id"  # no choices: stripped, case kept
-    monkeypatch.delenv("PHRONESIS_SYNTHESIS_MODEL", raising=False)
-    assert get_str("PHRONESIS_SYNTHESIS_MODEL") is None
-    assert get_str("PHRONESIS_SYNTHESIS_MODEL", "") == ""
+    monkeypatch.setenv("TRIBOS_RELIABILITY", "TRUE")
+    assert get_str("TRIBOS_RELIABILITY") == "on"  # switch alias
+    monkeypatch.setenv("TRIBOS_RELIABILITY", "No")
+    assert get_str("TRIBOS_RELIABILITY") == "off"
+    monkeypatch.setenv("TRIBOS_RELIABILITY", "sometimes")
+    assert get_str("TRIBOS_RELIABILITY") == "auto"
+    monkeypatch.setenv("TRIBOS_NLI", "on")
+    assert get_str("TRIBOS_NLI") == "auto"
+    monkeypatch.setenv("TRIBOS_NLI", "LLM")
+    assert get_str("TRIBOS_NLI") == "llm"
+    monkeypatch.setenv("TRIBOS_AGENT_PLAN", "1")  # env_flag accepts exactly off|auto|on
+    assert get_str("TRIBOS_AGENT_PLAN") == "auto"
+    monkeypatch.setenv("TRIBOS_SYNTHESIS_MODEL", "  some/Model-Id ")
+    assert get_str("TRIBOS_SYNTHESIS_MODEL") == "some/Model-Id"  # no choices: stripped, case kept
+    monkeypatch.delenv("TRIBOS_SYNTHESIS_MODEL", raising=False)
+    assert get_str("TRIBOS_SYNTHESIS_MODEL") is None
+    assert get_str("TRIBOS_SYNTHESIS_MODEL", "") == ""
 
 
 def test_get_path_and_get_list(monkeypatch, tmp_path):
-    monkeypatch.delenv("PHRONESIS_DATA_DIR", raising=False)
-    assert get_path("PHRONESIS_DATA_DIR") is None
-    monkeypatch.setenv("PHRONESIS_DATA_DIR", str(tmp_path))
-    assert get_path("PHRONESIS_DATA_DIR") == tmp_path
-    monkeypatch.setenv("PHRONESIS_DATA_DIR", "~/phronesis-data")
-    assert get_path("PHRONESIS_DATA_DIR") == Path(os.path.expanduser("~/phronesis-data"))
-    monkeypatch.delenv("PHRONESIS_CORS_ORIGINS", raising=False)
-    assert get_list("PHRONESIS_CORS_ORIGINS") == ["http://localhost:3000", "http://127.0.0.1:3000"]
-    monkeypatch.setenv("PHRONESIS_CORS_ORIGINS", " https://a.example , ,https://b.example")
-    assert get_list("PHRONESIS_CORS_ORIGINS") == ["https://a.example", "https://b.example"]
-    monkeypatch.setenv("PHRONESIS_DATASET_ROOTS", os.pathsep.join(["/data/a", "", "/data/b"]))
-    assert get_list("PHRONESIS_DATASET_ROOTS") == ["/data/a", "/data/b"]
+    monkeypatch.delenv("TRIBOS_DATA_DIR", raising=False)
+    assert get_path("TRIBOS_DATA_DIR") is None
+    monkeypatch.setenv("TRIBOS_DATA_DIR", str(tmp_path))
+    assert get_path("TRIBOS_DATA_DIR") == tmp_path
+    monkeypatch.setenv("TRIBOS_DATA_DIR", "~/tribos-data")
+    assert get_path("TRIBOS_DATA_DIR") == Path(os.path.expanduser("~/tribos-data"))
+    monkeypatch.delenv("TRIBOS_CORS_ORIGINS", raising=False)
+    assert get_list("TRIBOS_CORS_ORIGINS") == ["http://localhost:3000", "http://127.0.0.1:3000"]
+    monkeypatch.setenv("TRIBOS_CORS_ORIGINS", " https://a.example , ,https://b.example")
+    assert get_list("TRIBOS_CORS_ORIGINS") == ["https://a.example", "https://b.example"]
+    monkeypatch.setenv("TRIBOS_DATASET_ROOTS", os.pathsep.join(["/data/a", "", "/data/b"]))
+    assert get_list("TRIBOS_DATASET_ROOTS") == ["/data/a", "/data/b"]
 
 
 def test_unregistered_names_need_an_explicit_default(monkeypatch):
-    monkeypatch.delenv("PHRONESIS_NOT_A_SETTING", raising=False)
+    monkeypatch.delenv("TRIBOS_NOT_A_SETTING", raising=False)
     with pytest.raises(KeyError):
-        get_int("PHRONESIS_NOT_A_SETTING")
-    assert get_int("PHRONESIS_NOT_A_SETTING", 4) == 4
-    monkeypatch.setenv("PHRONESIS_NOT_A_SETTING", "nope")
-    assert get_str("PHRONESIS_NOT_A_SETTING", "x", choices=("x", "y")) == "x"
+        get_int("TRIBOS_NOT_A_SETTING")
+    assert get_int("TRIBOS_NOT_A_SETTING", 4) == 4
+    monkeypatch.setenv("TRIBOS_NOT_A_SETTING", "nope")
+    assert get_str("TRIBOS_NOT_A_SETTING", "x", choices=("x", "y")) == "x"
 
 
 def test_secret_values_are_never_logged(monkeypatch, caplog):
-    monkeypatch.setenv("MILVUS_PORT", "s3cr3t-value")
-    with caplog.at_level(logging.WARNING, logger="phronesis.config.settings"):
-        assert get_int("MILVUS_PORT") == 19530
+    monkeypatch.setenv("TRIBOS_MAX_RUNS", "s3cr3t-value")
+    with caplog.at_level(logging.WARNING, logger="tribos.config.settings"):
+        assert get_int("TRIBOS_MAX_RUNS") == 500
     assert "s3cr3t-value" in caplog.text  # not a secret: the bad value helps the operator
     caplog.clear()
     # A secret read through a numeric accessor (a misuse) still never echoes its value.
     monkeypatch.setenv("OPENAI_API_KEY", "sk-should-not-appear")
-    with caplog.at_level(logging.WARNING, logger="phronesis.config.settings"):
+    with caplog.at_level(logging.WARNING, logger="tribos.config.settings"):
         assert get_int("OPENAI_API_KEY", 0) == 0
     assert "sk-should-not-appear" not in caplog.text and "redacted" in caplog.text
 
@@ -295,89 +295,89 @@ def _apply(monkeypatch, name: str, raw: Optional[str]) -> None:
 
 
 def test_agentic_env_helpers_match_the_old_implementation(monkeypatch):
-    from phronesis.agentic.config import env_flag, env_float, env_int
+    from tribos.agentic.config import env_flag, env_float, env_int
 
     for raw in NUMERIC_INPUTS:
-        _apply(monkeypatch, "PHRONESIS_AGENT_MAX_TOOL_CALLS", raw)
-        assert env_int("PHRONESIS_AGENT_MAX_TOOL_CALLS", 40, 1, 200) == _old_env_int("PHRONESIS_AGENT_MAX_TOOL_CALLS", 40, 1, 200), raw
-        _apply(monkeypatch, "PHRONESIS_JOB_TTL_DAYS", raw)
-        assert env_float("PHRONESIS_JOB_TTL_DAYS", 30.0, 0.0, 36500.0) == _old_env_float("PHRONESIS_JOB_TTL_DAYS", 30.0, 0.0, 36500.0), raw
+        _apply(monkeypatch, "TRIBOS_AGENT_MAX_TOOL_CALLS", raw)
+        assert env_int("TRIBOS_AGENT_MAX_TOOL_CALLS", 40, 1, 200) == _old_env_int("TRIBOS_AGENT_MAX_TOOL_CALLS", 40, 1, 200), raw
+        _apply(monkeypatch, "TRIBOS_JOB_TTL_DAYS", raw)
+        assert env_float("TRIBOS_JOB_TTL_DAYS", 30.0, 0.0, 36500.0) == _old_env_float("TRIBOS_JOB_TTL_DAYS", 30.0, 0.0, 36500.0), raw
     for raw in FLAG_INPUTS:
-        _apply(monkeypatch, "PHRONESIS_AGENT_DECOMPOSE", raw)
+        _apply(monkeypatch, "TRIBOS_AGENT_DECOMPOSE", raw)
         for default in ("auto", "off", "on"):
-            assert env_flag("PHRONESIS_AGENT_DECOMPOSE", default) == _old_env_flag("PHRONESIS_AGENT_DECOMPOSE", default), raw
+            assert env_flag("TRIBOS_AGENT_DECOMPOSE", default) == _old_env_flag("TRIBOS_AGENT_DECOMPOSE", default), raw
 
 
 def test_reliability_env_helpers_match_the_old_implementation(monkeypatch):
-    from phronesis.tools import reliability
+    from tribos.tools import reliability
 
     for raw in NUMERIC_INPUTS:
-        _apply(monkeypatch, "PHRONESIS_TOOL_RETRIES", raw)
-        assert reliability._max_retries() == _old_env_int("PHRONESIS_TOOL_RETRIES", 2, 0, 5), raw
-        _apply(monkeypatch, "PHRONESIS_BREAKER_COOLDOWN_S", raw)
-        assert reliability._cooldown_s() == _old_env_float("PHRONESIS_BREAKER_COOLDOWN_S", 60.0, 0.0, 3600.0), raw
+        _apply(monkeypatch, "TRIBOS_TOOL_RETRIES", raw)
+        assert reliability._max_retries() == _old_env_int("TRIBOS_TOOL_RETRIES", 2, 0, 5), raw
+        _apply(monkeypatch, "TRIBOS_BREAKER_COOLDOWN_S", raw)
+        assert reliability._cooldown_s() == _old_env_float("TRIBOS_BREAKER_COOLDOWN_S", 60.0, 0.0, 3600.0), raw
     for raw in FLAG_INPUTS + ("YES", "0", "False"):
-        _apply(monkeypatch, "PHRONESIS_RELIABILITY", raw)
-        assert reliability.policies_enabled() == _old_switch("PHRONESIS_RELIABILITY"), raw
+        _apply(monkeypatch, "TRIBOS_RELIABILITY", raw)
+        assert reliability.policies_enabled() == _old_switch("TRIBOS_RELIABILITY"), raw
 
 
 def test_lumicell_env_helper_matches_the_old_implementation(monkeypatch):
-    engine = pytest.importorskip("phronesis.lumicell.engine")
+    engine = pytest.importorskip("tribos.lumicell.engine")
     for raw in NUMERIC_INPUTS:
-        _apply(monkeypatch, "PHRONESIS_LUMICELL_MAX_CELLS", raw)
-        assert engine._env_int("PHRONESIS_LUMICELL_MAX_CELLS", 50_000) == _old_lumicell_env_int(
-            "PHRONESIS_LUMICELL_MAX_CELLS", 50_000), raw
+        _apply(monkeypatch, "TRIBOS_LUMICELL_MAX_CELLS", raw)
+        assert engine._env_int("TRIBOS_LUMICELL_MAX_CELLS", 50_000) == _old_lumicell_env_int(
+            "TRIBOS_LUMICELL_MAX_CELLS", 50_000), raw
 
 
 # -- validation -------------------------------------------------------------------------------------------------------
 
 def test_validate_environment_clean_environment_has_no_problems():
     assert validate_environment({}) == []
-    assert validate_environment({"PHRONESIS_JOB_WORKERS": "4", "PHRONESIS_RELIABILITY": "1", "PHRONESIS_NLI": "on",
-                                 "PHRONESIS_SANDBOX": "yes", "PHRONESIS_LIVE_TESTS": "1", "PHRONESIS_WEB_PORT": "3001",
-                                 "PHRONESIS_DATA_DIR": "/srv/phronesis", "UNRELATED_VAR": "x",
-                                 "PHRONESIS_AGENT_MAX_TOKENS": ""}) == []
+    assert validate_environment({"TRIBOS_JOB_WORKERS": "4", "TRIBOS_RELIABILITY": "1", "TRIBOS_NLI": "on",
+                                 "TRIBOS_SANDBOX": "yes", "TRIBOS_LIVE_TESTS": "1", "TRIBOS_WEB_PORT": "3001",
+                                 "TRIBOS_DATA_DIR": "/srv/tribos", "UNRELATED_VAR": "x",
+                                 "TRIBOS_AGENT_MAX_TOKENS": ""}) == []
 
 
 def test_validate_environment_reports_typos_with_a_suggestion():
-    problems = validate_environment({"PHRONESIS_JOB_WORKER": "3", "PHRONESIS_RELIABILTY": "on", "PHRONESIS_ZZZ": "1"})
+    problems = validate_environment({"TRIBOS_JOB_WORKER": "3", "TRIBOS_RELIABILTY": "on", "TRIBOS_ZZZ": "1"})
     assert len(problems) == 3
     by_name: Dict[str, str] = {p.split(" ", 1)[0]: p for p in problems}
-    assert "did you mean PHRONESIS_JOB_WORKERS?" in by_name["PHRONESIS_JOB_WORKER"]
-    assert "did you mean PHRONESIS_RELIABILITY?" in by_name["PHRONESIS_RELIABILTY"]
-    assert "did you mean" not in by_name["PHRONESIS_ZZZ"]
+    assert "did you mean TRIBOS_JOB_WORKERS?" in by_name["TRIBOS_JOB_WORKER"]
+    assert "did you mean TRIBOS_RELIABILITY?" in by_name["TRIBOS_RELIABILTY"]
+    assert "did you mean" not in by_name["TRIBOS_ZZZ"]
 
 
 def test_validate_environment_reports_bad_values():
     problems = validate_environment({
-        "PHRONESIS_JOB_WORKERS": "lots",
-        "PHRONESIS_MAX_JOBS_PER_USER": "500",
-        "PHRONESIS_SANDBOX_TIMEOUT_S": "1",
-        "PHRONESIS_NLI_ENTAIL": "nan",
-        "PHRONESIS_PLANNER": "alwys",
-        "PHRONESIS_SANDBOX": "maybe",
-        "PHRONESIS_AUTH_MODE": "disable",
+        "TRIBOS_JOB_WORKERS": "lots",
+        "TRIBOS_MAX_JOBS_PER_USER": "500",
+        "TRIBOS_SANDBOX_TIMEOUT_S": "1",
+        "TRIBOS_NLI_ENTAIL": "nan",
+        "TRIBOS_PLANNER": "alwys",
+        "TRIBOS_SANDBOX": "maybe",
+        "TRIBOS_AUTH_MODE": "disable",
     })
     text = "\n".join(problems)
     assert len(problems) == 7, text
-    assert "PHRONESIS_JOB_WORKERS='lots' is not an integer" in text
-    assert "PHRONESIS_MAX_JOBS_PER_USER='500' is above the maximum 100" in text
-    assert "PHRONESIS_SANDBOX_TIMEOUT_S='1' is below the minimum 5" in text
-    assert "PHRONESIS_NLI_ENTAIL='nan' is not a number" in text
+    assert "TRIBOS_JOB_WORKERS='lots' is not an integer" in text
+    assert "TRIBOS_MAX_JOBS_PER_USER='500' is above the maximum 100" in text
+    assert "TRIBOS_SANDBOX_TIMEOUT_S='1' is below the minimum 5" in text
+    assert "TRIBOS_NLI_ENTAIL='nan' is not a number" in text
     assert "did you mean always?" in text
-    assert "PHRONESIS_SANDBOX='maybe' is not a boolean" in text
+    assert "TRIBOS_SANDBOX='maybe' is not a boolean" in text
     assert "did you mean disabled?" in text
 
 
 def test_validate_environment_never_echoes_secrets():
-    problems = validate_environment({"PHRONESIS_JWT_SECRT": "hunter2"})
+    problems = validate_environment({"TRIBOS_JWT_SECRT": "hunter2"})
     assert problems and "hunter2" not in "\n".join(problems)
-    assert "did you mean PHRONESIS_JWT_SECRET?" in problems[0]
+    assert "did you mean TRIBOS_JWT_SECRET?" in problems[0]
 
 
 def test_validate_environment_reads_os_environ_by_default(monkeypatch):
-    monkeypatch.setenv("PHRONESIS_MAX_RUNZ", "10")
-    assert any(p.startswith("PHRONESIS_MAX_RUNZ") and "PHRONESIS_MAX_RUNS" in p for p in validate_environment())
+    monkeypatch.setenv("TRIBOS_MAX_RUNZ", "10")
+    assert any(p.startswith("TRIBOS_MAX_RUNZ") and "TRIBOS_MAX_RUNS" in p for p in validate_environment())
 
 
 # -- startup and health -----------------------------------------------------------------------------------------------
@@ -385,14 +385,14 @@ def test_validate_environment_reads_os_environ_by_default(monkeypatch):
 def test_startup_check_warns_and_strict_mode_fails(monkeypatch, caplog):
     from app.backend import main as backend_main
 
-    monkeypatch.setenv("PHRONESIS_JOB_WORKERZ", "2")
-    monkeypatch.delenv("PHRONESIS_STRICT_CONFIG", raising=False)
-    with caplog.at_level(logging.WARNING, logger="phronesis.backend"):
+    monkeypatch.setenv("TRIBOS_JOB_WORKERZ", "2")
+    monkeypatch.delenv("TRIBOS_STRICT_CONFIG", raising=False)
+    with caplog.at_level(logging.WARNING, logger="tribos.backend"):
         problems = backend_main._check_config()
-    assert any("PHRONESIS_JOB_WORKERZ" in p for p in problems)
-    assert "Configuration: PHRONESIS_JOB_WORKERZ" in caplog.text
-    monkeypatch.setenv("PHRONESIS_STRICT_CONFIG", "1")
-    with pytest.raises(RuntimeError, match="PHRONESIS_STRICT_CONFIG"):
+    assert any("TRIBOS_JOB_WORKERZ" in p for p in problems)
+    assert "Configuration: TRIBOS_JOB_WORKERZ" in caplog.text
+    monkeypatch.setenv("TRIBOS_STRICT_CONFIG", "1")
+    with pytest.raises(RuntimeError, match="TRIBOS_STRICT_CONFIG"):
         backend_main._check_config()
 
 
@@ -409,10 +409,10 @@ def test_health_reports_the_config_problem_count(monkeypatch):
     monkeypatch.setitem(backend_main._health_cache, "readiness", None)
     client = TestClient(backend_main.app)
     baseline = client.get("/api/health").json()["config_problems"]
-    monkeypatch.setenv("PHRONESIS_HEALTH_CACHE_SECONDS", "5")  # typo of PHRONESIS_HEALTH_CACHE_S
+    monkeypatch.setenv("TRIBOS_HEALTH_CACHE_SECONDS", "5")  # typo of TRIBOS_HEALTH_CACHE_S
     body = client.get("/api/health").json()
     assert body["config_problems"] == baseline + 1
-    assert "PHRONESIS_HEALTH_CACHE_SECONDS" not in str(body)  # count only
+    assert "TRIBOS_HEALTH_CACHE_SECONDS" not in str(body)  # count only
 
 
 # -- docs generation --------------------------------------------------------------------------------------------------
@@ -421,15 +421,15 @@ def test_docs_use_registry_metadata_and_keep_secrets_blank(gen, scanned):
     doc = gen.render_markdown(scanned)
     example = gen.render_example(scanned)
     assert f"{len(REGISTRY)} variables." in doc
-    assert REGISTRY["PHRONESIS_AGENT_PLAN_CONCURRENCY"].description in doc
-    assert "| `PHRONESIS_AGENT_PLAN_CONCURRENCY` | int (1 to 16) | `4` |" in doc
+    assert REGISTRY["TRIBOS_AGENT_PLAN_CONCURRENCY"].description in doc
+    assert "| `TRIBOS_AGENT_PLAN_CONCURRENCY` | int (1 to 16) | `4` |" in doc
     assert "## Unregistered" not in doc
     for name, setting in REGISTRY.items():
         assert f"# {name}=" in example, name
         if setting.secret:
             assert f"# {name}=\n" in example, name
-    assert "# PHRONESIS_JOB_WORKERS=2\n" in example
-    assert "# PHRONESIS_SANDBOX=false\n" in example
+    assert "# TRIBOS_JOB_WORKERS=2\n" in example
+    assert "# TRIBOS_SANDBOX=false\n" in example
 
 
 def test_generated_reference_is_up_to_date(gen):

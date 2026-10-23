@@ -10,12 +10,12 @@ from typing import Any, Dict, List, Optional
 import pytest
 from pydantic import BaseModel
 
-from phronesis.agentic import config as agent_config
-from phronesis.agentic.budget import RunBudget
-from phronesis.agentic.control import ApprovalDecision, RunControl
-from phronesis.agentic.executor import PlanExecutor
-from phronesis.agentic.llm import AgentLLM
-from phronesis.agentic.plan_graph import (
+from tribos.agentic import config as agent_config
+from tribos.agentic.budget import RunBudget
+from tribos.agentic.control import ApprovalDecision, RunControl
+from tribos.agentic.executor import PlanExecutor
+from tribos.agentic.llm import AgentLLM
+from tribos.agentic.plan_graph import (
     RefError,
     drop_nodes,
     is_expensive_tool,
@@ -25,11 +25,11 @@ from phronesis.agentic.plan_graph import (
     validate_plan,
     validated_inputs,
 )
-from phronesis.agentic.planner import build_plan_prompt, select_tools
-from phronesis.agentic.runtime import register_phase, restore_phases, snapshot_phases
-from phronesis.agentic.state import AgentState, SubQuestion
-from phronesis.agents.query_context import QueryContext
-from phronesis.tools.registry import ErrorType, ToolResult
+from tribos.agentic.planner import build_plan_prompt, select_tools
+from tribos.agentic.runtime import register_phase, restore_phases, snapshot_phases
+from tribos.agentic.state import AgentState, SubQuestion
+from tribos.agents.query_context import QueryContext
+from tribos.tools.registry import ErrorType, ToolResult
 from tests.agentic_fakes import ScriptedLLM, collect_events, make_agentic_orchestrator
 from tests.fakes import build_recording_registry, called
 
@@ -337,7 +337,7 @@ def test_executor_stops_dispatching_when_budget_is_used_up():
 # Plan-and-execute phase: planner, joiner, replanning, approval
 # --------------------------------------------------------------------------------------------------------------
 def _phase():
-    from phronesis.agentic.plan_execute import PlanExecutePhase
+    from tribos.agentic.plan_execute import PlanExecutePhase
 
     return PlanExecutePhase()
 
@@ -474,13 +474,13 @@ def test_phase_applies_only_to_research_questions(monkeypatch):
     state.ctx.scope = "conversational"
     assert not phase.applies(state)
     state.ctx.scope = "research"
-    monkeypatch.setenv("PHRONESIS_AGENT_PLAN", "off")
+    monkeypatch.setenv("TRIBOS_AGENT_PLAN", "off")
     assert not phase.applies(state)
     assert phase.frameworks == (agent_config.AGENTIC, agent_config.DEBATE) and phase.stage == "augment" and phase.order == 10
 
 
 def test_react_mode_plans_one_node_per_step(monkeypatch):
-    monkeypatch.setenv("PHRONESIS_AGENT_PLAN_MODE", "react")
+    monkeypatch.setenv("TRIBOS_AGENT_PLAN_MODE", "react")
     reg, calls = build_recording_registry()
     replies = iter(
         [
@@ -504,7 +504,7 @@ def test_react_mode_plans_one_node_per_step(monkeypatch):
 # Decomposition
 # --------------------------------------------------------------------------------------------------------------
 def _decompose():
-    from phronesis.agentic.decompose import DecomposePhase
+    from tribos.agentic.decompose import DecomposePhase
 
     return DecomposePhase()
 
@@ -563,7 +563,7 @@ def test_simple_question_is_not_decomposed_and_costs_no_model_call():
 
 
 def test_decomposition_caps_at_five_and_skips_non_research():
-    from phronesis.agentic.decompose import heuristic_split
+    from tribos.agentic.decompose import heuristic_split
 
     q = "Tell me: 1) KRAS pathways 2) KRAS inhibitors 3) KRAS trials 4) KRAS structure 5) KRAS variants 6) KRAS expression"
     assert len(heuristic_split(q)) == 5
@@ -580,8 +580,8 @@ def test_decomposition_caps_at_five_and_skips_non_research():
 def planning_phases_only():
     """Only this package's phases (decompose, plan_execute), so other packages' phases cannot interfere."""
     saved = snapshot_phases()
-    from phronesis.agentic.decompose import DecomposePhase
-    from phronesis.agentic.plan_execute import PlanExecutePhase
+    from tribos.agentic.decompose import DecomposePhase
+    from tribos.agentic.plan_execute import PlanExecutePhase
 
     restore_phases({})
     register_phase(DecomposePhase())
@@ -677,8 +677,8 @@ def test_orchestrator_decomposes_compound_question(monkeypatch, tmp_path, planni
 def test_empty_drug_reference_falls_back_to_drugs_found_in_the_run():
     from types import SimpleNamespace
 
-    from phronesis.agentic.executor import PlanExecutor, run_known_drugs
-    from phronesis.agentic.plan_graph import PlanNode
+    from tribos.agentic.executor import PlanExecutor, run_known_drugs
+    from tribos.agentic.plan_graph import PlanNode
 
     chembl = ToolResult(success=True, tool_name="chembl_drug_profile",
                         data={"target_approved_drugs": [{"pref_name": "SOTORASIB"}, {"pref_name": "ADAGRASIB"}]})
@@ -704,9 +704,9 @@ def test_empty_drug_reference_falls_back_to_drugs_found_in_the_run():
 def test_blank_drug_argument_is_filled_from_the_run_instead_of_rejected():
     from types import SimpleNamespace
 
-    from phronesis.agentic.executor import PlanExecutor
+    from tribos.agentic.executor import PlanExecutor
 
-    from phronesis.drugintel.schemas import OpenFdaSafetyInput
+    from tribos.drugintel.schemas import OpenFdaSafetyInput
 
     reg, _ = build_recording_registry(extra_tools={"openfda_drug_safety": (OpenFdaSafetyInput, lambda kw: {})})
     graph = parse_plan(_plan_dict({"id": "n7", "tool": "openfda_drug_safety", "args": {"ingredient": ""}}))
@@ -725,9 +725,9 @@ def test_empty_target_reference_falls_back_to_synlethdb_partner_and_resolves_che
     import asyncio
     from types import SimpleNamespace
 
-    from phronesis.agentic.executor import PlanExecutor, run_known_genes
-    from phronesis.agentic.plan_graph import PlanNode
-    from phronesis.drugintel.schemas import ChemblProfileInput, ChemblResolveInput
+    from tribos.agentic.executor import PlanExecutor, run_known_genes
+    from tribos.agentic.plan_graph import PlanNode
+    from tribos.drugintel.schemas import ChemblProfileInput, ChemblResolveInput
 
     calls = []
 

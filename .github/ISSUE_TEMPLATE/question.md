@@ -23,7 +23,7 @@ labels: ["question", "needs-response"]
 
 ### Environment
 - Python version:
-- Phronesis version:
+- Tribos version:
 - Operating System:
 
 ### Additional context

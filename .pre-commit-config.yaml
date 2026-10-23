@@ -5,7 +5,7 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
-      # Keeps datasets, model weights and archives (phronesis_codebase.zip, *.h5ad) out of git history.
+      # Keeps datasets, model weights and archives (tribos_codebase.zip, *.h5ad) out of git history.
       - id: check-added-large-files
         args: ["--maxkb=5000"]
       - id: detect-private-key

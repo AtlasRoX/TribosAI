@@ -1,9 +1,9 @@
-# GitHub Workflows Documentation — Phronesis
+# GitHub Workflows Documentation — Tribos
 
-> **Phronesis** — Biomedical Research Assistant  
-> **Made by ChronoStrider Engineering (ChronoStrider Enginnerings)**
+> **Tribos** — Biomedical Research Assistant  
+> **Made by ChronoStrider Engineering**
 
-This document provides a comprehensive overview of all GitHub Actions workflows in the **Phronesis** repository, made by **ChronoStrider Engineering** (**ChronoStrider Enginnerings**), detailing their purpose, triggers, and functionality.
+This document provides a comprehensive overview of all GitHub Actions workflows in the **Tribos** repository, made by **ChronoStrider Engineering** (**ChronoStrider Engineering**), detailing their purpose, triggers, and functionality.
 
 ## Overview
 
@@ -12,7 +12,7 @@ Our CI/CD pipeline uses **UV** for fast, reliable dependency management across a
 ## Workflow Categories
 
 ### 🧪 Testing Workflows
-- [`tests_phronesis.yml`](#tests-phronesis)
+- [`tests_tribos.yml`](#tests-tribos)
 - [`tests_vivarix.yml`](#tests-vivarix)
 - [`tests_synapta.yml`](#tests-synapta)
 - [`tests_lithoscribe.yml`](#tests-lithoscribe)
@@ -41,7 +41,7 @@ Our CI/CD pipeline uses **UV** for fast, reliable dependency management across a
 
 **Triggers:**
 - Pull requests to `main` with changes to:
-  - `phronesis/lithoscribe/**`
+  - `tribos/lithoscribe/**`
   - `pyproject.toml`
   - `uv.lock`
 - Manual workflow dispatch
@@ -182,7 +182,7 @@ ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
 - Pull requests to `main` with changes to:
   - `pyproject.toml`
   - `uv.lock`
-  - `phronesis/**`
+  - `tribos/**`
 - Manual workflow dispatch
 
 **Features:**
@@ -257,7 +257,7 @@ BREAKING CHANGE:     → Major version bump (1.0.0 → 2.0.0)
 - Push to `main` branch with changes to:
   - `docs/**`
   - `mkdocs.yml`
-  - `phronesis/**`
+  - `tribos/**`
   - `pyproject.toml`
 - Manual workflow dispatch
 
@@ -347,8 +347,8 @@ GITHUB_TOKEN            # GitHub API access (auto-provided)
 Add these badges to your README for real-time status monitoring:
 
 ```markdown
-[![Security Audit](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/security_audit.yml/badge.svg)](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/security_audit.yml)
-[![SonarCloud](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/sonarcloud.yml/badge.svg)](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/sonarcloud.yml)
+[![Security Audit](https://github.com/AtlasRoX/trib/actions/workflows/security_audit.yml/badge.svg)](https://github.com/AtlasRoX/trib/actions/workflows/security_audit.yml)
+[![SonarCloud](https://github.com/AtlasRoX/trib/actions/workflows/sonarcloud.yml/badge.svg)](https://github.com/AtlasRoX/trib/actions/workflows/sonarcloud.yml)
 ```
 
 ### Common Issues & Solutions

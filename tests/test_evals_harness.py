@@ -13,10 +13,10 @@ from typing import Any, Dict, List
 import httpx
 import pytest
 
-from phronesis.evals import baseline, datasets, report, scoring
-from phronesis.evals.cli import main as cli_main
-from phronesis.evals.runner import Evaluator, RunConfig, aggregate_repeats, load_results, observe
-from phronesis.evals.schema import AnswerExpect, CaseResult, Check, EvalCase, Fact
+from tribos.evals import baseline, datasets, report, scoring
+from tribos.evals.cli import main as cli_main
+from tribos.evals.runner import Evaluator, RunConfig, aggregate_repeats, load_results, observe
+from tribos.evals.schema import AnswerExpect, CaseResult, Check, EvalCase, Fact
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -249,7 +249,7 @@ def test_leak_gate_and_skip_gates():
     obs = observe(payload(GOOD_ANSWER + " (Synapta)"), 1.0)
     assert not {c.name: c for c in scoring.gate_checks(obs)}["answer.no_internal_leak"].passed
     assert "answer.no_internal_leak" not in {c.name for c in scoring.gate_checks(obs, skip=["answer.no_internal_leak"])}
-    intro = observe(payload("I am Phronesis: Synapta, Vivarix ...", framework_used="conversational-direct"), 0.1)
+    intro = observe(payload("I am Tribos: Synapta, Vivarix ...", framework_used="conversational-direct"), 0.1)
     assert "answer.no_internal_leak" not in {c.name for c in scoring.gate_checks(intro)}  # the introduction names them
 
 

@@ -1,9 +1,9 @@
-# Phronesis: Scientific Validation, Multi-Agent Architecture & Benchmark Report
+# Tribos: Scientific Validation, Multi-Agent Architecture & Benchmark Report
 
-> **Phronesis** — Biomedical Research Assistant  
-> **Made by ChronoStrider Engineering (ChronoStrider Enginnerings)**
+> **Tribos** — Biomedical Research Assistant  
+> **Made by ChronoStrider Engineering**
 
-This document specifies the architecture, paper-to-feature mapping, and empirical validation results for the upgraded **Phronesis Biomedical Research Assistant**, engineered by **ChronoStrider Engineering** (**ChronoStrider Enginnerings**).
+This document specifies the architecture, paper-to-feature mapping, and empirical validation results for the upgraded **Tribos Biomedical Research Assistant**, engineered by **ChronoStrider Engineering** (**ChronoStrider Engineering**).
 
 ---
 
@@ -17,29 +17,29 @@ Prior to this upgrade, an inspection of the codebase revealed several architectu
 5. **Hallucinated Clinical Success**: When LLM synthesis encountered missing evidence or failed, it produced a hardcoded conclusion asserting "positive clinical trial progress".
 
 ### Implemented Solutions
-- **Authoritative Orchestrator (`phronesis/agents/authoritative_orchestrator.py`)**: Replaced the bypass with a unified multi-agent orchestrator connecting **🧬 Synapta**, **⚙️ Vivarix**, **🔬 Lumicell**, **📚 Lithoscribe**, and **🌐 WebSurfer**.
+- **Authoritative Orchestrator (`tribos/agents/authoritative_orchestrator.py`)**: Replaced the bypass with a unified multi-agent orchestrator connecting **🧬 Synapta**, **⚙️ Vivarix**, **🔬 Lumicell**, **📚 Lithoscribe**, and **🌐 WebSurfer**.
 - **Real Execution Engines**: Integrated COPASI/BASICO for kinetic ODE integration and Scanpy/AnnData for single-cell transcriptomics.
 - **PaperQA2 Literature Engine**: Iterative query decomposition, EuropePMC passage retrieval, DOI/PMID tracking, and explicit reporting of insufficient evidence.
-- **Deterministic Reflexion Verifier (`phronesis/verify/verifier.py`)**: Audits claims against simulator outputs, validates canonical identifiers, strips vendor/framework leaks, and enforces bounded self-correction.
-- **Mem0 SQLite Vault with BM25 (`phronesis/utils/memory/clinical_memory.py`)**: Implements thread-isolated, typed memory nodes (`USER_INSTRUCTION`, `WORKING_HYPOTHESIS`, `RETRIEVED_EVIDENCE`, `COMPUTED_RESULT`, `FAILURE_LESSON`), contradiction handling, and Okapi BM25 probabilistic retrieval.
-- **ToolUniverse Standardized Registry (`phronesis/tools/registry.py`)**: Standardizes tool inputs, outputs, canonical entity IDs (`ensembl_id`, `uniprot_id`, `biomodel_id`, `pmid`), timeouts, and structured error states (`TIMEOUT`, `VALIDATION_ERROR`, `SIMULATION_FAILED`).
+- **Deterministic Reflexion Verifier (`tribos/verify/verifier.py`)**: Audits claims against simulator outputs, validates canonical identifiers, strips vendor/framework leaks, and enforces bounded self-correction.
+- **Mem0 SQLite Vault with BM25 (`tribos/utils/memory/research_memory.py`)**: Implements thread-isolated, typed memory nodes (`USER_INSTRUCTION`, `WORKING_HYPOTHESIS`, `RETRIEVED_EVIDENCE`, `COMPUTED_RESULT`, `FAILURE_LESSON`), contradiction handling, and Okapi BM25 probabilistic retrieval.
+- **ToolUniverse Standardized Registry (`tribos/tools/registry.py`)**: Standardizes tool inputs, outputs, canonical entity IDs (`ensembl_id`, `uniprot_id`, `biomodel_id`, `pmid`), timeouts, and structured error states (`TIMEOUT`, `VALIDATION_ERROR`, `SIMULATION_FAILED`).
 - **Live Observed Readiness**: `/api/health` queries live upstream services (OpenTargets, EuropePMC, UniProt) and returns measured latency in milliseconds.
 
 ---
 
 ## 2. Paper-to-Feature Mapping
 
-| Reference Paper / Framework | Core Principles Adapted | Implementation in Phronesis |
+| Reference Paper / Framework | Core Principles Adapted | Implementation in Tribos |
 | :--- | :--- | :--- |
 | **ReAct** (Yao et al., 2022) & **Biomni** (2025) | Unified multi-specialist coordination, dynamic reasoning-acting loops, routing strictly to relevant domains. | `AuthoritativeOrchestrator` determines active specialists dynamically based on query intent; eliminates hardcoded canned outputs. |
-| **ToolUniverse** (2025) | Standardized biomedical tool registry, validated schemas, canonical entity IDs, timeout enforcement. | `BiomedicalToolRegistry` (`phronesis/tools/registry.py`) with Pydantic schemas, canonical IDs (`ensembl_id`, `uniprot_id`, `biomodel_id`), and typed error states. |
-| **PaperQA2** (2024) & **OpenScholar** (2024) | Query decomposition, passage-level retrieval and reranking, DOI/PMID tracking, contradiction tracking, explicit limitations. | `LiteratureSynthesisEngine` (`phronesis/lithoscribe/synthesis_engine.py`) breaks clinical questions into mechanistic subqueries, extracts ranked EuropePMC passages, tracks DOIs, and flags missing evidence. |
-| **Reflexion** (Shinn et al., 2023) | Deterministic audit of claims, numerical checks against tool execution artifacts, vendor leak prevention, bounded self-correction. | `ClinicalVerifier` (`phronesis/verify/verifier.py`) detects unsupported clinical assertions, checks numerical consistency, enforces naming rules, and returns defect feedback. |
-| **COPASI / BASICO** | Reproducible systems biology: kinetic ODE integration, parameter scans, steady-state computation, execution artifacts. | `VivarixSimulationEngine` (`phronesis/vivarix/engine.py`) runs deterministic LSODA ODE integration, caches SBML models locally, generates concentration trajectories and base64 plots. |
-| **CellAgent** (2024) | Analytical single-cell transcriptomics: QC filtering, normalization, log1p, PCA, graph, Leiden clustering, Wilcoxon DE markers. | `LumicellAnalysisEngine` (`phronesis/lumicell/engine.py`) executes Scanpy/AnnData pipelines, preserves donor metadata, ranks cluster markers, and attaches observational disclaimers. |
-| **Mem0** (2025) | Isolated persistent memory, typed semantic nodes, verification tiers, contradiction handling, BM25 retrieval. | `ClinicalMemoryEngine` (`phronesis/utils/memory/clinical_memory.py`) stores memories in SQLite with Okapi BM25 scoring, scopes retrieval by thread, and demotes conflicting provisional claims to `REFUTED`. |
+| **ToolUniverse** (2025) | Standardized biomedical tool registry, validated schemas, canonical entity IDs, timeout enforcement. | `ToolRegistry` (`tribos/tools/registry.py`) with Pydantic schemas, canonical IDs (`ensembl_id`, `uniprot_id`, `biomodel_id`), and typed error states. |
+| **PaperQA2** (2024) & **OpenScholar** (2024) | Query decomposition, passage-level retrieval and reranking, DOI/PMID tracking, contradiction tracking, explicit limitations. | `LiteratureSynthesisEngine` (`tribos/lithoscribe/synthesis_engine.py`) breaks clinical questions into mechanistic subqueries, extracts ranked EuropePMC passages, tracks DOIs, and flags missing evidence. |
+| **Reflexion** (Shinn et al., 2023) | Deterministic audit of claims, numerical checks against tool execution artifacts, vendor leak prevention, bounded self-correction. | `TribosVerifier` (`tribos/verify/verifier.py`) detects unsupported clinical assertions, checks numerical consistency, enforces naming rules, and returns defect feedback. |
+| **COPASI / BASICO** | Reproducible systems biology: kinetic ODE integration, parameter scans, steady-state computation, execution artifacts. | `VivarixSimulationEngine` (`tribos/vivarix/engine.py`) runs deterministic LSODA ODE integration, caches SBML models locally, generates concentration trajectories and base64 plots. |
+| **CellAgent** (2024) | Analytical single-cell transcriptomics: QC filtering, normalization, log1p, PCA, graph, Leiden clustering, Wilcoxon DE markers. | `LumicellAnalysisEngine` (`tribos/lumicell/engine.py`) executes Scanpy/AnnData pipelines, preserves donor metadata, ranks cluster markers, and attaches observational disclaimers. |
+| **Mem0** (2025) | Isolated persistent memory, typed semantic nodes, verification tiers, contradiction handling, BM25 retrieval. | `ResearchMemoryEngine` (`tribos/utils/memory/research_memory.py`) stores memories in SQLite with Okapi BM25 scoring, scopes retrieval by thread, and demotes conflicting provisional claims to `REFUTED`. |
 | **LLMCompiler** (2023) | Dependency-aware execution DAG, parallel independent tool retrieval, bounded concurrency. | `AuthoritativeOrchestrator` runs Stage 1 (Synapta, Lithoscribe, WebSurfer) in parallel via `asyncio.gather`, followed by Stage 2 systems biology (Vivarix, Lumicell). |
-| **BioDiscoveryAgent** (2024) | Evidence-backed hypothesis prioritization and actionable laboratory validation protocol formulation. | `BioDiscoveryEngine` (`phronesis/agents/discovery.py`) scores candidate targets using composite metrics (association, literature evidence, perturbation response) and formulates experiments. |
+| **DiscoveryAgent** (2024) | Evidence-backed hypothesis prioritization and actionable laboratory validation protocol formulation. | `DiscoveryEngine` (`tribos/agents/discovery.py`) scores candidate targets using composite metrics (association, literature evidence, perturbation response) and formulates experiments. |
 | **BFCL**, **STaRK**, **BixBench** (inspiration only) | Public benchmarks whose task categories inspired local regression tests. The official datasets and harnesses are NOT run and no benchmark scores are claimed. | `tests/test_scientific_validation.py` runs local integration and regression tests covering tool selection, entity resolution, ODE simulation, single-cell analysis, verifier audits, and memory isolation. |
 
 ---
@@ -92,7 +92,7 @@ tests/test_scientific_validation.py::test_regression_invalid_parameter_override_
 6. **`test_bixbench_vivarix_parameter_scan`**: Evaluates parameter sensitivity across multiple points, confirming non-linear dose-response curve generation.
 7. **`test_bixbench_lumicell_requires_real_dataset_without_fabrication`**: Verifies that Lumicell rejects queries without dataset provenance with `ErrorType.DATASET_REQUIRED` and strictly analyzes real AnnData `.h5ad` files without synthetic generation.
 8. **`test_paperqa2_literature_synthesis`**: Tests query decomposition into mechanistic subqueries, EuropePMC full-text XML retrieval, passage reranking, and DOI/PMID tracking.
-9. **`test_reflexion_verifier_catches_unsupported_conclusion_and_vendor_leak`**: Evaluates `ClinicalVerifier` against an ungrounded response containing hallucinated clinical success and vendor name leaks (`OpenAI`, `NVIDIA`, `LangGraph`). Successfully flags defects and marks `passed = False`.
+9. **`test_reflexion_verifier_catches_unsupported_conclusion_and_vendor_leak`**: Evaluates `TribosVerifier` against an ungrounded response containing hallucinated clinical success and vendor name leaks (`OpenAI`, `NVIDIA`, `LangGraph`). Successfully flags defects and marks `passed = False`.
 10. **`test_reflexion_verifier_passes_grounded_response`**: Confirms that evidence-backed responses referencing verified simulator outputs and literature passages pass verification.
 11. **`test_mem0_thread_isolation_and_bm25_retrieval`**: Confirms thread isolation across distinct clinical sessions, typed nodes (`USER_INSTRUCTION`, `RETRIEVED_EVIDENCE`), and probabilistic Okapi BM25 ranking.
 12. **`test_mem0_contradiction_detection`**: Verifies that adding an empirical verified memory contradicting a prior provisional node demotes the prior node to `REFUTED`.
@@ -102,7 +102,7 @@ tests/test_scientific_validation.py::test_regression_invalid_parameter_override_
 16. **`test_regression_unsupported_clinical_claim_fails_verification`**: Confirms that ungrounded clinical trial claims (e.g. claiming Phase III trial success without evidence) fail verification with `CLINICAL_CLAIM` defects and score < 0.50.
 17. **`test_regression_numerical_mismatch_14_92_vs_7_46_fails`**: Confirms that numerical claims with >5% deviation (such as 14.92 against an observed 7.46) fail verification with a critical `NUMERICAL` defect.
 18. **`test_regression_invented_doi_and_pmid_fails`**: Confirms that unobserved DOIs or PMIDs are caught as critical `CITATION` defects and prevent verification.
-19. **`test_regression_evidence_free_discovery_disabled`**: Confirms that the BioDiscoveryEngine returns `INSUFFICIENT_EVIDENCE` and empty rankings when tool evidence is missing, eliminating invented 0.87 scores.
+19. **`test_regression_evidence_free_discovery_disabled`**: Confirms that the DiscoveryEngine returns `INSUFFICIENT_EVIDENCE` and empty rankings when tool evidence is missing, eliminating invented 0.87 scores.
 20. **`test_regression_unrelated_query_no_kras_default`**: Confirms that general questions (e.g. light-independent reactions of photosynthesis) do not route to KRAS, Vivarix ODEs, or Lumicell.
 21. **`test_regression_conversational_greeting_no_tools`**: Confirms that casual conversational greetings return direct assistant dialogue without dispatching biomedical agents.
 22. **`test_regression_cross_user_memory_isolation`**: Confirms that memory retrieval is scoped by `user_id` and does not leak private investigation findings across users.
@@ -149,12 +149,12 @@ tests/test_scientific_validation.py::test_regression_invalid_parameter_override_
 ### Codebase Archiving Utility
 
 The codebase packaging utility (`scripts/archive_codebase.py` and `scripts/archive_codebase.ps1`) enforces strict exclusion rules:
-- **Excluded Directories**: `.venv`, `node_modules`, `.next`, `__pycache__`, `.git`, `.phronesis_memory`, `.pytest_cache`, `.ruff_cache`, `.mypy_cache`, `dist`, `build`, `tmp`, `temp`, `logs`.
+- **Excluded Directories**: `.venv`, `node_modules`, `.next`, `__pycache__`, `.git`, `.tribos_memory`, `.pytest_cache`, `.ruff_cache`, `.mypy_cache`, `dist`, `build`, `tmp`, `temp`, `logs`.
 - **Excluded Files**: `.env*`, `*credentials*`, `*.pem`, `*.key`, `id_rsa*`, `*.db`, `*.sqlite`, `*.sqlite3`, `*.log`, `*.tmp`, `*.zip`.
 
 To regenerate the codebase archives:
 ```powershell
 .\scripts\archive_codebase.ps1 --both
 ```
-- Full Distribution: `phronesis_codebase.zip` (Code, Notebooks & Reference Datasets)
-- Slim Distribution: `phronesis_codebase_slim.zip` (Code, Pipelines & Configuration)
+- Full Distribution: `tribos_codebase.zip` (Code, Notebooks & Reference Datasets)
+- Slim Distribution: `tribos_codebase_slim.zip` (Code, Pipelines & Configuration)

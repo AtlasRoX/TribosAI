@@ -1,6 +1,6 @@
 // Memory Vault display helpers (UI-005), aligned with the real API contract:
 //   GET  /api/memory/stats    -> {status, db_size_kb, total_nodes, total_threads, total_verified_empirical,
-//                                 total_contradictions_resolved}   (phronesis/utils/memory/clinical_memory.py)
+//                                 total_contradictions_resolved}   (tribos/utils/memory/research_memory.py)
 //   GET  /api/memory/entities -> {entities: [{entity, mention_count, first_seen, last_seen}], count}
 //   POST /api/memory/search   -> {results: [{node_id, thread_id, memory_type, content, verification_status, score, sources}]}
 // Framework-free so `node --test` can import it.

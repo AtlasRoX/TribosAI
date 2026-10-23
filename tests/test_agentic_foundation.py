@@ -6,13 +6,13 @@ import asyncio
 
 import pytest
 
-from phronesis.agentic import config as agent_config
-from phronesis.agentic.budget import BudgetExhausted, RunBudget
-from phronesis.agentic.control import ApprovalDecision, RunControl, create_control, get_control
-from phronesis.agentic.guardrails import neutralise, screen, spotlight
-from phronesis.agentic.llm import extract_json
-from phronesis.agentic.runtime import AgentPhase, PhaseOutcome, register_phase, restore_phases, snapshot_phases
-from phronesis.agentic.tool_retrieval import retrieve_tools, tool_card
+from tribos.agentic import config as agent_config
+from tribos.agentic.budget import BudgetExhausted, RunBudget
+from tribos.agentic.control import ApprovalDecision, RunControl, create_control, get_control
+from tribos.agentic.guardrails import neutralise, screen, spotlight
+from tribos.agentic.llm import extract_json
+from tribos.agentic.runtime import AgentPhase, PhaseOutcome, register_phase, restore_phases, snapshot_phases
+from tribos.agentic.tool_retrieval import retrieve_tools, tool_card
 from tests.agentic_fakes import collect_events, make_agentic_orchestrator
 from tests.fakes import build_recording_registry
 
@@ -21,7 +21,7 @@ from tests.fakes import build_recording_registry
 def isolated_phases():
     state = snapshot_phases()
     # Feature phases must not interfere with the foundation's own probes.
-    from phronesis.extensions import load_extensions
+    from tribos.extensions import load_extensions
 
     load_extensions()
     restore_phases({})
@@ -208,9 +208,9 @@ def test_failing_phase_never_breaks_turn(monkeypatch, tmp_path, isolated_phases)
 
 
 def test_run_budget_has_no_time_limit_by_default(monkeypatch):
-    from phronesis.agentic.budget import UNLIMITED_SECONDS, RunBudget
+    from tribos.agentic.budget import UNLIMITED_SECONDS, RunBudget
 
-    monkeypatch.delenv("PHRONESIS_AGENT_MAX_SECONDS", raising=False)
+    monkeypatch.delenv("TRIBOS_AGENT_MAX_SECONDS", raising=False)
     b = RunBudget.from_env()
     assert b.max_seconds == 0 and not b.time_limited
     b.started -= 10_000  # far past the old 420 s cap

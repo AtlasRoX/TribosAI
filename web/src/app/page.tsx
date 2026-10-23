@@ -110,7 +110,7 @@ interface AgentMetadata {
 }
 
 const ORCHESTRATION_FRAMEWORK = "authoritative-react-compiler";
-// The API's default when PHRONESIS_DEFAULT_FRAMEWORK is unset: Auto routing (docs/agentic/auto-routing.md).
+// The API's default when TRIBOS_DEFAULT_FRAMEWORK is unset: Auto routing (docs/agentic/auto-routing.md).
 const FALLBACK_DEFAULT_FRAMEWORK = "auto";
 
 // Every framework the backend implements; descriptions are replaced by /api/frameworks when it answers.
@@ -188,8 +188,8 @@ const FRAMEWORK_LABEL: Record<string, string> = {
   "conversational-direct": "Direct reply",
 };
 
-const AUTH_TOKEN_STORAGE_KEY = "phronesis-auth-token";
-const BACKEND_URL_STORAGE_KEY = "phronesis-backend-url";
+const AUTH_TOKEN_STORAGE_KEY = "tribos-auth-token";
+const BACKEND_URL_STORAGE_KEY = "tribos-backend-url";
 const DEFAULT_MODEL = process.env.NEXT_PUBLIC_DEFAULT_MODEL || "nvidia/nemotron-3-super-120b-a12b";
 
 /** A backend base URL the user typed, normalized, or null when it is not an http(s) URL. */
@@ -203,7 +203,7 @@ function parseBackendUrl(value: string): string | null {
   }
 }
 
-export default function ClinicalRDAssistant() {
+export default function TribosAssistant() {
   const [messages, setMessages] = useState<Message[]>([]);
 
   const [inputMessage, setInputMessage] = useState("");
@@ -401,7 +401,7 @@ export default function ClinicalRDAssistant() {
   /** Records an auth problem from any API response status so the banner can explain it. */
   const noteAuthStatus = (status: number) => {
     if (status === 503) setAuthProblem("The API reports that authentication is not configured on the server.");
-    else if (status === 401 || status === 403) setAuthProblem("The API rejected the access token. Set it under Settings → Phronesis Access Token.");
+    else if (status === 401 || status === 403) setAuthProblem("The API rejected the access token. Set it under Settings → Tribos Access Token.");
     else if (status >= 200 && status < 300) setAuthProblem(null);
   };
 
@@ -484,7 +484,7 @@ export default function ClinicalRDAssistant() {
   useEffect(() => {
     try {
       const active = (document.documentElement.getAttribute("data-theme") as "dark" | "light") ||
-        (localStorage.getItem("phronesis-theme") as "dark" | "light") ||
+        (localStorage.getItem("tribos-theme") as "dark" | "light") ||
         "dark";
       setTheme(active);
     } catch {
@@ -497,7 +497,7 @@ export default function ClinicalRDAssistant() {
     const nextTheme = current === "dark" ? "light" : "dark";
     setTheme(nextTheme);
     try {
-      localStorage.setItem("phronesis-theme", nextTheme);
+      localStorage.setItem("tribos-theme", nextTheme);
     } catch {
       // ignore storage error
     }
@@ -701,8 +701,8 @@ export default function ClinicalRDAssistant() {
       .replace(/\bTalk2BioModels?\b/gi, "Vivarix")
       .replace(/\bTalk2Cells?\b/gi, "Lumicell")
       .replace(/\bTalk2Scholars?\b/gi, "Lithoscribe")
-      .replace(/\bTalk2AI[-_ ]?Agents[-_ ]?4[-_ ]?Pharma\b/gi, "Phronesis")
-      .replace(/\bAI[-_ ]?Agents[-_ ]?4[-_ ]?Pharma\b/gi, "Phronesis");
+      .replace(/\bTalk2AI[-_ ]?Agents[-_ ]?4[-_ ]?Pharma\b/gi, "Tribos")
+      .replace(/\bAI[-_ ]?Agents[-_ ]?4[-_ ]?Pharma\b/gi, "Tribos");
   }
 
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -1185,7 +1185,7 @@ export default function ClinicalRDAssistant() {
             // Honest error handling without fabricating simulated outputs
             appendAssistantMessage(
               systemMessage(
-                `> ⚠️ **Phronesis backend unreachable** at \`${backendUrl}\`.\n>\n` +
+                `> ⚠️ **Tribos backend unreachable** at \`${backendUrl}\`.\n>\n` +
                   `> ${errorMessage(jsonErr) || errorMessage(err) || "The server is offline, unreachable, or timed out"}.\n>\n` +
                   "> Start it with `uvicorn app.backend.main:app --port 8000`, then send your question again."
               ),
@@ -1266,7 +1266,7 @@ export default function ClinicalRDAssistant() {
       setJobsRefreshKey((k) => k + 1);
     } catch (err: unknown) {
       const status = errorStatus(err);
-      if (status === 401 || status === 403) setAuthProblem("The API rejected the access token. Set it under Settings → Phronesis Access Token.");
+      if (status === 401 || status === 403) setAuthProblem("The API rejected the access token. Set it under Settings → Tribos Access Token.");
       content = `> ⚠️ **Background job not started.** ${errorMessage(err, "The backend did not accept the job.")}`;
     }
     appendAssistantMessage(
@@ -1492,12 +1492,12 @@ export default function ClinicalRDAssistant() {
         >
           {isSidebarOpen ? (
             <>
-              {/* Phronesis Brand */}
+              {/* Tribos Brand */}
               <div style={{ display: "flex", alignItems: "center", height: "26px", overflow: "hidden" }}>
                 <img
                   src="/logo-tight.png"
-                  alt="Phronesis"
-                  className="phronesis-tight-logo"
+                  alt="Tribos"
+                  className="tribos-tight-logo"
                   style={{
                     height: "22px",
                     width: "auto",
@@ -1573,8 +1573,8 @@ export default function ClinicalRDAssistant() {
               ) : (
                 <img
                   src="/icon.png"
-                  alt="Phronesis"
-                  className="phronesis-icon"
+                  alt="Tribos"
+                  className="tribos-icon"
                   style={{
                     width: "22px",
                     height: "22px",
@@ -2464,13 +2464,13 @@ export default function ClinicalRDAssistant() {
                 </div>
                 <div>
                   <label htmlFor="settings-auth-token" style={{ fontSize: "12px", color: "var(--text-muted)", display: "block", marginBottom: "4px" }}>
-                    Phronesis Access Token (Bearer)
+                    Tribos Access Token (Bearer)
                   </label>
                   <input
                     id="settings-auth-token"
                     type="password"
                     autoComplete="off"
-                    placeholder="token issued by your Phronesis administrator"
+                    placeholder="token issued by your Tribos administrator"
                     value={authTokenDraft}
                     onChange={(e) => setAuthTokenDraft(e.target.value.trim())}
                     onBlur={() => {
@@ -3054,7 +3054,7 @@ export default function ClinicalRDAssistant() {
                 </div>
                 <h1 className="hero-title">What shall we investigate today?</h1>
                 <p className="hero-subtitle">
-                  Phronesis coordinates knowledge graphs, kinetic simulations, single-cell analysis, and the
+                  Tribos coordinates knowledge graphs, kinetic simulations, single-cell analysis, and the
                   literature, then checks the answer&apos;s claims against the retrieved evidence and shows what was
                   and was not checked.
                 </p>
@@ -3082,11 +3082,11 @@ export default function ClinicalRDAssistant() {
                           <img
                             src="/icon-tight.png"
                             alt=""
-                            className="phronesis-icon"
+                            className="tribos-icon"
                             style={{ width: "13px", height: "13px", objectFit: "contain" }}
                           />
                         </span>
-                        <span style={{ fontWeight: 600, color: "var(--text-main)" }}>{msg.agent || "Phronesis"}</span>
+                        <span style={{ fontWeight: 600, color: "var(--text-main)" }}>{msg.agent || "Tribos"}</span>
                         {msg.framework_used ? (
                           <span
                             style={{ color: "var(--text-faint)" }}
@@ -3265,7 +3265,7 @@ export default function ClinicalRDAssistant() {
                     <img
                       src="/icon-tight.png"
                       alt=""
-                      className="phronesis-icon"
+                      className="tribos-icon"
                       style={{ width: "13px", height: "13px", objectFit: "contain" }}
                     />
                   </span>

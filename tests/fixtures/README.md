@@ -1,7 +1,7 @@
-# Test Fixtures — Phronesis
+# Test Fixtures — Tribos
 
-> **Phronesis** — Biomedical Research Assistant  
-> **Made by ChronoStrider Engineering (ChronoStrider Enginnerings)**
+> **Tribos** — Biomedical Research Assistant  
+> **Made by ChronoStrider Engineering**
 
 ## test_atlas.h5ad
 

@@ -1,9 +1,9 @@
-# Zero-Docker Cloud Architecture & Deployment Guide — Phronesis
+# Zero-Docker Cloud Architecture & Deployment Guide — Tribos
 
-> **Phronesis** — Biomedical Research Assistant  
-> **Made by ChronoStrider Engineering (ChronoStrider Enginnerings)**
+> **Tribos** — Biomedical Research Assistant  
+> **Made by ChronoStrider Engineering**
 
-This guide describes how to configure, run, and deploy **Phronesis** (engineered by **ChronoStrider Engineering** / **ChronoStrider Enginnerings**) with **zero Docker dependencies**, using a 100% **cloud-native** architecture powered by **BioContext MCP**.
+This guide describes how to configure, run, and deploy **Tribos** (engineered by **ChronoStrider Engineering** / **ChronoStrider Engineering**) with **zero Docker dependencies**, using a 100% **cloud-native** architecture powered by **BioContext MCP**.
 
 ---
 
@@ -71,7 +71,7 @@ With dependencies managed via `uv`, you can launch any agent without starting Do
 
 ```bash
 # Launch the main orchestrator agent
-uv run streamlit run app/frontend/streamlit_app_phronesis.py
+uv run streamlit run app/frontend/streamlit_app_tribos.py
 
 # Or launch specific agents:
 uv run streamlit run app/frontend/streamlit_app_synapta.py
@@ -98,9 +98,9 @@ Zero-Docker Cloud Native Mode active.
 1. Fork or push your repository to GitHub.
 2. Log in to [share.streamlit.io](https://share.streamlit.io/).
 3. Create a new app:
-   - **Repository:** `YourOrg/Phronesis`
+   - **Repository:** `YourOrg/Tribos`
    - **Branch:** `main`
-   - **Main file path:** `app/frontend/streamlit_app_phronesis.py`
+   - **Main file path:** `app/frontend/streamlit_app_tribos.py`
 4. In **App settings → Secrets**, paste:
    ```toml
    OPENAI_API_KEY = "sk-..."
@@ -123,7 +123,7 @@ Zero-Docker Cloud Native Mode active.
    - `SCM_DO_BUILD_DURING_DEPLOYMENT = 1`
 3. Set Startup Command:
    ```bash
-   streamlit run app/frontend/streamlit_app_phronesis.py --server.port 8000 --server.address 0.0.0.0
+   streamlit run app/frontend/streamlit_app_tribos.py --server.port 8000 --server.address 0.0.0.0
    ```
 4. Connect your GitHub repository for continuous deployment.
 
@@ -141,7 +141,7 @@ Zero-Docker Cloud Native Mode active.
 
 ---
 
-## 🧬 BioContext MCP Capabilities in Phronesis
+## 🧬 BioContext MCP Capabilities in Tribos
 
 | Agent | BioContext Tool | Purpose |
 | :--- | :--- | :--- |
@@ -152,4 +152,4 @@ Zero-Docker Cloud Native Mode active.
 | **Lithoscribe** | `biocontext_europepmc` | Queries Europe PMC for full-text articles and citations alongside Semantic Scholar. |
 | **Lumicell** | `biocontext_panglaodb` | Identifies single-cell cell-type markers and expression profiles. |
 | **Lumicell** | `biocontext_ensembl` | Converts and standardizes gene symbols and genomic coordinates. |
-| **Phronesis** | `biocontext` | Universal biomedical intelligence gateway across all coordinated workflows. |
+| **Tribos** | `biocontext` | Universal biomedical intelligence gateway across all coordinated workflows. |

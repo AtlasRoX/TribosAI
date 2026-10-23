@@ -16,7 +16,7 @@ export interface ToolCallRecord {
 }
 
 export interface RunManifest {
-  schema_version: "phronesis.run_manifest/1";
+  schema_version: "tribos.run_manifest/1";
   run_id: string;
   thread_id: string;
   query: string;

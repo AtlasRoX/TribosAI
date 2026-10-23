@@ -7,8 +7,8 @@ import asyncio
 from types import SimpleNamespace
 from typing import Any, Dict, List
 
-from phronesis.agentic.budget import RunBudget
-from phronesis.agents.orchestration import agent_rounds
+from tribos.agentic.budget import RunBudget
+from tribos.agents.orchestration import agent_rounds
 
 DRAFT = (
     "**Bottom line**\nSotorasib has activity in KRAS G12C NSCLC [PMID:00000001].\n\n"

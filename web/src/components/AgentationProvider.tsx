@@ -36,7 +36,7 @@ export function AgentationProvider() {
   return (
     <Agentation
       endpoint={endpoint}
-      appName="Phronesis"
+      appName="Tribos"
       copyToClipboard={true}
     />
   );

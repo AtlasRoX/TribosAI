@@ -7,7 +7,7 @@ import socket
 
 import pytest
 
-from phronesis.agentic.tool_retrieval import (
+from tribos.agentic.tool_retrieval import (
     expand_query,
     rank_tools,
     recall_at_k,
@@ -51,7 +51,7 @@ LABELLED = [
 @pytest.fixture(scope="module")
 def default_registry():
     """The real default registry (builtin + extension tools), built with outbound connections blocked."""
-    from phronesis.tools.registry import BiomedicalToolRegistry, register_default_biomedical_tools
+    from tribos.tools.registry import ToolRegistry, register_default_tools
 
     real_connect = socket.socket.connect
 
@@ -60,8 +60,8 @@ def default_registry():
 
     socket.socket.connect = blocked  # type: ignore[method-assign]
     try:
-        reg = BiomedicalToolRegistry()
-        register_default_biomedical_tools(reg)
+        reg = ToolRegistry()
+        register_default_tools(reg)
     except Exception as exc:  # noqa: BLE001
         pytest.skip(f"default registry could not be built offline: {exc}")
     finally:

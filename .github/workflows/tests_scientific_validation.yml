@@ -7,7 +7,7 @@ on:
   pull_request:
     branches: [main, master]
     paths:
-      - "phronesis/**"
+      - "tribos/**"
       - "app/**"
       - "tests/**"
       - "pyproject.toml"
@@ -16,7 +16,7 @@ on:
   push:
     branches: [main, master]
     paths:
-      - "phronesis/**"
+      - "tribos/**"
       - "app/**"
       - "tests/**"
       - "pyproject.toml"
@@ -53,8 +53,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen --extra dev
 
-      # Network cases (@pytest.mark.network) stay skipped: PHRONESIS_LIVE_TESTS is not set here.
-      # Coverage scope comes from [tool.coverage.run] in pyproject.toml (source = phronesis).
+      # Network cases (@pytest.mark.network) stay skipped: TRIBOS_LIVE_TESTS is not set here.
+      # Coverage scope comes from [tool.coverage.run] in pyproject.toml (source = tribos).
       - name: Run tests/ with coverage
         run: uv run coverage run -m pytest tests/ -q --durations=10
 
@@ -94,14 +94,14 @@ jobs:
       - name: Ruff (runtime errors, blocking)
         run: >-
           uv run ruff check --select E9,F63,F7,F82 --output-format=github
-          phronesis/agents phronesis/agentic phronesis/tools app tests
+          tribos/agents tribos/agentic tribos/tools app tests
 
       # Report only: the full [tool.ruff.lint] rule set had ~2,900 pre-existing findings on 2026-10-17 (mostly
       # UP006/UP045 annotation style, autofixable). Drop --exit-zero once `ruff check --fix` has been applied.
       - name: Ruff (full rule set, report only)
         run: >-
           uv run ruff check --exit-zero --statistics
-          phronesis/agents phronesis/agentic phronesis/tools app tests
+          tribos/agents tribos/agentic tribos/tools app tests
 
   type-check:
     name: Mypy (new modules)
@@ -124,5 +124,5 @@ jobs:
       - name: Run mypy
         run: >-
           uv run mypy --ignore-missing-imports
-          phronesis/agents phronesis/trials phronesis/drugintel phronesis/variants
-          phronesis/provenance phronesis/export phronesis/datasets
+          tribos/agents tribos/trials tribos/drugintel tribos/variants
+          tribos/provenance tribos/export tribos/datasets

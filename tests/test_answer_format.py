@@ -9,15 +9,15 @@ from datetime import date
 
 import pytest
 
-from phronesis.agents import authoritative_orchestrator as orch_module
-from phronesis.agents.prompts import (
+from tribos.agents import authoritative_orchestrator as orch_module
+from tribos.agents.prompts import (
     CORRECTION_SYSTEM_PROMPT,
     SYNTHESIS_SYSTEM_PROMPT,
     build_evidence_block,
     build_synthesis_request,
     evidence_level,
 )
-from phronesis.tools.registry import ToolResult
+from tribos.tools.registry import ToolResult
 from tests import fakes
 from tests.test_audit_regressions import offline_orchestrator  # noqa: F401  (fixture)
 

@@ -13,19 +13,19 @@ from typing import Any, Dict, List, Optional
 import pytest
 from langchain_core.messages import AIMessage
 
-from phronesis.agentic import config as agent_config
-from phronesis.agentic.budget import BudgetExhausted, RunBudget
-from phronesis.agentic.control import RunCancelled, RunControl
-from phronesis.agentic.gaps import GAP_PHASE, near_duplicate, useful_for_gap
-from phronesis.agentic.llm import AgentLLM
-from phronesis.agentic.runtime import AgentPhase, AgenticRuntime, PhaseOutcome, register_phase, restore_phases, snapshot_phases
-from phronesis.agentic.state import AgentState, SubQuestion
-from phronesis.agents.authoritative_orchestrator import strip_evidence_markup
-from phronesis.agents.orchestration import draft as draft_stage
-from phronesis.agents.orchestration.context import RunContext
-from phronesis.agents.orchestration.finalize import apply_incomplete_status, turn_fully_supported
-from phronesis.agents.query_context import QueryContext
-from phronesis.tools import registry as registry_module
+from tribos.agentic import config as agent_config
+from tribos.agentic.budget import BudgetExhausted, RunBudget
+from tribos.agentic.control import RunCancelled, RunControl
+from tribos.agentic.gaps import GAP_PHASE, near_duplicate, useful_for_gap
+from tribos.agentic.llm import AgentLLM
+from tribos.agentic.runtime import AgentPhase, AgenticRuntime, PhaseOutcome, register_phase, restore_phases, snapshot_phases
+from tribos.agentic.state import AgentState, SubQuestion
+from tribos.agents.authoritative_orchestrator import strip_evidence_markup
+from tribos.agents.orchestration import draft as draft_stage
+from tribos.agents.orchestration.context import RunContext
+from tribos.agents.orchestration.finalize import apply_incomplete_status, turn_fully_supported
+from tribos.agents.query_context import QueryContext
+from tribos.tools import registry as registry_module
 from tests.agentic_fakes import collect_events, make_agentic_orchestrator
 from tests.fakes import _fake_output, called
 
@@ -36,7 +36,7 @@ QUERY = "What diseases is KRAS associated with?"
 def phases():
     """Only the phases a test registers run."""
     saved = snapshot_phases()
-    from phronesis.extensions import load_extensions
+    from tribos.extensions import load_extensions
 
     load_extensions()
     restore_phases({})
@@ -105,7 +105,7 @@ def test_repeated_equivalent_gap_queries_terminate(monkeypatch, tmp_path, phases
     reply = lambda _s, _u: (  # noqa: E731
         '{"sub_questions":[{"id":"q0","status":"partial"}],"queries":["' + next(gap_queries, "sotorasib FDA approval") + '"]}'
     )
-    monkeypatch.setenv("PHRONESIS_AGENT_MAX_DRAFT_ROUNDS", "4")
+    monkeypatch.setenv("TRIBOS_AGENT_MAX_DRAFT_ROUNDS", "4")
     orch, calls, llm = make_agentic_orchestrator(
         monkeypatch, tmp_path, responses={"gaps": reply, "synthesis": changing_synthesis()},
         extra_tools=fresh_literature("Sotorasib FDA approval for KRAS G12C colorectal cancer with panitumumab"),
@@ -150,10 +150,10 @@ def test_optional_calls_stop_at_the_reserve_while_final_calls_still_fit():
 
 
 def test_from_env_sets_a_finalization_reserve(monkeypatch):
-    monkeypatch.delenv("PHRONESIS_AGENT_FINAL_RESERVE_TOKENS", raising=False)
+    monkeypatch.delenv("TRIBOS_AGENT_FINAL_RESERVE_TOKENS", raising=False)
     b = RunBudget.from_env(None)
     assert b.final_reserve_tokens == 30_000 and b.final_reserve_calls == 2
-    monkeypatch.setenv("PHRONESIS_AGENT_FINAL_RESERVE_TOKENS", "5000")
+    monkeypatch.setenv("TRIBOS_AGENT_FINAL_RESERVE_TOKENS", "5000")
     assert RunBudget.from_env(None).final_reserve_tokens == 5_000
 
 
@@ -168,7 +168,7 @@ class SlowLLM:
 
 def test_concurrent_calls_cannot_overshoot_the_budget(monkeypatch):
     """Parallel critics each reserve prompt + output before they start: only as many as fit run."""
-    monkeypatch.setenv("PHRONESIS_AGENT_OUTPUT_RESERVE_TOKENS", "2000")
+    monkeypatch.setenv("TRIBOS_AGENT_OUTPUT_RESERVE_TOKENS", "2000")
     budget = RunBudget(max_tokens=10_000, max_llm_calls=40)
     llm = AgentLLM(lambda **_k: SlowLLM(), "m", None, budget)
 
@@ -305,7 +305,7 @@ def _run_context(events: List[Dict[str, Any]], control: Optional[RunControl] = N
 
 
 def test_a_slow_model_call_emits_heartbeats_on_its_step(monkeypatch):
-    monkeypatch.setenv("PHRONESIS_PROGRESS_HEARTBEAT_S", "0.05")
+    monkeypatch.setenv("TRIBOS_PROGRESS_HEARTBEAT_S", "0.05")
     events: List[Dict[str, Any]] = []
     rc = _run_context(events)
 
@@ -322,7 +322,7 @@ def test_a_slow_model_call_emits_heartbeats_on_its_step(monkeypatch):
 
 
 def test_cancel_stops_a_long_model_call_promptly(monkeypatch):
-    monkeypatch.setenv("PHRONESIS_PROGRESS_HEARTBEAT_S", "0")
+    monkeypatch.setenv("TRIBOS_PROGRESS_HEARTBEAT_S", "0")
     control = RunControl("u", interactive=False)
     rc = _run_context([], control)
 

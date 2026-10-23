@@ -1,11 +1,11 @@
-# Streamlit Security Implementation Guide — Phronesis
+# Streamlit Security Implementation Guide — Tribos
 
-> **Phronesis** — Biomedical Research Assistant  
-> **Made by ChronoStrider Engineering (ChronoStrider Enginnerings)**
+> **Tribos** — Biomedical Research Assistant  
+> **Made by ChronoStrider Engineering**
 
 ## Overview
 
-This document outlines the comprehensive security measures implemented for file uploads in the **Phronesis** applications, engineered by **ChronoStrider Engineering** (**ChronoStrider Enginnerings**). The security implementation addresses file validation, content scanning, and protection against various attack vectors.
+This document outlines the comprehensive security measures implemented for file uploads in the **Tribos** applications, engineered by **ChronoStrider Engineering** (**ChronoStrider Engineering**). The security implementation addresses file validation, content scanning, and protection against various attack vectors.
 
 ## Security Architecture
 
@@ -144,12 +144,12 @@ The system automatically blocks files containing:
 
 ## Application Integration
 
-### Phronesis (Combined) — T2AA4P
+### Tribos (Combined) — T2AA4P
 
 T2AA4P integrates both T2B and T2KG secure uploads via shared utilities, so no additional per-app code is needed beyond calling the helpers.
 
 ```python
-# In app/frontend/streamlit_app_phronesis.py
+# In app/frontend/streamlit_app_tribos.py
 
 # SBML/PDF (T2B side)
 uploaded_sbml_file = streamlit_utils.get_t2b_uploaded_files(app)

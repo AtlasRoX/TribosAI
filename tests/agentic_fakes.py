@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from langchain_core.messages import AIMessage
 
-from phronesis.agents import authoritative_orchestrator as orch_module
+from tribos.agents import authoritative_orchestrator as orch_module
 from tests.fakes import ExtraTools, make_offline_orchestrator
 
 Responder = Union[str, Callable[[str, str], str]]
@@ -78,7 +78,7 @@ def make_agentic_orchestrator(
     orch, calls = make_offline_orchestrator(monkeypatch, tmp_path, extra_tools=extra_tools)
     llm = ScriptedLLM(responses or {}, default_synthesis=default_synthesis)
     monkeypatch.setattr(orch_module, "get_llm", lambda *a, **k: llm)
-    monkeypatch.setenv("PHRONESIS_PLANNER", "off")  # the query planner model stays out of agentic tests
+    monkeypatch.setenv("TRIBOS_PLANNER", "off")  # the query planner model stays out of agentic tests
     return orch, calls, llm
 
 

@@ -15,16 +15,16 @@ from typing import Any, Dict, List
 
 import pytest
 
-from phronesis.agentic import config as agent_config
-from phronesis.agentic.analyst import AnalystPhase, deterministic_script, has_analysis_intent
-from phronesis.agentic.runtime import restore_phases, snapshot_phases
-from phronesis.agentic.sandbox import ResolvedInput, bound_scope
-from phronesis.agentic.sandbox.policy import check_code
-from phronesis.agentic.sandbox.runner import run_code
-from phronesis.agents import authoritative_orchestrator as orch_module
-from phronesis.datasets.models import DatasetProvenanceIn
-from phronesis.datasets.store import get_dataset_store, reset_dataset_store
-from phronesis.extensions import sandbox as sandbox_ext
+from tribos.agentic import config as agent_config
+from tribos.agentic.analyst import AnalystPhase, deterministic_script, has_analysis_intent
+from tribos.agentic.runtime import restore_phases, snapshot_phases
+from tribos.agentic.sandbox import ResolvedInput, bound_scope
+from tribos.agentic.sandbox.policy import check_code
+from tribos.agentic.sandbox.runner import run_code
+from tribos.agents import authoritative_orchestrator as orch_module
+from tribos.datasets.models import DatasetProvenanceIn
+from tribos.datasets.store import get_dataset_store, reset_dataset_store
+from tribos.extensions import sandbox as sandbox_ext
 from tests.agentic_fakes import collect_events, make_agentic_orchestrator
 from tests.fakes import make_offline_orchestrator
 
@@ -152,7 +152,7 @@ def _probe_child(monkeypatch) -> Dict[str, Any]:
     """Test helper: run with the policy bypassed so the child's environment and socket module can be inspected."""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-a-real-key")
     monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test-not-a-real-key")
-    monkeypatch.setenv("PHRONESIS_AUTH_TOKEN", "secret-token")
+    monkeypatch.setenv("TRIBOS_AUTH_TOKEN", "secret-token")
     code = (
         "import os, socket\n"
         "result = {'env': sorted(os.environ), 'values': ' '.join(os.environ.values())}\n"
@@ -171,7 +171,7 @@ def _probe_child(monkeypatch) -> Dict[str, Any]:
 def test_child_env_is_scrubbed_and_network_blocked(monkeypatch):
     probe = _probe_child(monkeypatch)
     assert "OPENAI_API_KEY" not in probe["env"] and "NVIDIA_API_KEY" not in probe["env"]
-    assert "PHRONESIS_AUTH_TOKEN" not in probe["env"]
+    assert "TRIBOS_AUTH_TOKEN" not in probe["env"]
     assert "sk-test-not-a-real-key" not in probe["values"] and "secret-token" not in probe["values"]
     assert not [k for k in probe["env"] if any(s in k.upper() for s in ("KEY", "TOKEN", "SECRET", "PASSWORD"))]
     assert probe["env"] and set(probe["env"]) <= {
@@ -209,8 +209,8 @@ def _atlas_genes() -> List[str]:
 
 @pytest.fixture
 def upload_store(monkeypatch, tmp_path):
-    monkeypatch.setenv("PHRONESIS_UPLOAD_ROOT", str(tmp_path / "uploads"))
-    monkeypatch.delenv("PHRONESIS_DATASET_ROOTS", raising=False)
+    monkeypatch.setenv("TRIBOS_UPLOAD_ROOT", str(tmp_path / "uploads"))
+    monkeypatch.delenv("TRIBOS_DATASET_ROOTS", raising=False)
     reset_dataset_store()
     yield get_dataset_store()
     reset_dataset_store()
@@ -219,7 +219,7 @@ def upload_store(monkeypatch, tmp_path):
 @pytest.fixture
 def analyst_only():
     state = snapshot_phases()
-    from phronesis.extensions import load_extensions
+    from tribos.extensions import load_extensions
 
     load_extensions()
     restore_phases({"analyst": AnalystPhase()})
@@ -234,16 +234,16 @@ def _upload(store) -> Any:
 
 
 def test_tool_is_off_by_default_and_reads_only_bound_datasets(monkeypatch, upload_store):
-    from phronesis.tools.registry import BiomedicalToolRegistry
+    from tribos.tools.registry import ToolRegistry
 
-    monkeypatch.delenv("PHRONESIS_SANDBOX", raising=False)
-    reg = BiomedicalToolRegistry()
+    monkeypatch.delenv("TRIBOS_SANDBOX", raising=False)
+    reg = ToolRegistry()
     sandbox_ext.register_tools(reg)
     assert reg.get_entry(sandbox_ext.TOOL_NAME) is None
     off = sandbox_ext.run_analysis("result = 1\n", [])
     assert not off.success and off.data == {"status": "disabled"}
 
-    monkeypatch.setenv("PHRONESIS_SANDBOX", "on")
+    monkeypatch.setenv("TRIBOS_SANDBOX", "on")
     sandbox_ext.register_tools(reg)
     assert reg.get_entry(sandbox_ext.TOOL_NAME).domain == "analysis"
     rec = _upload(upload_store)
@@ -273,7 +273,7 @@ def _agentic(monkeypatch, tmp_path, responses=None):
 
 
 def test_analyst_codeact_loop_end_to_end(monkeypatch, tmp_path, upload_store, analyst_only):
-    monkeypatch.setenv("PHRONESIS_SANDBOX", "on")
+    monkeypatch.setenv("TRIBOS_SANDBOX", "on")
     rec = _upload(upload_store)
     g1, g2 = _atlas_genes()[:2]
     bad = "import pandas as pd\ndf = pd.read_csv('atlas.csv', index_col=0)\nresult = {'r': float(df['NOT_A_GENE'].corr(df['%s']))}\n" % g1
@@ -313,7 +313,7 @@ def test_analyst_codeact_loop_end_to_end(monkeypatch, tmp_path, upload_store, an
 
 
 def test_analyst_rejects_policy_violations_and_allows_insufficient_information(monkeypatch, tmp_path, upload_store, analyst_only):
-    monkeypatch.setenv("PHRONESIS_SANDBOX", "on")
+    monkeypatch.setenv("TRIBOS_SANDBOX", "on")
     rec = _upload(upload_store)
     replies = iter(
         [
@@ -336,8 +336,8 @@ def test_analyst_rejects_policy_violations_and_allows_insufficient_information(m
 
 
 def test_analyst_without_model_runs_deterministic_statistics(monkeypatch, tmp_path, upload_store, analyst_only):
-    monkeypatch.setenv("PHRONESIS_SANDBOX", "on")
-    monkeypatch.setenv("PHRONESIS_PLANNER", "off")
+    monkeypatch.setenv("TRIBOS_SANDBOX", "on")
+    monkeypatch.setenv("TRIBOS_PLANNER", "off")
     rec = _upload(upload_store)
     orch, calls = make_offline_orchestrator(monkeypatch, tmp_path)
     sandbox_ext.register_tools(orch_module.get_tool_registry())
@@ -356,7 +356,7 @@ def test_analyst_without_model_runs_deterministic_statistics(monkeypatch, tmp_pa
 
 def test_analyst_is_off_by_default_and_respects_the_option(monkeypatch, tmp_path, upload_store, analyst_only):
     rec = _upload(upload_store)
-    monkeypatch.delenv("PHRONESIS_SANDBOX", raising=False)
+    monkeypatch.delenv("TRIBOS_SANDBOX", raising=False)
     orch, calls, llm = _agentic(monkeypatch, tmp_path, {"analyst": "{}"})
     res, _ = asyncio.run(
         collect_events(
@@ -366,7 +366,7 @@ def test_analyst_is_off_by_default_and_respects_the_option(monkeypatch, tmp_path
     )
     assert "sandbox_analysis" not in res.execution_artifacts and "analyst" not in llm.phases()
 
-    monkeypatch.setenv("PHRONESIS_SANDBOX", "on")
+    monkeypatch.setenv("TRIBOS_SANDBOX", "on")
     orch, calls, llm = _agentic(monkeypatch, tmp_path, {"analyst": "{}"})
     res, _ = asyncio.run(
         collect_events(

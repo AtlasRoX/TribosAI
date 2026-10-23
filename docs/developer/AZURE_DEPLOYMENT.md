@@ -1,13 +1,13 @@
-# Azure OpenAI Deployment Guide — Phronesis
+# Azure OpenAI Deployment Guide — Tribos
 
-> **Phronesis** — Biomedical Research Assistant  
-> **Made by ChronoStrider Engineering (ChronoStrider Enginnerings)**
+> **Tribos** — Biomedical Research Assistant  
+> **Made by ChronoStrider Engineering**
 
-This guide provides instructions for configuring **Phronesis** (engineered by **ChronoStrider Engineering** / **ChronoStrider Enginnerings**) to work with Azure OpenAI services, which is particularly useful for enterprise environments that require custom endpoints or Azure-based deployments.
+This guide provides instructions for configuring **Tribos** (engineered by **ChronoStrider Engineering** / **ChronoStrider Engineering**) to work with Azure OpenAI services, which is particularly useful for enterprise environments that require custom endpoints or Azure-based deployments.
 
 ## Overview
 
-Phronesis supports three OpenAI deployment modes:
+Tribos supports three OpenAI deployment modes:
 1. **Standard OpenAI** - Direct OpenAI API usage
 2. **Custom OpenAI Endpoint** - OpenAI-compatible API with custom base URL
 3. **Azure OpenAI** - Full Azure OpenAI service with Azure AD authentication
@@ -177,6 +177,6 @@ For Azure-specific issues:
 - [Azure OpenAI Documentation](https://docs.microsoft.com/en-us/azure/cognitive-services/openai/)
 - [Azure Support](https://azure.microsoft.com/en-us/support/)
 
-For Phronesis issues:
-- [GitHub Issues](https://github.com/AtlasRoX/phronesis-CS/issues)
-- [Documentation](https://atlasrox.github.io/Phronesis/)
+For Tribos issues:
+- [GitHub Issues](https://github.com/AtlasRoX/trib/issues)
+- [Documentation](https://atlasrox.github.io/Tribos/)

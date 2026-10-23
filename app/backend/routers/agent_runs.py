@@ -7,7 +7,7 @@ The first SSE event of an agentic run (chat stream or job events) is
 and action guards after Magentic-UI (Mozannar et al. 2025, arXiv:2507.22358).
 
 Every route is scoped to the authenticated user: another user's run id is a 404, exactly like an unknown one.
-Controls live in this process only (phronesis.agentic.control).
+Controls live in this process only (tribos.agentic.control).
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel, Field
 
 from app.backend.auth import get_current_user
-from phronesis.agentic.control import ApprovalDecision, RunControl, get_control
+from tribos.agentic.control import ApprovalDecision, RunControl, get_control
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
 
@@ -87,7 +87,7 @@ async def cancel_run(req: Optional[CancelRequest] = None, run_id: str = RunIdPat
 async def reliability(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
     """Tool reliability telemetry (circuit breakers, retries, cache) when the reliability layer provides it."""
     try:
-        from phronesis.tools import reliability as reliability_module
+        from tribos.tools import reliability as reliability_module
     except Exception:  # noqa: BLE001
         return {"available": False}
     snapshot = getattr(reliability_module, "reliability_snapshot", None)

@@ -1,4 +1,4 @@
-# Phronesis agentic features: verified literature and API references (Verification, Memory, Tools, Data sources)
+# Tribos agentic features: verified literature and API references (Verification, Memory, Tools, Data sources)
 
 How I checked: titles, first authors, years and venues come from arXiv abstract pages, Crossref DOI metadata (api.crossref.org) or the venue's proceedings pages. I called the REST endpoints with curl on 2026-10-16 and the result of each call is noted. Anything I could not confirm is labelled UNVERIFIED or left out. The "technique we borrow" lines are design notes based on the papers and docs.
 
@@ -134,7 +134,7 @@ How I checked: titles, first authors, years and venues come from arXiv abstract 
   - Borrow: an Agent Card served at `https://{domain}/.well-known/agent-card.json`. Bindings: JSON-RPC, gRPC and HTTP+JSON/REST. Methods: `SendMessage`, `SendStreamingMessage`, `GetTask`, `ListTasks`, `CancelTask`, `SubscribeToTask`, the push-notification config CRUD methods, and `GetExtendedAgentCard`. In v1.0 these names are PascalCase; the older slash names such as `message/send` came from versions before 1.0.
   - Verified via: https://a2a-protocol.org/latest/specification/
 - **Model Context Protocol (MCP): Landscape, Security Threats, and Future Research Directions.** Hou, X. et al., 2025, arXiv. arXiv:2503.23278. https://arxiv.org/abs/2503.23278
-  - Borrow: the paper's threat taxonomy across the MCP server lifecycle (creation, operation, update), covering risks such as tool poisoning, name collisions, and configuration drift or privilege persistence. We use it as a checklist when exposing Phronesis tools as an MCP server.
+  - Borrow: the paper's threat taxonomy across the MCP server lifecycle (creation, operation, update), covering risks such as tool poisoning, name collisions, and configuration drift or privilege persistence. We use it as a checklist when exposing Tribos tools as an MCP server.
   - Verified via: https://arxiv.org/abs/2503.23278
 
 ## 18. Tool retrieval and selection from a large tool catalogue

@@ -8,8 +8,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.backend.main import app
-from phronesis.agentic.budget import RunBudget
-from phronesis.agentic.config import (
+from tribos.agentic.budget import RunBudget
+from tribos.agentic.config import (
     ALL_EFFORT_LEVELS,
     EFFORT_HIGH,
     EFFORT_LOW,
@@ -17,9 +17,9 @@ from phronesis.agentic.config import (
     EFFORT_ULTRA,
     get_effort_profile,
 )
-from phronesis.agentic.decompose import heuristic_split, parse_decomposition
-from phronesis.agents.authoritative_orchestrator import literature_request
-from phronesis.agents.query_planner import QueryContext
+from tribos.agentic.decompose import heuristic_split, parse_decomposition
+from tribos.agents.authoritative_orchestrator import literature_request
+from tribos.agents.query_planner import QueryContext
 
 
 def test_effort_profiles_definitions():

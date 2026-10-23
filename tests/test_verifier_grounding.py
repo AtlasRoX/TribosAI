@@ -1,4 +1,4 @@
-"""Verifier grounding regressions from Phronesis_Source_Audit_2026-10-18.md (findings F6-F9) and operational claims.
+"""Verifier grounding regressions from Tribos_Source_Audit_2026-10-18.md (findings F6-F9) and operational claims.
 
 F6: FDA eligibility comes from the record's own URL host, never from a URL quoted in its text.
 F7: population checks cover typed clinical tool records (CIViC/variant evidence), not only articles.
@@ -19,9 +19,9 @@ from typing import Any, Dict, List
 
 import pytest
 
-from phronesis.verify.verifier import ClaimRecord, ClinicalVerifier, VerificationReport, _Doc, is_regulatory_doc
-from phronesis.tools.registry import ToolResult
-from phronesis.utils import source_authority as sa
+from tribos.verify.verifier import ClaimRecord, TribosVerifier, VerificationReport, _Doc, is_regulatory_doc
+from tribos.tools.registry import ToolResult
+from tribos.utils import source_authority as sa
 
 Q = "KRAS G12C inhibitors in NSCLC and colorectal cancer: FDA-approved indications and clinical evidence"
 APPROVAL = "Sotorasib received FDA accelerated approval for KRAS G12C-mutated NSCLC."
@@ -64,7 +64,7 @@ def web(results: List[Dict[str, Any]], top_page: Dict[str, Any] | None = None) -
     ],
 )
 def test_lookalike_userinfo_and_missing_urls_are_not_fda_records(url):
-    report = ClinicalVerifier().verify_response(Q, APPROVAL, {"websurfer": web([{"title": "FDA", "url": url, "snippet": SNIPPET}])})
+    report = TribosVerifier().verify_response(Q, APPROVAL, {"websurfer": web([{"title": "FDA", "url": url, "snippet": SNIPPET}])})
     c = claim_for(report, "accelerated approval")
     assert c.status == "unsupported" and "no FDA label or approval record" in c.reason
 
@@ -72,7 +72,7 @@ def test_lookalike_userinfo_and_missing_urls_are_not_fda_records(url):
 def test_a_third_party_page_quoting_an_fda_link_is_not_an_fda_record():
     page = {"title": "News", "url": "https://example.test/article",
             "snippet": SNIPPET + " Source: https://www.fda.gov/drugs/resources-information-approved-drugs/sotorasib"}
-    report = ClinicalVerifier().verify_response(Q, APPROVAL, {"websurfer": web([page])})
+    report = TribosVerifier().verify_response(Q, APPROVAL, {"websurfer": web([page])})
     assert claim_for(report, "accelerated approval").status == "unsupported"
 
 
@@ -83,30 +83,30 @@ def test_a_third_party_page_quoting_an_fda_link_is_not_an_fda_record():
      "https://WWW.FDA.GOV./drugs/notice"],
 )
 def test_genuine_fda_hosts_are_eligible(url):
-    report = ClinicalVerifier().verify_response(Q, APPROVAL, {"websurfer": web([{"title": "FDA", "url": url, "snippet": SNIPPET}])})
+    report = TribosVerifier().verify_response(Q, APPROVAL, {"websurfer": web([{"title": "FDA", "url": url, "snippet": SNIPPET}])})
     assert claim_for(report, "accelerated approval").status == "supported"
 
 
 def test_origin_alone_does_not_establish_the_claim():
     unrelated = {"title": "FDA", "url": "https://www.fda.gov/drugs/notice", "snippet": "Guidance on bioequivalence studies for generic tablets."}
-    report = ClinicalVerifier().verify_response(Q, APPROVAL, {"websurfer": web([unrelated])})
+    report = TribosVerifier().verify_response(Q, APPROVAL, {"websurfer": web([unrelated])})
     assert claim_for(report, "accelerated approval").status == "unsupported"
 
 
 def test_a_redirect_is_judged_by_its_final_host():
     redirected_away = {"title": "FDA", "url": "https://www.fda.gov/drugs/sotorasib", "final_url": "https://example.test/landing",
                        "content": SNIPPET}
-    report = ClinicalVerifier().verify_response(Q, APPROVAL, {"websurfer": web([], top_page=redirected_away)})
+    report = TribosVerifier().verify_response(Q, APPROVAL, {"websurfer": web([], top_page=redirected_away)})
     assert claim_for(report, "accelerated approval").status == "unsupported"
     redirected_in = dict(redirected_away, url="https://example.test/go", final_url="https://www.fda.gov/drugs/sotorasib")
-    report = ClinicalVerifier().verify_response(Q, APPROVAL, {"websurfer": web([], top_page=redirected_in)})
+    report = TribosVerifier().verify_response(Q, APPROVAL, {"websurfer": web([], top_page=redirected_in)})
     assert claim_for(report, "accelerated approval").status == "supported"
     assert sa.record_url({"url": "https://a.example.test", "redirects": ["https://b.example.test", "https://www.fda.gov/x"]}) == "https://www.fda.gov/x"
 
 
 def test_one_authority_policy_is_shared():
-    from phronesis.agents import prompts
-    from phronesis.agents.citations import source_authority as cite_authority
+    from tribos.agents import prompts
+    from tribos.agents.citations import source_authority as cite_authority
 
     assert prompts.source_authority is sa.source_authority and cite_authority is sa.source_authority
     assert sa.source_authority("https://www.fda.gov.example.test/fake") == "web"
@@ -135,7 +135,7 @@ def _relational_judge(claim: str, passages: List[Dict[str, str]]) -> Dict[str, s
 
 @pytest.mark.parametrize("judge", [None, _relational_judge])
 def test_a_variant_record_about_nsclc_cannot_support_a_crc_claim(judge):
-    report = ClinicalVerifier().verify_response(Q, CRC_CLAIM, {"variants": variant_tool()}, entailment_judge=judge)
+    report = TribosVerifier().verify_response(Q, CRC_CLAIM, {"variants": variant_tool()}, entailment_judge=judge)
     c = claim_for(report, "5.0%")
     assert c.status == "unsupported" and "population mismatch" in c.reason
     assert "POPULATION_MISMATCH" in categories(report)
@@ -144,13 +144,13 @@ def test_a_variant_record_about_nsclc_cannot_support_a_crc_claim(judge):
 @pytest.mark.parametrize("judge", [None, _relational_judge])
 def test_the_same_data_through_the_article_path_fails_the_same_way(judge):
     passage = {"pmid": "00000002", "passage_id": "a", "title": "Synthetic NSCLC cohort", "passage_text": NSCLC_TEXT}
-    report = ClinicalVerifier().verify_response(Q, CRC_CLAIM + " (PMID: 00000002)", {"lit": lit([passage])}, entailment_judge=judge)
+    report = TribosVerifier().verify_response(Q, CRC_CLAIM + " (PMID: 00000002)", {"lit": lit([passage])}, entailment_judge=judge)
     assert claim_for(report, "5.0%").status == "unsupported" and "POPULATION_MISMATCH" in categories(report)
 
 
 def test_a_variant_record_in_the_claims_disease_still_supports_it():
     right = CRC_CLAIM.replace("In colorectal cancer", "In NSCLC")
-    report = ClinicalVerifier().verify_response(Q, right, {"variants": variant_tool()})
+    report = TribosVerifier().verify_response(Q, right, {"variants": variant_tool()})
     assert claim_for(report, "5.0%").status == "supported" and "POPULATION_MISMATCH" not in categories(report)
 
 
@@ -161,7 +161,7 @@ def test_a_label_listing_unrelated_warnings_is_not_a_population_mismatch():
                   "warnings": "Hepatotoxicity; interstitial lung disease. Secondary acute myeloid leukemia (AML) was not observed."},
         "approval": {"status": "approved", "application_number": "NDA214665", "first_approval_date": "2021-05-28"},
     }]})
-    report = ClinicalVerifier().verify_response(Q, APPROVAL, {"openfda": label})
+    report = TribosVerifier().verify_response(Q, APPROVAL, {"openfda": label})
     c = claim_for(report, "accelerated approval")
     assert "population mismatch" not in (c.reason or "") and "POPULATION_MISMATCH" not in categories(report)
 
@@ -195,9 +195,9 @@ COHORT_UNSTATED = dict(COHORT, passage_text="The KRAS-mutant NSCLC cohort compri
 
 
 def test_an_explicit_denominator_error_from_the_judge_is_not_overridden_by_matching_numbers():
-    report = ClinicalVerifier().verify_response(Q, WRONG_N, {"lit": lit([COHORT_UNSTATED])})
+    report = TribosVerifier().verify_response(Q, WRONG_N, {"lit": lit([COHORT_UNSTATED])})
     assert claim_for(report, "19.9 months").status == "supported"  # numbers all present: deterministic check passes
-    report = ClinicalVerifier().verify_response(Q, WRONG_N, {"lit": lit([COHORT_UNSTATED])}, entailment_judge=_denominator_judge)
+    report = TribosVerifier().verify_response(Q, WRONG_N, {"lit": lit([COHORT_UNSTATED])}, entailment_judge=_denominator_judge)
     c = claim_for(report, "19.9 months")
     assert c.status == "unsupported" and "denominator" in c.reason
     assert report.defects and "NUMERIC_RELATION_MISMATCH" in categories(report)
@@ -205,13 +205,13 @@ def test_an_explicit_denominator_error_from_the_judge_is_not_overridden_by_match
 
 
 def test_an_inconclusive_judge_does_not_overturn_matching_numbers():
-    report = ClinicalVerifier().verify_response(Q, WRONG_N, {"lit": lit([COHORT_UNSTATED])}, entailment_judge=_inconclusive_judge)
+    report = TribosVerifier().verify_response(Q, WRONG_N, {"lit": lit([COHORT_UNSTATED])}, entailment_judge=_inconclusive_judge)
     assert claim_for(report, "19.9 months").status == "supported"
     assert "NUMERIC_RELATION_MISMATCH" not in categories(report)
 
 
 def test_a_parent_cohort_size_given_for_a_subgroup_fails_without_a_judge():
-    report = ClinicalVerifier().verify_response(Q, WRONG_N, {"lit": lit([COHORT])})
+    report = TribosVerifier().verify_response(Q, WRONG_N, {"lit": lit([COHORT])})
     c = claim_for(report, "19.9 months")
     assert c.status == "unsupported" and "16" in c.reason
     assert "NUMERIC_RELATION_MISMATCH" in categories(report)
@@ -219,7 +219,7 @@ def test_a_parent_cohort_size_given_for_a_subgroup_fails_without_a_judge():
 
 @pytest.mark.parametrize("judge", [None, _denominator_judge, _inconclusive_judge])
 def test_the_correct_subgroup_size_still_passes(judge):
-    report = ClinicalVerifier().verify_response(Q, RIGHT_N, {"lit": lit([COHORT])}, entailment_judge=judge)
+    report = TribosVerifier().verify_response(Q, RIGHT_N, {"lit": lit([COHORT])}, entailment_judge=judge)
     c = claim_for(report, "19.9 months")
     assert c.status == "supported", c.reason
     assert "NUMERIC_RELATION_MISMATCH" not in categories(report)
@@ -259,7 +259,7 @@ def test_correct_claims_from_the_real_abstract_are_supported():
         "7.2 months (95% CI 5.1-10.6) with docetaxel (N=116), mortality HR 0.65 (95% CI 0.49-0.87) (PMID: 39369609).",
     ]
     for answer in claims:
-        report = ClinicalVerifier().verify_response(Q, answer, passages)
+        report = TribosVerifier().verify_response(Q, answer, passages)
         c = claim_for(report, "median overall survival")
         assert c.status == "supported", (answer, c.reason)
 
@@ -269,7 +269,7 @@ def test_a_failed_lookup_is_grounded_in_the_tool_outcome_not_in_a_paper():
     failed = ToolResult(success=False, tool_name="lithoscribe_literature_synthesis",
                         error="No peer-reviewed publications found in this search for: 'PMID:39369609'")
     answer = "The exact-identifier search for PMID 39369609 failed in this run."
-    report = ClinicalVerifier().verify_response(Q, answer, {"lit": failed, "lit2": lit([_primary_passage()])})
+    report = TribosVerifier().verify_response(Q, answer, {"lit": failed, "lit2": lit([_primary_passage()])})
     c = claim_for(report, "search for PMID 39369609 failed")
     assert c.claim_type == "operational"
     assert all(not (e.source_key or "").startswith(("PMID:", "DOI:")) for e in c.evidence)
@@ -278,7 +278,7 @@ def test_a_failed_lookup_is_grounded_in_the_tool_outcome_not_in_a_paper():
 
 def test_an_operational_sentence_without_a_matching_tool_event_is_not_checked():
     answer = "The full correction document was not retrieved, so corrected content could not be applied."
-    report = ClinicalVerifier().verify_response(Q, answer, {"lit": lit([_primary_passage()])})
+    report = TribosVerifier().verify_response(Q, answer, {"lit": lit([_primary_passage()])})
     c = claim_for(report, "correction document was not retrieved")
     assert c.claim_type == "operational" and c.status == "not_checked" and "operational status" in c.reason
     assert not c.evidence
@@ -289,7 +289,7 @@ def test_surf_url_records_the_final_url_and_redirect_hops(monkeypatch):
 
     import httpx
 
-    from phronesis.tools import web_search as ws
+    from tribos.tools import web_search as ws
 
     async def public(_url):
         return None
@@ -310,7 +310,7 @@ def test_surf_url_records_the_final_url_and_redirect_hops(monkeypatch):
     assert sa.source_authority(sa.record_url(page)) == "regulatory"
 
 
-# Live regression (18 Oct 2026, Phronesis_Next_Test_Query.txt): the answer was right but scored 0.15 because the
+# Live regression (18 Oct 2026, Tribos_Next_Test_Query.txt): the answer was right but scored 0.15 because the
 # retrieved erratum's PMID was "not found", the correction-status sentences were judged against the paper, and the
 # "Source: abstract of PMID ...; URL: ..." lines were audited as claims. The answer text is the live run's own.
 LIVE_ANSWER = Path(__file__).parent / "fixtures" / "primary" / "live_answer_pmid_39369609.md"
@@ -338,7 +338,7 @@ def _live_literature_result() -> ToolResult:
 
 def test_live_answer_correction_and_source_lines_are_not_false_findings():
     answer = LIVE_ANSWER.read_text(encoding="utf-8")
-    report = ClinicalVerifier().verify_response("Retrieve PMID 39369609", answer, {"lit": _live_literature_result()})
+    report = TribosVerifier().verify_response("Retrieve PMID 39369609", answer, {"lit": _live_literature_result()})
     descriptions = " ".join(d.description for d in report.defects)
     assert "39984314" not in descriptions  # the retrieved erratum is a retrieved record
     assert not any(c.claim_text.lstrip("*_ ").lower().startswith("source") for c in report.claims)
@@ -355,7 +355,7 @@ LIVE_ANSWER_2 = Path(__file__).parent / "fixtures" / "primary" / "live_answer2_p
 def test_second_live_answer_erratum_linkage_and_figure_provenance_are_not_false_findings():
     # The second matched run: "A correction (erratum) exists for PMID X (linked erratum PMID Y)" is record linkage the
     # exact lookup reports, and "*All figures are taken verbatim from the abstract ...*" only locates the numbers.
-    report = ClinicalVerifier().verify_response("Retrieve PMID 39369609", LIVE_ANSWER_2.read_text(encoding="utf-8"),
+    report = TribosVerifier().verify_response("Retrieve PMID 39369609", LIVE_ANSWER_2.read_text(encoding="utf-8"),
                                                 {"lit": _live_literature_result()})
     erratum = claim_for(report, "erratum) exists")
     assert erratum.claim_type == "operational" and erratum.status == "supported"
@@ -368,7 +368,7 @@ def test_third_live_answer_has_no_false_findings():
     # The final matched run: its only remaining findings were "**Article:** <URL>" and "Erratum notice: PMID ..."
     # location lines. Every evidence claim in it is supported by the real abstract.
     answer = (Path(__file__).parent / "fixtures" / "primary" / "live_answer3_pmid_39369609.md").read_text(encoding="utf-8")
-    report = ClinicalVerifier().verify_response("Retrieve PMID 39369609", answer, {"lit": _live_literature_result()})
+    report = TribosVerifier().verify_response("Retrieve PMID 39369609", answer, {"lit": _live_literature_result()})
     assert not [c for c in report.claims if c.status in ("unsupported", "contradicted")], [
         (c.status, c.claim_text[:80]) for c in report.claims if c.status != "supported"]
     assert not any(c.claim_text.lstrip("*_- ").startswith(("Article", "Erratum notice")) for c in report.claims)

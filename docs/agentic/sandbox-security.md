@@ -5,9 +5,9 @@ Feature 10 lets an agent write Python and run it over a dataset the researcher a
 arXiv:2503.00096; Data Interpreter, arXiv:2402.18679). This page explains what the sandbox defends against,
 what it does not, and how to run it in production.
 
-Code: `phronesis/agentic/sandbox/policy.py` (AST policy), `phronesis/agentic/sandbox/runner.py` (subprocess),
-`phronesis/agentic/sandbox/__init__.py` (dataset scoping), `phronesis/agentic/analyst.py` (the CodeAct phase),
-`phronesis/extensions/sandbox.py` (the `analysis_run_python` registry tool).
+Code: `tribos/agentic/sandbox/policy.py` (AST policy), `tribos/agentic/sandbox/runner.py` (subprocess),
+`tribos/agentic/sandbox/__init__.py` (dataset scoping), `tribos/agentic/analyst.py` (the CodeAct phase),
+`tribos/extensions/sandbox.py` (the `analysis_run_python` registry tool).
 
 ## Threat model
 
@@ -35,7 +35,7 @@ attack surface, and pure-Python sandboxes have a long history of escapes.
 
 1. **Spotlighting of untrusted text** (Hines et al. 2024, arXiv:2403.14720). The dataset preview, previous
    outputs and the question reach the model inside `<untrusted_data>` blocks, with instruction-like spans
-   neutralised (`phronesis/agentic/guardrails.py`). The system prompt says this text is data.
+   neutralised (`tribos/agentic/guardrails.py`). The system prompt says this text is data.
 2. **AST policy** (`policy.py`), applied before anything runs:
    - an import allowlist: numpy, pandas, scipy, sklearn, matplotlib, anndata, scanpy, statsmodels (if
      installed), math, statistics, json, re, collections, itertools, functools, typing, datetime;
@@ -76,13 +76,13 @@ attack surface, and pure-Python sandboxes have a long history of escapes.
    `DatasetStore.resolve_for_user` for that user only, checks that each path lies under the upload root, and
    copies the files in. A call with no bound scope reads no files. The planner cannot use the tool to reach
    another user's upload or a server path.
-9. **Off by default.** Nothing runs unless `PHRONESIS_SANDBOX=on`. When it is off the tool is not registered,
+9. **Off by default.** Nothing runs unless `TRIBOS_SANDBOX=on`. When it is off the tool is not registered,
    and if it is called anyway it refuses.
 
 Known gaps (do not rely on the in-process layers for these):
 - Native code in allowed packages (numpy, scipy, h5py, numba) can do anything the OS lets the process do.
 - A library function that writes files internally, or that evaluates strings, is outside what the AST can see.
-- The matplotlib font cache directory (`<tmp>/phronesis-sandbox-mpl`) is shared between runs so the cache is not
+- The matplotlib font cache directory (`<tmp>/tribos-sandbox-mpl`) is shared between runs so the cache is not
   rebuilt every time. One run could therefore alter it for the next run.
 - Memory and CPU limits are best effort on Windows.
 
@@ -105,9 +105,9 @@ bootstrap and the JSON output contract stay the same.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `PHRONESIS_SANDBOX` | off | `on` enables the `analysis_run_python` tool and the analyst phase |
-| `PHRONESIS_SANDBOX_TIMEOUT_S` | 60 | Wall-clock limit per cell (5 to 110 s; the registry timeout is 120 s) |
-| `PHRONESIS_SANDBOX_MEMORY_MB` | 2048 | Memory limit per cell (RLIMIT_AS or the Job Object) |
+| `TRIBOS_SANDBOX` | off | `on` enables the `analysis_run_python` tool and the analyst phase |
+| `TRIBOS_SANDBOX_TIMEOUT_S` | 60 | Wall-clock limit per cell (5 to 110 s; the registry timeout is 120 s) |
+| `TRIBOS_SANDBOX_MEMORY_MB` | 2048 | Memory limit per cell (RLIMIT_AS or the Job Object) |
 | `agent_options.enable_code_analysis` | true | A per-request switch; false skips the analyst phase |
 
 The analyst phase also needs an agentic framework, a CSV/TSV/h5ad attachment, and a question with analysis

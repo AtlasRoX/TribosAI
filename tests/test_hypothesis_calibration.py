@@ -11,9 +11,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from phronesis.agentic import config as agent_config
-from phronesis.agentic.runtime import register_phase, restore_phases, snapshot_phases
-from phronesis.vivarix.calibration import CHI2_THRESHOLD_95, calibrate_parameters, load_timecourse
+from tribos.agentic import config as agent_config
+from tribos.agentic.runtime import register_phase, restore_phases, snapshot_phases
+from tribos.vivarix.calibration import CHI2_THRESHOLD_95, calibrate_parameters, load_timecourse
 from tests.agentic_fakes import collect_events, make_agentic_orchestrator
 from tests.fakes import called
 
@@ -132,16 +132,16 @@ def test_calibration_rejects_bad_requests():
 
 @pytest.fixture
 def upload_store(monkeypatch, tmp_path):
-    from phronesis.datasets.store import get_dataset_store, reset_dataset_store
+    from tribos.datasets.store import get_dataset_store, reset_dataset_store
 
-    monkeypatch.setenv("PHRONESIS_UPLOAD_ROOT", str(tmp_path / "uploads"))
+    monkeypatch.setenv("TRIBOS_UPLOAD_ROOT", str(tmp_path / "uploads"))
     reset_dataset_store()
     yield get_dataset_store()
     reset_dataset_store()
 
 
 def _prov():
-    from phronesis.datasets.models import DatasetProvenanceIn
+    from tribos.datasets.models import DatasetProvenanceIn
 
     return DatasetProvenanceIn(source="in_house", attests_no_direct_identifiers=True)
 
@@ -162,7 +162,7 @@ def _basico_or_skip():
 # -----------------------------------------------------------------------------
 
 def test_elo_and_fold_change_helpers():
-    from phronesis.agentic.hypothesis import elo_update, log2_fold_change
+    from tribos.agentic.hypothesis import elo_update, log2_fold_change
 
     a, b = elo_update(1200.0, 1200.0, 1.0)
     assert (a, b) == pytest.approx((1216.0, 1184.0))
@@ -223,8 +223,8 @@ def _toy_params(_kw: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _toy_tools() -> Dict[str, Any]:
-    from phronesis.extensions.calibration import VivarixListParametersInput
-    from phronesis.tools.registry import VivarixSimInput
+    from tribos.extensions.calibration import VivarixListParametersInput
+    from tribos.tools.registry import VivarixSimInput
 
     return {"vivarix_simulate_time_course": (VivarixSimInput, _toy_sim), "vivarix_list_parameters": (VivarixListParametersInput, _toy_params)}
 
@@ -232,11 +232,11 @@ def _toy_tools() -> Dict[str, Any]:
 @pytest.fixture
 def wp4_phases():
     state = snapshot_phases()
-    from phronesis.extensions import load_extensions
+    from tribos.extensions import load_extensions
 
     load_extensions()
-    from phronesis.agentic.calibrate import CalibratePhase
-    from phronesis.agentic.hypothesis import HypothesisPhase
+    from tribos.agentic.calibrate import CalibratePhase
+    from tribos.agentic.hypothesis import HypothesisPhase
 
     restore_phases({})
     register_phase(HypothesisPhase())
@@ -328,7 +328,7 @@ def test_hypothesis_llm_generation_and_elo_judge(monkeypatch, tmp_path, wp4_phas
 
 
 def test_hypothesis_respects_suppressed_simulation(monkeypatch, tmp_path, wp4_phases):
-    from phronesis.agentic.runtime import AgentPhase
+    from tribos.agentic.runtime import AgentPhase
 
     class Suppress(AgentPhase):
         key = "test_suppress"
@@ -371,8 +371,8 @@ def test_classic_framework_runs_no_hypothesis_or_calibration(monkeypatch, tmp_pa
 
 def test_calibrate_phase_fits_uploaded_model(monkeypatch, tmp_path, upload_store, wp4_phases):
     _basico_or_skip()
-    from phronesis.agentic.runtime import unregister_phase
-    from phronesis.extensions.calibration import (
+    from tribos.agentic.runtime import unregister_phase
+    from tribos.extensions.calibration import (
         VivarixCalibrateInput,
         VivarixListParametersInput,
         run_calibration_tool,
@@ -406,8 +406,8 @@ def test_calibrate_phase_fits_uploaded_model(monkeypatch, tmp_path, upload_store
 
 
 def test_calibrate_phase_never_runs_when_simulation_suppressed(monkeypatch, tmp_path, wp4_phases):
-    from phronesis.agentic.runtime import AgentPhase
-    from phronesis.extensions.calibration import VivarixCalibrateInput
+    from tribos.agentic.runtime import AgentPhase
+    from tribos.extensions.calibration import VivarixCalibrateInput
 
     class Suppress(AgentPhase):
         key = "test_suppress"
@@ -432,8 +432,8 @@ def test_calibrate_phase_never_runs_when_simulation_suppressed(monkeypatch, tmp_
 def test_tumour_suppressor_hypotheses_target_synthetic_lethal_partners_not_the_gene():
     from types import SimpleNamespace
 
-    from phronesis.agentic.hypothesis import HypothesisPhase, is_loss_of_function_target
-    from phronesis.tools.registry import ToolResult
+    from tribos.agentic.hypothesis import HypothesisPhase, is_loss_of_function_target
+    from tribos.tools.registry import ToolResult
 
     assert is_loss_of_function_target("BRCA2", "anything") and is_loss_of_function_target("MYC", "MYC loss in X")
     assert not is_loss_of_function_target("KRAS", "KRAS G12C-mutant NSCLC")

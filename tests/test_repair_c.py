@@ -10,8 +10,8 @@ from typing import Any, Dict, List
 
 import pytest
 
-from phronesis.utils.memory.clinical_memory import (
-    ClinicalMemoryEngine,
+from tribos.utils.memory.research_memory import (
+    ResearchMemoryEngine,
     assertions_conflict,
     classify_instructions,
     summarize_tool_data,
@@ -19,11 +19,11 @@ from phronesis.utils.memory.clinical_memory import (
 
 
 @pytest.fixture
-def mem(tmp_path) -> ClinicalMemoryEngine:
-    return ClinicalMemoryEngine(storage_dir=str(tmp_path / "mem"))
+def mem(tmp_path) -> ResearchMemoryEngine:
+    return ResearchMemoryEngine(storage_dir=str(tmp_path / "mem"))
 
 
-def _turn(mem: ClinicalMemoryEngine, thread: str, query: str, tools: Dict[str, Any] | None = None, **kw: Any) -> Dict[str, Any]:
+def _turn(mem: ResearchMemoryEngine, thread: str, query: str, tools: Dict[str, Any] | None = None, **kw: Any) -> Dict[str, Any]:
     return mem.consolidate_turn_sync(thread, query, "resp", tools or {}, **kw)
 
 
@@ -66,7 +66,7 @@ def test_reset_of_thread_a_keeps_thread_ab(mem):
 
 def test_connections_are_closed(tmp_path):
     root = tmp_path / "closing"
-    engine = ClinicalMemoryEngine(storage_dir=str(root))
+    engine = ResearchMemoryEngine(storage_dir=str(root))
     _turn(engine, "t", "KRAS question", {"synapta": "KRAS G12D"}, user_id="alice")
     engine.search_memory("KRAS", user_id="alice")
     engine.get_context_package("t", user_id="alice", query="KRAS")
@@ -151,7 +151,7 @@ def test_async_wrappers(mem):
 # --- entities, summaries, contradictions ----------------------------------------------------------------------
 
 def test_gene_regex_ignores_english_words():
-    ents = ClinicalMemoryEngine.extract_entities("The model met the criteria; ret and atm are words. MET amplification.")
+    ents = ResearchMemoryEngine.extract_entities("The model met the criteria; ret and atm are words. MET amplification.")
     assert ents["targets"] == ["MET"]
 
 
@@ -218,11 +218,11 @@ def api(monkeypatch, tmp_path):
 
     from app.backend import main as backend_main
 
-    engine = ClinicalMemoryEngine(storage_dir=str(tmp_path / "api_mem"))
-    monkeypatch.setattr(backend_main, "get_clinical_memory_engine", lambda: engine)
-    monkeypatch.delenv("PHRONESIS_AUTH_MODE", raising=False)
-    monkeypatch.delenv("PHRONESIS_JWT_SECRET", raising=False)
-    monkeypatch.setenv("PHRONESIS_API_TOKENS", "alice-token:alice,bob-token:bob")
+    engine = ResearchMemoryEngine(storage_dir=str(tmp_path / "api_mem"))
+    monkeypatch.setattr(backend_main, "get_research_memory_engine", lambda: engine)
+    monkeypatch.delenv("TRIBOS_AUTH_MODE", raising=False)
+    monkeypatch.delenv("TRIBOS_JWT_SECRET", raising=False)
+    monkeypatch.setenv("TRIBOS_API_TOKENS", "alice-token:alice,bob-token:bob")
     return TestClient(backend_main.app), backend_main, engine
 
 
@@ -360,7 +360,7 @@ def test_rerun_rejects_unknown_model_without_key():
 # --- LLM factory ---------------------------------------------------------------------------------------------
 
 def test_placeholder_keys_fail_fast(monkeypatch):
-    from phronesis.utils.llm.llm_factory import LLMUnavailableError, get_llm
+    from tribos.utils.llm.llm_factory import LLMUnavailableError, get_llm
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-placeholder")
     monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
@@ -376,7 +376,7 @@ def test_placeholder_keys_fail_fast(monkeypatch):
 
 
 def test_stream_total_timeout(monkeypatch):
-    from phronesis.utils.llm import llm_factory
+    from tribos.utils.llm import llm_factory
 
     class _SlowLLM:
         async def astream(self, _messages):

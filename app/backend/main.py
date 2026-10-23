@@ -1,5 +1,5 @@
 """
-FastAPI Backend for Phronesis Clinical R&D Multi-Agent Assistant.
+FastAPI Backend for Tribos Clinical R&D Multi-Agent Assistant.
 Serves Next.js frontend with REST & Server-Sent Events (SSE) streaming.
 """
 
@@ -17,9 +17,9 @@ from typing import Any, AsyncGenerator, Callable, List, Optional
 
 from dotenv import load_dotenv
 
-# Load environment variables from .env. PHRONESIS_LOAD_DOTENV=0 skips it: the test suite sets it so a developer's
+# Load environment variables from .env. TRIBOS_LOAD_DOTENV=0 skips it: the test suite sets it so a developer's
 # .env (keys, auth mode, data paths) never leaks into pytest runs (audit TST-003).
-if os.getenv("PHRONESIS_LOAD_DOTENV", "1").strip().lower() not in ("0", "false", "no", "off"):
+if os.getenv("TRIBOS_LOAD_DOTENV", "1").strip().lower() not in ("0", "false", "no", "off"):
     load_dotenv()
 
 from fastapi import Depends, FastAPI, HTTPException, Path
@@ -27,46 +27,46 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 from starlette.background import BackgroundTask
-from phronesis.agents.authoritative_orchestrator import (
+from tribos.agents.authoritative_orchestrator import (
     get_authoritative_orchestrator,
 )
-from phronesis.utils.llm.llm_factory import (
+from tribos.utils.llm.llm_factory import (
     DEFAULT_ORCHESTRATOR_MODEL,
     get_supported_models,
     is_allowed_model,
     usable_key,
 )
-from phronesis.utils.biocontext import BioContextMCPClient
-from phronesis.utils.memory import get_clinical_memory_engine
+from tribos.utils.biocontext import BioContextMCPClient
+from tribos.utils.memory import get_research_memory_engine
 
 from app.backend.auth import auth_disabled, get_current_user
 from app.backend.limits import UserConcurrencyLimiter
 from app.backend.security import SecurityMiddleware, cors_origins, insecure_allowed
 from app.backend.routers.datasets import router as datasets_router
 from app.backend.routers.export import router as export_router
-from phronesis.agentic import config as agent_config
-from phronesis.config import get_bool, validate_environment
+from tribos.agentic import config as agent_config
+from tribos.config import get_bool, validate_environment
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("phronesis.backend")
+logger = logging.getLogger("tribos.backend")
 
 
 def _package_version(default: str = "1.0.0") -> str:
     try:
-        return importlib.metadata.version("phronesis")
+        return importlib.metadata.version("tribos")
     except importlib.metadata.PackageNotFoundError:
         return default
 
 
 def _check_config() -> List[str]:
-    """Log every configuration problem as a warning; PHRONESIS_STRICT_CONFIG=1 turns them into a startup error.
+    """Log every configuration problem as a warning; TRIBOS_STRICT_CONFIG=1 turns them into a startup error.
 
     Weak bearer secrets (SEC-009) are reported by validate_environment too."""
     problems = validate_environment()
     for problem in problems:
         logger.warning("Configuration: %s", problem)
-    if problems and get_bool("PHRONESIS_STRICT_CONFIG"):
-        raise RuntimeError(f"{len(problems)} configuration problem(s) (PHRONESIS_STRICT_CONFIG=1); see the warnings above")
+    if problems and get_bool("TRIBOS_STRICT_CONFIG"):
+        raise RuntimeError(f"{len(problems)} configuration problem(s) (TRIBOS_STRICT_CONFIG=1); see the warnings above")
     return problems
 
 
@@ -75,11 +75,11 @@ async def _lifespan(_app: FastAPI):
     _check_config()
     job_manager = None
     try:
-        from phronesis.agentic.jobs import get_job_manager
+        from tribos.agentic.jobs import get_job_manager
 
         job_manager = get_job_manager()  # marks jobs left running by a previous process as interrupted
     except Exception as exc:  # noqa: BLE001
-        logging.getLogger("phronesis.backend").warning("Job manager unavailable: %s", exc)
+        logging.getLogger("tribos.backend").warning("Job manager unavailable: %s", exc)
     yield
     shutdown = getattr(job_manager, "shutdown", None)
     if callable(shutdown):
@@ -88,11 +88,11 @@ async def _lifespan(_app: FastAPI):
             if asyncio.iscoroutine(result):
                 await result
         except Exception as exc:  # noqa: BLE001
-            logging.getLogger("phronesis.backend").warning("Job manager shutdown failed: %s", exc)
+            logging.getLogger("tribos.backend").warning("Job manager shutdown failed: %s", exc)
 
 
 app = FastAPI(
-    title="Phronesis Clinical R&D API",
+    title="Tribos Clinical R&D API",
     description="Multi-Agent Orchestrator backend powered by NVIDIA NIM Nemotron and BioContext MCP",
     version=_package_version(),
     lifespan=_lifespan,
@@ -117,7 +117,7 @@ app.include_router(export_router)
 
 # Agentic platform routers (run control, jobs, projects, MCP, A2A). A router that fails to import is logged
 # and skipped so one broken feature never takes the API down.
-# Routers that failed are listed in /api/health; PHRONESIS_STRICT_ROUTERS=1 makes such a failure fatal at startup.
+# Routers that failed are listed in /api/health; TRIBOS_STRICT_ROUTERS=1 makes such a failure fatal at startup.
 DISABLED_ROUTERS: dict[str, str] = {}
 for _router_module in (
     "app.backend.routers.agent_runs",
@@ -129,31 +129,31 @@ for _router_module in (
     try:
         app.include_router(importlib.import_module(_router_module).router)
     except Exception as _router_exc:  # noqa: BLE001
-        if os.getenv("PHRONESIS_STRICT_ROUTERS", "").strip().lower() in ("1", "true", "yes", "on"):
-            raise RuntimeError(f"Router {_router_module} failed to load (PHRONESIS_STRICT_ROUTERS=1)") from _router_exc
+        if os.getenv("TRIBOS_STRICT_ROUTERS", "").strip().lower() in ("1", "true", "yes", "on"):
+            raise RuntimeError(f"Router {_router_module} failed to load (TRIBOS_STRICT_ROUTERS=1)") from _router_exc
         DISABLED_ROUTERS[_router_module] = type(_router_exc).__name__
-        logging.getLogger("phronesis.backend").warning(
+        logging.getLogger("tribos.backend").warning(
             "Router %s disabled: %s", _router_module, _router_exc, exc_info=True
         )
 
 if auth_disabled():
     logger.warning(
-        "PHRONESIS_AUTH_MODE=disabled: all requests run as a single local user. Only loopback clients are served%s.",
-        " (PHRONESIS_ALLOW_INSECURE=1: other clients too; publish the port on 127.0.0.1 only)" if insecure_allowed() else "",
+        "TRIBOS_AUTH_MODE=disabled: all requests run as a single local user. Only loopback clients are served%s.",
+        " (TRIBOS_ALLOW_INSECURE=1: other clients too; publish the port on 127.0.0.1 only)" if insecure_allowed() else "",
     )
 
 _DATASET_ID_RE = re.compile(r"ds_[0-9a-f]{12}")
 
 MAX_MESSAGE_CHARS = 20_000
 MAX_THREAD_ID_CHARS = 200
-SSE_HEARTBEAT_SECONDS = float(os.getenv("PHRONESIS_SSE_HEARTBEAT_S", "15"))
-HEALTH_CACHE_SECONDS = float(os.getenv("PHRONESIS_HEALTH_CACHE_S", "60"))
+SSE_HEARTBEAT_SECONDS = float(os.getenv("TRIBOS_SSE_HEARTBEAT_S", "15"))
+HEALTH_CACHE_SECONDS = float(os.getenv("TRIBOS_HEALTH_CACHE_S", "60"))
 
 # Each orchestration runs many tools and model calls; one user cannot start an unbounded number at once.
-_chat_slots = UserConcurrencyLimiter(int(os.getenv("PHRONESIS_MAX_CONCURRENT_CHATS_PER_USER", "2")))
+_chat_slots = UserConcurrencyLimiter(int(os.getenv("TRIBOS_MAX_CONCURRENT_CHATS_PER_USER", "2")))
 _CHAT_BUSY_DETAIL = "You already have the maximum number of questions running; wait for one to finish."
 # Title generation calls the model too; over this per-user limit a request gets the heuristic title instead.
-_title_slots = UserConcurrencyLimiter(int(os.getenv("PHRONESIS_MAX_CONCURRENT_TITLES_PER_USER", "2")))
+_title_slots = UserConcurrencyLimiter(int(os.getenv("TRIBOS_MAX_CONCURRENT_TITLES_PER_USER", "2")))
 
 
 def _internal_error(request_id: str) -> str:
@@ -210,7 +210,7 @@ class ChatRequest(BaseModel):
     framework: Optional[str] = Field(
         default=None,
         max_length=64,
-        description="Orchestration framework id (see /api/frameworks); defaults to PHRONESIS_DEFAULT_FRAMEWORK",
+        description="Orchestration framework id (see /api/frameworks); defaults to TRIBOS_DEFAULT_FRAMEWORK",
     )
     project_id: Optional[str] = Field(default=None, max_length=64, description="Research project (prj_...) for project memory")
     agent_options: Optional[AgentOptions] = Field(default=None, description="Per-request agentic settings")
@@ -396,7 +396,7 @@ async def _service_readiness() -> dict[str, Any]:
 @app.get("/api/health/live")
 async def liveness_check() -> dict[str, Any]:
     """Cheap liveness probe: no upstream calls."""
-    return {"status": "alive", "service": "Phronesis Clinical R&D API"}
+    return {"status": "alive", "service": "Tribos Clinical R&D API"}
 
 
 _URL_RE = re.compile(r"\b[a-z][a-z0-9+.-]*://[^\s'\"<>]+", re.I)
@@ -457,7 +457,7 @@ async def health_check() -> dict[str, Any]:
     observed_readiness = await _service_readiness()
     return {
         "status": "healthy",
-        "service": "Phronesis Clinical R&D API",
+        "service": "Tribos Clinical R&D API",
         "llm_providers": _provider_flags(),
         "mcp_connectivity": {
             "remote_mcp_active": bool(observed_readiness.get("mcp_remote_active", False)),
@@ -495,8 +495,8 @@ async def list_models() -> dict[str, Any]:
 
 
 def _request_framework(req: "ChatRequest") -> str:
-    """The framework a chat request runs: its own choice, else PHRONESIS_DEFAULT_FRAMEWORK, else Auto routing."""
-    return agent_config.resolve_framework(req.framework, os.getenv("PHRONESIS_DEFAULT_FRAMEWORK") or agent_config.AUTO)
+    """The framework a chat request runs: its own choice, else TRIBOS_DEFAULT_FRAMEWORK, else Auto routing."""
+    return agent_config.resolve_framework(req.framework, os.getenv("TRIBOS_DEFAULT_FRAMEWORK") or agent_config.AUTO)
 
 
 def _agent_kwargs(req: "ChatRequest", interactive: bool) -> dict[str, Any]:
@@ -511,7 +511,7 @@ def _agent_kwargs(req: "ChatRequest", interactive: bool) -> dict[str, Any]:
 @app.get("/api/frameworks")
 async def list_frameworks() -> dict[str, Any]:
     """Orchestration frameworks the backend implements."""
-    default = agent_config.resolve_framework(None, os.getenv("PHRONESIS_DEFAULT_FRAMEWORK") or agent_config.AUTO)
+    default = agent_config.resolve_framework(None, os.getenv("TRIBOS_DEFAULT_FRAMEWORK") or agent_config.AUTO)
     return {
         "default": default,
         "frameworks": [
@@ -611,21 +611,21 @@ ThreadIdPath = Path(..., min_length=1, max_length=MAX_THREAD_ID_CHARS)
 @app.post("/api/reset")
 async def reset_session(req: ResetRequest, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     """Clear working memory for exactly the given thread_id (caller's memories only)."""
-    await asyncio.to_thread(get_clinical_memory_engine().clear_thread_memory, req.thread_id, user_id)
+    await asyncio.to_thread(get_research_memory_engine().clear_thread_memory, req.thread_id, user_id)
     return {"success": True, "thread_id": req.thread_id, "message": "Session and thread memory reset"}
 
 
 @app.get("/api/memory/stats")
 async def memory_stats_endpoint(user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     """Return clinical memory metrics for the authenticated user."""
-    engine = get_clinical_memory_engine()
+    engine = get_research_memory_engine()
     return await asyncio.to_thread(engine.get_memory_stats, user_id)
 
 
 @app.get("/api/memory/thread/{thread_id}")
 async def get_thread_memory_endpoint(thread_id: str = ThreadIdPath, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     """Retrieve the authenticated user's dialogue history for a thread."""
-    engine = get_clinical_memory_engine()
+    engine = get_research_memory_engine()
     history = await asyncio.to_thread(engine.get_conversation_history, thread_id, user_id)
     return {"thread_id": thread_id, "turns": history, "count": len(history)}
 
@@ -633,7 +633,7 @@ async def get_thread_memory_endpoint(thread_id: str = ThreadIdPath, user_id: str
 @app.get("/api/memory/entities")
 async def get_entities_vault_endpoint(user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     """Retrieve biological entities referenced in the authenticated user's memories."""
-    engine = get_clinical_memory_engine()
+    engine = get_research_memory_engine()
     entities = await asyncio.to_thread(engine.get_entity_vault, user_id)
     return {"entities": entities, "count": len(entities)}
 
@@ -641,7 +641,7 @@ async def get_entities_vault_endpoint(user_id: str = Depends(get_current_user)) 
 @app.post("/api/memory/search")
 async def search_memory_endpoint(req: MemorySearchRequest, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     """BM25 search across the authenticated user's historical memory chunks and findings."""
-    engine = get_clinical_memory_engine()
+    engine = get_research_memory_engine()
     results = await asyncio.to_thread(engine.search_memory, req.query, req.thread_id, user_id, None, req.top_k or 5)
     return {"query": req.query, "results": results, "count": len(results)}
 
@@ -649,7 +649,7 @@ async def search_memory_endpoint(req: MemorySearchRequest, user_id: str = Depend
 @app.delete("/api/memory/thread/{thread_id}")
 async def clear_thread_memory_endpoint(thread_id: str = ThreadIdPath, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     """Clear the authenticated user's memory for exactly this thread id."""
-    engine = get_clinical_memory_engine()
+    engine = get_research_memory_engine()
     await asyncio.to_thread(engine.clear_thread_memory, thread_id, user_id)
     return {"success": True, "thread_id": thread_id, "message": "Thread memory cleared"}
 
@@ -657,7 +657,7 @@ async def clear_thread_memory_endpoint(thread_id: str = ThreadIdPath, user_id: s
 @app.delete("/api/memory/clear")
 async def clear_all_memory_endpoint(user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     """Clear all memories belonging to the authenticated user."""
-    engine = get_clinical_memory_engine()
+    engine = get_research_memory_engine()
     await asyncio.to_thread(engine.clear_all_memory, user_id)
     return {"success": True, "message": "All of your clinical memory was cleared"}
 
@@ -687,7 +687,7 @@ async def generate_chat_title(
 async def _ai_or_heuristic_title(req: TitleRequest, query: str) -> TitleResponse:
     # Fast AI title generation attempt (timeout 4.5s)
     try:
-        from phronesis.utils.llm.llm_factory import get_llm
+        from tribos.utils.llm.llm_factory import get_llm
         from langchain_core.messages import HumanMessage, SystemMessage
 
         model_id = req.model or DEFAULT_ORCHESTRATOR_MODEL

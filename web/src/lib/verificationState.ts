@@ -27,7 +27,7 @@ export interface VerificationState {
   counts: { supported: number; contradicted: number; unsupported: number; not_checked: number };
 }
 
-/** Fields only a real verifier run produces (phronesis VerificationReport); the placeholder has none of them. */
+/** Fields only a real verifier run produces (tribos VerificationReport); the placeholder has none of them. */
 const VERIFIER_FIELDS = [
   "fully_verified",
   "claims",

@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /*
- * Phronesis design system: "Observatory".
+ * Tribos design system: "Observatory".
  * A deep midnight canvas with one flat accent color for primary actions,
  * and per-agent hues for provenance. Typography: Google Sans (UI) + Google Sans Code (data).
  */
@@ -88,30 +88,30 @@
   --body-bg-gradient: none;
 }
 
-.phronesis-brand-logo,
-.phronesis-tight-logo,
-.phronesis-icon {
+.tribos-brand-logo,
+.tribos-tight-logo,
+.tribos-icon {
   object-fit: contain !important;
   display: inline-block !important;
   vertical-align: middle !important;
   transition: filter 0.2s ease, opacity 0.2s ease;
 }
 
-[data-theme="dark"] .phronesis-brand-logo,
-[data-theme="dark"] .phronesis-tight-logo,
-[data-theme="dark"] .phronesis-icon,
-.dark .phronesis-brand-logo,
-.dark .phronesis-tight-logo,
-.dark .phronesis-icon {
+[data-theme="dark"] .tribos-brand-logo,
+[data-theme="dark"] .tribos-tight-logo,
+[data-theme="dark"] .tribos-icon,
+.dark .tribos-brand-logo,
+.dark .tribos-tight-logo,
+.dark .tribos-icon {
   filter: brightness(0) invert(1) !important;
 }
 
-[data-theme="light"] .phronesis-brand-logo,
-[data-theme="light"] .phronesis-tight-logo,
-[data-theme="light"] .phronesis-icon,
-.light .phronesis-brand-logo,
-.light .phronesis-tight-logo,
-.light .phronesis-icon {
+[data-theme="light"] .tribos-brand-logo,
+[data-theme="light"] .tribos-tight-logo,
+[data-theme="light"] .tribos-icon,
+.light .tribos-brand-logo,
+.light .tribos-tight-logo,
+.light .tribos-icon {
   filter: brightness(0) !important;
 }
 

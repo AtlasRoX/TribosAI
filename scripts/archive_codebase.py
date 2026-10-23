@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Archive Codebase Utility
-Creates and maintains a clean, production-grade ZIP archive of the Phronesis codebase.
+Creates and maintains a clean, production-grade ZIP archive of the Tribos codebase.
 Automatically excludes transient files, virtual environments, build artifacts, and caches.
 """
 
@@ -24,8 +24,8 @@ IGNORED_DIRS = {
     ".next",
     "__pycache__",
     ".git",
-    ".phronesis_memory",
-    ".phronesis_runs",
+    ".tribos_memory",
+    ".tribos_runs",
     ".pytest_cache",
     ".ruff_cache",
     ".mypy_cache",
@@ -186,13 +186,13 @@ def main() -> None:
     repo_root = Path(__file__).resolve().parent.parent
 
     parser = argparse.ArgumentParser(
-        description="Creates and maintains clean ZIP archives of the Phronesis codebase."
+        description="Creates and maintains clean ZIP archives of the Tribos codebase."
     )
     parser.add_argument(
         "-o", "--output",
         type=Path,
         default=None,
-        help="Path to output zip file (default: phronesis_codebase.zip in repo root)",
+        help="Path to output zip file (default: tribos_codebase.zip in repo root)",
     )
     parser.add_argument(
         "-s", "--slim",
@@ -202,21 +202,21 @@ def main() -> None:
     parser.add_argument(
         "--both",
         action="store_true",
-        help="Generate both full (phronesis_codebase.zip) and slim (phronesis_codebase_slim.zip) archives",
+        help="Generate both full (tribos_codebase.zip) and slim (tribos_codebase_slim.zip) archives",
     )
 
     args = parser.parse_args()
 
     if args.both:
-        full_zip = repo_root / "phronesis_codebase.zip"
-        slim_zip = repo_root / "phronesis_codebase_slim.zip"
+        full_zip = repo_root / "tribos_codebase.zip"
+        slim_zip = repo_root / "tribos_codebase_slim.zip"
         create_codebase_zip(repo_root, full_zip, slim=False)
         create_codebase_zip(repo_root, slim_zip, slim=True)
     else:
         if args.output:
             target_zip = args.output
         else:
-            filename = "phronesis_codebase_slim.zip" if args.slim else "phronesis_codebase.zip"
+            filename = "tribos_codebase_slim.zip" if args.slim else "tribos_codebase.zip"
             target_zip = repo_root / filename
         create_codebase_zip(repo_root, target_zip, slim=args.slim)
 

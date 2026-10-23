@@ -1,7 +1,7 @@
 // Reader-facing names for evidence keys ("agent.gaps.4.lithoscribe" -> "Europe PMC (gap search)"). The backend sends
 // `evidence_labels` next to `evidence_keys` when it can; this is the fallback for keys without one.
 
-/** Public names of tool and source keys (mirrors phronesis/sources/names.py `public`). */
+/** Public names of tool and source keys (mirrors tribos/sources/names.py `public`). */
 export const SOURCE_NAMES: Record<string, string> = {
   synapta: "OpenTargets/KEGG",
   lithoscribe: "Europe PMC",

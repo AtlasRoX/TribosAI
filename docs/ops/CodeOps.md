@@ -6,8 +6,8 @@ hide:
 
 <img src='../VPE.png' height="50" width="50"></img>
 
-# <font color=black>CodeOps — Phronesis</font>
-> **Phronesis** — Made by ChronoStrider Engineering (ChronoStrider Enginnerings)<br>
+# <font color=black>CodeOps — Tribos</font>
+> **Tribos** — Made by ChronoStrider Engineering<br>
 > **Version** 1.0<br>
 
 1. [Overview](#overview)
@@ -21,9 +21,9 @@ hide:
 <hr>
 
 ## Overview
-Welcome to the CodeOps guide for **Phronesis**, engineered by **ChronoStrider Engineering** (**ChronoStrider Enginnerings**)!
+Welcome to the CodeOps guide for **Tribos**, engineered by **ChronoStrider Engineering** (**ChronoStrider Engineering**)!
 
-This document serves as a guide to our team's approach to managing code. Your insights and feedback are highly encouraged 😊. Please provide feedback via [GitHub Issues](https://github.com/AtlasRoX/phronesis-CS/issues). Thanks 😊.
+This document serves as a guide to our team's approach to managing code. Your insights and feedback are highly encouraged 😊. Please provide feedback via [GitHub Issues](https://github.com/AtlasRoX/trib/issues). Thanks 😊.
 
 This guide will cover the following topics relevant for our CodeOps:.
 
@@ -207,7 +207,7 @@ pylint --disable=R0801,W0613 app/
 pylint --disable=R0801,W0613 agents/
 ```
 
-*will ignore the warnings with codes [R0801](https://pylint.readthedocs.io/en/stable/user_guide/messages/refactor/duplicate-code.html) and [W0613](https://pylint.readthedocs.io/en/latest/user_guide/messages/warning/unused-argument.html). Choose to disable warnings wisely. Additionally, if you choose to disable a warning while testing locally, you must also disable it in the workflow files for GitHub Actions (see the section on Automated workflows in the DevOps guide). We have already disabled a few warnings. Please look at the [tests.yml](https://github.com/AtlasRoX/phronesis-CS/main/.github/workflows/tests.yml) to know the warnings we have currently disabled.*
+*will ignore the warnings with codes [R0801](https://pylint.readthedocs.io/en/stable/user_guide/messages/refactor/duplicate-code.html) and [W0613](https://pylint.readthedocs.io/en/latest/user_guide/messages/warning/unused-argument.html). Choose to disable warnings wisely. Additionally, if you choose to disable a warning while testing locally, you must also disable it in the workflow files for GitHub Actions (see the section on Automated workflows in the DevOps guide). We have already disabled a few warnings. Please look at the [tests.yml](https://github.com/AtlasRoX/trib/main/.github/workflows/tests.yml) to know the warnings we have currently disabled.*
 
 ### coverage:
 **Job**: makes sure every method is called at least once in the tests/ folder<br>

@@ -1,5 +1,5 @@
 """
-Phronesis as a Model Context Protocol server (feature 17): JSON-RPC 2.0 over Streamable HTTP at POST /mcp.
+Tribos as a Model Context Protocol server (feature 17): JSON-RPC 2.0 over Streamable HTTP at POST /mcp.
 
 Specs:
 - MCP 2025-11-25 (https://modelcontextprotocol.io/specification/2025-11-25/): the `initialize` handshake,
@@ -9,10 +9,10 @@ Specs:
   protocolVersion"]`). An unsupported version is rejected with -32600.
 
 Tools:
-- `phronesis_research`: the full orchestrator, non-interactive (plan approvals are automatic), with a
+- `tribos_research`: the full orchestrator, non-interactive (plan approvals are automatic), with a
   `framework` argument (default agentic-plan-execute). Returns the answer text plus structuredContent
   {answer, citations, verification, task_status, framework, thread_id}.
-- An allowlist of read-only registry tools (`PHRONESIS_MCP_TOOLS`, comma-separated; default below), listed
+- An allowlist of read-only registry tools (`TRIBOS_MCP_TOOLS`, comma-separated; default below), listed
   only when registered, with `inputSchema` = the tool's pydantic `model_json_schema()`.
 
 Security, after the MCP threat taxonomy of Hou et al. 2025 (arXiv:2503.23278):
@@ -21,7 +21,7 @@ Security, after the MCP threat taxonomy of Hou et al. 2025 (arXiv:2503.23278):
 - static descriptions: tool descriptions come from this file (or the code-defined registry entry,
   neutralised) and never from upstream data, so no tool-description injection or rug-pull at runtime;
 - the same bearer authentication as the REST API, Origin validation against the CORS allowlist (DNS
-  rebinding), and a per-user concurrency limit on tools/call (`PHRONESIS_MCP_MAX_CONCURRENT`, default 2);
+  rebinding), and a per-user concurrency limit on tools/call (`TRIBOS_MCP_MAX_CONCURRENT`, default 2);
 - no sampling, roots or elicitation requests to the client, and no session state.
 
 Errors: -32700 parse error, -32600 invalid request, -32601 method not found, -32602 invalid params (also an
@@ -44,11 +44,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.backend.auth import get_current_user
 from app.backend.limits import UserConcurrencyLimiter
-from phronesis.agentic import config as agent_config
-from phronesis.agentic.guardrails import neutralise
-from phronesis.provenance.rerun import UNSAFE_TOOL_RE, tool_replay_refusal
+from tribos.agentic import config as agent_config
+from tribos.agentic.guardrails import neutralise
+from tribos.provenance.rerun import UNSAFE_TOOL_RE, tool_replay_refusal
 
-logger = logging.getLogger("phronesis.backend.mcp")
+logger = logging.getLogger("tribos.backend.mcp")
 
 router = APIRouter(tags=["mcp"])
 
@@ -58,7 +58,7 @@ VERSION_META_KEY = "io.modelcontextprotocol/protocolVersion"
 
 PARSE_ERROR, INVALID_REQUEST, METHOD_NOT_FOUND, INVALID_PARAMS, INTERNAL_ERROR = -32700, -32600, -32601, -32602, -32603
 
-RESEARCH_TOOL = "phronesis_research"
+RESEARCH_TOOL = "tribos_research"
 
 DEFAULT_TOOLS: Tuple[str, ...] = (
     "synapta_opentargets_search",
@@ -82,13 +82,13 @@ DEFAULT_TOOLS: Tuple[str, ...] = (
     "preprints_recent",
 )
 
-# Refused whatever PHRONESIS_MCP_TOOLS says: writes, uploads, code execution and generative/docking calls. The same
+# Refused whatever TRIBOS_MCP_TOOLS says: writes, uploads, code execution and generative/docking calls. The same
 # policy object guards the run re-play endpoints (SEC-001), so the two entry points cannot drift apart.
 _DENY_RE = UNSAFE_TOOL_RE
 
 _STATIC_DESCRIPTIONS: Dict[str, str] = {
     RESEARCH_TOOL: (
-        "Answer a biomedical research question with the full Phronesis pipeline: literature, target-disease "
+        "Answer a biomedical research question with the full Tribos pipeline: literature, target-disease "
         "evidence, trials, drugs and (when asked) kinetic model simulation, with a verified, cited answer."
     ),
     "synapta_opentargets_search": "Search Open Targets for a gene, target or disease by name; returns matching ids.",
@@ -104,11 +104,11 @@ _STATIC_DESCRIPTIONS: Dict[str, str] = {
 }
 
 _INSTRUCTIONS = (
-    "Phronesis answers biomedical research questions with cited, verified evidence. Use phronesis_research for "
+    "Tribos answers biomedical research questions with cited, verified evidence. Use tribos_research for "
     "full questions; the other tools are read-only lookups against public databases."
 )
 
-_mcp_slots = UserConcurrencyLimiter(int(os.getenv("PHRONESIS_MCP_MAX_CONCURRENT", "2") or 2))
+_mcp_slots = UserConcurrencyLimiter(int(os.getenv("TRIBOS_MCP_MAX_CONCURRENT", "2") or 2))
 
 
 class ResearchArgs(BaseModel):
@@ -124,15 +124,15 @@ class ResearchArgs(BaseModel):
 
 # Seams for tests ---------------------------------------------------------------------------------------------
 def _get_registry() -> Any:
-    from phronesis.agents import authoritative_orchestrator as orch_module
+    from tribos.agents import authoritative_orchestrator as orch_module
 
     return orch_module.get_tool_registry()
 
 
 async def _default_research_runner(user_id: str, args: ResearchArgs) -> Dict[str, Any]:
-    from phronesis.agents.authoritative_orchestrator import get_authoritative_orchestrator
+    from tribos.agents.authoritative_orchestrator import get_authoritative_orchestrator
 
-    timeout = float(os.getenv("PHRONESIS_MCP_RESEARCH_TIMEOUT_S", "900") or 900)
+    timeout = float(os.getenv("TRIBOS_MCP_RESEARCH_TIMEOUT_S", "900") or 900)
     orch = get_authoritative_orchestrator()
     res = await asyncio.wait_for(
         orch.execute_inquiry(
@@ -153,10 +153,10 @@ research_runner: Callable[[str, ResearchArgs], Awaitable[Dict[str, Any]]] = _def
 
 def _server_info() -> Dict[str, Any]:
     try:
-        version = importlib.metadata.version("phronesis")
+        version = importlib.metadata.version("tribos")
     except importlib.metadata.PackageNotFoundError:
         version = "1.0.0"
-    return {"name": "phronesis", "title": "Phronesis biomedical research", "version": version}
+    return {"name": "tribos", "title": "Tribos biomedical research", "version": version}
 
 
 def _capabilities() -> Dict[str, Any]:
@@ -254,7 +254,7 @@ async def dispatch_rpc(payload: Any, handler: Callable[[str, Any, Dict[str, Any]
 
 def _allowed_origins() -> List[str]:
     raw = ",".join(
-        [os.getenv("PHRONESIS_CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"), os.getenv("PHRONESIS_MCP_ALLOWED_ORIGINS", "")]
+        [os.getenv("TRIBOS_CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"), os.getenv("TRIBOS_MCP_ALLOWED_ORIGINS", "")]
     )
     return [o.strip().rstrip("/") for o in raw.split(",") if o.strip()]
 
@@ -268,7 +268,7 @@ def check_origin(request: Request) -> Optional[JSONResponse]:
 
 # Tools ---------------------------------------------------------------------------------------------------
 def allowlisted_names() -> List[str]:
-    raw = os.getenv("PHRONESIS_MCP_TOOLS")
+    raw = os.getenv("TRIBOS_MCP_TOOLS")
     names = [n.strip() for n in raw.split(",") if n.strip()] if raw else list(DEFAULT_TOOLS)
     return [n for n in dict.fromkeys(names) if n != RESEARCH_TOOL and not _DENY_RE.search(n)]
 
@@ -291,7 +291,7 @@ def tool_definitions(registry: Any) -> List[Dict[str, Any]]:
     tools = [
         {
             "name": RESEARCH_TOOL,
-            "title": "Phronesis research",
+            "title": "Tribos research",
             "description": _STATIC_DESCRIPTIONS[RESEARCH_TOOL],
             "inputSchema": ResearchArgs.model_json_schema(),
             "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": False, "openWorldHint": True},

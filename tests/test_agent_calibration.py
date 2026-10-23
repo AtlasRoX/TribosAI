@@ -1,5 +1,5 @@
 """
-Comprehensive Agent Calibration Test Suite for Phronesis.
+Comprehensive Agent Calibration Test Suite for Tribos.
 Validates:
 1. Multi-agent confidence & factuality calibration (Guo et al. 2017, Mohri & Hashimoto 2024).
 2. Split-conformal back-off coverage guarantees at alpha = 0.10.
@@ -18,9 +18,9 @@ from typing import Any, Dict
 import numpy as np
 import pytest
 
-from phronesis.agentic import calibration_stats as cs
-from phronesis.agentic import confidence as conf
-from phronesis.vivarix.calibration import (
+from tribos.agentic import calibration_stats as cs
+from tribos.agentic import confidence as conf
+from tribos.vivarix.calibration import (
     CHI2_THRESHOLD_95,
     calibrate_parameters,
     load_timecourse,

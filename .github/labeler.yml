@@ -18,22 +18,22 @@ dependencies:
 # Vivarix module
 vivarix:
   - changed-files:
-    - any-glob-to-any-file: ['phronesis/vivarix/**']
+    - any-glob-to-any-file: ['tribos/vivarix/**']
 
 # Lithoscribe module
 lithoscribe:
   - changed-files:
-    - any-glob-to-any-file: ['phronesis/lithoscribe/**']
+    - any-glob-to-any-file: ['tribos/lithoscribe/**']
 
 # Lumicell module
 lumicell:
   - changed-files:
-    - any-glob-to-any-file: ['phronesis/lumicell/**']
+    - any-glob-to-any-file: ['tribos/lumicell/**']
 
 # Synapta module
 synapta:
   - changed-files:
-    - any-glob-to-any-file: ['phronesis/synapta/**']
+    - any-glob-to-any-file: ['tribos/synapta/**']
 
 # Tests
 tests:
@@ -58,14 +58,14 @@ backend:
 # Shared pipeline: orchestrator, planner, verifier, tools, memory
 core:
   - changed-files:
-    - any-glob-to-any-file: ['phronesis/agents/**', 'phronesis/phronesis/**', 'phronesis/tools/**', 'phronesis/utils/**', 'phronesis/sources/**', 'phronesis/extensions/**']
+    - any-glob-to-any-file: ['tribos/agents/**', 'tribos/tribos/**', 'tribos/tools/**', 'tribos/utils/**', 'tribos/sources/**', 'tribos/extensions/**']
 
 # Clinical R&D modules
 clinical:
   - changed-files:
-    - any-glob-to-any-file: ['phronesis/trials/**', 'phronesis/drugintel/**', 'phronesis/diseaseintel/**', 'phronesis/variants/**']
+    - any-glob-to-any-file: ['tribos/trials/**', 'tribos/drugintel/**', 'tribos/diseaseintel/**', 'tribos/variants/**']
 
 # Datasets, provenance, export and evaluation
 data-provenance:
   - changed-files:
-    - any-glob-to-any-file: ['phronesis/datasets/**', 'phronesis/provenance/**', 'phronesis/export/**', 'phronesis/evals/**']
+    - any-glob-to-any-file: ['tribos/datasets/**', 'tribos/provenance/**', 'tribos/export/**', 'tribos/evals/**']

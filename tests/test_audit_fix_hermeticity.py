@@ -43,7 +43,7 @@ def _under(path: Path, root: Path) -> bool:
 
 
 def test_state_root_is_a_temporary_directory_outside_the_repository():
-    root = Path(os.environ["PHRONESIS_DATA_DIR"])
+    root = Path(os.environ["TRIBOS_DATA_DIR"])
     assert root == _conftest().TEST_STATE_ROOT
     assert root.is_dir() and not _under(root, REPO_ROOT)
     for name in _conftest().STATE_DIR_VARS:
@@ -51,12 +51,12 @@ def test_state_root_is_a_temporary_directory_outside_the_repository():
 
 
 def test_every_default_store_resolves_under_the_test_state_root():
-    from phronesis.agentic.jobs import default_jobs_dir
-    from phronesis.agentic.router_store import default_router_dir
-    from phronesis.datasets.store import default_upload_root
-    from phronesis.provenance.run_store import _default_root
-    from phronesis.tools.reliability import _cache_dir
-    from phronesis.utils.memory.project_store import default_projects_dir
+    from tribos.agentic.jobs import default_jobs_dir
+    from tribos.agentic.router_store import default_router_dir
+    from tribos.datasets.store import default_upload_root
+    from tribos.provenance.run_store import _default_root
+    from tribos.tools.reliability import _cache_dir
+    from tribos.utils.memory.project_store import default_projects_dir
 
     root = _conftest().TEST_STATE_ROOT
     for path in (default_jobs_dir(), default_router_dir(), default_upload_root(), _default_root(), _cache_dir(),
@@ -66,13 +66,13 @@ def test_every_default_store_resolves_under_the_test_state_root():
 
 
 def test_process_wide_memory_engine_writes_outside_the_repository(monkeypatch):
-    from phronesis.utils.memory import clinical_memory
+    from tribos.utils.memory import research_memory
 
-    repo_db = REPO_ROOT / ".phronesis_memory" / "clinical_memory_v2.db"
+    repo_db = REPO_ROOT / ".tribos_memory" / "research_memory_v2.db"
     before = repo_db.stat().st_mtime_ns if repo_db.exists() else None
 
-    monkeypatch.setattr(clinical_memory, "_GLOBAL_CLINICAL_MEMORY", None)
-    engine = clinical_memory.get_clinical_memory_engine()
+    monkeypatch.setattr(research_memory, "_GLOBAL_RESEARCH_MEMORY", None)
+    engine = research_memory.get_research_memory_engine()
     assert _under(Path(engine.storage_dir), _conftest().TEST_STATE_ROOT)
     asyncio.run(engine.consolidate_turn(thread_id="hermeticity_probe", query="q", response="r",
                                         tool_results={"synapta": "EGFR probe finding"}, user_id="user_probe"))
@@ -90,13 +90,13 @@ def test_process_wide_memory_engine_writes_outside_the_repository(monkeypatch):
 @pytest.mark.skipif(_conftest().LIVE_TESTS, reason="live runs keep the caller's keys")
 def test_offline_run_has_no_keys_and_no_registered_settings_from_the_developer_environment():
     scrubbed = _conftest().scrubbed_variable_names
-    for key in ("NVIDIA_API_KEY", "NVIDIA_NIM_API_KEY", "OPENAI_API_KEY", "TAVILY_API_KEY", "PHRONESIS_AUTH_MODE",
-                "PHRONESIS_CONFIDENCE_CALIBRATION", "AIAGENTS4PHARMA_LLM_MODEL", "PHRONESIS_SYNLETHDB_DIR"):
+    for key in ("NVIDIA_API_KEY", "NVIDIA_NIM_API_KEY", "OPENAI_API_KEY", "TAVILY_API_KEY", "TRIBOS_AUTH_MODE",
+                "TRIBOS_CONFIDENCE_CALIBRATION", "TRIBOS_LLM_MODEL", "TRIBOS_SYNLETHDB_DIR"):
         assert key not in os.environ, key
     # The scrub covers registered settings and any secret-looking name, but not pytest's own variables.
-    fake_env = {"PHRONESIS_AUTH_MODE": "disabled", "ANTHROPIC_API_KEY": "x", "SOME_SERVICE_TOKEN": "x",
-                "PYTEST_CURRENT_TEST": "t", "PHRONESIS_LIVE_TESTS": "0", "PATH": "/bin"}
-    assert scrubbed(fake_env) == ["ANTHROPIC_API_KEY", "PHRONESIS_AUTH_MODE", "SOME_SERVICE_TOKEN"]
+    fake_env = {"TRIBOS_AUTH_MODE": "disabled", "ANTHROPIC_API_KEY": "x", "SOME_SERVICE_TOKEN": "x",
+                "PYTEST_CURRENT_TEST": "t", "TRIBOS_LIVE_TESTS": "0", "PATH": "/bin"}
+    assert scrubbed(fake_env) == ["ANTHROPIC_API_KEY", "TRIBOS_AUTH_MODE", "SOME_SERVICE_TOKEN"]
 
 
 # Counts load_dotenv calls made by app/backend/main.py itself (third-party imports such as pymilvus.settings also
@@ -116,7 +116,7 @@ print("LOAD_DOTENV_CALLS=%d" % sum(os.path.abspath(c) == main_file for c in call
 
 
 def _import_main_counting_dotenv_loads(flag: str) -> int:
-    env = {**os.environ, "PHRONESIS_LOAD_DOTENV": flag, "PHRONESIS_PRIMEKG_PRELOAD": "0"}
+    env = {**os.environ, "TRIBOS_LOAD_DOTENV": flag, "TRIBOS_PRIMEKG_PRELOAD": "0"}
     out = subprocess.run([sys.executable, "-c", _IMPORT_PROBE], cwd=str(REPO_ROOT), env=env, capture_output=True,
                          text=True, timeout=600)
     assert out.returncode == 0, out.stderr[-2000:]
@@ -126,7 +126,7 @@ def _import_main_counting_dotenv_loads(flag: str) -> int:
 
 @pytest.mark.slow
 def test_importing_the_api_does_not_load_dotenv_under_pytest():
-    assert os.environ.get("PHRONESIS_LOAD_DOTENV") == "0"
+    assert os.environ.get("TRIBOS_LOAD_DOTENV") == "0"
     assert _import_main_counting_dotenv_loads("0") == 0
     # The server still loads .env by default (load_dotenv is stubbed in the probe, so no real file is read).
     assert _import_main_counting_dotenv_loads("1") == 1
@@ -140,10 +140,10 @@ def test_implicit_dotenv_loads_are_noops_but_explicit_files_still_load(tmp_path,
     assert dotenv.load_dotenv() is False
     assert dotenv.load_dotenv(REPO_ROOT / ".env") is False
     env_file = tmp_path / "own.env"
-    env_file.write_text("PHRONESIS_HERMETICITY_PROBE=from-own-file\n", encoding="utf-8")
-    monkeypatch.delenv("PHRONESIS_HERMETICITY_PROBE", raising=False)
+    env_file.write_text("TRIBOS_HERMETICITY_PROBE=from-own-file\n", encoding="utf-8")
+    monkeypatch.delenv("TRIBOS_HERMETICITY_PROBE", raising=False)
     assert dotenv.load_dotenv(env_file) is True
-    assert os.environ["PHRONESIS_HERMETICITY_PROBE"] == "from-own-file"
+    assert os.environ["TRIBOS_HERMETICITY_PROBE"] == "from-own-file"
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -220,5 +220,5 @@ def test_loopback_stays_open():
 
 
 def test_guard_preserves_the_socket_module_identity_for_other_guards():
-    # phronesis.evals.cassette restores socket.getaddrinfo after replay and checks it is the socket function.
+    # tribos.evals.cassette restores socket.getaddrinfo after replay and checks it is the socket function.
     assert socket.getaddrinfo.__module__ == "socket"

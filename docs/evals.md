@@ -1,9 +1,9 @@
-# Evaluating Phronesis
+# Evaluating Tribos
 
-> **Phronesis** — Evaluation Suites & Benchmarks  
-> **Made by ChronoStrider Engineering (ChronoStrider Enginnerings)**
+> **Tribos** — Evaluation Suites & Benchmarks  
+> **Made by ChronoStrider Engineering**
 
-`phronesis.evals` measures how well Phronesis handles clinical and research questions, at three levels:
+`tribos.evals` measures how well Tribos handles clinical and research questions, at three levels:
 
 | Level | What runs | What it checks | Cost |
 |---|---|---|---|
@@ -14,14 +14,14 @@
 ## Quick start
 
 ```bash
-uv run python -m phronesis.evals list                                         # suites and what they cover
-uv run python -m phronesis.evals run --level plan                             # offline routing check, ~5 s
-uv run python -m phronesis.evals run --suite clinical --level retrieval       # literature retrieval, ~2 min
-uv run python -m phronesis.evals run --level answer --judge                   # full answers, ~20 min
-uv run python -m phronesis.evals run --suite clinical --level answer --ids clin-sepsis   # one case
+uv run python -m tribos.evals list                                         # suites and what they cover
+uv run python -m tribos.evals run --level plan                             # offline routing check, ~5 s
+uv run python -m tribos.evals run --suite clinical --level retrieval       # literature retrieval, ~2 min
+uv run python -m tribos.evals run --level answer --judge                   # full answers, ~20 min
+uv run python -m tribos.evals run --suite clinical --level answer --ids clin-sepsis   # one case
 ```
 
-`phronesis-eval` is the same command once the package is installed. Keys come from `.env`, as for the app.
+`tribos-eval` is the same command once the package is installed. Keys come from `.env`, as for the app.
 
 Each run writes `eval_runs/<time>_<suites>_<levels>/`:
 
@@ -44,7 +44,7 @@ Each run writes `eval_runs/<time>_<suites>_<levels>/`:
 | `bioasq` | — | BioASQ task B: yes/no, factoid, list and summary questions with gold documents. Registration is required, so download the JSON and pass `--bioasq-file` |
 | `path/to/file.jsonl` | — | Your own cases |
 
-Benchmarks are run open-domain: Phronesis retrieves its own evidence, so a PubMedQA question also measures whether the source abstract was found. Sample them with `--limit 50 --seed 1`. LitQA2 asks about papers published after many models' training data; read its accuracy together with coverage (how often the answer committed to an option).
+Benchmarks are run open-domain: Tribos retrieves its own evidence, so a PubMedQA question also measures whether the source abstract was found. Sample them with `--limit 50 --seed 1`. LitQA2 asks about papers published after many models' training data; read its accuracy together with coverage (how often the answer committed to an option).
 
 ## Options worth knowing
 
@@ -91,7 +91,7 @@ Every answer-level result reports these metrics. They are computed from stored o
 
   Model-written artifacts never count as evidence: claim confidence, the agent plan, run trace and dialogue, hypotheses and project memory.
 - `answer.no_internal_leak`: a research answer must not contain:
-  - internal component names (Lithoscribe, Synapta, Vivarix, Lumicell, BioDiscovery, in any case);
+  - internal component names (Lithoscribe, Synapta, Vivarix, Lumicell, Discovery, in any case);
   - evidence-field keys (`clinical_trials`, `structure_intel`, `total_reports`, `tool_status`, …);
   - internal step ids (`agent.gaps.9-12`);
   - prompt tags (`[CLINICAL_CLAIM]`).
@@ -105,14 +105,14 @@ A case can switch a gate off with `"skip_gates": ["answer.no_internal_leak"]`.
 ## Through the API (`--via`)
 
 ```bash
-uv run python -m phronesis.evals run --suite golden --level answer --via http://127.0.0.1:8000 --ids golden-kras
+uv run python -m tribos.evals run --suite golden --level answer --via http://127.0.0.1:8000 --ids golden-kras
 ```
 
 Each answer case, and each of its setup turns, is sent to `POST /api/chat` with the body the web client sends: `message`, `thread_id`, `enable_web_search`, the case's `framework`, `agent_options`, `dataset_ids` and `project_id`, and `model` when `--model` is given. The returned JSON (the orchestrator result's `to_dict()`) is scored exactly like an in-process result, so the API layer is tested as well. Afterwards the thread's memory is deleted with `DELETE /api/memory/thread/{id}`.
 
 Details:
 
-- **Authentication.** A bearer token is read from `PHRONESIS_EVAL_TOKEN`. It is never written to `meta.json`.
+- **Authentication.** A bearer token is read from `TRIBOS_EVAL_TOKEN`. It is never written to `meta.json`.
 - **Errors.** A non-200 status, or a reply without a `response` string, becomes an errored result with a failed `answer.no_crash`.
 - **Other levels.** Plan and retrieval still run in-process.
 - **Timeouts.** Golden cases set `timeout_s` (1,800 s), because agentic frameworks take minutes.
@@ -120,10 +120,10 @@ Details:
 ## Regression control: baselines
 
 ```bash
-uv run python -m phronesis.evals run --suite golden --level answer --via http://127.0.0.1:8000
-uv run python -m phronesis.evals baseline save eval_runs/<run> --name golden          # eval_runs/baselines/golden.json
+uv run python -m tribos.evals run --suite golden --level answer --via http://127.0.0.1:8000
+uv run python -m tribos.evals baseline save eval_runs/<run> --name golden          # eval_runs/baselines/golden.json
 # ... change the system, run again ...
-uv run python -m phronesis.evals baseline check eval_runs/<new run> --name golden --delta 0.03
+uv run python -m tribos.evals baseline check eval_runs/<new run> --name golden --delta 0.03
 ```
 
 - **Saving.** `baseline save` stores a per-case snapshot of the run. For each scored case it records pass, `fact_recall`, `faithfulness`, latency and each hard gate's outcome. Use `--baseline <file>` to write or read an explicit path, such as a committed baseline.
@@ -142,8 +142,8 @@ With few live cases a single bad run is noisy. Use `--repeat 3` before saving a 
 Edited a case's expectations, or improved a scorer? Re-apply them to a finished run's stored answers, without calling the system again:
 
 ```bash
-uv run python -m phronesis.evals rescore eval_runs/<run>               # seconds; previous results kept in results.prev.jsonl
-uv run python -m phronesis.evals rescore eval_runs/<run> --rejudge     # also re-ask the judge and label grader
+uv run python -m tribos.evals rescore eval_runs/<run>               # seconds; previous results kept in results.prev.jsonl
+uv run python -m tribos.evals rescore eval_runs/<run> --rejudge     # also re-ask the judge and label grader
 ```
 
 Retrieval results store every retrieved PMID, DOI and title in rank order, and answers store the full response and citations. Gold papers, title patterns, required facts and thresholds can therefore all change after the fact. Re-run the system only when the system itself changed.
@@ -151,7 +151,7 @@ Retrieval results store every retrieved PMID, DOI and title in rank order, and a
 ## Comparing runs
 
 ```bash
-uv run python -m phronesis.evals compare eval_runs/<before> eval_runs/<after>
+uv run python -m tribos.evals compare eval_runs/<before> eval_runs/<after>
 ```
 
 This prints metric deltas per level, every case that went from pass to fail (with the failing checks), and every case that was fixed. Run the same suites and levels before and after a change. `meta.json` records the code fingerprint, so you can confirm which code each run used.
@@ -217,14 +217,14 @@ Live answer cases are slow and vary between runs. A **cassette** records every t
 
 ```bash
 # 1. Record locally, against the live APIs and model (in-process only; not with --via):
-uv run python -m phronesis.evals run --suite golden --level answer --ids golden-kras-g12c-nsclc --record
-# 2. Commit the cassette: phronesis/evals/cassettes/golden/golden-kras-g12c-nsclc.json
+uv run python -m tribos.evals run --suite golden --level answer --ids golden-kras-g12c-nsclc --record
+# 2. Commit the cassette: tribos/evals/cassettes/golden/golden-kras-g12c-nsclc.json
 # 3. Replay (what CI does), in seconds:
-uv run python -m phronesis.evals run --suite golden --level answer --replay
-uv run python -m phronesis.evals run --suite golden --level answer --replay --repeat 2   # determinism check: never flaky
+uv run python -m tribos.evals run --suite golden --level answer --replay
+uv run python -m tribos.evals run --suite golden --level answer --replay --repeat 2   # determinism check: never flaky
 ```
 
-What a cassette holds (`phronesis/evals/cassette.py`):
+What a cassette holds (`tribos/evals/cassette.py`):
 
 - **Tool calls.** Each registry call is recorded with its `ToolResult`, keyed by the tool name and the canonical JSON of its arguments. The hook sits below the registry's argument validation and run-manifest recording, and above its cache, circuit breakers, retries and executor. A replayed run therefore still writes its own manifest, canonical ids and evidence, and the citation gate checks them as usual.
 - **Model calls.** Each call is keyed by the model and the prompt messages, and records the reply text and the model's reasoning. This covers models obtained through `get_llm`, whether called with `ainvoke`, `astream` or `astream_with_reasoning`: the planner, the agent phases, NLI, the synthesis, rewrites and the Reflexion correction. Replay builds no real client.
@@ -235,13 +235,13 @@ How replay matches calls:
 
 - **Normalised keys.** Before hashing, volatile parts of prompts and arguments are replaced by placeholders: ISO timestamps, today's date (and the recording's date) in any common format, uuids, `run_…`/`job_…` ids, eval thread ids and Unix timestamps. The `<retrieval_date>` in a prompt does not break a replay.
 - **Order.** A call made several times replays its recordings in order.
-- **Pinned settings.** `PHRONESIS_NLI=llm` and no tool embeddings, for recording and replay alike. Without the pin, a cross-encoder in one machine's HF cache would send that machine down a different path from CI.
+- **Pinned settings.** `TRIBOS_NLI=llm` and no tool embeddings, for recording and replay alike. Without the pin, a cross-encoder in one machine's HF cache would send that machine down a different path from CI.
 - **Recorded latency.** A replayed result reports the recorded run's latency (`replay_latency_s` holds the replay's own wall time), so its metrics match the recording.
 
 What is stored:
 
 - **Secrets are redacted.** API keys, `Authorization` headers, bearer tokens, `nvapi-`/`sk-` keys, `?api_key=` URL parameters and the values of `*_KEY`/`*_TOKEN`/`*_SECRET` environment variables never reach the file.
-- **Prompts are not stored in full.** Each prompt keeps a per-message hash, its length and a short preview. Set `PHRONESIS_CASSETTE_PROMPTS=1` while recording to keep the full normalised prompts; a miss then shows the first differing characters.
+- **Prompts are not stored in full.** Each prompt keeps a per-message hash, its length and a short preview. Set `TRIBOS_CASSETTE_PROMPTS=1` while recording to keep the full normalised prompts; a miss then shows the first differing characters.
 - **Size.** Files larger than 2 MB are written gzipped (`.json.gz`).
 
 Failures:
@@ -271,12 +271,12 @@ Limits:
   - The plan level gates on `plan.pass_rate=1`.
   - The replay runs every committed cassette (`run --suite <suites with cassettes> --level answer --replay`) and fails on any miss. With no cassettes committed, the step is skipped with a notice.
 - **Weekly and on demand**, it runs retrieval and answers live, using the `NVIDIA_API_KEY` secret, and gates on `retrieval.hit_rate` and `answer.pass_rate`. It uploads `eval_runs/` as an artifact, so the HTML report can be downloaded from the run page.
-- **Weekly and on demand, golden.** A third job runs the `golden` suite at the answer level and then checks it with `baseline check --baseline phronesis/evals/baselines/golden.json`. When no baseline is committed, the check step is skipped with a notice. To commit one, save it from a trusted run with `baseline save <run> --baseline phronesis/evals/baselines/golden.json`.
+- **Weekly and on demand, golden.** A third job runs the `golden` suite at the answer level and then checks it with `baseline check --baseline tribos/evals/baselines/golden.json`. When no baseline is committed, the check step is skipped with a notice. To commit one, save it from a trusted run with `baseline save <run> --baseline tribos/evals/baselines/golden.json`.
 
 The push and pull-request path filters cover:
 
 - the agents and the agentic runtime;
-- tools, sources (including `sources_extra`), drug intelligence, Lithoscribe and `phronesis/utils/` (the model factory, HTTP helpers, biocontext);
+- tools, sources (including `sources_extra`), drug intelligence, Lithoscribe and `tribos/utils/` (the model factory, HTTP helpers, biocontext);
 - the API (`app/`) and the harness.
 
 ## Reading results honestly

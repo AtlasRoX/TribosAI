@@ -9,8 +9,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from phronesis.vivarix.tools import parameter_scan as scan_module
-from phronesis.vivarix.tools import steady_state as steady_module
+from tribos.vivarix.tools import parameter_scan as scan_module
+from tribos.vivarix.tools import steady_state as steady_module
 
 pytestmark = pytest.mark.unit_mock
 

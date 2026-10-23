@@ -15,16 +15,16 @@ from typing import Any, Dict, List, Tuple
 import numpy as np
 import pytest
 
-from phronesis.agentic import calibration_stats as cs
-from phronesis.agentic import confidence as conf
-from phronesis.agentic import nli
-from phronesis.agentic.budget import RunBudget
-from phronesis.agentic.config import AGENTIC
-from phronesis.agentic.control import RunControl
-from phronesis.agentic.llm import AgentLLM
-from phronesis.agentic.state import AgentState
-from phronesis.verify.verifier import ClinicalVerifier
-from phronesis.tools.registry import ToolResult
+from tribos.agentic import calibration_stats as cs
+from tribos.agentic import confidence as conf
+from tribos.agentic import nli
+from tribos.agentic.budget import RunBudget
+from tribos.agentic.config import AGENTIC
+from tribos.agentic.control import RunControl
+from tribos.agentic.llm import AgentLLM
+from tribos.agentic.state import AgentState
+from tribos.verify.verifier import TribosVerifier
+from tribos.tools.registry import ToolResult
 from tests.agentic_fakes import ScriptedLLM, collect_events, make_agentic_orchestrator
 
 # Logits in the cross-encoder/nli-deberta-v3-base order: 0=contradiction, 1=entailment, 2=neutral.
@@ -44,8 +44,8 @@ CLINICAL_CONTRADICTED = "Sotorasib improved overall survival in KRAS G12C lung c
 @pytest.fixture(autouse=True)
 def _fresh_nli_cache(monkeypatch):
     nli.reset_cache()
-    for var in ("PHRONESIS_NLI", "PHRONESIS_NLI_MODEL", "PHRONESIS_CONFIDENCE_T", "PHRONESIS_CONFIDENCE_CALIBRATION",
-                "PHRONESIS_NLI_MAX_LLM_CALLS", "PHRONESIS_NLI_LLM_BATCH", "PHRONESIS_CONFIDENCE_ELICIT"):
+    for var in ("TRIBOS_NLI", "TRIBOS_NLI_MODEL", "TRIBOS_CONFIDENCE_T", "TRIBOS_CONFIDENCE_CALIBRATION",
+                "TRIBOS_NLI_MAX_LLM_CALLS", "TRIBOS_NLI_LLM_BATCH", "TRIBOS_CONFIDENCE_ELICIT"):
         monkeypatch.delenv(var, raising=False)
     yield
     nli.reset_cache()
@@ -187,7 +187,7 @@ def _tool_results() -> Dict[str, ToolResult]:
 
 
 def _verify(response: str, judge=None):
-    return ClinicalVerifier().verify_response(
+    return TribosVerifier().verify_response(
         query="KRAS signaling in pancreatic cancer and sotorasib survival",
         response_markdown=response,
         tool_results=_tool_results(),
@@ -263,7 +263,7 @@ def _scifact_responder(label: str, calls: List[str]):
 
 
 def test_llm_precompute_fills_cache_and_judge_serves_it(monkeypatch):
-    monkeypatch.setenv("PHRONESIS_NLI", "llm")
+    monkeypatch.setenv("TRIBOS_NLI", "llm")
     calls: List[str] = []
     llm = ScriptedLLM({"nli": _scifact_responder("REFUTES", calls)})
     state = make_state(_tool_results(), llm, draft=MECH_SUPPORTED)
@@ -280,7 +280,7 @@ def test_llm_precompute_fills_cache_and_judge_serves_it(monkeypatch):
     scores = nli.find_scores(state.bag["nli_scores"], MECH_SUPPORTED)
     assert scores["contradiction"] == 0.95 and scores["backend"] == "llm" and scores["best_source"] == "PMID:123456"
 
-    report = ClinicalVerifier().verify_response(
+    report = TribosVerifier().verify_response(
         query=state.query, response_markdown=MECH_SUPPORTED, tool_results=state.tool_results, entailment_judge=judge
     )
     c = claim_by_text(report, "drives pancreatic")
@@ -291,9 +291,9 @@ def test_llm_precompute_fills_cache_and_judge_serves_it(monkeypatch):
 
 
 def test_llm_judge_call_cap_and_budget(monkeypatch):
-    monkeypatch.setenv("PHRONESIS_NLI", "llm")
-    monkeypatch.setenv("PHRONESIS_NLI_LLM_BATCH", "1")
-    monkeypatch.setenv("PHRONESIS_NLI_MAX_LLM_CALLS", "3")
+    monkeypatch.setenv("TRIBOS_NLI", "llm")
+    monkeypatch.setenv("TRIBOS_NLI_LLM_BATCH", "1")
+    monkeypatch.setenv("TRIBOS_NLI_MAX_LLM_CALLS", "3")
     genes = ["BRAF", "EGFR", "MYC", "TP53", "PIK3CA", "SMAD4"]
     passages = [{"pmid": str(100000 + i), "passage_text": f"{g} signaling in pancreatic cancer."} for i, g in enumerate(genes)]
     draft = " ".join(f"{g} signaling drives pancreatic tumour growth (PMID: {100000 + i})." for i, g in enumerate(genes))
@@ -306,7 +306,7 @@ def test_llm_judge_call_cap_and_budget(monkeypatch):
     asyncio.run(nli.precompute(state))
     assert len(calls) == 3  # the cap holds across draft rounds
 
-    monkeypatch.setenv("PHRONESIS_NLI_MAX_LLM_CALLS", "12")
+    monkeypatch.setenv("TRIBOS_NLI_MAX_LLM_CALLS", "12")
     calls2: List[str] = []
     llm2 = ScriptedLLM({"nli": _scifact_responder("SUPPORTS", calls2)})
     tight = make_state({"lit": lit_result(passages)}, llm2, budget=RunBudget(max_llm_calls=4), draft=draft)
@@ -326,10 +326,10 @@ def test_resolve_backend_order(monkeypatch):
     monkeypatch.setattr(nli, "_model_available", lambda mid: False)
     assert nli.resolve_backend(make_state({}, llm))[0] == nli.BACKEND_LLM  # auto, no model -> agent model
     assert nli.resolve_backend(make_state({}, None))[0] == nli.BACKEND_NONE  # auto, nothing
-    monkeypatch.setenv("PHRONESIS_NLI", "off")
+    monkeypatch.setenv("TRIBOS_NLI", "off")
     state = make_state({}, llm)
     assert nli.resolve_backend(state)[0] == nli.BACKEND_NONE
-    monkeypatch.setenv("PHRONESIS_NLI", "llm")
+    monkeypatch.setenv("TRIBOS_NLI", "llm")
     assert nli.resolve_backend(make_state({}, llm))[0] == nli.BACKEND_LLM
     none_state = make_state({}, None)
     nli.install(none_state)
@@ -408,17 +408,17 @@ def test_confidence_weights_and_calibration_file(tmp_path, monkeypatch):
 
     path = tmp_path / "cal.json"
     path.write_text(json.dumps({"temperature": 2.0, "conformal_threshold": 0.6, "weights": {"bias": 0.5}}), encoding="utf-8")
-    monkeypatch.setenv("PHRONESIS_CONFIDENCE_CALIBRATION", str(path))
+    monkeypatch.setenv("TRIBOS_CONFIDENCE_CALIBRATION", str(path))
     cal = conf.load_calibration()
     assert cal["temperature"] == 2.0 and cal["conformal_threshold"] == 0.6 and cal["weights"]["bias"] == 0.5
-    monkeypatch.setenv("PHRONESIS_CONFIDENCE_T", "1.5")
+    monkeypatch.setenv("TRIBOS_CONFIDENCE_T", "1.5")
     assert conf.load_calibration()["temperature"] == 1.5
 
 
 def test_confidence_phase_uses_nli_conflicts_and_stated_blend(monkeypatch):
     pred = FakePredictor([("kras signaling in pancreatic", ENTAIL)], default=NEUTRAL)
     patch_loader(monkeypatch, pred)
-    monkeypatch.setenv("PHRONESIS_NLI", "model")
+    monkeypatch.setenv("TRIBOS_NLI", "model")
     stated: List[str] = []
 
     def p_true(system: str, user: str) -> str:
@@ -462,7 +462,7 @@ def _phases(res) -> List[str]:
 
 
 def test_end_to_end_cross_encoder_judge_and_confidence_artifact(monkeypatch, tmp_path):
-    monkeypatch.setenv("PHRONESIS_NLI", "model")
+    monkeypatch.setenv("TRIBOS_NLI", "model")
     pred = FakePredictor([], default=NEUTRAL)  # the passage never entails the claim
     loaded = patch_loader(monkeypatch, pred)
     res, _events, calls, _llm = _run(monkeypatch, tmp_path)
@@ -488,7 +488,7 @@ def test_end_to_end_cross_encoder_judge_and_confidence_artifact(monkeypatch, tmp
 
 
 def test_end_to_end_model_judge_precomputed_before_verification(monkeypatch, tmp_path):
-    monkeypatch.setenv("PHRONESIS_NLI", "llm")
+    monkeypatch.setenv("TRIBOS_NLI", "llm")
     nli_calls: List[str] = []
     res, _events, _calls, llm = _run(monkeypatch, tmp_path, responses={"nli": _scifact_responder("REFUTES", nli_calls)}, thread="v2")
     assert nli_calls and len(nli_calls) <= nli.MAX_LLM_CALLS
@@ -505,7 +505,7 @@ def test_end_to_end_model_judge_precomputed_before_verification(monkeypatch, tmp
 
 
 def test_backend_off_leaves_verification_unchanged(monkeypatch, tmp_path):
-    monkeypatch.setenv("PHRONESIS_NLI", "off")
+    monkeypatch.setenv("TRIBOS_NLI", "off")
     pred = FakePredictor([], default=CONTRA)
     loaded = patch_loader(monkeypatch, pred)
     res, _events, _calls, llm = _run(monkeypatch, tmp_path, thread="v3")

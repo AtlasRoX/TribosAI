@@ -1,10 +1,10 @@
 # syntax=docker/dockerfile:1
 #
-# Phronesis Clinical R&D API (FastAPI + uvicorn).
+# Tribos Clinical R&D API (FastAPI + uvicorn).
 #
-#   docker build -f docker/backend.Dockerfile -t phronesis-backend .     (context = repo root)
+#   docker build -f docker/backend.Dockerfile -t tribos-backend .     (context = repo root)
 #
-# This image replaces the legacy Streamlit image in phronesis/phronesis/Dockerfile for the API. Dependencies
+# This image replaces the legacy Streamlit image in tribos/tribos/Dockerfile for the API. Dependencies
 # come from uv.lock (`uv sync --frozen`), so the image matches CI. The lock pins torch and other heavy
 # scientific packages, so expect a large image (several GB).
 
@@ -45,35 +45,35 @@ FROM python:${PYTHON_VERSION}-slim AS runtime
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl libgomp1 \
   && rm -rf /var/lib/apt/lists/* \
-  && groupadd --system --gid 10001 phronesis \
-  && useradd --system --uid 10001 --gid phronesis --home-dir /home/phronesis --create-home phronesis \
+  && groupadd --system --gid 10001 tribos \
+  && useradd --system --uid 10001 --gid tribos --home-dir /home/tribos --create-home tribos \
   && mkdir -p /data \
-  && chown phronesis:phronesis /data
+  && chown tribos:tribos /data
 
 WORKDIR /app
 
-COPY --from=builder --chown=phronesis:phronesis /app/.venv /app/.venv
-COPY --chown=phronesis:phronesis phronesis/ ./phronesis/
-COPY --chown=phronesis:phronesis app/ ./app/
+COPY --from=builder --chown=tribos:tribos /app/.venv /app/.venv
+COPY --chown=tribos:tribos tribos/ ./tribos/
+COPY --chown=tribos:tribos app/ ./app/
 
-# All mutable state lives on the /data volume. PHRONESIS_DATA_DIR is the umbrella; the stores below are the
+# All mutable state lives on the /data volume. TRIBOS_DATA_DIR is the umbrella; the stores below are the
 # variables the code actually reads (run provenance, jobs, memory, projects, tool cache, PrimeKG).
 ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONPATH=/app \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PHRONESIS_DATA_DIR=/data \
-    PHRONESIS_RUNS_DIR=/data/runs \
-    PHRONESIS_JOBS_DIR=/data/jobs \
-    PHRONESIS_MEMORY_DIR=/data/memory \
-    PHRONESIS_PROJECTS_DIR=/data/projects \
-    PHRONESIS_TOOL_CACHE_DIR=/data/tool_cache \
-    PHRONESIS_PRIMEKG_DIR=/data/primekg \
-    HOME=/home/phronesis
+    TRIBOS_DATA_DIR=/data \
+    TRIBOS_RUNS_DIR=/data/runs \
+    TRIBOS_JOBS_DIR=/data/jobs \
+    TRIBOS_MEMORY_DIR=/data/memory \
+    TRIBOS_PROJECTS_DIR=/data/projects \
+    TRIBOS_TOOL_CACHE_DIR=/data/tool_cache \
+    TRIBOS_PRIMEKG_DIR=/data/primekg \
+    HOME=/home/tribos
 
 VOLUME ["/data"]
 
-USER phronesis
+USER tribos
 
 EXPOSE 8000
 

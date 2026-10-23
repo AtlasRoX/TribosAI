@@ -33,9 +33,9 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "Phronesis | Clinical R&D Assistant",
+  title: "Tribos | Clinical R&D Assistant",
   description:
-    "Phronesis - Advanced Autonomous Clinical R&D Multi-Agent Intelligence System. Made by ChronoStrider Engineering (ChronoStrider Enginnerings).",
+    "Tribos - Advanced Autonomous Clinical R&D Multi-Agent Intelligence System. Made by ChronoStrider Engineering.",
   icons: {
     icon: "/icon-tight.png",
     shortcut: "/icon-tight.png",
@@ -56,7 +56,7 @@ export default function RootLayout({
             __html: `
               (function() {
                 try {
-                  var saved = localStorage.getItem('phronesis-theme');
+                  var saved = localStorage.getItem('tribos-theme');
                   var theme = saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
                   document.documentElement.classList.remove('light', 'dark');
                   document.documentElement.classList.add(theme);

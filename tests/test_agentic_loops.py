@@ -9,20 +9,20 @@ from typing import Any, Dict, List
 
 import pytest
 
-from phronesis.agentic import config as agent_config
-from phronesis.agentic.counter_evidence import (
+from tribos.agentic import config as agent_config
+from tribos.agentic.counter_evidence import (
     COUNTER_EVIDENCE_PHASE,
     CounterEvidencePhase,
     heuristic_rating,
     negation_queries,
 )
-from phronesis.agentic.gaps import GAP_PHASE, hedged_sentences, rewrite_query
-from phronesis.agentic.runtime import AgentPhase, register_phase, restore_phases, snapshot_phases
-from phronesis.agentic.specialists import build_specialists, classify_tool, tool_allowed
-from phronesis.agentic.topologies import DEBATE_PHASE, SUPERVISOR_PHASE, SWARM_PHASE
-from phronesis.agents import authoritative_orchestrator as orch_module
-from phronesis.agents.query_context import QueryContext
-from phronesis.tools import registry as registry_module
+from tribos.agentic.gaps import GAP_PHASE, hedged_sentences, rewrite_query
+from tribos.agentic.runtime import AgentPhase, register_phase, restore_phases, snapshot_phases
+from tribos.agentic.specialists import build_specialists, classify_tool, tool_allowed
+from tribos.agentic.topologies import DEBATE_PHASE, SUPERVISOR_PHASE, SWARM_PHASE
+from tribos.agents import authoritative_orchestrator as orch_module
+from tribos.agents.query_context import QueryContext
+from tribos.tools import registry as registry_module
 from tests.agentic_fakes import collect_events, make_agentic_orchestrator
 from tests.fakes import _fake_output, build_recording_registry, called
 
@@ -54,7 +54,7 @@ CETUXIMAB_KRAS = {  # Karapetis et al., NEJM 2008
 def phases():
     """Only the phases a test registers run (other packages' phases are switched off)."""
     state = snapshot_phases()
-    from phronesis.extensions import load_extensions
+    from tribos.extensions import load_extensions
 
     load_extensions()
     restore_phases({})
@@ -84,7 +84,7 @@ def literature_tool(routes: Dict[str, Dict[str, Any]]):
 
 def disable_agent_model(monkeypatch, llm) -> None:
     """The agent (planning/critique) model is unavailable while the answer model still works."""
-    monkeypatch.setenv("PHRONESIS_AGENT_MODEL", "agent-offline")
+    monkeypatch.setenv("TRIBOS_AGENT_MODEL", "agent-offline")
 
     def get_llm(*_a, **kw):
         if kw.get("model_name") == "agent-offline":

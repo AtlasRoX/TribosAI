@@ -449,7 +449,7 @@ export interface AgentDialogueArtifact {
 }
 
 /** The agentic keys added to ExecutionArtifacts. */
-/** Auto routing: which architecture was chosen for the question and why (phronesis/agentic/router.py). */
+/** Auto routing: which architecture was chosen for the question and why (tribos/agentic/router.py). */
 export interface FrameworkRoutingArtifact {
   requested: "auto";
   chosen: FrameworkId;

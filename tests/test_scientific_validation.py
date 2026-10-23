@@ -1,5 +1,5 @@
 """
-Scientific Validation & Regression Test Suite for Phronesis.
+Scientific Validation & Regression Test Suite for Tribos.
 
 These are local integration and regression tests. They are *inspired by* the task categories of public
 benchmarks (BFCL for function calling, STaRK for knowledge retrieval, BixBench for computational biology),
@@ -21,22 +21,22 @@ import time
 import pytest
 from typing import Dict, Any
 
-from phronesis.tools.registry import (
-    BiomedicalToolRegistry,
+from tribos.tools.registry import (
+    ToolRegistry,
     ErrorType,
     ToolResult,
     ToolUniverseEntry,
     AdapterType,
     get_tool_registry,
 )
-from phronesis.utils.biocontext import BioContextMCPClient
-from phronesis.vivarix.engine import VivarixSimulationEngine
-from phronesis.lithoscribe.synthesis_engine import LiteratureSynthesisEngine
-from phronesis.verify.verifier import ClinicalVerifier, DefectSeverity
-from phronesis.utils.memory import MemoryType, VerificationStatus
-from phronesis.utils.memory.clinical_memory import ClinicalMemoryEngine
-from phronesis.agents.discovery import BioDiscoveryEngine
-from phronesis.agents.authoritative_orchestrator import AuthoritativeOrchestrator
+from tribos.utils.biocontext import BioContextMCPClient
+from tribos.vivarix.engine import VivarixSimulationEngine
+from tribos.lithoscribe.synthesis_engine import LiteratureSynthesisEngine
+from tribos.verify.verifier import TribosVerifier, DefectSeverity
+from tribos.utils.memory import MemoryType, VerificationStatus
+from tribos.utils.memory.research_memory import ResearchMemoryEngine
+from tribos.agents.discovery import DiscoveryEngine
+from tribos.agents.authoritative_orchestrator import AuthoritativeOrchestrator
 from pydantic import BaseModel, Field
 
 from tests.fakes import make_offline_orchestrator
@@ -46,11 +46,11 @@ from tests.fakes import make_offline_orchestrator
 def memory(tmp_path):
     """A private memory vault per test (audit TST-002).
 
-    The process-wide engine used to live in <repo>/.phronesis_memory and these tests left user-scoped rows there
+    The process-wide engine used to live in <repo>/.tribos_memory and these tests left user-scoped rows there
     (cleanup covered only the default user and was skipped when an assertion failed). A fresh store per test is
     hermetic, needs no cleanup, and makes counters such as the contradiction total exact.
     """
-    return ClinicalMemoryEngine(storage_dir=str(tmp_path / "memory"))
+    return ResearchMemoryEngine(storage_dir=str(tmp_path / "memory"))
 
 
 # =============================================================================
@@ -65,7 +65,7 @@ class MockVivarixInput(BaseModel):
 @pytest.mark.asyncio
 async def test_registry_tool_registry_validation_and_rejection():
     """Regression test: verify valid arguments pass and invalid schemas/identifiers are rejected."""
-    registry = BiomedicalToolRegistry()
+    registry = ToolRegistry()
 
     async def mock_sim(biomodel_id: str, duration: float = 50.0):
         return {"simulated": True, "model": biomodel_id}
@@ -223,7 +223,7 @@ async def test_paperqa2_literature_synthesis():
 
 def test_reflexion_verifier_catches_unsupported_conclusion_and_vendor_leak():
     """Reflexion test: verify verifier detects fake positive conclusions and vendor names."""
-    verifier = ClinicalVerifier()
+    verifier = TribosVerifier()
 
     # Tool execution failed
     tool_results = {
@@ -257,7 +257,7 @@ def test_reflexion_verifier_catches_unsupported_conclusion_and_vendor_leak():
 
 def test_reflexion_verifier_passes_grounded_response():
     """Reflexion test: verify properly grounded scientific text passes."""
-    verifier = ClinicalVerifier()
+    verifier = TribosVerifier()
     tool_results = {
         "vivarix": ToolResult(
             success=True,
@@ -368,11 +368,11 @@ async def test_mem0_contradiction_detection(memory):
 
 
 # =============================================================================
-# 8. BioDiscoveryAgent BENCHMARK: HYPOTHESIS PRIORITIZATION
+# 8. DiscoveryAgent BENCHMARK: HYPOTHESIS PRIORITIZATION
 # =============================================================================
 
 def test_biodiscovery_hypothesis_prioritization():
-    """BioDiscoveryAgent test: verify multi-factorial candidate prioritization and experimental proposals."""
+    """DiscoveryAgent test: verify multi-factorial candidate prioritization and experimental proposals."""
     tool_results = {
         "synapta": ToolResult(
             success=True,
@@ -381,7 +381,7 @@ def test_biodiscovery_hypothesis_prioritization():
         )
     }
 
-    report = BioDiscoveryEngine.prioritize_hypotheses(
+    report = DiscoveryEngine.prioritize_hypotheses(
         inquiry="Overcome adaptive resistance",
         primary_target="KRAS",
         tool_results=tool_results,
@@ -456,7 +456,7 @@ async def test_cancellation_resilience():
 
 def test_regression_unsupported_clinical_claim_fails_verification():
     """Regression test: Unsupported clinical assertions without evidence must fail with score < 0.50 (NOT 1.00)."""
-    verifier = ClinicalVerifier()
+    verifier = TribosVerifier()
     # No literature tool evidence
     tool_results = {
         "synapta": ToolResult(success=True, tool_name="synapta", canonical_ids={"target_symbol": "KRAS"}),
@@ -477,7 +477,7 @@ def test_regression_unsupported_clinical_claim_fails_verification():
 
 def test_regression_numerical_mismatch_14_92_vs_7_46_fails():
     """Regression test: 14.92 concentration must NOT pass when observed result was 7.46 (5% tolerance enforced)."""
-    verifier = ClinicalVerifier()
+    verifier = TribosVerifier()
     tool_results = {
         "vivarix": ToolResult(
             success=True,
@@ -503,7 +503,7 @@ def test_regression_numerical_mismatch_14_92_vs_7_46_fails():
 
 def test_regression_invented_doi_and_pmid_fails():
     """Regression test: Unobserved DOI or PMID must trigger CITATION defect and fail verification."""
-    verifier = ClinicalVerifier()
+    verifier = TribosVerifier()
     tool_results = {
         "lithoscribe": ToolResult(
             success=True,
@@ -526,7 +526,7 @@ def test_regression_invented_doi_and_pmid_fails():
 
 def test_regression_evidence_free_discovery_disabled():
     """Regression test: Zero tool evidence must return INSUFFICIENT_EVIDENCE with empty candidate ranking (NOT 0.87)."""
-    report = BioDiscoveryEngine.prioritize_hypotheses(
+    report = DiscoveryEngine.prioritize_hypotheses(
         inquiry="Propose combination therapy",
         primary_target="KRAS",
         tool_results={},  # Zero tool evidence
@@ -577,7 +577,7 @@ async def test_regression_conversational_greeting_no_tools(monkeypatch, tmp_path
     assert res.framework_used == "conversational-direct"
     assert len(res.selected_agents) == 0
     assert calls == []  # no tool ran
-    assert "Phronesis" in res.response
+    assert "Tribos" in res.response
     assert res.verification_report["passed"] is True
 
     orch.memory.clear_thread_memory(th_id)

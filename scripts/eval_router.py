@@ -32,7 +32,7 @@ def load_benchmark(name: str = "benchmark") -> Dict[str, Any]:
 
 def cache_semantic_features(path: Path) -> None:
     """Reuse the model's semantic features per question across runs (re-tuning the scores costs no model calls)."""
-    from phronesis.agentic import router
+    from tribos.agentic import router
 
     cache: Dict[str, Any] = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     real = router.semantic_features
@@ -49,12 +49,12 @@ def cache_semantic_features(path: Path) -> None:
 
 
 async def route_all(cases: List[Dict[str, Any]], semantic: bool, model: str) -> List[str]:
-    from phronesis.agentic import router
-    from phronesis.agents import query_planner as qp
+    from tribos.agentic import router
+    from tribos.agents import query_planner as qp
 
     factory = None
     if semantic:
-        from phronesis.utils.llm.llm_factory import get_llm
+        from tribos.utils.llm.llm_factory import get_llm
 
         factory = get_llm
     out: List[str] = []
@@ -101,21 +101,21 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--semantic", action="store_true", help="add the model's semantic features")
     parser.add_argument("--samples", type=int, default=1, help="semantic feature samples per question (1-5)")
-    parser.add_argument("--model", default=None, help="model id (default: AIAGENTS4PHARMA_LLM_MODEL)")
+    parser.add_argument("--model", default=None, help="model id (default: TRIBOS_LLM_MODEL)")
     parser.add_argument("--cache", type=Path, help="JSON file caching the model's semantic features per question")
     parser.add_argument("--set", default="benchmark", choices=("benchmark", "holdout"), help="question set to route")
     parser.add_argument("--json", action="store_true", help="print the report as JSON")
     args = parser.parse_args()
-    os.environ.setdefault("PHRONESIS_PLANNER", "off")
-    os.environ["PHRONESIS_ROUTER_LEARNING"] = "off"  # measure the router, not this machine's history
-    os.environ["PHRONESIS_ROUTER_SAMPLES"] = str(max(1, min(5, args.samples)))
+    os.environ.setdefault("TRIBOS_PLANNER", "off")
+    os.environ["TRIBOS_ROUTER_LEARNING"] = "off"  # measure the router, not this machine's history
+    os.environ["TRIBOS_ROUTER_SAMPLES"] = str(max(1, min(5, args.samples)))
     if not args.semantic:
-        os.environ["PHRONESIS_ROUTER_LLM"] = "off"
+        os.environ["TRIBOS_ROUTER_LLM"] = "off"
     if args.semantic:
         from dotenv import load_dotenv
 
         load_dotenv(ROOT / ".env")  # the model key the app uses
-    args.model = args.model or os.getenv("AIAGENTS4PHARMA_LLM_MODEL") or "gpt-4o-mini"
+    args.model = args.model or os.getenv("TRIBOS_LLM_MODEL") or "gpt-4o-mini"
     if args.cache:
         cache_semantic_features(args.cache)
     bench = load_benchmark(args.set)

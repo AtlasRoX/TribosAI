@@ -12,11 +12,11 @@ from typing import Any, Dict, List
 
 import pytest
 
-from phronesis.agents.query_planner import build_query_context
-from phronesis.export.report_model import ExportMessage, build_report_model, citation_line
-from phronesis.extensions import hooks
-from phronesis.verify.verifier import ClinicalVerifier
-from phronesis.tools.registry import ErrorType, ToolResult
+from tribos.agents.query_planner import build_query_context
+from tribos.export.report_model import ExportMessage, build_report_model, citation_line
+from tribos.extensions import hooks
+from tribos.verify.verifier import TribosVerifier
+from tribos.tools.registry import ErrorType, ToolResult
 from tests.fakes import called, make_offline_orchestrator
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -36,7 +36,7 @@ async def _ask(orch, query: str):
 
 @pytest.mark.asyncio
 async def test_planner_falls_back_to_feature_parsers(monkeypatch):
-    monkeypatch.setenv("PHRONESIS_PLANNER", "off")
+    monkeypatch.setenv("TRIBOS_PLANNER", "off")
 
     async def ctx_for(q: str):
         return await build_query_context(
@@ -62,7 +62,7 @@ def test_registered_checks_do_not_double_flag_a_claim():
     with hooks.isolated_hooks():
         hooks.register_verification_check("a", lambda vctx: [dict(defect)])
         hooks.register_verification_check("b", lambda vctx: [dict(defect), dict(defect, category="CLINICAL_CLAIM")])
-        report = ClinicalVerifier().verify_response("q", "The ORR was 99%.", {})
+        report = TribosVerifier().verify_response("q", "The ORR was 99%.", {})
     flagged = [(d.category, d.claim) for d in report.defects if d.claim == "ORR 99%"]
     assert flagged == [("NUMERICAL", "ORR 99%"), ("CLINICAL_CLAIM", "ORR 99%")]
 
@@ -76,7 +76,7 @@ def test_a_number_in_passage_text_is_not_a_pmid():
             data={"ranked_passages": [{"pmid": passage["pmid"], "passage_text": passage["passage_text"]}]},
         )
     }
-    verifier = ClinicalVerifier()
+    verifier = TribosVerifier()
     # "79 of 279 patients" is in the passage; 279 is not a PMID it names.
     report = verifier.verify_response("q", "Osimertinib improved overall survival (PMID: 279).", lit)
     assert [d for d in report.defects if d.claim == "PMID 279"]
@@ -108,7 +108,7 @@ def test_export_citations_carry_literature_grades():
 
 
 def test_bracket_citation_markers_become_plain_citations():
-    from phronesis.agents.authoritative_orchestrator import AuthoritativeOrchestrator
+    from tribos.agents.authoritative_orchestrator import AuthoritativeOrchestrator
 
     text = (
         "Target engagement was shown【42310679】. Trials exist (NCT04303780)【clinical_trials】. "

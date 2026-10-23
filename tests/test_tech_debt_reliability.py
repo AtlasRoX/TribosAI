@@ -30,15 +30,15 @@ REPO = Path(__file__).resolve().parents[1]
 
 # 1. One typography fold ------------------------------------------------------------------------------------------
 def test_orchestrator_and_verifier_fold_the_same_characters():
-    from phronesis.agents.authoritative_orchestrator import normalize_typography
-    from phronesis.verify.verifier import ClinicalVerifier
-    from phronesis.utils.text import fold_typography
+    from tribos.agents.authoritative_orchestrator import normalize_typography
+    from tribos.verify.verifier import TribosVerifier
+    from tribos.utils.text import fold_typography
 
     sample = "Mos\u2011P \u2212 0.4\u2009mM, on\u2010target\u2012x, hyphen\u00adated, et\u202fal., a\u00a0b, c\u2007d, e\u200af"
     folded = fold_typography(sample)
     assert folded == "Mos-P - 0.4 mM, on-target-x, hyphenated, et al., a b, c d, e f"
     assert normalize_typography(sample) == folded
-    assert ClinicalVerifier._normalize_typography(sample) == folded
+    assert TribosVerifier._normalize_typography(sample) == folded
     # Range dashes carry meaning and are kept.
     assert fold_typography("HR 0.23\u20130.41 \u2014 n=10") == "HR 0.23\u20130.41 \u2014 n=10"
     assert fold_typography(None) == "" and fold_typography("") == ""
@@ -50,8 +50,8 @@ def _defect(sentence: str) -> Any:
 
 
 def test_remove_flagged_sentences_matches_through_typography():
-    from phronesis.verify.verifier import remove_flagged_sentences
-    from phronesis.utils.text import fold_typography
+    from tribos.verify.verifier import remove_flagged_sentences
+    from tribos.utils.text import fold_typography
 
     original = ("Intro sentence here. Sotorasib\u00ad cures every KRAS\u2011mutant patient\u2009today. Another fact.\n")
     flagged = fold_typography("Sotorasib\u00ad cures every KRAS\u2011mutant patient\u2009today.")
@@ -63,17 +63,17 @@ def test_remove_flagged_sentences_matches_through_typography():
 
 
 def test_remove_flagged_sentences_logs_when_a_sentence_is_missing(caplog):
-    from phronesis.verify.verifier import remove_flagged_sentences
+    from tribos.verify.verifier import remove_flagged_sentences
 
     text = "Intro sentence here. Another fact.\n"
-    with caplog.at_level(logging.WARNING, logger="phronesis.verify.verifier"):
+    with caplog.at_level(logging.WARNING, logger="tribos.verify.verifier"):
         out, removed = remove_flagged_sentences(text, [_defect("A sentence that is not there.")])
     assert out == text and removed == []
     assert any("not found" in r.getMessage() for r in caplog.records)
 
 
 def test_find_folded_maps_positions_back():
-    from phronesis.utils.text import find_folded
+    from tribos.utils.text import find_folded
 
     hay = "a\u00adb\u2011c d"
     start, end = find_folded(hay, "ab-c")
@@ -87,9 +87,9 @@ class _In(BaseModel):
 
 
 def _registry(name: str, executor: Any, adapter: str = "DIRECT_REST", timeout: float = 5.0) -> Any:
-    from phronesis.tools.registry import AdapterType, BiomedicalToolRegistry, ToolUniverseEntry
+    from tribos.tools.registry import AdapterType, ToolRegistry, ToolUniverseEntry
 
-    reg = BiomedicalToolRegistry.__new__(BiomedicalToolRegistry)
+    reg = ToolRegistry.__new__(ToolRegistry)
     reg._tools, reg._executors = {}, {}
     reg.register(
         ToolUniverseEntry(name=name, description="t", domain="general", adapter_type=AdapterType(adapter),
@@ -108,12 +108,12 @@ def test_networked_sync_tools_run_on_their_own_bounded_pool():
 
     res = asyncio.run(_registry("t_net", tool).execute("t_net", x=2))
     assert res.success and res.data == {"x": 2}
-    assert seen and seen[0].startswith("phronesis-net")
+    assert seen and seen[0].startswith("tribos-net")
 
 
 def test_execute_always_returns_a_tool_result(monkeypatch):
-    from phronesis.tools import reliability
-    from phronesis.tools.registry import ErrorType, ToolResult
+    from tribos.tools import reliability
+    from tribos.tools.registry import ErrorType, ToolResult
 
     reg = _registry("t_none", lambda x=1: {"x": x})
 
@@ -133,8 +133,8 @@ def test_execute_always_returns_a_tool_result(monkeypatch):
 
 
 def test_control_exceptions_still_propagate(monkeypatch):
-    from phronesis.agentic.control import RunCancelled
-    from phronesis.tools import reliability
+    from tribos.agentic.control import RunCancelled
+    from tribos.tools import reliability
 
     reg = _registry("t_cancel", lambda x=1: {"x": x})
 
@@ -147,14 +147,14 @@ def test_control_exceptions_still_propagate(monkeypatch):
 
 
 def test_provenance_failure_is_logged_not_swallowed(monkeypatch, caplog):
-    from phronesis.provenance import run_manifest
+    from tribos.provenance import run_manifest
 
     def broken(**_k: Any) -> None:
         raise RuntimeError("manifest down")
 
     monkeypatch.setattr(run_manifest, "record_tool_call", broken)
     reg = _registry("t_prov", lambda x=1: {"x": x})
-    with caplog.at_level(logging.WARNING, logger="phronesis.tools.registry"):
+    with caplog.at_level(logging.WARNING, logger="tribos.tools.registry"):
         res = asyncio.run(reg.execute("t_prov"))
     assert res.success
     assert any("run manifest" in r.getMessage() and r.exc_info for r in caplog.records)
@@ -162,7 +162,7 @@ def test_provenance_failure_is_logged_not_swallowed(monkeypatch, caplog):
 
 # 4. biocontext sync wrapper ----------------------------------------------------------------------------------
 def test_biocontext_sync_wrapper_does_not_deadlock_inside_a_running_loop(monkeypatch):
-    from phronesis.utils.biocontext import client as bc
+    from tribos.utils.biocontext import client as bc
 
     c = bc.BioContextMCPClient()
 
@@ -184,7 +184,7 @@ def test_biocontext_sync_wrapper_does_not_deadlock_inside_a_running_loop(monkeyp
 
 
 def test_run_coroutine_sync_works_with_and_without_a_loop():
-    from phronesis.utils.biocontext.client import _run_coroutine_sync
+    from tribos.utils.biocontext.client import _run_coroutine_sync
 
     async def value() -> int:
         return 7
@@ -217,13 +217,13 @@ def test_run_coroutine_sync_works_with_and_without_a_loop():
     ],
 )
 def test_policy_rejects_reader_paths_outside_the_work_dir(code):
-    from phronesis.agentic.sandbox.policy import check_code
+    from tribos.agentic.sandbox.policy import check_code
 
     assert check_code(code), code
 
 
 def test_policy_allows_relative_reader_paths_and_file_handles():
-    from phronesis.agentic.sandbox.policy import check_code
+    from tribos.agentic.sandbox.policy import check_code
 
     code = (
         "import pandas as pd\nimport numpy as np\nimport json\n"
@@ -244,7 +244,7 @@ def _csv(tmp_path: Path) -> str:
 
 
 def test_runtime_reader_guard_blocks_computed_paths(tmp_path):
-    from phronesis.agentic.sandbox.runner import run_code
+    from tribos.agentic.sandbox.runner import run_code
 
     code = (
         "from pandas import read_csv\nimport numpy as np\n"
@@ -263,7 +263,7 @@ def test_runtime_reader_guard_blocks_computed_paths(tmp_path):
 
 
 def test_runtime_reader_guard_reports_permission_error(tmp_path):
-    from phronesis.agentic.sandbox.runner import run_code
+    from tribos.agentic.sandbox.runner import run_code
 
     out = run_code("import pandas as pd\np = '..' + '/io/x'\ndf = pd.read_csv(p)\n", {"data.csv": _csv(tmp_path)})
     assert out["status"] == "error" and "PermissionError" in out["error"]
@@ -279,7 +279,7 @@ class _FakeStream:
 
 
 def _surf(peer_ip: str, monkeypatch) -> Dict[str, Any]:
-    from phronesis.tools import web_search
+    from tribos.tools import web_search
 
     for var in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
         monkeypatch.delenv(var, raising=False)
@@ -319,15 +319,15 @@ def api(monkeypatch, tmp_path):
 
     from app.backend import main as backend_main
 
-    monkeypatch.delenv("PHRONESIS_AUTH_MODE", raising=False)
-    monkeypatch.delenv("PHRONESIS_JWT_SECRET", raising=False)
-    monkeypatch.setenv("PHRONESIS_API_TOKENS", "alice-token:alice,bob-token:bob")
+    monkeypatch.delenv("TRIBOS_AUTH_MODE", raising=False)
+    monkeypatch.delenv("TRIBOS_JWT_SECRET", raising=False)
+    monkeypatch.setenv("TRIBOS_API_TOKENS", "alice-token:alice,bob-token:bob")
     return TestClient(backend_main.app), backend_main
 
 
 def test_title_endpoint_is_limited_per_user(api, monkeypatch):
     from app.backend.limits import UserConcurrencyLimiter
-    from phronesis.utils.llm import llm_factory
+    from tribos.utils.llm import llm_factory
 
     client, backend_main = api
     calls: List[str] = []
@@ -357,7 +357,7 @@ def test_jwt_errors_are_not_echoed(api, monkeypatch):
 
     client, _ = api
     secret = "test-secret-with-enough-length-0123456789"
-    monkeypatch.setenv("PHRONESIS_JWT_SECRET", secret)
+    monkeypatch.setenv("TRIBOS_JWT_SECRET", secret)
     expired = jwt.encode({"sub": "carol", "exp": int(time.time()) - 60}, secret, algorithm="HS256")
     resp = client.get("/api/memory/stats", headers={"Authorization": f"Bearer {expired}"})
     assert resp.status_code == 401
@@ -382,15 +382,15 @@ def test_strict_routers_make_a_router_failure_fatal():
     script = (
         "import os, sys, types\n"
         "sys.modules['app.backend.routers.a2a'] = types.ModuleType('app.backend.routers.a2a')  # no .router\n"
-        "os.environ.pop('PHRONESIS_STRICT_ROUTERS', None)\n"
+        "os.environ.pop('TRIBOS_STRICT_ROUTERS', None)\n"
         "import app.backend.main as m\n"
         "assert 'app.backend.routers.a2a' in m.DISABLED_ROUTERS, m.DISABLED_ROUTERS\n"
         "del sys.modules['app.backend.main']\n"
-        "os.environ['PHRONESIS_STRICT_ROUTERS'] = '1'\n"
+        "os.environ['TRIBOS_STRICT_ROUTERS'] = '1'\n"
         "try:\n    import app.backend.main\nexcept RuntimeError as exc:\n    print('FATAL', exc)\n"
         "else:\n    print('NOT FATAL')\n"
     )
-    env = {**os.environ, "PHRONESIS_AUTH_MODE": "disabled"}
+    env = {**os.environ, "TRIBOS_AUTH_MODE": "disabled"}
     proc = subprocess.run([sys.executable, "-c", script], cwd=str(REPO), env=env, capture_output=True, text=True,
                           timeout=300)
     assert proc.returncode == 0, proc.stderr[-2000:]

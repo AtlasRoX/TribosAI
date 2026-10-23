@@ -88,7 +88,7 @@ test("httpErrorMessage keeps the brief (panels) and detailed (composer) wording"
   assert.equal(httpErrorMessage(500, ""), "Request failed (500).");
   assert.equal(
     httpErrorMessage(403, "expired", "detailed"),
-    "Not authorized (403): expired. Check the access token under Settings → Phronesis Access Token."
+    "Not authorized (403): expired. Check the access token under Settings → Tribos Access Token."
   );
   assert.equal(httpErrorMessage(429, "", "detailed"), "Too many requests (429). Wait for the running question to finish, then try again.");
   assert.match(httpErrorMessage(503, "", "detailed"), /^The API is unavailable \(503\)\. If authentication is not configured/);

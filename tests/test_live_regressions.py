@@ -1,10 +1,10 @@
-"""Regressions found by live runs against the local backend (Phronesis_Next_Test_Query.txt, 18 October 2026)."""
+"""Regressions found by live runs against the local backend (Tribos_Next_Test_Query.txt, 18 October 2026)."""
 
 from __future__ import annotations
 
 import pytest
 
-from phronesis.agents.query_planner import detect_simulation_constraints
+from tribos.agents.query_planner import detect_simulation_constraints
 
 # The diagnostic query's own exclusion sentence asked a clarifying question ("Which model should I simulate?").
 BAN_LIST = "No FDA sweep, simulation, omics, hypothesis generation or debate is needed."
@@ -39,9 +39,9 @@ def test_an_unrelated_no_does_not_ban_a_requested_simulation(text):
 
 # The diagnostic query also excludes debate and hypothesis generation; neither may be routed to or run.
 def test_auto_routing_never_picks_debate_when_the_question_excludes_it():
-    from phronesis.agentic import router
-    from phronesis.agentic.config import DEBATE
-    from phronesis.agents.query_context import QueryContext
+    from tribos.agentic import router
+    from tribos.agentic.config import DEBATE
+    from tribos.agents.query_context import QueryContext
 
     q = "Propose two testable hypotheses and debate whether drug A is superior to drug B. No debate is needed."
     ctx = QueryContext(raw_query=q, clean_query=q, excluded_modules={"debate"})
@@ -56,8 +56,8 @@ def test_auto_routing_never_picks_debate_when_the_question_excludes_it():
 def test_an_excluded_debate_phase_does_not_run_even_under_the_debate_framework():
     from types import SimpleNamespace
 
-    from phronesis.agentic.config import DEBATE
-    from phronesis.agentic.topologies import DebatePhase
+    from tribos.agentic.config import DEBATE
+    from tribos.agentic.topologies import DebatePhase
 
     state = SimpleNamespace(framework=DEBATE, bag={}, draft="An answer.", ctx=SimpleNamespace(scope="research", excluded_modules={"debate"}))
     assert not DebatePhase().applies(state)
@@ -68,16 +68,16 @@ def test_an_excluded_debate_phase_does_not_run_even_under_the_debate_framework()
 def test_named_identifiers_are_always_passed_to_the_literature_tool():
     import asyncio
 
-    from phronesis.agentic.budget import RunBudget
-    from phronesis.agentic.state import AgentState
-    from phronesis.agents.query_context import QueryContext
+    from tribos.agentic.budget import RunBudget
+    from tribos.agentic.state import AgentState
+    from tribos.agents.query_context import QueryContext
 
     seen = {}
 
     class Reg:
         async def execute(self, name, **kwargs):
             seen.update(kwargs)
-            from phronesis.tools.registry import ToolResult
+            from tribos.tools.registry import ToolResult
 
             return ToolResult(success=True, tool_name=name, data={})
 
@@ -91,7 +91,7 @@ def test_named_identifiers_are_always_passed_to_the_literature_tool():
 
 
 def test_references_to_internal_evidence_sections_are_removed_from_the_answer():
-    from phronesis.agents.authoritative_orchestrator import strip_evidence_markup
+    from tribos.agents.authoritative_orchestrator import strip_evidence_markup
 
     text = "- The correction notice was retrieved (see `<literature_limitations>`).\n- Keep `x < y` and <b>bold</b>."
     out = strip_evidence_markup(text)
@@ -100,8 +100,8 @@ def test_references_to_internal_evidence_sections_are_removed_from_the_answer():
 
 
 def test_agentic_literature_documents_carry_the_title_and_record_url():
-    from phronesis.agentic.evidence import render_result
-    from phronesis.tools.registry import ToolResult
+    from tribos.agentic.evidence import render_result
+    from tribos.tools.registry import ToolResult
 
     res = ToolResult(success=True, tool_name="lithoscribe_literature_synthesis", data={"ranked_passages": [
         {"pmid": "39369609", "title": "Real-world comparative effectiveness of sotorasib versus docetaxel", "passage_text": "Objectives ..."}

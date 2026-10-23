@@ -1,4 +1,4 @@
-"""Targeted section repair (phronesis/agents/orchestration/section_repair.py): only affected sections are rewritten,
+"""Targeted section repair (tribos/agents/orchestration/section_repair.py): only affected sections are rewritten,
 untouched text stays byte-identical, invalid replacements keep the original, and versions stay consistent."""
 
 from __future__ import annotations
@@ -6,7 +6,7 @@ from __future__ import annotations
 import asyncio
 from typing import List, Tuple
 
-from phronesis.agents.orchestration.section_repair import (
+from tribos.agents.orchestration.section_repair import (
     AnswerVersion,
     affected_sections,
     citation_keys,

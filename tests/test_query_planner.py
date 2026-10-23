@@ -14,13 +14,13 @@ from typing import Any, Dict, List
 
 import pytest
 
-from phronesis.agents import authoritative_orchestrator as orch_module
-from phronesis.agents import query_planner as qp
-from phronesis.agents.discovery import BioDiscoveryEngine
-from phronesis.agents.prompts import build_evidence_block
-from phronesis.agents.query_context import QueryContext, ResolvedEntity
-from phronesis.verify.verifier import ClinicalVerifier
-from phronesis.tools.registry import ToolResult
+from tribos.agents import authoritative_orchestrator as orch_module
+from tribos.agents import query_planner as qp
+from tribos.agents.discovery import DiscoveryEngine
+from tribos.agents.prompts import build_evidence_block
+from tribos.agents.query_context import QueryContext, ResolvedEntity
+from tribos.verify.verifier import TribosVerifier
+from tribos.tools.registry import ToolResult
 from tests.fakes import build_recording_registry, called, make_offline_orchestrator
 
 
@@ -176,7 +176,7 @@ HOSTILE_PLAN = {
 
 @pytest.mark.asyncio
 async def test_llm_planner_cannot_override_hard_guards(monkeypatch, tmp_path):
-    monkeypatch.setenv("PHRONESIS_PLANNER", "always")
+    monkeypatch.setenv("TRIBOS_PLANNER", "always")
     orch, calls = make_offline_orchestrator(monkeypatch, tmp_path)
     sink: Dict[str, Any] = {}
     monkeypatch.setattr(orch_module, "get_llm", lambda *a, **k: _PlannerAndAnswerLLM(HOSTILE_PLAN, sink))
@@ -259,9 +259,9 @@ async def test_slow_planner_respects_budget_and_auto_mode_skips_when_entities_ex
 
 @pytest.mark.asyncio
 async def test_planner_off_and_no_reasoning_from_planner(monkeypatch, tmp_path):
-    monkeypatch.setenv("PHRONESIS_PLANNER", "off")
+    monkeypatch.setenv("TRIBOS_PLANNER", "off")
     assert (await _ctx(NO_ENTITY_Q, llm_factory=_raise)).planner == "deterministic"
-    monkeypatch.delenv("PHRONESIS_PLANNER")
+    monkeypatch.delenv("TRIBOS_PLANNER")
 
     class Both:
         async def ainvoke(self, _messages):
@@ -271,7 +271,7 @@ async def test_planner_off_and_no_reasoning_from_planner(monkeypatch, tmp_path):
             for piece in ["<think>Answer reasoning.</think>", "No gene was named."]:
                 yield SimpleNamespace(content=piece, additional_kwargs={})
 
-    monkeypatch.setenv("PHRONESIS_SHOW_REASONING", "1")
+    monkeypatch.setenv("TRIBOS_SHOW_REASONING", "1")
     orch, _ = make_offline_orchestrator(monkeypatch, tmp_path)
     monkeypatch.setattr(orch_module, "get_llm", lambda *a, **k: Both())
     events: List[Dict[str, Any]] = []
@@ -325,7 +325,7 @@ class _ScopePlanner:
 async def test_planner_scope_verdict_never_overrides_concrete_entities(monkeypatch):
     assert (await _ctx("blorp zing", llm_factory=lambda **_kw: _ScopePlanner("unclear"))).scope == "unclear"
     assert (await _ctx("blorp zing", llm_factory=lambda **_kw: _ScopePlanner("maybe"))).scope == "research"
-    monkeypatch.setenv("PHRONESIS_PLANNER", "always")
+    monkeypatch.setenv("TRIBOS_PLANNER", "always")
     ctx = await _ctx("Find KRAS papers only.", llm_factory=lambda **_kw: _ScopePlanner("conversational"))
     assert ctx.planner == "llm" and ctx.scope == "research" and ctx.decisions["lithoscribe"].run
 
@@ -366,7 +366,7 @@ async def test_vague_follow_up_in_a_thread_with_history_is_still_researched(monk
 
 @pytest.mark.asyncio
 async def test_model_reasoning_is_not_shown_by_default(monkeypatch, tmp_path):
-    monkeypatch.delenv("PHRONESIS_SHOW_REASONING", raising=False)
+    monkeypatch.delenv("TRIBOS_SHOW_REASONING", raising=False)
 
     class Thinks:
         async def astream(self, _messages):
@@ -401,9 +401,9 @@ def test_unvalidated_entities_never_whitelist_ids():
 
 def test_discovery_matches_species_through_aliases():
     viv = ToolResult(success=True, tool_name="vivarix", data={"initial_concentrations": {"Erk2-PP": 10.0, "Mos": 5.0}, "final_concentrations": {"Erk2-PP": 200.0, "Mos": 5.1}})
-    report = BioDiscoveryEngine.prioritize_hypotheses("q", "MAPK1", {"vivarix": viv}, target_aliases=["ERK2"])
+    report = DiscoveryEngine.prioritize_hypotheses("q", "MAPK1", {"vivarix": viv}, target_aliases=["ERK2"])
     assert "target species" in json.dumps(report.model_dump())
-    without = BioDiscoveryEngine.prioritize_hypotheses("q", "MAPK1", {"vivarix": viv})
+    without = DiscoveryEngine.prioritize_hypotheses("q", "MAPK1", {"vivarix": viv})
     assert "model species" in json.dumps(without.model_dump())
 
 

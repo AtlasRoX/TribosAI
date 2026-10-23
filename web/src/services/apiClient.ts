@@ -1,4 +1,4 @@
-// The one HTTP client for the Phronesis API: bearer-header helper type, error-message extraction, a JSON
+// The one HTTP client for the Tribos API: bearer-header helper type, error-message extraction, a JSON
 // request helper and the server-sent-events reader shared by the chat stream and background-job streams.
 //
 // Every caller passes the committed backend URL and the page's authHeaders helper, so the bearer token is only
@@ -21,7 +21,7 @@ export class ApiError extends Error {
   }
 }
 
-export const UNREACHABLE_MESSAGE = "The Phronesis backend is unreachable.";
+export const UNREACHABLE_MESSAGE = "The Tribos backend is unreachable.";
 
 /** The readable message of anything thrown, or `fallback` when it has none. */
 export function errorMessage(err: unknown, fallback = ""): string {
@@ -70,13 +70,13 @@ export function httpErrorMessage(status: number, detail: string, style: "brief" 
     switch (status) {
       case 401:
       case 403:
-        return `Not authorized (${status})${d}. Check the access token under Settings → Phronesis Access Token.`;
+        return `Not authorized (${status})${d}. Check the access token under Settings → Tribos Access Token.`;
       case 422:
         return `The request was rejected as invalid (422)${d}.`;
       case 429:
         return `Too many requests (429)${d}. Wait for the running question to finish, then try again.`;
       case 503:
-        return `The API is unavailable (503)${d}. If authentication is not configured on the server, set PHRONESIS_API_TOKENS or PHRONESIS_JWT_SECRET (or PHRONESIS_AUTH_MODE=disabled for local development).`;
+        return `The API is unavailable (503)${d}. If authentication is not configured on the server, set TRIBOS_API_TOKENS or TRIBOS_JWT_SECRET (or TRIBOS_AUTH_MODE=disabled for local development).`;
       default:
         return `The request failed with status ${status}${d}.`;
     }

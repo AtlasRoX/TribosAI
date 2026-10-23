@@ -133,14 +133,14 @@ function preprocessMarkdown(raw: string): string {
 
   let processed = raw;
 
-  // 0. Normalize legacy agent and project names to official Phronesis designations
+  // 0. Normalize legacy agent and project names to official Tribos designations
   processed = processed
     .replace(/\bTalk2KnowledgeGraphs?\b/gi, "Synapta")
     .replace(/\bTalk2BioModels?\b/gi, "Vivarix")
     .replace(/\bTalk2Cells?\b/gi, "Lumicell")
     .replace(/\bTalk2Scholars?\b/gi, "Lithoscribe")
-    .replace(/\bTalk2AI[-_ ]?Agents[-_ ]?4[-_ ]?Pharma\b/gi, "Phronesis")
-    .replace(/\bAI[-_ ]?Agents[-_ ]?4[-_ ]?Pharma\b/gi, "Phronesis");
+    .replace(/\bTalk2AI[-_ ]?Agents[-_ ]?4[-_ ]?Pharma\b/gi, "Tribos")
+    .replace(/\bAI[-_ ]?Agents[-_ ]?4[-_ ]?Pharma\b/gi, "Tribos");
 
 
 

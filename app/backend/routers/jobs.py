@@ -27,9 +27,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
 from app.backend.auth import get_current_user
-from phronesis.agentic.jobs import JOB_ID_RE, STATUSES, JobError, get_job_manager, public_job
+from tribos.agentic.jobs import JOB_ID_RE, STATUSES, JobError, get_job_manager, public_job
 
-logger = logging.getLogger("phronesis.backend.jobs")
+logger = logging.getLogger("tribos.backend.jobs")
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
@@ -38,7 +38,7 @@ JobIdPath = Path(..., min_length=4, max_length=64)
 
 def _heartbeat_s() -> float:
     try:
-        return max(0.05, float(os.getenv("PHRONESIS_SSE_HEARTBEAT_S", "15")))
+        return max(0.05, float(os.getenv("TRIBOS_SSE_HEARTBEAT_S", "15")))
     except ValueError:
         return 15.0
 

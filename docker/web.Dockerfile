@@ -1,14 +1,14 @@
 # syntax=docker/dockerfile:1
 #
-# Phronesis web app (Next.js).
+# Tribos web app (Next.js).
 #
 #   docker build -f docker/web.Dockerfile --build-arg NEXT_PUBLIC_API_URL=http://localhost:8000 \
-#     -t phronesis-web web            (context = web/)
+#     -t tribos-web web            (context = web/)
 #
 # The browser calls the API directly: web/src/app/page.tsx reads NEXT_PUBLIC_API_URL (default
 # http://127.0.0.1:8000), and Next.js inlines NEXT_PUBLIC_* at build time. Set the build arg to the URL the
 # *browser* can reach, not the compose service name, and list the web origin in the backend's
-# PHRONESIS_CORS_ORIGINS. Changing the URL needs a rebuild (the in-app settings field can override it per user).
+# TRIBOS_CORS_ORIGINS. Changing the URL needs a rebuild (the in-app settings field can override it per user).
 
 ARG NODE_VERSION=22
 

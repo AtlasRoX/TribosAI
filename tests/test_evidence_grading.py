@@ -13,21 +13,21 @@ from typing import Any, Dict, Iterable, List, Optional
 import httpx
 import pytest
 
-from phronesis.agents.discovery import BioDiscoveryEngine
-from phronesis.agents.prompts import build_evidence_block
-from phronesis.extensions import grading as grading_ext
-from phronesis.extensions import hooks, load_extensions
-from phronesis.lithoscribe.evidence_grading import GradeBasis, StudyType, grade_article, grade_from_mesh, is_integrity_notice, mesh_descriptors
-from phronesis.lithoscribe.integrity import (
+from tribos.agents.discovery import DiscoveryEngine
+from tribos.agents.prompts import build_evidence_block
+from tribos.extensions import grading as grading_ext
+from tribos.extensions import hooks, load_extensions
+from tribos.lithoscribe.evidence_grading import GradeBasis, StudyType, grade_article, grade_from_mesh, is_integrity_notice, mesh_descriptors
+from tribos.lithoscribe.integrity import (
     CrossrefIntegrityClient,
     europepmc_integrity,
     merge_integrity,
     parse_crossref_updates,
 )
-from phronesis.lithoscribe.synthesis_engine import LiteratureSynthesisEngine
-from phronesis.verify.verifier import ClinicalVerifier
-from phronesis.tools.registry import LithoscribeSynthesisInput, ToolResult
-from phronesis.utils.biocontext.client import BioContextMCPClient
+from tribos.lithoscribe.synthesis_engine import LiteratureSynthesisEngine
+from tribos.verify.verifier import TribosVerifier
+from tribos.tools.registry import LithoscribeSynthesisInput, ToolResult
+from tribos.utils.biocontext.client import BioContextMCPClient
 from tests.fakes import make_offline_orchestrator
 
 FIXTURES = Path(__file__).parent / "fixtures" / "literature"
@@ -272,7 +272,7 @@ async def test_discovery_grade_weighting():
     passages = rct.data["ranked_passages"]
     assert len(passages) == 1 and passages[0]["section"] == "Abstract"  # the complete abstract is one base passage
     assert "vemurafenib" in passages[0]["passage_text"].lower() and len(passages[0]["passage_text"]) > 500
-    rep = BioDiscoveryEngine.prioritize_hypotheses("BRAF melanoma", "BRAF", {"lithoscribe": rct})
+    rep = DiscoveryEngine.prioritize_hypotheses("BRAF melanoma", "BRAF", {"lithoscribe": rct})
     cand = rep.candidates[0]
     assert cand.observed_components["literature_support"] == 0.45
     assert "Supported by 1 EuropePMC article (1 randomized controlled trial)" in cand.rationale
@@ -281,17 +281,17 @@ async def test_discovery_grade_weighting():
     in_vitro = await run_engine(["in_vitro_40737322", "in_vitro_40959979", "in_vitro_39344518", "in_vitro_39424923"], query="KRAS cell lines")
     assert {p["evidence_grade"]["study_type"] for p in in_vitro.data["ranked_passages"]} == {"in_vitro"}
     n_articles = len({p["article_key"] for p in in_vitro.data["ranked_passages"]})
-    rep2 = BioDiscoveryEngine.prioritize_hypotheses("KRAS", "KRAS", {"lithoscribe": in_vitro})
+    rep2 = DiscoveryEngine.prioritize_hypotheses("KRAS", "KRAS", {"lithoscribe": in_vitro})
     assert rep2.candidates[0].observed_components["literature_support"] == round(min(1.0, n_articles * 0.25 / 2), 2)
     if n_articles == 4:
         assert rep2.candidates[0].observed_components["literature_support"] == 0.5
 
     retracted = await run_engine(["wakefield_9500320", "rct_21639808"], query="vemurafenib melanoma BRAF")
-    rep3 = BioDiscoveryEngine.prioritize_hypotheses("BRAF melanoma", "BRAF", {"lithoscribe": retracted})
+    rep3 = DiscoveryEngine.prioritize_hypotheses("BRAF melanoma", "BRAF", {"lithoscribe": retracted})
     assert "1 retracted article excluded" in rep3.candidates[0].rationale
 
     legacy = ToolResult(success=True, tool_name="lithoscribe_literature_synthesis", data={"ranked_passages": [{"pmid": "1", "passage_text": "x"}, {"pmid": "1", "passage_text": "y"}]})
-    rep4 = BioDiscoveryEngine.prioritize_hypotheses("KRAS", "KRAS", {"lithoscribe": legacy})
+    rep4 = DiscoveryEngine.prioritize_hypotheses("KRAS", "KRAS", {"lithoscribe": legacy})
     assert rep4.candidates[0].observed_components["literature_support"] == 0.5  # ungraded: count / 4
 
 
@@ -303,7 +303,7 @@ async def test_discovery_grade_weighting():
 async def test_verifier_rejects_retracted_pmid_and_doi(grading_hooks):
     res = await run_engine(["wakefield_9500320", "retraction_notice_20137807", "rct_21639808"])
     text = f"The MMR vaccine was linked to autism in a 1998 case series (PMID: 9500320; DOI {WAKEFIELD_DOI})."
-    report = ClinicalVerifier().verify_response(
+    report = TribosVerifier().verify_response(
         "Does the MMR vaccine cause autism?", text, {"lithoscribe": res},
         historical_identifiers={"pmids": {"9500320"}, "dois": {WAKEFIELD_DOI}},
     )
@@ -320,7 +320,7 @@ async def test_verifier_rejects_retracted_pmid_and_doi(grading_hooks):
 async def test_verifier_does_not_harvest_notice_dois(grading_hooks):
     res = await run_engine(["wakefield_9500320", "retraction_notice_20137807", "rct_21639808"])
     assert WAKEFIELD_NOTICE_DOI in json.dumps(res.data)  # present in the raw tool output
-    report = ClinicalVerifier().verify_response(
+    report = TribosVerifier().verify_response(
         "MMR vaccine autism", f"The Lancet notice is DOI {WAKEFIELD_NOTICE_DOI}.", {"lithoscribe": res}
     )
     assert [d for d in _codes(report, "CITATION") if WAKEFIELD_NOTICE_DOI in d.claim]
@@ -333,10 +333,10 @@ async def test_verifier_eoc_requires_caveat(grading_hooks):
     assert ga["integrity"]["status"] == "expression_of_concern"
     assert {n["source"] for n in ga["integrity"]["notices"]} == {"europepmc", "crossref_publisher"}
     tr = {"lithoscribe": res}
-    bad = ClinicalVerifier().verify_response("CPI203 rapamycin", "CPI203 enhanced rapamycin effects in PanNET cell lines (PMID: 25299775).", tr)
+    bad = TribosVerifier().verify_response("CPI203 rapamycin", "CPI203 enhanced rapamycin effects in PanNET cell lines (PMID: 25299775).", tr)
     flags = _codes(bad, "INTEGRITY_FLAG")
     assert flags and flags[0].severity.value == "MAJOR" and flags[0].claim == "PMID 25299775"
-    ok = ClinicalVerifier().verify_response(
+    ok = TribosVerifier().verify_response(
         "CPI203 rapamycin",
         "CPI203 enhanced rapamycin effects in PanNET cell lines (PMID: 25299775), a paper subject to an expression of concern.",
         tr,
@@ -348,13 +348,13 @@ async def test_verifier_eoc_requires_caveat(grading_hooks):
 async def test_verifier_design_misstatement(grading_hooks):
     res = await run_engine(["in_vitro_40737322"], query="adagrasib neoantigens KRAS G12C")
     tr = {"lithoscribe": res}
-    bad = ClinicalVerifier().verify_response(
+    bad = TribosVerifier().verify_response(
         "adagrasib neoantigens", "Adagrasib generated KRAS G12C neoantigens in a randomized phase III trial (PMID: 40737322).", tr
     )
     grade_defects = _codes(bad, "EVIDENCE_GRADE")
     assert grade_defects and grade_defects[0].severity.value == "MAJOR"
     assert "in vitro" in grade_defects[0].description and "MeSH: Cell Line, Tumor" in grade_defects[0].description
-    ok = ClinicalVerifier().verify_response(
+    ok = TribosVerifier().verify_response(
         "adagrasib neoantigens", "In tumor cell lines, adagrasib generated KRAS G12C neoantigens (PMID: 40737322).", tr
     )
     assert not _codes(ok, "EVIDENCE_GRADE")
@@ -399,7 +399,7 @@ async def test_orchestrator_literature_artifact(monkeypatch, tmp_path, grading_h
 
 
 def test_prompt_rule_registers_with_the_tools(grading_hooks):
-    from phronesis.agents.prompts import get_synthesis_system_prompt
+    from tribos.agents.prompts import get_synthesis_system_prompt
 
     hooks.unregister("prompt_rule", "grading")
     assert grading_ext.PROMPT_RULE not in get_synthesis_system_prompt()

@@ -1,5 +1,5 @@
 """
-Auto routing (phronesis/agentic/router.py, router_store.py): the routing matrix and benchmark accuracy, semantic
+Auto routing (tribos/agentic/router.py, router_store.py): the routing matrix and benchmark accuracy, semantic
 features and self-consistency, guardrails and adjudication, outcome learning, escalation, and Auto end to end
 through the orchestrator. No network.
 """
@@ -16,9 +16,9 @@ from typing import Any, Dict, List
 import pytest
 from langchain_core.messages import AIMessage
 
-from phronesis.agentic import config as agent_config
-from phronesis.agentic import router, router_store
-from phronesis.agents import query_planner as qp
+from tribos.agentic import config as agent_config
+from tribos.agentic import router, router_store
+from tribos.agents import query_planner as qp
 from tests.agentic_fakes import collect_events, make_agentic_orchestrator
 
 AGENTIC, SUPERVISOR, SWARM, DEBATE = agent_config.AGENTIC, agent_config.SUPERVISOR, agent_config.SWARM, agent_config.DEBATE
@@ -75,7 +75,7 @@ def _eval_module():
 @pytest.mark.parametrize("name, strict, acceptable", [("benchmark", 0.9, 0.95), ("holdout", 0.8, 0.9)])
 def test_deterministic_accuracy_on_the_routing_benchmarks(monkeypatch, name, strict, acceptable):
     """Regression guard: the offline router keeps its measured accuracy (scripts/eval_router.py prints the misses)."""
-    monkeypatch.setenv("PHRONESIS_ROUTER_LLM", "off")
+    monkeypatch.setenv("TRIBOS_ROUTER_LLM", "off")
     ev = _eval_module()
     bench = ev.load_benchmark(name)
     report = ev.score(bench, asyncio.run(ev.route_all(bench["cases"], False, "m")))
@@ -145,7 +145,7 @@ def test_unusable_semantic_replies_fall_back_to_the_deterministic_signals():
 
 
 def test_self_consistency_averages_samples(monkeypatch):
-    monkeypatch.setenv("PHRONESIS_ROUTER_SAMPLES", "3")
+    monkeypatch.setenv("TRIBOS_ROUTER_SAMPLES", "3")
     no = {**CONTESTED_FEATURES, "contested": False}
     llm = _PhaseLLM([CONTESTED_FEATURES, CONTESTED_FEATURES, no])
     decision = _route("Is immunotherapy preferable to chemotherapy for elderly patients?", llm)
@@ -270,8 +270,8 @@ def _thought(events, step_id):
 
 
 def test_auto_end_to_end_routes_explains_records_and_learns(monkeypatch, tmp_path):
-    monkeypatch.setenv("PHRONESIS_ROUTER_LEARNING", "on")
-    monkeypatch.setenv("PHRONESIS_ROUTER_DIR", str(tmp_path / "router"))
+    monkeypatch.setenv("TRIBOS_ROUTER_LEARNING", "on")
+    monkeypatch.setenv("TRIBOS_ROUTER_DIR", str(tmp_path / "router"))
     orch, _calls, _llm = make_agentic_orchestrator(monkeypatch, tmp_path)
     question = "What diseases is KRAS associated with, and which pathways is it part of?"
     res, events = asyncio.run(collect_events(orch, query=question, thread_id="auto-e2e", framework=agent_config.AUTO))
@@ -289,8 +289,8 @@ def test_auto_end_to_end_routes_explains_records_and_learns(monkeypatch, tmp_pat
 
 
 def test_user_chosen_runs_are_learned_too(monkeypatch, tmp_path):
-    monkeypatch.setenv("PHRONESIS_ROUTER_LEARNING", "on")
-    monkeypatch.setenv("PHRONESIS_ROUTER_DIR", str(tmp_path / "router"))
+    monkeypatch.setenv("TRIBOS_ROUTER_LEARNING", "on")
+    monkeypatch.setenv("TRIBOS_ROUTER_DIR", str(tmp_path / "router"))
     orch, _calls, _llm = make_agentic_orchestrator(monkeypatch, tmp_path)
     res, _ = asyncio.run(collect_events(orch, query="What are the adverse events of pembrolizumab?", thread_id="u1", framework=SUPERVISOR))
     assert "framework_routing" not in res.execution_artifacts
@@ -323,7 +323,7 @@ def test_plan_execute_without_auto_never_runs_the_debate(monkeypatch, tmp_path):
 def test_api_lists_auto_and_accepts_it(monkeypatch):
     from app.backend import main
 
-    monkeypatch.delenv("PHRONESIS_DEFAULT_FRAMEWORK", raising=False)
+    monkeypatch.delenv("TRIBOS_DEFAULT_FRAMEWORK", raising=False)
     listing = asyncio.run(main.list_frameworks())
     assert listing["default"] == agent_config.AUTO
     assert listing["frameworks"][0]["id"] == agent_config.AUTO and listing["frameworks"][0]["agentic"] is True

@@ -1,18 +1,18 @@
-# SonarCloud Integration Setup Guide — Phronesis
+# SonarCloud Integration Setup Guide — Tribos
 
-> **Phronesis** — Biomedical Research Assistant  
-> **Made by ChronoStrider Engineering (ChronoStrider Enginnerings)**
+> **Tribos** — Biomedical Research Assistant  
+> **Made by ChronoStrider Engineering**
 
 ## Overview
 
-SonarCloud provides advanced code quality analysis, security scanning, and technical debt tracking for the **Phronesis** project, made by **ChronoStrider Engineering** (**ChronoStrider Enginnerings**). This document outlines the setup and configuration process.
+SonarCloud provides advanced code quality analysis, security scanning, and technical debt tracking for the **Tribos** project, made by **ChronoStrider Engineering** (**ChronoStrider Engineering**). This document outlines the setup and configuration process.
 
 ## Setup Steps
 
 ### 1. SonarCloud Account Setup
 
 1. **Create SonarCloud Account**: Go to [sonarcloud.io](https://sonarcloud.io) and sign in with GitHub
-2. **Import Repository**: Import the `AtlasRoX/phronesis-CS` repository
+2. **Import Repository**: Import the `AtlasRoX/trib` repository
 3. **Generate Token**: Go to Account → Security → Generate new token
 
 ### 2. GitHub Repository Configuration
@@ -28,7 +28,7 @@ SONAR_TOKEN=your_sonarcloud_token_here
 
 The project is configured with:
 
-- **Project Key**: `AtlasRoX_phronesis-CS`
+- **Project Key**: `AtlasRoX_tribos-CS`
 - **Organization**: `atlasrox`
 - **Quality Gate**: Uses SonarCloud's default quality gate
 
@@ -128,9 +128,9 @@ brew install sonar-scanner
 
 # Run analysis
 sonar-scanner \
-  -Dsonar.projectKey=AtlasRoX_phronesis-CS \
+  -Dsonar.projectKey=AtlasRoX_tribos-CS \
   -Dsonar.organization=atlasrox \
-  -Dsonar.sources=phronesis \
+  -Dsonar.sources=tribos \
   -Dsonar.host.url=https://sonarcloud.io \
   -Dsonar.login=your_token_here
 ```

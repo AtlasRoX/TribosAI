@@ -10,9 +10,9 @@ import pytest
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 
-from phronesis.agents import authoritative_orchestrator as orch_module
-from phronesis.utils.llm import llm_factory
-from phronesis.utils.llm.llm_factory import _ThinkTagSplitter, astream_with_reasoning
+from tribos.agents import authoritative_orchestrator as orch_module
+from tribos.utils.llm import llm_factory
+from tribos.utils.llm.llm_factory import _ThinkTagSplitter, astream_with_reasoning
 from tests.test_audit_regressions import offline_orchestrator  # noqa: F401
 
 
@@ -86,7 +86,7 @@ async def test_chat_openai_stream_surfaces_reasoning_content():
 @pytest.mark.asyncio
 async def test_orchestrator_streams_reasoning_answer_and_real_steps(offline_orchestrator, monkeypatch):  # noqa: F811
     orch, _calls = offline_orchestrator
-    monkeypatch.setenv("PHRONESIS_SHOW_REASONING", "1")
+    monkeypatch.setenv("TRIBOS_SHOW_REASONING", "1")
 
     class FakeStreamingLLM:
         async def astream(self, _messages):

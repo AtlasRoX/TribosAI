@@ -1,6 +1,6 @@
 // Citation helpers for the answer renderer (owned by CITATIONS, feature 4).
 // Keep this module framework-free and erasable-TypeScript-only so `node --test` can import it.
-// The identifier grammar mirrors phronesis/agents/citations.py so occurrence counts line up.
+// The identifier grammar mirrors tribos/agents/citations.py so occurrence counts line up.
 
 import type { CitationEntry, CitationMap, ClaimSupport } from "../types/citations";
 

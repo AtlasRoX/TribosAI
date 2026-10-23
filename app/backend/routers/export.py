@@ -17,13 +17,13 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.backend.auth import get_current_user
 from app.backend.limits import UserSemaphores
-from phronesis.agentic import config as agent_config
-from phronesis.utils.llm.llm_factory import is_allowed_model
-from phronesis.export import ExportRequest, build_report_model
-from phronesis.provenance.run_manifest import RunManifest, client_view, utc_now
-from phronesis.provenance.run_store import get_run_store, valid_run_id
+from tribos.agentic import config as agent_config
+from tribos.utils.llm.llm_factory import is_allowed_model
+from tribos.export import ExportRequest, build_report_model
+from tribos.provenance.run_manifest import RunManifest, client_view, utc_now
+from tribos.provenance.run_store import get_run_store, valid_run_id
 
-logger = logging.getLogger("phronesis.backend.export")
+logger = logging.getLogger("tribos.backend.export")
 
 router = APIRouter(tags=["export"])
 
@@ -76,13 +76,13 @@ class ClientRerunRequest(BaseModel):
 
 # Seams for tests: the registry and orchestrator the chat endpoints use.
 def _get_registry() -> Any:
-    from phronesis.agents import authoritative_orchestrator as orch_module
+    from tribos.agents import authoritative_orchestrator as orch_module
 
     return orch_module.get_tool_registry()
 
 
 def _get_orchestrator() -> Any:
-    from phronesis.agents.authoritative_orchestrator import get_authoritative_orchestrator
+    from tribos.agents.authoritative_orchestrator import get_authoritative_orchestrator
 
     return get_authoritative_orchestrator()
 
@@ -104,11 +104,11 @@ def _slug(text: str) -> str:
 
 
 def _filename(question: str, fmt: ExportFormat) -> str:
-    return f"phronesis-{_slug(question)}-{datetime.now(timezone.utc):%Y%m%d}.{_EXTENSIONS[fmt]}"
+    return f"tribos-{_slug(question)}-{datetime.now(timezone.utc):%Y%m%d}.{_EXTENSIONS[fmt]}"
 
 
 def _render(fmt: ExportFormat, report: Any) -> bytes:
-    from phronesis import export as exporter
+    from tribos import export as exporter
 
     if fmt is ExportFormat.docx:
         return exporter.render_docx(report)
@@ -143,7 +143,7 @@ async def export_message(fmt: ExportFormat, req: ExportRequest, user_id: str = D
     filename = _filename(req.question, fmt)
     headers = {
         "Content-Disposition": f"attachment; filename=\"{filename}\"; filename*=UTF-8''{quote(filename)}",
-        "X-Phronesis-Provenance": report.provenance,
+        "X-Tribos-Provenance": report.provenance,
     }
     return Response(content=body, media_type=_MEDIA_TYPES[fmt], headers=headers)
 
@@ -170,7 +170,7 @@ async def rerun_client_manifest(req: ClientRerunRequest, user_id: str = Depends(
     inputs except a typed dataset path inside the configured dataset roots. A single refused call rejects the
     whole request (400); nothing is executed.
     """
-    from phronesis.provenance.rerun import ReplayPolicyError, check_replayable, diff_runs, replay_tools, without_calls
+    from tribos.provenance.rerun import ReplayPolicyError, check_replayable, diff_runs, replay_tools, without_calls
 
     posted = req.manifest.model_dump(mode="json")
     posted_calls = posted.get("tool_calls") or []
@@ -217,7 +217,7 @@ def _rerun_framework(original: Dict[str, Any]) -> Optional[str]:
 
 @router.post("/api/runs/{run_id}/rerun")
 async def rerun_stored(run_id: str, req: RerunRequest, user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
-    from phronesis.provenance.rerun import check_replayable, diff_runs, replay_tools, without_calls
+    from tribos.provenance.rerun import check_replayable, diff_runs, replay_tools, without_calls
 
     original = await _load_owned(user_id, run_id)
     store = get_run_store()

@@ -1321,7 +1321,7 @@ def disease_families(text: str) -> Set[str]:
     return {name for name, pat in _DISEASE_LEXICON if pat.search(t)}
 
 
-class ClinicalVerifier:
+class TribosVerifier:
     """
     Biomedical Verifier applying deterministic rules and evidence cross-referencing.
     Requires external evidence or deterministic computational outputs for scientific assertions.
@@ -1354,7 +1354,7 @@ class ClinicalVerifier:
 
     # Models often typeset with Unicode hyphens ("Mos‑P", U+2011), minus signs, and narrow/no-break
     # spaces. Fold them to ASCII before matching so "Mos‑P = 23.4" is never read as a claim about "Mos".
-    # The table is shared with the orchestrator (phronesis.utils.text), so a flagged sentence can be found again.
+    # The table is shared with the orchestrator (tribos.utils.text), so a flagged sentence can be found again.
     _TYPOGRAPHY_FOLD = TYPOGRAPHY_FOLD
 
     @classmethod
@@ -1808,7 +1808,7 @@ class ClinicalVerifier:
                         category="INTEGRITY",
                         severity=DefectSeverity.CRITICAL,
                         description=f"Response mentions internal provider or framework name '{forbidden}'.",
-                        suggested_correction="Use official Phronesis agent designations (Synapta, Vivarix, Lumicell, Lithoscribe, WebSurfer).",
+                        suggested_correction="Use official Tribos agent designations (Synapta, Vivarix, Lumicell, Lithoscribe, WebSurfer).",
                     )
                 )
 

@@ -22,18 +22,18 @@ import h5py
 import httpx
 import pytest
 
-from phronesis.agents.prompts import build_evidence_block
-from phronesis.agents.query_context import QueryContext
-from phronesis.datasets import geo
-from phronesis.datasets.attach import resolve_attachments
-from phronesis.datasets.models import DatasetProvenanceIn
-from phronesis.datasets.paths import is_allowed_typed_path
-from phronesis.datasets.provenance import postprocess_lumicell_result, postprocess_vivarix_result
-from phronesis.datasets.store import DatasetNotFound, DatasetStoreError, get_dataset_store, reset_dataset_store
-from phronesis.extensions import hooks, load_extensions
-from phronesis.extensions import uploads as uploads_ext
-from phronesis.verify.verifier import ClinicalVerifier
-from phronesis.tools.registry import ToolResult
+from tribos.agents.prompts import build_evidence_block
+from tribos.agents.query_context import QueryContext
+from tribos.datasets import geo
+from tribos.datasets.attach import resolve_attachments
+from tribos.datasets.models import DatasetProvenanceIn
+from tribos.datasets.paths import is_allowed_typed_path
+from tribos.datasets.provenance import postprocess_lumicell_result, postprocess_vivarix_result
+from tribos.datasets.store import DatasetNotFound, DatasetStoreError, get_dataset_store, reset_dataset_store
+from tribos.extensions import hooks, load_extensions
+from tribos.extensions import uploads as uploads_ext
+from tribos.verify.verifier import TribosVerifier
+from tribos.tools.registry import ToolResult
 from tests.fakes import called, make_offline_orchestrator
 
 REPO = Path(__file__).resolve().parents[1]
@@ -78,9 +78,9 @@ def _atlas_csv(transpose: bool = False) -> bytes:
 @pytest.fixture
 def upload_root(monkeypatch, tmp_path):
     root = tmp_path / "uploads"
-    monkeypatch.setenv("PHRONESIS_UPLOAD_ROOT", str(root))
-    for name in ("PHRONESIS_UPLOAD_MAX_MB_H5AD", "PHRONESIS_UPLOAD_MAX_MB_CSV", "PHRONESIS_UPLOAD_MAX_MB_SBML",
-                 "PHRONESIS_UPLOAD_MAX_TOTAL_MB", "PHRONESIS_UPLOAD_MAX_DATASETS", "PHRONESIS_DATASET_ROOTS"):
+    monkeypatch.setenv("TRIBOS_UPLOAD_ROOT", str(root))
+    for name in ("TRIBOS_UPLOAD_MAX_MB_H5AD", "TRIBOS_UPLOAD_MAX_MB_CSV", "TRIBOS_UPLOAD_MAX_MB_SBML",
+                 "TRIBOS_UPLOAD_MAX_TOTAL_MB", "TRIBOS_UPLOAD_MAX_DATASETS", "TRIBOS_DATASET_ROOTS"):
         monkeypatch.delenv(name, raising=False)
     reset_dataset_store()
     geo.clear_cache()
@@ -187,7 +187,7 @@ async def test_non_anndata_hdf5_is_rejected(store, tmp_path):
 
 @pytest.mark.asyncio
 async def test_size_cap_while_streaming_leaves_no_part_file(store, upload_root, monkeypatch):
-    monkeypatch.setenv("PHRONESIS_UPLOAD_MAX_MB_H5AD", "0.01")  # ~10 KB; the atlas is ~21 KB
+    monkeypatch.setenv("TRIBOS_UPLOAD_MAX_MB_H5AD", "0.01")  # ~10 KB; the atlas is ~21 KB
     with pytest.raises(DatasetStoreError) as err:
         await store.create_from_stream("alice", _chunks(ATLAS.read_bytes()), "test_atlas.h5ad", _prov())
     assert (err.value.status_code, err.value.reason_code) == (413, "too_large")
@@ -232,13 +232,13 @@ async def test_delete_while_file_is_open_is_a_conflict(store):
 
 @pytest.mark.asyncio
 async def test_total_quota_and_dataset_count(store, monkeypatch):
-    monkeypatch.setenv("PHRONESIS_UPLOAD_MAX_DATASETS", "1")
+    monkeypatch.setenv("TRIBOS_UPLOAD_MAX_DATASETS", "1")
     await store.create_from_stream("alice", [ATLAS.read_bytes()], "a.h5ad", _prov())
     with pytest.raises(DatasetStoreError) as err:
         await store.create_from_stream("alice", [ATLAS.read_bytes()], "b.h5ad", _prov())
     assert (err.value.status_code, err.value.reason_code) == (507, "quota_exceeded")
-    monkeypatch.setenv("PHRONESIS_UPLOAD_MAX_DATASETS", "50")
-    monkeypatch.setenv("PHRONESIS_UPLOAD_MAX_TOTAL_MB", "0.03")
+    monkeypatch.setenv("TRIBOS_UPLOAD_MAX_DATASETS", "50")
+    monkeypatch.setenv("TRIBOS_UPLOAD_MAX_TOTAL_MB", "0.03")
     with pytest.raises(DatasetStoreError) as err:
         await store.create_from_stream("alice", _chunks(ATLAS.read_bytes()), "c.h5ad", _prov())
     assert err.value.status_code == 507
@@ -355,9 +355,9 @@ def client(monkeypatch, upload_root):
 
     from app.backend import main as backend_main
 
-    monkeypatch.delenv("PHRONESIS_AUTH_MODE", raising=False)
-    monkeypatch.delenv("PHRONESIS_JWT_SECRET", raising=False)
-    monkeypatch.setenv("PHRONESIS_API_TOKENS", "alice-token:alice,bob-token:bob")
+    monkeypatch.delenv("TRIBOS_AUTH_MODE", raising=False)
+    monkeypatch.delenv("TRIBOS_JWT_SECRET", raising=False)
+    monkeypatch.setenv("TRIBOS_API_TOKENS", "alice-token:alice,bob-token:bob")
     return TestClient(backend_main.app)
 
 
@@ -403,7 +403,7 @@ def test_api_length_size_type_and_provenance_errors(client, monkeypatch):
     r = _post(client, ALICE, data=ATLAS.read_bytes()[:5000])
     assert r.status_code == 422 and r.json()["reason_code"] == "hdf5_unreadable"
 
-    for name in ("PHRONESIS_UPLOAD_MAX_MB_H5AD", "PHRONESIS_UPLOAD_MAX_MB_CSV", "PHRONESIS_UPLOAD_MAX_MB_SBML"):
+    for name in ("TRIBOS_UPLOAD_MAX_MB_H5AD", "TRIBOS_UPLOAD_MAX_MB_CSV", "TRIBOS_UPLOAD_MAX_MB_SBML"):
         monkeypatch.setenv(name, "0.001")
     r = _post(client, ALICE, data=ATLAS.read_bytes() * 5)  # ~100 KB > 1 KB cap + 64 KB multipart allowance
     assert r.status_code == 413 and r.json()["reason_code"] == "too_large"
@@ -544,11 +544,11 @@ async def test_typed_path_outside_roots_is_ignored(store, upload_root, monkeypat
     assert is_allowed_typed_path("test_atlas.h5ad")
     rec = await store.create_from_stream("alice", [ATLAS.read_bytes()], "a.h5ad", _prov())
     analysis_path, _ = store.file_paths("alice", rec)
-    monkeypatch.setenv("PHRONESIS_DATASET_ROOTS", str(upload_root.parent))
+    monkeypatch.setenv("TRIBOS_DATASET_ROOTS", str(upload_root.parent))
     assert not is_allowed_typed_path(analysis_path)  # uploads are reachable only through their id
 
     orch, calls = make_offline_orchestrator(monkeypatch, tmp_path)
-    monkeypatch.delenv("PHRONESIS_DATASET_ROOTS")
+    monkeypatch.delenv("TRIBOS_DATASET_ROOTS")
     await orch.execute_inquiry(f"Analyze the single-cell file {outside}", thread_id="t-typed", enable_web_search=False, user_id="alice")
     assert not called(calls, "lumicell_analyze_single_cell")
 
@@ -566,7 +566,7 @@ async def _geo_verified_context(store, monkeypatch) -> tuple:
     assert rec.geo_verification.status == "verified"
     resolution = await resolve_attachments("alice", [rec.id], "")
     ctx = QueryContext(raw_query="Cluster this dataset", clean_query="Cluster this dataset", attachments=resolution.attachments)
-    from phronesis.lumicell.engine import LumicellAnalysisEngine
+    from tribos.lumicell.engine import LumicellAnalysisEngine
 
     res = LumicellAnalysisEngine().execute_single_cell_pipeline(
         dataset_path=resolution.attachments[0].analysis_path, dataset_name=rec.display_name
@@ -581,8 +581,8 @@ async def _geo_verified_context(store, monkeypatch) -> tuple:
 
 @pytest.mark.asyncio
 async def test_vivarix_uploaded_sbml_and_units(store, monkeypatch):
-    from phronesis.agentic.sandbox import bound_scope
-    from phronesis.vivarix import engine as engine_module
+    from tribos.agentic.sandbox import bound_scope
+    from tribos.vivarix import engine as engine_module
 
     rec = await store.create_from_stream("alice", [SBML.read_bytes()], "kholodenko.xml", _prov(source="biomodels"))
     _, model_path = store.file_paths("alice", rec)
@@ -625,8 +625,8 @@ async def test_vivarix_uploaded_sbml_and_units(store, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_parameter_scan_never_reports_a_missing_species(store):
-    from phronesis.agentic.sandbox import bound_scope
-    from phronesis.vivarix.engine import VivarixSimulationEngine
+    from tribos.agentic.sandbox import bound_scope
+    from tribos.vivarix.engine import VivarixSimulationEngine
 
     rec = await store.create_from_stream("alice", [SBML.read_bytes()], "kholodenko.xml", _prov(source="biomodels"))
     _, model_path = store.file_paths("alice", rec)
@@ -722,14 +722,14 @@ async def test_unverified_geo_accession_is_a_critical_identifier(store, monkeypa
     assert accession not in ctx.observed_identifiers()["geo"]
     assert accession not in json.dumps(hooks.apply_serialization_filters("lumicell", lum.data))
 
-    from phronesis.utils.memory.clinical_memory import ClinicalMemoryEngine
+    from tribos.utils.memory.research_memory import ResearchMemoryEngine
 
-    assert accession not in ClinicalMemoryEngine.collect_identifiers(lum.data, "lumicell")["geo"]
+    assert accession not in ResearchMemoryEngine.collect_identifiers(lum.data, "lumicell")["geo"]
     tag = re.search(r"<dataset_provenance [^>]*/>", build_evidence_block({"lumicell": lum}, "r", query_context=ctx)).group(0)
     assert accession not in tag and f'geo_status="{status}"' in tag and 'geo_verified="false"' in tag
 
     answer = f"This dataset comes from GEO series {accession}."
-    report = ClinicalVerifier().verify_response(
+    report = TribosVerifier().verify_response(
         "Cluster this dataset", answer, {"lumicell": lum}, context_identifiers=ctx.observed_identifiers(), query_context=ctx
     )
     assert any(d.category == "IDENTIFIER" and d.severity.value == "CRITICAL" and accession in d.description for d in report.defects)
@@ -747,7 +747,7 @@ async def test_uploaded_sbml_model_id_is_not_a_biomodels_citation(store, upload_
     )
     assert viv.data["provenance"]["sbml_model_id"] == "BIOMD0000000010"
     assert "BIOMD0000000010" not in json.dumps(hooks.apply_serialization_filters("vivarix", viv.data))
-    report = ClinicalVerifier().verify_response(
+    report = TribosVerifier().verify_response(
         "q", "The uploaded model is BioModels entry BIOMD0000000010.", {"vivarix": viv},
         context_identifiers=ctx.observed_identifiers(), query_context=ctx,
     )
@@ -764,7 +764,7 @@ async def test_geo_lookup_sends_ncbi_api_key(geo_mock, monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("limit_env,limit", [("PHRONESIS_UPLOAD_MAX_DATASETS", "1"), ("PHRONESIS_UPLOAD_MAX_TOTAL_MB", "0.03")])
+@pytest.mark.parametrize("limit_env,limit", [("TRIBOS_UPLOAD_MAX_DATASETS", "1"), ("TRIBOS_UPLOAD_MAX_TOTAL_MB", "0.03")])
 async def test_parallel_uploads_cannot_exceed_user_limits(store, monkeypatch, limit_env, limit):
     import asyncio
 

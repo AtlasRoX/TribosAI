@@ -1,6 +1,6 @@
 # Auto routing: choosing the architecture per question
 
-`framework: "auto"` lets Phronesis choose how to answer each question instead of making the user pick one of the
+`framework: "auto"` lets Tribos choose how to answer each question instead of making the user pick one of the
 five orchestration architectures. Auto is the default in the web app.
 
 ## Why a router, and why this one
@@ -31,7 +31,7 @@ escalates on explicit triggers, and learns from how its answers held up.
 ## Architecture
 
 All five architectures run on one engine: the framework id only selects which agent phases run at each stage
-(`phronesis/agentic/runtime.py:get_phases`). Auto therefore needs no new pipeline:
+(`tribos/agentic/runtime.py:get_phases`). Auto therefore needs no new pipeline:
 
 ```
 question ─► read_question (entities, intents, scope)
@@ -46,14 +46,14 @@ question ─► read_question (entities, intents, scope)
                                    verification, claim confidence, task status ─► outcome store ◄────┘
 ```
 
-1. **Features** (`phronesis/agentic/router.py`), each in [0, 1]: hypothesis generation, contested claim, safety-critical,
+1. **Features** (`tribos/agentic/router.py`), each in [0, 1]: hypothesis generation, contested claim, safety-critical,
    asks for a recommendation, head-to-head comparison, target evaluation, exploratory, open-ended, computational,
    explicit parts, independent (decomposable) parts, sequential steps, several facets, several domains.
    - *Deterministic signals* come from the planner's query context and keyword patterns.
    - *Semantic features* come from one structured model call (`[phase:router]`) that reads the question's shape:
      question kind (therapy comparison, dosing, diagnosis, prognosis, variant interpretation, target assessment, trial
      landscape, repurposing, hypothesis generation, simulation, data analysis, exploration, ...), number of parts,
-     decomposable versus sequential, domains, and the flags above. `PHRONESIS_ROUTER_SAMPLES` (1–5) averages several
+     decomposable versus sequential, domains, and the flags above. `TRIBOS_ROUTER_SAMPLES` (1–5) averages several
      samples (self-consistency).
    - The blend is 65% semantic, 35% deterministic. Safety flags (safety-critical, computational) are OR-ed: the model can
      raise them but never clear them. Without a model the deterministic signals are used alone.
@@ -62,7 +62,7 @@ question ─► read_question (entities, intents, scope)
    contested conclusions, more strongly with stakes, a recommendation or a comparison; the supervisor takes open-ended,
    multi-facet questions without explicit parts; the swarm takes only low-stakes exploration. A softmax (temperature
    0.4) gives a probability per architecture; the top probability is the router's confidence.
-3. **Outcome learning** (`phronesis/agentic/router_store.py`). Every agentic research run, Auto-routed or chosen by the
+3. **Outcome learning** (`tribos/agentic/router_store.py`). Every agentic research run, Auto-routed or chosen by the
    user, stores its features, a coarse question signature (kind plus strong flags), the architecture and an outcome
    quality: 35% grounding (verification score), 35% calibrated answer confidence, 15% task completion, 15% core phase
    health. Runs the user routed by hand observe architectures Auto did not pick. At routing time each architecture's
@@ -79,8 +79,8 @@ question ─► read_question (entities, intents, scope)
    chosen architecture, confidence, probabilities, the factors behind the score, the semantic reading, learned nudges,
    guardrail, adjudication and escalation. The Agent run card shows them under "Why this approach".
 
-Settings: `PHRONESIS_ROUTER_LLM` (off = deterministic only), `PHRONESIS_ROUTER_SAMPLES`, `PHRONESIS_ROUTER_LEARNING`
-(off | auto | on), `PHRONESIS_ROUTER_DIR`.
+Settings: `TRIBOS_ROUTER_LLM` (off = deterministic only), `TRIBOS_ROUTER_SAMPLES`, `TRIBOS_ROUTER_LEARNING`
+(off | auto | on), `TRIBOS_ROUTER_DIR`.
 
 ## Evaluation
 

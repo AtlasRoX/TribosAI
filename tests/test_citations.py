@@ -12,16 +12,16 @@ from typing import Any, Dict, List
 
 import pytest
 
-from phronesis.agents import authoritative_orchestrator as orch_module
-from phronesis.agents.citations import (
+from tribos.agents import authoritative_orchestrator as orch_module
+from tribos.agents.citations import (
     MEMORY_NOTE,
     build_citation_map,
     scan_answer,
     scan_keys,
 )
-from phronesis.verify.verifier import ClinicalVerifier, DefectItem, DefectSeverity, VerificationReport
-from phronesis.sources.base import CitationRecord
-from phronesis.tools.registry import ToolResult
+from tribos.verify.verifier import TribosVerifier, DefectItem, DefectSeverity, VerificationReport
+from tribos.sources.base import CitationRecord
+from tribos.tools.registry import ToolResult
 from tests.fakes import make_offline_orchestrator
 
 FIXTURES = Path(__file__).parent / "fixtures" / "citations"
@@ -120,7 +120,7 @@ def test_literature_entry_has_passage_highlight_title_and_level():
 
 
 def clean(text: str) -> str:
-    from phronesis.agents.citations import clean_text
+    from tribos.agents.citations import clean_text
 
     return clean_text(text)
 
@@ -138,7 +138,7 @@ def test_doi_in_another_case_resolves_to_the_pmid_entry():
 def test_unobserved_pmid_with_defect_goes_to_unverified():
     tools = _lit(_passages(_record("pmid_42511798")))
     answer = "KRAS G12C review (PMID: 42511798); another claim (PMID: 99999999)."
-    report = ClinicalVerifier().verify_response("KRAS G12C", answer, tools)
+    report = TribosVerifier().verify_response("KRAS G12C", answer, tools)
     assert any(d.claim == "PMID 99999999" for d in report.defects)
     cmap = build_citation_map(answer, tools, report)
     assert "PMID:99999999" not in cmap["entries"]
@@ -328,7 +328,7 @@ def test_verifier_claim_support_marks_grounded_highlight():
         "Treatment-related adverse events of sotorasib were pooled from CodeBreaK 100 (NCT03600883) "
         "and graded according to CTCAE v5.0 (PMID: 39846981)."
     )
-    report = ClinicalVerifier().verify_response("sotorasib safety", answer, tools)
+    report = TribosVerifier().verify_response("sotorasib safety", answer, tools)
     assert report.claim_support and report.claim_support[0]["evidence_key"] == "PMID:39846981"
     cmap = build_citation_map(answer, tools, report)
     support = next(s for s in cmap["supports"] if s["key"] == "PMID:39846981")
@@ -434,7 +434,7 @@ async def test_orchestrator_result_and_stream_carry_citations(monkeypatch, tmp_p
 
     from app.backend import main as backend_main
 
-    monkeypatch.setenv("PHRONESIS_AUTH_MODE", "disabled")
+    monkeypatch.setenv("TRIBOS_AUTH_MODE", "disabled")
     monkeypatch.setattr(backend_main, "get_authoritative_orchestrator", lambda: orch)
     client = TestClient(backend_main.app)
     with client.stream("POST", "/api/chat/stream", json={"message": "Find KRAS papers only.", "thread_id": "t-cite-sse",

@@ -1,4 +1,4 @@
-"""Record/replay cassettes for answer-level evals (phronesis/evals/cassette.py): keys, redaction, hooks, determinism."""
+"""Record/replay cassettes for answer-level evals (tribos/evals/cassette.py): keys, redaction, hooks, determinism."""
 
 from __future__ import annotations
 
@@ -12,12 +12,12 @@ from typing import Any, Dict, List
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from phronesis.evals import cassette as cas
-from phronesis.evals.cli import main as cli_main
-from phronesis.evals.runner import Evaluator, RunConfig
-from phronesis.evals.schema import EvalCase
-from phronesis.tools import reliability
-from phronesis.utils.llm import llm_factory
+from tribos.evals import cassette as cas
+from tribos.evals.cli import main as cli_main
+from tribos.evals.runner import Evaluator, RunConfig
+from tribos.evals.schema import EvalCase
+from tribos.tools import reliability
+from tribos.utils.llm import llm_factory
 from tests.fakes import build_recording_registry
 
 TODAY = dt.date.today().isoformat()
@@ -324,7 +324,7 @@ def test_real_orchestrator_record_then_replay_is_deterministic(monkeypatch, tmp_
 
 
 def test_provenance_probes_are_recorded_and_replayed(monkeypatch, tmp_path):
-    from phronesis.provenance import source_versions
+    from tribos.provenance import source_versions
 
     probes = []
 

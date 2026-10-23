@@ -105,7 +105,7 @@ export function SandboxAnalysisArtifact({ data }: { data: SandboxData }) {
       defaultOpen={false}
     >
       {status === "disabled" && (
-        <p className={styles.muted}>Code analysis is switched off on this server (PHRONESIS_SANDBOX) or in your agent settings.</p>
+        <p className={styles.muted}>Code analysis is switched off on this server (TRIBOS_SANDBOX) or in your agent settings.</p>
       )}
       {data.error && <p className={styles.errorText}>{str(data.error)}</p>}
 

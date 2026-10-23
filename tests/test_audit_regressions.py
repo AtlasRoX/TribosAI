@@ -11,19 +11,19 @@ from typing import Any, Dict, List, Tuple
 
 import pytest
 
-from phronesis.agents import authoritative_orchestrator as orch_module
-from phronesis.agents.authoritative_orchestrator import AuthoritativeOrchestrator
-from phronesis.agents.discovery import BioDiscoveryEngine
-from phronesis.verify.verifier import ClinicalVerifier
-from phronesis.tools import registry as registry_module
-from phronesis.tools.registry import (
+from tribos.agents import authoritative_orchestrator as orch_module
+from tribos.agents.authoritative_orchestrator import AuthoritativeOrchestrator
+from tribos.agents.discovery import DiscoveryEngine
+from tribos.verify.verifier import TribosVerifier
+from tribos.tools import registry as registry_module
+from tribos.tools.registry import (
     AdapterType,
-    BiomedicalToolRegistry,
+    ToolRegistry,
     ErrorType,
     ToolResult,
     ToolUniverseEntry,
 )
-from phronesis.utils.memory.clinical_memory import ClinicalMemoryEngine
+from tribos.utils.memory.research_memory import ResearchMemoryEngine
 
 
 # =============================================================================
@@ -113,8 +113,8 @@ def _vivarix(initial, final):
 
 
 def test_discovery_kinetic_score_tracks_flux_change():
-    small = BioDiscoveryEngine.prioritize_hypotheses("q", "ERK2", {"vivarix": _vivarix({"Erk2-PP": 10.0}, {"Erk2-PP": 10.1})})
-    large = BioDiscoveryEngine.prioritize_hypotheses("q", "ERK2", {"vivarix": _vivarix({"Erk2-PP": 10.0}, {"Erk2-PP": 200.0})})
+    small = DiscoveryEngine.prioritize_hypotheses("q", "ERK2", {"vivarix": _vivarix({"Erk2-PP": 10.0}, {"Erk2-PP": 10.1})})
+    large = DiscoveryEngine.prioritize_hypotheses("q", "ERK2", {"vivarix": _vivarix({"Erk2-PP": 10.0}, {"Erk2-PP": 200.0})})
     k_small = small.candidates[0].observed_components["pathway_kinetics"]
     k_large = large.candidates[0].observed_components["pathway_kinetics"]
     assert k_small < 0.05 < 0.9 < k_large
@@ -129,9 +129,9 @@ def test_discovery_single_cell_score_tracks_log_fold_change():
             data={"top_markers_by_cluster": {"0": [{"gene": "KRAS", "cluster": "0", "log_fold_change": lfc, "p_adj": padj}]}},
         )
 
-    weak = BioDiscoveryEngine.prioritize_hypotheses("q", "KRAS", {"lumicell": lum(0.5, 0.01), "vivarix": _vivarix({"A": 1}, {"A": 2})})
-    strong = BioDiscoveryEngine.prioritize_hypotheses("q", "KRAS", {"lumicell": lum(5.0, 0.01), "vivarix": _vivarix({"A": 1}, {"A": 2})})
-    insignificant = BioDiscoveryEngine.prioritize_hypotheses("q", "KRAS", {"lumicell": lum(5.0, 0.4), "vivarix": _vivarix({"A": 1}, {"A": 2})})
+    weak = DiscoveryEngine.prioritize_hypotheses("q", "KRAS", {"lumicell": lum(0.5, 0.01), "vivarix": _vivarix({"A": 1}, {"A": 2})})
+    strong = DiscoveryEngine.prioritize_hypotheses("q", "KRAS", {"lumicell": lum(5.0, 0.01), "vivarix": _vivarix({"A": 1}, {"A": 2})})
+    insignificant = DiscoveryEngine.prioritize_hypotheses("q", "KRAS", {"lumicell": lum(5.0, 0.4), "vivarix": _vivarix({"A": 1}, {"A": 2})})
     assert weak.candidates[0].observed_components["single_cell_marker_evidence"] == pytest.approx(0.125)
     assert strong.candidates[0].observed_components["single_cell_marker_evidence"] == pytest.approx(1.0)
     assert insignificant.candidates[0].observed_components["single_cell_marker_evidence"] is None
@@ -157,7 +157,7 @@ def _sim_result(units="nmol"):
 
 
 def test_verifier_no_false_positive_on_phosphorylated_prefix():
-    report = ClinicalVerifier().verify_response(
+    report = TribosVerifier().verify_response(
         query="Simulate Mos phosphorylation",
         response_markdown="Mos-P reached 65.87 nM while Mos was 34.13 nM.\n| **Mos** | 100.000 nM | 34.130 nM | -65.9% |",
         tool_results={"vivarix": _sim_result()},
@@ -168,7 +168,7 @@ def test_verifier_no_false_positive_on_phosphorylated_prefix():
 
 def test_verifier_no_false_positive_with_unicode_hyphens():
     # Models typeset "Mos‑P" with U+2011 and use narrow no-break spaces; that must not read as "Mos".
-    report = ClinicalVerifier().verify_response(
+    report = TribosVerifier().verify_response(
         query="Simulate Mos phosphorylation",
         response_markdown="- Mos‑P = **65.87 nM**\n- Mos = **34.13 nM**\nActive Mos‑P rises to 65.87 nM.",
         tool_results={"vivarix": _sim_result()},
@@ -177,7 +177,7 @@ def test_verifier_no_false_positive_with_unicode_hyphens():
 
 
 def test_verifier_still_catches_errors_written_with_unicode_hyphens():
-    report = ClinicalVerifier().verify_response(
+    report = TribosVerifier().verify_response(
         query="Simulate Mos phosphorylation",
         response_markdown="- Mos‑P = **12.00 nM**",
         tool_results={"vivarix": _sim_result()},
@@ -186,7 +186,7 @@ def test_verifier_still_catches_errors_written_with_unicode_hyphens():
 
 
 def test_verifier_catches_unit_and_sign_errors():
-    verifier = ClinicalVerifier()
+    verifier = TribosVerifier()
     wrong_unit = verifier.verify_response("Mos simulation", "Final Mos concentration: 34.13 mM.", {"vivarix": _sim_result()})
     assert any(d.category == "NUMERICAL" for d in wrong_unit.defects)
     negative = verifier.verify_response("Mos simulation", "Mos: -34.13 nM at the end of the run.", {"vivarix": _sim_result()})
@@ -196,7 +196,7 @@ def test_verifier_catches_unit_and_sign_errors():
 
 
 def test_verifier_flags_unobserved_ensembl_and_uniprot():
-    verifier = ClinicalVerifier()
+    verifier = TribosVerifier()
     tool_results = {"synapta": ToolResult(success=True, tool_name="synapta", canonical_ids={"ensembl_id": "ENSG00000133703"}, data={"x": 1})}
     report = verifier.verify_response(
         "KRAS identifiers",
@@ -218,7 +218,7 @@ def _passages(*texts):
 
 
 def test_verifier_rejects_clinical_claim_backed_by_unrelated_passages():
-    report = ClinicalVerifier().verify_response(
+    report = TribosVerifier().verify_response(
         "sotorasib efficacy",
         "Phase 3 trial readouts confirmed an 85% objective response rate and curative efficacy for sotorasib.",
         {"lithoscribe": _passages("Glycolytic enzymes regulate hepatic metabolism.", "Endometrial repair depends on stromal remodeling.")},
@@ -228,7 +228,7 @@ def test_verifier_rejects_clinical_claim_backed_by_unrelated_passages():
 
 
 def test_verifier_accepts_clinical_claim_grounded_in_passage():
-    report = ClinicalVerifier().verify_response(
+    report = TribosVerifier().verify_response(
         "sotorasib efficacy in NSCLC",
         "In the phase 2 CodeBreaK 100 trial, sotorasib achieved a 37.1% objective response rate in KRAS G12C NSCLC.",
         {"lithoscribe": _passages(
@@ -240,7 +240,7 @@ def test_verifier_accepts_clinical_claim_grounded_in_passage():
 
 
 def test_verifier_allows_honest_limitation_statements():
-    report = ClinicalVerifier().verify_response(
+    report = TribosVerifier().verify_response(
         "PF-99999999 phase 3 overall survival",
         "No Phase 3 overall survival data are available for PF-99999999; the compound is unverified.",
         {"lithoscribe": _passages("KRAS biology review.")},
@@ -249,7 +249,7 @@ def test_verifier_allows_honest_limitation_statements():
 
 
 def test_verifier_steady_state_distinction():
-    verifier = ClinicalVerifier()
+    verifier = TribosVerifier()
     asserted = verifier.verify_response("Mos simulation", "Mos reaches a steady state of 34.13 nM.", {"vivarix": _sim_result()})
     assert any(d.category == "MODELING_DISTINCTION" for d in asserted.defects)
     hedged = verifier.verify_response("Mos simulation", "Mos ends at 34.13 nM; this is not a steady state.", {"vivarix": _sim_result()})
@@ -258,7 +258,7 @@ def test_verifier_steady_state_distinction():
 
 def test_verifier_suggested_experiment_is_not_a_steady_state_claim():
     # Found by the evaluation harness: a "Suggested next experiments" bullet was flagged as a modelling claim.
-    report = ClinicalVerifier().verify_response(
+    report = TribosVerifier().verify_response(
         "Mos simulation",
         "Mos ends at 34.13 nM.\n\n### Suggested next experiments\n"
         "- Run a systematic parameter sweep of V1 and record the steady-state concentrations of Mos-P.",
@@ -271,7 +271,7 @@ def test_verifier_complex_name_is_not_a_value_of_its_component():
     # Found by the evaluation harness: "(EGF_EGFR)2-P" was read as species EGF_EGFR with value 2.
     sim = _sim_result()
     sim.data["final_concentrations"] = {"EGF_EGFR": 17.43, "(EGF_EGFR)2-P": 3.61, "(EGF_EGFR)_Shc-P": 1.84}
-    report = ClinicalVerifier().verify_response(
+    report = TribosVerifier().verify_response(
         "EGFR simulation",
         "| Species | Concentration (nmol) |\n|---|---|\n| EGF_EGFR | 17.43 |\n| (EGF_EGFR)2‑P | 3.61 |\n| (EGF_EGFR)_Shc‑P | 1.84 |",
         {"vivarix": sim},
@@ -280,7 +280,7 @@ def test_verifier_complex_name_is_not_a_value_of_its_component():
 
 
 def test_verifier_accepts_identifiers_from_verified_memory():
-    verifier = ClinicalVerifier()
+    verifier = TribosVerifier()
     text = "As established previously, BIOMD0000000010 captured MAPK ultrasensitivity."
     without = verifier.verify_response("previous MAPK conclusion", text, {})
     assert any(d.category == "IDENTIFIER" for d in without.defects)
@@ -296,7 +296,7 @@ def test_verifier_accepts_identifiers_from_verified_memory():
 
 @pytest.mark.asyncio
 async def test_memory_scoped_by_user(tmp_path):
-    mem = ClinicalMemoryEngine(storage_dir=str(tmp_path))
+    mem = ResearchMemoryEngine(storage_dir=str(tmp_path))
     data = {"vivarix": {"model_id": "BIOMD0000000010", "final_concentrations": {"Mos": 1.0}}}
     await mem.consolidate_turn("shared-thread", "KRAS query", "resp", data, user_id="alice", is_turn_verified=True)
     await mem.consolidate_turn("shared-thread", "KRAS query", "resp", data, user_id="bob", is_turn_verified=True)
@@ -319,11 +319,11 @@ def api_client(monkeypatch, tmp_path):
 
     from app.backend import main as backend_main
 
-    engine = ClinicalMemoryEngine(storage_dir=str(tmp_path))
-    monkeypatch.setattr(backend_main, "get_clinical_memory_engine", lambda: engine)
-    monkeypatch.delenv("PHRONESIS_AUTH_MODE", raising=False)
-    monkeypatch.delenv("PHRONESIS_JWT_SECRET", raising=False)
-    monkeypatch.setenv("PHRONESIS_API_TOKENS", "alice-token:alice,bob-token:bob")
+    engine = ResearchMemoryEngine(storage_dir=str(tmp_path))
+    monkeypatch.setattr(backend_main, "get_research_memory_engine", lambda: engine)
+    monkeypatch.delenv("TRIBOS_AUTH_MODE", raising=False)
+    monkeypatch.delenv("TRIBOS_JWT_SECRET", raising=False)
+    monkeypatch.setenv("TRIBOS_API_TOKENS", "alice-token:alice,bob-token:bob")
     return TestClient(backend_main.app), engine
 
 
@@ -346,7 +346,7 @@ def test_api_scopes_memory_to_authenticated_user(api_client):
 
 def test_api_fails_closed_when_auth_unconfigured(api_client, monkeypatch):
     client, _ = api_client
-    monkeypatch.delenv("PHRONESIS_API_TOKENS", raising=False)
+    monkeypatch.delenv("TRIBOS_API_TOKENS", raising=False)
     assert client.get("/api/memory/stats").status_code == 503
 
 
@@ -354,7 +354,7 @@ def test_api_accepts_jwt_subject(api_client, monkeypatch):
     import jwt
 
     client, _ = api_client
-    monkeypatch.setenv("PHRONESIS_JWT_SECRET", "test-secret-with-enough-length-0123456789")
+    monkeypatch.setenv("TRIBOS_JWT_SECRET", "test-secret-with-enough-length-0123456789")
     token = jwt.encode({"sub": "carol", "exp": int(time.time()) + 60}, "test-secret-with-enough-length-0123456789", algorithm="HS256")
     resp = client.get("/api/memory/stats", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
@@ -368,7 +368,7 @@ def test_api_accepts_jwt_subject(api_client, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_sync_executor_runs_off_event_loop_and_respects_timeout():
-    reg = BiomedicalToolRegistry()
+    reg = ToolRegistry()
     seen = {}
 
     def slow(query: str, max_results: int = 3):

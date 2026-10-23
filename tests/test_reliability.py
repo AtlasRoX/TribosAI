@@ -1,5 +1,5 @@
 """
-Offline fault-injection tests for the tool reliability layer (phronesis/tools/reliability.py, feature 19).
+Offline fault-injection tests for the tool reliability layer (tribos/tools/reliability.py, feature 19).
 
 In the spirit of ToolEmu (arXiv:2309.15817) and ToolSword (arXiv:2402.10753), the upstream is emulated: scripted
 executors return timeouts, 5xx-style upstream errors, not-found answers and noisy partial payloads, and the tests
@@ -17,9 +17,9 @@ from typing import Any, Callable, Dict, List, Optional
 import pytest
 from pydantic import BaseModel, Field
 
-from phronesis.provenance import run_manifest as rm
-from phronesis.tools import reliability as rel
-from phronesis.tools.registry import AdapterType, BiomedicalToolRegistry, ErrorType, ToolResult, ToolUniverseEntry
+from tribos.provenance import run_manifest as rm
+from tribos.tools import reliability as rel
+from tribos.tools.registry import AdapterType, ToolRegistry, ErrorType, ToolResult, ToolUniverseEntry
 from tests.fakes import build_recording_registry
 
 
@@ -39,14 +39,14 @@ class Clock:
 @pytest.fixture(autouse=True)
 def policies(monkeypatch, tmp_path):
     """Policies on (they default to off under pytest), no real sleeping, deterministic jitter and clocks."""
-    for name in ("PHRONESIS_TOOL_CACHE_DIR", "PHRONESIS_RUNS_DIR", "PHRONESIS_TOOL_CACHE_TTL_S", "PHRONESIS_TOOL_RETRIES",
-                 "PHRONESIS_BREAKER_THRESHOLD", "PHRONESIS_BREAKER_COOLDOWN_S"):
+    for name in ("TRIBOS_TOOL_CACHE_DIR", "TRIBOS_RUNS_DIR", "TRIBOS_TOOL_CACHE_TTL_S", "TRIBOS_TOOL_RETRIES",
+                 "TRIBOS_BREAKER_THRESHOLD", "TRIBOS_BREAKER_COOLDOWN_S"):
         monkeypatch.delenv(name, raising=False)
     # A per-test data dir: the session-wide one (tests/conftest.py) would let one test's SQLite cache rows be
     # replayed as hits in the next.
-    monkeypatch.setenv("PHRONESIS_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("PHRONESIS_RELIABILITY", "on")
-    monkeypatch.setenv("PHRONESIS_TOOL_CACHE", "on")
+    monkeypatch.setenv("TRIBOS_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("TRIBOS_RELIABILITY", "on")
+    monkeypatch.setenv("TRIBOS_TOOL_CACHE", "on")
     sleeps: List[float] = []
     jitter: List[tuple] = []
 
@@ -68,7 +68,7 @@ def policies(monkeypatch, tmp_path):
 
 
 def scripted_tool(
-    reg: BiomedicalToolRegistry,
+    reg: ToolRegistry,
     name: str,
     outcomes: List[Any],
     *,
@@ -119,17 +119,17 @@ OK = {"results": [{"id": "hsa04010", "description": "MAPK signaling pathway - Ho
 
 @pytest.mark.asyncio
 async def test_policies_default_off_under_pytest(monkeypatch):
-    monkeypatch.delenv("PHRONESIS_RELIABILITY", raising=False)
-    monkeypatch.delenv("PHRONESIS_TOOL_CACHE", raising=False)
+    monkeypatch.delenv("TRIBOS_RELIABILITY", raising=False)
+    monkeypatch.delenv("TRIBOS_TOOL_CACHE", raising=False)
     assert not rel.policies_enabled() and not rel.cache_enabled()
-    reg = BiomedicalToolRegistry()
+    reg = ToolRegistry()
     calls = scripted_tool(reg, "rest_tool", [upstream_error(), OK])
     res = await reg.execute("rest_tool", query="x")
     assert not res.success and len(calls) == 1 and "failure_class" not in res.metadata
-    monkeypatch.setenv("PHRONESIS_RELIABILITY", "on")
+    monkeypatch.setenv("TRIBOS_RELIABILITY", "on")
     assert rel.policies_enabled() and not rel.cache_enabled()  # the cache needs its own opt-in under pytest
-    monkeypatch.setenv("PHRONESIS_RELIABILITY", "off")
-    monkeypatch.setenv("PHRONESIS_TOOL_CACHE", "on")
+    monkeypatch.setenv("TRIBOS_RELIABILITY", "off")
+    monkeypatch.setenv("TRIBOS_TOOL_CACHE", "on")
     assert not rel.cache_enabled()  # the master switch wins
 
 
@@ -154,7 +154,7 @@ async def test_local_compute_is_never_cached_or_retried():
 
 @pytest.mark.asyncio
 async def test_retries_with_exponential_backoff_and_full_jitter(policies):
-    reg = BiomedicalToolRegistry()
+    reg = ToolRegistry()
     calls = scripted_tool(reg, "rest_tool", [upstream_error(), timeout_error(), OK])
     res = await reg.execute("rest_tool", query="KRAS")
     assert res.success and len(calls) == 3 and res.metadata["retries"] == 2
@@ -166,8 +166,8 @@ async def test_retries_with_exponential_backoff_and_full_jitter(policies):
 
 @pytest.mark.asyncio
 async def test_retries_stop_after_the_configured_count(monkeypatch, policies):
-    monkeypatch.setenv("PHRONESIS_TOOL_RETRIES", "1")
-    reg = BiomedicalToolRegistry()
+    monkeypatch.setenv("TRIBOS_TOOL_RETRIES", "1")
+    reg = ToolRegistry()
     calls = scripted_tool(reg, "rest_tool", [upstream_error()])
     res = await reg.execute("rest_tool", query="KRAS")
     assert not res.success and len(calls) == 2 and res.metadata["retries"] == 1
@@ -176,7 +176,7 @@ async def test_retries_stop_after_the_configured_count(monkeypatch, policies):
 
 @pytest.mark.asyncio
 async def test_transport_exception_is_retried_but_other_failures_are_not():
-    reg = BiomedicalToolRegistry()
+    reg = ToolRegistry()
     import httpx
 
     flaky = scripted_tool(reg, "flaky", [httpx.ConnectError("Connection refused"), OK])
@@ -192,7 +192,7 @@ async def test_transport_exception_is_retried_but_other_failures_are_not():
 
 @pytest.mark.asyncio
 async def test_retries_never_run_past_the_run_deadline(policies):
-    reg = BiomedicalToolRegistry()
+    reg = ToolRegistry()
     calls = scripted_tool(reg, "rest_tool", [upstream_error(), OK], timeout=10.0)
     with rel.run_deadline(2.0):  # a retry would need its backoff plus a 10 s timeout
         res = await reg.execute("rest_tool", query="x")
@@ -208,7 +208,7 @@ async def test_retries_never_run_past_the_run_deadline(policies):
 
 @pytest.mark.asyncio
 async def test_cache_hit_and_miss_use_validated_kwargs_and_return_copies():
-    reg = BiomedicalToolRegistry()
+    reg = ToolRegistry()
     calls = scripted_tool(reg, "rest_tool", [OK])
     first = await reg.execute("rest_tool", query="KRAS")
     assert first.success and first.metadata["cache"] == "miss"
@@ -226,21 +226,21 @@ async def test_cache_hit_and_miss_use_validated_kwargs_and_return_copies():
 
 @pytest.mark.asyncio
 async def test_cache_ttl_expiry(monkeypatch, policies):
-    reg = BiomedicalToolRegistry()
+    reg = ToolRegistry()
     calls = scripted_tool(reg, "rest_tool", [OK])
     await reg.execute("rest_tool", query="x")
     policies["wall"].t += 6 * 3600 - 1
     assert (await reg.execute("rest_tool", query="x")).metadata["cache"] == "hit"
     policies["wall"].t += 2
     assert (await reg.execute("rest_tool", query="x")).metadata["cache"] == "miss" and len(calls) == 2
-    monkeypatch.setenv("PHRONESIS_TOOL_CACHE_TTL_S", "0")
+    monkeypatch.setenv("TRIBOS_TOOL_CACHE_TTL_S", "0")
     res = await reg.execute("rest_tool", query="new")
     assert "cache" not in res.metadata
 
 
 @pytest.mark.asyncio
 async def test_cache_disabled_and_excluded_tools(monkeypatch):
-    reg = BiomedicalToolRegistry()
+    reg = ToolRegistry()
     plain = scripted_tool(reg, "rest_tool", [OK])
     upload = scripted_tool(reg, "upload_tool", [OK], tags=["upload"])
     failing = scripted_tool(reg, "failing", [upstream_error()])
@@ -248,7 +248,7 @@ async def test_cache_disabled_and_excluded_tools(monkeypatch):
         assert "cache" not in (await reg.execute("upload_tool", query="x")).metadata
         await reg.execute("failing", query="x")
     assert len(upload) == 2 and len(failing) == 6  # failures are never cached (3 attempts each)
-    monkeypatch.setenv("PHRONESIS_TOOL_CACHE", "off")
+    monkeypatch.setenv("TRIBOS_TOOL_CACHE", "off")
     for _ in range(2):
         assert "cache" not in (await reg.execute("rest_tool", query="x")).metadata
     assert len(plain) == 2
@@ -256,7 +256,7 @@ async def test_cache_disabled_and_excluded_tools(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_partial_payloads_are_not_cached():
-    reg = BiomedicalToolRegistry()
+    reg = ToolRegistry()
     partial = {"items": [1], "sources": [{"name": "a", "status": "ok"}, {"name": "b", "status": "error"}]}
     calls = scripted_tool(reg, "rest_tool", [partial])
     await reg.execute("rest_tool", query="x")
@@ -266,8 +266,8 @@ async def test_partial_payloads_are_not_cached():
 
 @pytest.mark.asyncio
 async def test_sqlite_store_survives_a_memory_reset(monkeypatch, tmp_path):
-    monkeypatch.setenv("PHRONESIS_RUNS_DIR", str(tmp_path / "runs"))  # default store: <runs>/tool_cache
-    reg = BiomedicalToolRegistry()
+    monkeypatch.setenv("TRIBOS_RUNS_DIR", str(tmp_path / "runs"))  # default store: <runs>/tool_cache
+    reg = ToolRegistry()
     calls = scripted_tool(reg, "rest_tool", [OK])
     assert (await reg.execute("rest_tool", query="x")).metadata["cache"] == "miss"
     assert (tmp_path / "runs" / "tool_cache" / "tool_cache.sqlite3").is_file()
@@ -285,10 +285,10 @@ async def test_sqlite_store_survives_a_memory_reset(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_breaker_opens_fails_fast_half_opens_and_closes(monkeypatch, policies):
-    monkeypatch.setenv("PHRONESIS_TOOL_RETRIES", "0")
-    monkeypatch.setenv("PHRONESIS_BREAKER_THRESHOLD", "3")
-    monkeypatch.setenv("PHRONESIS_BREAKER_COOLDOWN_S", "60")
-    reg = BiomedicalToolRegistry()
+    monkeypatch.setenv("TRIBOS_TOOL_RETRIES", "0")
+    monkeypatch.setenv("TRIBOS_BREAKER_THRESHOLD", "3")
+    monkeypatch.setenv("TRIBOS_BREAKER_COOLDOWN_S", "60")
+    reg = ToolRegistry()
     outcomes: List[Any] = [upstream_error(), timeout_error(), upstream_error()]
     calls = scripted_tool(reg, "rest_tool", [lambda kw: outcomes.pop(0) if outcomes else OK])
     for q in ("a", "b", "c"):
@@ -310,8 +310,8 @@ async def test_breaker_opens_fails_fast_half_opens_and_closes(monkeypatch, polic
 
 @pytest.mark.asyncio
 async def test_failed_trial_reopens_without_retry(monkeypatch, policies):
-    monkeypatch.setenv("PHRONESIS_BREAKER_THRESHOLD", "1")
-    reg = BiomedicalToolRegistry()
+    monkeypatch.setenv("TRIBOS_BREAKER_THRESHOLD", "1")
+    reg = ToolRegistry()
     calls = scripted_tool(reg, "rest_tool", [upstream_error()])
     await reg.execute("rest_tool", query="a")  # 3 attempts (2 retries), then open
     assert len(calls) == 3 and rel.reliability_snapshot()["breakers"]["rest_tool"]["state"] == "open"
@@ -324,9 +324,9 @@ async def test_failed_trial_reopens_without_retry(monkeypatch, policies):
 
 @pytest.mark.asyncio
 async def test_half_open_admits_exactly_one_concurrent_trial(monkeypatch, policies):
-    monkeypatch.setenv("PHRONESIS_TOOL_RETRIES", "0")
-    monkeypatch.setenv("PHRONESIS_BREAKER_THRESHOLD", "1")
-    reg = BiomedicalToolRegistry()
+    monkeypatch.setenv("TRIBOS_TOOL_RETRIES", "0")
+    monkeypatch.setenv("TRIBOS_BREAKER_THRESHOLD", "1")
+    reg = ToolRegistry()
     gate = asyncio.Event()
     state = {"n": 0}
 
@@ -352,8 +352,8 @@ async def test_half_open_admits_exactly_one_concurrent_trial(monkeypatch, polici
 
 @pytest.mark.asyncio
 async def test_validation_errors_and_not_found_do_not_trip_the_breaker(monkeypatch):
-    monkeypatch.setenv("PHRONESIS_BREAKER_THRESHOLD", "1")
-    reg = BiomedicalToolRegistry()
+    monkeypatch.setenv("TRIBOS_BREAKER_THRESHOLD", "1")
+    reg = ToolRegistry()
     scripted_tool(reg, "nf", [ToolResult(success=False, tool_name="nf", error="no record", error_type=ErrorType.NOT_FOUND)])
     for _ in range(3):
         await reg.execute("nf", query="x")
@@ -363,9 +363,9 @@ async def test_validation_errors_and_not_found_do_not_trip_the_breaker(monkeypat
 
 @pytest.mark.asyncio
 async def test_upstream_tag_shares_one_breaker(monkeypatch):
-    monkeypatch.setenv("PHRONESIS_TOOL_RETRIES", "0")
-    monkeypatch.setenv("PHRONESIS_BREAKER_THRESHOLD", "2")
-    reg = BiomedicalToolRegistry()
+    monkeypatch.setenv("TRIBOS_TOOL_RETRIES", "0")
+    monkeypatch.setenv("TRIBOS_BREAKER_THRESHOLD", "2")
+    reg = ToolRegistry()
     a = scripted_tool(reg, "api_a", [upstream_error()], tags=["upstream:shared_api"])
     b = scripted_tool(reg, "api_b", [OK], tags=["upstream:shared_api"])
     await reg.execute("api_a", query="1")
@@ -381,9 +381,9 @@ async def test_upstream_tag_shares_one_breaker(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_fallback_runs_only_while_the_breaker_is_open(monkeypatch):
-    monkeypatch.setenv("PHRONESIS_TOOL_RETRIES", "0")
-    monkeypatch.setenv("PHRONESIS_BREAKER_THRESHOLD", "1")
-    reg = BiomedicalToolRegistry()
+    monkeypatch.setenv("TRIBOS_TOOL_RETRIES", "0")
+    monkeypatch.setenv("TRIBOS_BREAKER_THRESHOLD", "1")
+    reg = ToolRegistry()
     lit = scripted_tool(reg, "lit_tool", [upstream_error()])
     web = scripted_tool(reg, "web_tool", [{"results": [{"url": "https://example.org", "title": "t"}]}])
     rel.register_fallback("lit_tool", "web_tool", lambda kw: {"query": f"{kw['query']} review"})
@@ -399,7 +399,7 @@ async def test_fallback_runs_only_while_the_breaker_is_open(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_failure_class_labels():
-    reg = BiomedicalToolRegistry()
+    reg = ToolRegistry()
     scripted_tool(reg, "slow", [timeout_error()])
     scripted_tool(reg, "down", [upstream_error()])
     missing = await reg.execute("no_such_tool", query="x")
@@ -414,10 +414,10 @@ async def test_failure_class_labels():
 
 @pytest.mark.asyncio
 async def test_recorder_sees_one_call_per_execute(monkeypatch, tmp_path):
-    monkeypatch.setenv("PHRONESIS_RUNS_DIR", str(tmp_path / "runs"))
-    monkeypatch.setenv("PHRONESIS_TOOL_CACHE", "on")
-    monkeypatch.setenv("PHRONESIS_BREAKER_THRESHOLD", "1")
-    reg = BiomedicalToolRegistry()
+    monkeypatch.setenv("TRIBOS_RUNS_DIR", str(tmp_path / "runs"))
+    monkeypatch.setenv("TRIBOS_TOOL_CACHE", "on")
+    monkeypatch.setenv("TRIBOS_BREAKER_THRESHOLD", "1")
+    reg = ToolRegistry()
     calls = scripted_tool(reg, "rest_tool", [upstream_error(), OK])
     scripted_tool(reg, "down", [upstream_error()])
     rec = rm.RunRecorder(query="q", thread_id="t", model_name="m", enable_web_search=False, user_id="alice", api_key_supplied=False)
@@ -441,7 +441,7 @@ async def test_recorder_sees_one_call_per_execute(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_concurrent_sync_tools_share_state_safely(monkeypatch):
-    reg = BiomedicalToolRegistry()
+    reg = ToolRegistry()
     seen: List[str] = []
 
     def sync_exec(query: str, size: int = 5) -> Dict[str, Any]:
@@ -463,7 +463,7 @@ async def test_concurrent_sync_tools_share_state_safely(monkeypatch):
 
 
 def test_snapshot_reports_config(monkeypatch):
-    monkeypatch.setenv("PHRONESIS_BREAKER_THRESHOLD", "7")
+    monkeypatch.setenv("TRIBOS_BREAKER_THRESHOLD", "7")
     snap = rel.reliability_snapshot()
     assert snap["enabled"] and snap["config"]["breaker_threshold"] == 7 and snap["config"]["retries"] == 2
     assert snap["cache"]["memory_max"] == 512

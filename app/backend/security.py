@@ -3,18 +3,18 @@ Request-level protections applied to every route (pure ASGI, so streamed respons
 
 - Request body limits (SEC-004): a declared Content-Length over the route's limit is refused with 413 before the
   handler runs; a body without one (chunked) is counted while it is read and refused as soon as it passes the
-  limit. Limits: PHRONESIS_MAX_BODY_MB (default 2 MB) for JSON routes, PHRONESIS_MAX_EXPORT_BODY_MB (default 16 MB)
+  limit. Limits: TRIBOS_MAX_BODY_MB (default 2 MB) for JSON routes, TRIBOS_MAX_EXPORT_BODY_MB (default 16 MB)
   for report export and client-manifest re-runs, which carry plots and manifests. The multipart dataset upload
   (POST /api/datasets) has its own streamed, per-kind limits and is not counted here.
 - Origin check on state-changing methods (SEC-002): a browser request whose Origin is not in the CORS allow-list
   is refused with 403. Browsers attach Origin to every cross-origin POST, including the "simple" text/plain and
   multipart requests that skip the CORS preflight, so a third-party page cannot submit jobs or uploads.
-- Host allow-list (SEC-002, DNS rebinding): when authentication is disabled, or PHRONESIS_ALLOWED_HOSTS is set, a
+- Host allow-list (SEC-002, DNS rebinding): when authentication is disabled, or TRIBOS_ALLOWED_HOSTS is set, a
   request whose Host header is not allowed is refused with 400. With auth disabled the default list is the
   loopback names (localhost, 127.0.0.1, [::1]); a rebound attacker hostname never matches.
 - Loopback-only clients when authentication is disabled (SEC-002 / CFG-001): every request then runs as one
   local user, so a client that is not on the loopback interface is refused with 403 unless the operator sets
-  PHRONESIS_ALLOW_INSECURE=1 (e.g. inside a container whose port is published on 127.0.0.1 only).
+  TRIBOS_ALLOW_INSECURE=1 (e.g. inside a container whose port is published on 127.0.0.1 only).
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional
 
 from starlette.exceptions import HTTPException
 
-logger = logging.getLogger("phronesis.backend.security")
+logger = logging.getLogger("tribos.backend.security")
 
 Scope = Dict[str, Any]
 Message = Dict[str, Any]
@@ -58,13 +58,13 @@ def max_body_bytes(method: str, path: str) -> Optional[int]:
     if (method, path.rstrip("/")) in _UNCOUNTED:
         return None
     if any(path.startswith(p) for p in _LARGE_BODY_PREFIXES):
-        return _mb("PHRONESIS_MAX_EXPORT_BODY_MB", 16.0)
-    return _mb("PHRONESIS_MAX_BODY_MB", 2.0)
+        return _mb("TRIBOS_MAX_EXPORT_BODY_MB", 16.0)
+    return _mb("TRIBOS_MAX_BODY_MB", 2.0)
 
 
 def cors_origins() -> List[str]:
-    """PHRONESIS_CORS_ORIGINS without wildcards: '*' together with credentials would let any page read responses."""
-    raw = os.getenv("PHRONESIS_CORS_ORIGINS", DEFAULT_CORS_ORIGINS)
+    """TRIBOS_CORS_ORIGINS without wildcards: '*' together with credentials would let any page read responses."""
+    raw = os.getenv("TRIBOS_CORS_ORIGINS", DEFAULT_CORS_ORIGINS)
     out = []
     for item in raw.split(","):
         origin = item.strip().rstrip("/")
@@ -78,7 +78,7 @@ def cors_origins() -> List[str]:
 
 
 def allowed_origins() -> List[str]:
-    extra = [o.strip().rstrip("/") for o in os.getenv("PHRONESIS_MCP_ALLOWED_ORIGINS", "").split(",") if o.strip()]
+    extra = [o.strip().rstrip("/") for o in os.getenv("TRIBOS_MCP_ALLOWED_ORIGINS", "").split(",") if o.strip()]
     return list(dict.fromkeys(cors_origins() + [o for o in extra if "*" not in o]))
 
 
@@ -90,7 +90,7 @@ def _auth_disabled() -> bool:
 
 def allowed_hosts() -> Optional[List[str]]:
     """Host names requests may address, or None when no Host check applies (bearer auth and no explicit list)."""
-    raw = [h.strip().lower() for h in os.getenv("PHRONESIS_ALLOWED_HOSTS", "").split(",") if h.strip()]
+    raw = [h.strip().lower() for h in os.getenv("TRIBOS_ALLOWED_HOSTS", "").split(",") if h.strip()]
     if raw:
         return raw
     if not _auth_disabled():
@@ -124,7 +124,7 @@ def is_loopback_client(client: Optional[Iterable[Any]]) -> bool:
 
 
 def insecure_allowed() -> bool:
-    return _truthy(os.getenv("PHRONESIS_ALLOW_INSECURE"))
+    return _truthy(os.getenv("TRIBOS_ALLOW_INSECURE"))
 
 
 def _headers(scope: Scope) -> Dict[str, str]:
@@ -170,7 +170,7 @@ class SecurityMiddleware:
             await _send_json(
                 send, 403,
                 "Authentication is disabled, so this server only answers clients on this machine. Configure "
-                "PHRONESIS_API_TOKENS or PHRONESIS_JWT_SECRET to serve other hosts.",
+                "TRIBOS_API_TOKENS or TRIBOS_JWT_SECRET to serve other hosts.",
             )
             return
 

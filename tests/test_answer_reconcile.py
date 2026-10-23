@@ -8,8 +8,8 @@ from typing import Any, Dict, List
 
 import pytest
 
-from phronesis.agents.orchestration import verify as verify_stage
-from phronesis.verify.verifier import (
+from tribos.agents.orchestration import verify as verify_stage
+from tribos.verify.verifier import (
     COMPUTED_CONFIDENCE_NOTE,
     prefer_primary_trial_reports,
     reconcile_confidence_line,
@@ -213,7 +213,7 @@ def test_other_sentences_are_untouched():
 
 
 def test_verify_helper_keeps_text_on_failure(monkeypatch):
-    from phronesis.verify import verifier as verifier_mod
+    from tribos.verify import verifier as verifier_mod
 
     def boom(*_a: Any) -> Any:
         raise RuntimeError("x")
@@ -223,6 +223,6 @@ def test_verify_helper_keeps_text_on_failure(monkeypatch):
 
 
 def test_prompt_asks_for_the_primary_report():
-    from phronesis.agents.prompts import SYNTHESIS_SYSTEM_PROMPT
+    from tribos.agents.prompts import SYNTHESIS_SYSTEM_PROMPT
 
     assert "primary report is in <evidence>, cite that report for its results" in SYNTHESIS_SYSTEM_PROMPT

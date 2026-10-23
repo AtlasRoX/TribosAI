@@ -14,12 +14,12 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-from phronesis.agentic import config as agent_config
-from phronesis.agentic.budget import BudgetExhausted, RunBudget, RunDeadlineExceeded
-from phronesis.agentic.control import RunCancelled, RunControl
-from phronesis.agentic.llm import AgentLLM
-from phronesis.agents.orchestration.agent_rounds import generation_allocation
-from phronesis.agents.orchestration.context import RunContext
+from tribos.agentic import config as agent_config
+from tribos.agentic.budget import BudgetExhausted, RunBudget, RunDeadlineExceeded
+from tribos.agentic.control import RunCancelled, RunControl
+from tribos.agentic.llm import AgentLLM
+from tribos.agents.orchestration.agent_rounds import generation_allocation
+from tribos.agents.orchestration.context import RunContext
 from tests.agentic_fakes import collect_events, make_agentic_orchestrator
 
 QUERY = "What diseases is KRAS associated with?"
@@ -67,7 +67,7 @@ def _parallel(budget: RunBudget, n: int, phase: str = "debate") -> List[Any]:
 def test_regression_a_concurrent_calls_cannot_exceed_the_hard_budget(monkeypatch):
     """Audit F2, case A: 10,000 tokens, three concurrent calls, 1,000 exact input tokens and 2,048 reserved output
     each. The old code sent caps from the global remainder (6,952 / 3,904 / 856) and reconciled to 11,760."""
-    monkeypatch.setenv("PHRONESIS_AGENT_OUTPUT_RESERVE_TOKENS", "2048")
+    monkeypatch.setenv("TRIBOS_AGENT_OUTPUT_RESERVE_TOKENS", "2048")
     budget = RunBudget(max_tokens=10_000, max_llm_calls=40)
     results, caps = _parallel(budget, 3)
     assert all(c is not None and c <= 2_048 for c in caps), caps  # each call's own allocation is what was sent
@@ -77,7 +77,7 @@ def test_regression_a_concurrent_calls_cannot_exceed_the_hard_budget(monkeypatch
 
 def test_regression_b_optional_calls_leave_the_final_reserve_intact(monkeypatch):
     """Audit F2, case B: 3,000 tokens kept for final work; two optional calls used to reach 9,904."""
-    monkeypatch.setenv("PHRONESIS_AGENT_OUTPUT_RESERVE_TOKENS", "2048")
+    monkeypatch.setenv("TRIBOS_AGENT_OUTPUT_RESERVE_TOKENS", "2048")
     budget = RunBudget(max_tokens=10_000, max_llm_calls=40, final_reserve_tokens=3_000)
     _parallel(budget, 2)
     assert budget.tokens <= budget.max_tokens - budget.final_reserve_tokens, budget.tokens
@@ -149,7 +149,7 @@ def test_regression_f1_first_draft_is_charged_to_the_run_ledger(monkeypatch, tmp
 def test_regression_f1_no_uncharged_first_draft_after_hard_exhaustion(monkeypatch, tmp_path):
     """With the model-call budget already used up, the first draft must not call the provider: the answer is the
     deterministic evidence summary, marked as a budget stop."""
-    monkeypatch.setenv("PHRONESIS_AGENT_MAX_LLM_CALLS", "1")
+    monkeypatch.setenv("TRIBOS_AGENT_MAX_LLM_CALLS", "1")
     orch, _calls, llm = make_agentic_orchestrator(monkeypatch, tmp_path, responses={
         "decompose": '{"complex": true, "sub_questions": [{"id": "q1", "text": "What diseases is KRAS associated with?"},'
                      ' {"id": "q2", "text": "Which KRAS variants matter?"}]}',
@@ -167,7 +167,7 @@ def test_regression_f1_no_uncharged_first_draft_after_hard_exhaustion(monkeypatc
 def test_first_draft_streams_with_its_admitted_output_cap(monkeypatch, tmp_path):
     seen: List[Dict[str, Any]] = []
     orch, _calls, llm = make_agentic_orchestrator(monkeypatch, tmp_path)
-    from phronesis.agents import authoritative_orchestrator as orch_module
+    from tribos.agents import authoritative_orchestrator as orch_module
 
     def get_llm(*_a: Any, **k: Any) -> Any:
         seen.append(k)
@@ -196,7 +196,7 @@ def _run_context(budget: Optional[RunBudget] = None, control: Optional[RunContro
 
 def test_regression_f4_watched_enforces_the_run_deadline(monkeypatch):
     """Audit F4: a 0.01 s run budget around a 0.05 s call used to return "finished"."""
-    monkeypatch.setenv("PHRONESIS_PROGRESS_HEARTBEAT_S", "0")
+    monkeypatch.setenv("TRIBOS_PROGRESS_HEARTBEAT_S", "0")
     budget = RunBudget(max_seconds=0.01)
     rc = _run_context(budget, RunControl("u", interactive=False))
     with pytest.raises(RunDeadlineExceeded):
@@ -205,7 +205,7 @@ def test_regression_f4_watched_enforces_the_run_deadline(monkeypatch):
 
 
 def test_deadline_cancels_a_long_call_promptly_without_a_control(monkeypatch):
-    monkeypatch.setenv("PHRONESIS_PROGRESS_HEARTBEAT_S", "0")
+    monkeypatch.setenv("TRIBOS_PROGRESS_HEARTBEAT_S", "0")
     budget = RunBudget(max_seconds=0.2)
     rc = _run_context(budget)
     t0 = time.perf_counter()
@@ -230,8 +230,8 @@ async def _stubborn(seconds: float) -> str:
 
 
 def test_a_call_that_delays_its_cancellation_does_not_hold_the_run(monkeypatch):
-    monkeypatch.setenv("PHRONESIS_PROGRESS_HEARTBEAT_S", "0")
-    monkeypatch.setenv("PHRONESIS_CANCEL_GRACE_S", "0.2")
+    monkeypatch.setenv("TRIBOS_PROGRESS_HEARTBEAT_S", "0")
+    monkeypatch.setenv("TRIBOS_CANCEL_GRACE_S", "0.2")
     control = RunControl("u", interactive=False)
     rc = _run_context(RunBudget(), control)
 
@@ -252,7 +252,7 @@ def test_a_call_that_delays_its_cancellation_does_not_hold_the_run(monkeypatch):
 
 
 def test_a_lost_client_cancels_the_watched_call(monkeypatch):
-    monkeypatch.setenv("PHRONESIS_PROGRESS_HEARTBEAT_S", "0")
+    monkeypatch.setenv("TRIBOS_PROGRESS_HEARTBEAT_S", "0")
     rc = _run_context(RunBudget())
     inner: Dict[str, Any] = {}
 
@@ -286,7 +286,7 @@ def test_no_optional_work_starts_after_the_deadline():
 
 
 def test_stream_total_timeout_follows_the_run_deadline():
-    from phronesis.utils.llm.llm_factory import STREAM_TOTAL_TIMEOUT, stream_timeout
+    from tribos.utils.llm.llm_factory import STREAM_TOTAL_TIMEOUT, stream_timeout
 
     assert stream_timeout(None) == STREAM_TOTAL_TIMEOUT
     assert stream_timeout(12.5) == 12.5

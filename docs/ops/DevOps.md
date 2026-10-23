@@ -6,8 +6,8 @@ hide:
 
 <img src='../VPE.png' height="50" width="50"></img>
 
-# <font color=black>DevOps — Phronesis</font>
-> **Phronesis** — Made by ChronoStrider Engineering (ChronoStrider Enginnerings)<br>
+# <font color=black>DevOps — Tribos</font>
+> **Tribos** — Made by ChronoStrider Engineering<br>
 > **Version** 1.0<br>
 
 1. [Introduction](#Introduction)
@@ -20,7 +20,7 @@ hide:
 8. [Automated workflows for testing, documentation, and release](#automated-workflows-for-testing-documentation-and-release)
  
 ## Introduction
-Welcome to the DevOps guide for **Phronesis**, engineered by **ChronoStrider Engineering** (**ChronoStrider Enginnerings**)! This document serves as a guide to our team's approach to managing DevOps practices within the project. Your insights and feedback are highly encouraged 😊<br>
+Welcome to the DevOps guide for **Tribos**, engineered by **ChronoStrider Engineering** (**ChronoStrider Engineering**)! This document serves as a guide to our team's approach to managing DevOps practices within the project. Your insights and feedback are highly encouraged 😊<br>
 
 🗸 **GitHub repo creation & workflow**: A table on repo operation on GitHub<br>
 🗸 **Environment**: How to create a virtual environment for your projects.<br>
@@ -29,7 +29,7 @@ Welcome to the DevOps guide for **Phronesis**, engineered by **ChronoStrider Eng
 🗸 **Automated Workflows with GitHub Actions**: About the implementation of automated workflows using GitHub Actions, streamlining tasks such as testing, linting, code coverage, and version releases.<br>
 
 ## Feedback and Issue Reporting
-For new features or bug reports in the repositories, please submit them via [GitHub Issues](https://github.com/AtlasRoX/phronesis-CS/issues). Thanks 😊.
+For new features or bug reports in the repositories, please submit them via [GitHub Issues](https://github.com/AtlasRoX/trib/issues). Thanks 😊.
 
 ## GitHub Repo Creation Workflow
 In the table, you will find step-by-step instructions on how to fork a repo from the VPE team account to your private account, and then clone it onto your local machine for coding/development purposes.

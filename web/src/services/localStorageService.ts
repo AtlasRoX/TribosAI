@@ -1,5 +1,5 @@
 /**
- * Phronesis Local Storage Service
+ * Tribos Local Storage Service
  * Persistence for investigations (threads), chat message histories and user preferences in the browser.
  *
  * Privacy (UI-007): conversations can hold clinical details, so history is
@@ -73,11 +73,11 @@ export interface StorageNotice {
 }
 
 const STORAGE_KEYS = {
-  INVESTIGATIONS: "phronesis_investigations_v2",
-  ACTIVE_THREAD: "phronesis_active_thread_id_v2",
-  THREAD_MESSAGES_PREFIX: "phronesis_thread_messages_v2_",
-  SETTINGS: "phronesis_user_settings_v2",
-  HISTORY_PREFS: "phronesis_history_prefs_v1",
+  INVESTIGATIONS: "tribos_investigations_v2",
+  ACTIVE_THREAD: "tribos_active_thread_id_v2",
+  THREAD_MESSAGES_PREFIX: "tribos_thread_messages_v2_",
+  SETTINGS: "tribos_user_settings_v2",
+  HISTORY_PREFS: "tribos_history_prefs_v1",
 };
 
 const LEGACY_DUMMY_IDS = new Set(["thread-kras", "thread-her2", "thread-insulin", "thread-nsclc"]);
@@ -224,7 +224,7 @@ export class LocalStorageService {
     const s = this.store();
     if (!s) return false;
     try {
-      const testKey = "__phronesis_storage_test__";
+      const testKey = "__tribos_storage_test__";
       s.setItem(testKey, "1");
       s.removeItem(testKey);
       return true;
@@ -342,7 +342,7 @@ export class LocalStorageService {
       s.removeItem(STORAGE_KEYS.INVESTIGATIONS);
       s.removeItem(STORAGE_KEYS.ACTIVE_THREAD);
     } catch (e) {
-      console.warn("PhronesisLocalStorage: could not adopt history saved by an older version", e);
+      console.warn("TribosLocalStorage: could not adopt history saved by an older version", e);
     }
   }
 
@@ -390,7 +390,7 @@ export class LocalStorageService {
       }
       return [];
     } catch (e) {
-      console.warn("PhronesisLocalStorage: failed to get investigations", e);
+      console.warn("TribosLocalStorage: failed to get investigations", e);
       return [];
     }
   }
@@ -521,7 +521,7 @@ export class LocalStorageService {
       const parsed = JSON.parse(raw);
       return Array.isArray(parsed) ? parsed : [];
     } catch (e) {
-      console.warn(`PhronesisLocalStorage: failed to get messages for ${threadId}`, e);
+      console.warn(`TribosLocalStorage: failed to get messages for ${threadId}`, e);
       return [];
     }
   }
@@ -620,7 +620,7 @@ export class LocalStorageService {
         this.saveInvestigationsList(list);
       }
     } catch (e) {
-      console.warn(`PhronesisLocalStorage: failed to update the investigation record for ${threadId}`, e);
+      console.warn(`TribosLocalStorage: failed to update the investigation record for ${threadId}`, e);
     }
     return result;
   }
@@ -683,7 +683,7 @@ export class LocalStorageService {
 
       for (let i = 0; i < s.length; i++) {
         const key = s.key(i);
-        if (key && key.startsWith("phronesis_")) {
+        if (key && key.startsWith("tribos_")) {
           const val = s.getItem(key) || "";
           totalBytes += (key.length + val.length) * 2; // UTF-16 approximation
           if (key.startsWith(prefix)) {
@@ -725,7 +725,7 @@ export class LocalStorageService {
         for (let i = 0; i < s.length; i++) {
           const key = s.key(i);
           // Preferences (where/how long to keep history, model choice) are not conversation data.
-          if (key && key.startsWith("phronesis_") && key !== STORAGE_KEYS.HISTORY_PREFS && key !== STORAGE_KEYS.SETTINGS) {
+          if (key && key.startsWith("tribos_") && key !== STORAGE_KEYS.HISTORY_PREFS && key !== STORAGE_KEYS.SETTINGS) {
             keysToRemove.push(key);
           }
         }
@@ -741,7 +741,7 @@ export class LocalStorageService {
    * The investigation record stays, marked `messagesPruned` with an explanatory preview, and listeners are told.
    */
   private handleQuotaExceeded(err: unknown, pendingList?: InvestigationItem[], keep?: string): string[] {
-    console.warn("PhronesisLocalStorage: storage full, pruning the oldest thread's messages", err);
+    console.warn("TribosLocalStorage: storage full, pruning the oldest thread's messages", err);
     try {
       const list = pendingList ?? this.getInvestigations();
       if (list.length <= 3) return [];

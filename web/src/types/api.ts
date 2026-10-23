@@ -24,7 +24,7 @@ export interface ModelsResponse {
   models?: unknown[];
 }
 
-/** GET /api/memory/stats (clinical_memory.get_memory_stats). Legacy fields are optional and no longer sent. */
+/** GET /api/memory/stats (research_memory.get_memory_stats). Legacy fields are optional and no longer sent. */
 export interface MemoryStats {
   status?: string;
   db_size_kb?: number;
@@ -41,7 +41,7 @@ export interface MemoryStats {
   [k: string]: unknown;
 }
 
-/** One entity referenced in the user's memories (clinical_memory.get_entity_vault). */
+/** One entity referenced in the user's memories (research_memory.get_entity_vault). */
 export interface MemoryEntity {
   entity?: string;
   mention_count?: number;
@@ -56,7 +56,7 @@ export interface MemoryEntitiesResponse {
   count?: number;
 }
 
-/** One hit of clinical_memory.search_memory. */
+/** One hit of research_memory.search_memory. */
 export interface MemorySearchResult {
   node_id?: string;
   thread_id?: string;

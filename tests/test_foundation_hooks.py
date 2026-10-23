@@ -15,15 +15,15 @@ from typing import Any, Dict, List
 
 import pytest
 
-from phronesis.agents import authoritative_orchestrator as orch_module
-from phronesis.agents.prompts import SYNTHESIS_SYSTEM_PROMPT, build_evidence_block, get_synthesis_system_prompt
-from phronesis.agents.query_context import SourceDecision
-from phronesis.extensions import hooks
-from phronesis.verify.verifier import ClinicalVerifier
-from phronesis.provenance import run_manifest
-from phronesis.sources import CitationRecord, EvidenceSource, register_source, unregister_source
-from phronesis.tools.registry import ErrorType, ToolResult, WebSurferSearchInput
-from phronesis.utils.memory.clinical_memory import ClinicalMemoryEngine
+from tribos.agents import authoritative_orchestrator as orch_module
+from tribos.agents.prompts import SYNTHESIS_SYSTEM_PROMPT, build_evidence_block, get_synthesis_system_prompt
+from tribos.agents.query_context import SourceDecision
+from tribos.extensions import hooks
+from tribos.verify.verifier import TribosVerifier
+from tribos.provenance import run_manifest
+from tribos.sources import CitationRecord, EvidenceSource, register_source, unregister_source
+from tribos.tools.registry import ErrorType, ToolResult, WebSurferSearchInput
+from tribos.utils.memory.research_memory import ResearchMemoryEngine
 from tests.fakes import build_recording_registry, called, make_offline_orchestrator
 from tests.test_audit_regressions import api_client  # noqa: F401  (fixture)
 
@@ -218,7 +218,7 @@ async def test_evidence_source_fallback_markdown_when_model_unavailable(isolated
     orch, _ = make_offline_orchestrator(monkeypatch, tmp_path, extra_tools=_trial_tool())
     res = await orch.execute_inquiry("Which osimertinib trial records exist?", thread_id="t-fb", enable_web_search=False)
     assert f"#### Test registry\n- {NCT}" in res.response
-    assert res.response.index("#### Test registry") < res.response.index("BioDiscoveryAgent")
+    assert res.response.index("#### Test registry") < res.response.index("DiscoveryAgent")
 
 
 def _trial_result() -> Dict[str, ToolResult]:
@@ -227,7 +227,7 @@ def _trial_result() -> Dict[str, ToolResult]:
 
 # 3. Unobserved NCT ids are flagged even in hedged sentences; observed ones pass.
 def test_nct_family_is_hedge_independent():
-    v = ClinicalVerifier()
+    v = TribosVerifier()
     bad = v.verify_response("osimertinib trials", "NCT09999999 has not posted results.", _trial_result())
     flagged = [d for d in bad.defects if d.category == "IDENTIFIER" and d.claim == "NCT09999999"]
     assert flagged and flagged[0].severity.value == "CRITICAL"
@@ -239,7 +239,7 @@ def test_nct_family_is_hedge_independent():
 
 # 4. Context identifiers are accepted; unknown ChEMBL ids are flagged.
 def test_context_identifiers_accept_chembl():
-    report = ClinicalVerifier().verify_response(
+    report = TribosVerifier().verify_response(
         "sotorasib potency",
         "Sotorasib is CHEMBL4535757; CHEMBL9999999 is something else.",
         {},
@@ -252,7 +252,7 @@ def test_context_identifiers_accept_chembl():
 
 # 5. An identifier the researcher typed is observed.
 def test_user_typed_rsid_passes():
-    report = ClinicalVerifier().verify_response(
+    report = TribosVerifier().verify_response(
         "Is rs113488022 relevant in melanoma?", "rs113488022 was named in the question; no evidence was retrieved.", {}
     )
     assert not [d for d in report.defects if d.category == "IDENTIFIER"]
@@ -263,7 +263,7 @@ def test_identifier_veto_beats_history(isolated):
     hooks.register_identifier_veto(
         "test", lambda tr: {"pmids": {"9500320": "PMID 9500320 is retracted (test veto)."}}
     )
-    report = ClinicalVerifier().verify_response(
+    report = TribosVerifier().verify_response(
         "MMR vaccine autism", "Lithoscribe retrieved PMID: 9500320.", {}, historical_identifiers={"pmids": {"9500320"}}
     )
     retracted = [d for d in report.defects if d.category == "RETRACTED_CITATION"]
@@ -282,9 +282,9 @@ def test_serialization_filter_hides_excluded_doi(isolated):
         )
     }
     text = f"See DOI {doi}."
-    assert not [d for d in ClinicalVerifier().verify_response("q doi", text, tool_results).defects if d.category == "CITATION"]
+    assert not [d for d in TribosVerifier().verify_response("q doi", text, tool_results).defects if d.category == "CITATION"]
     hooks.register_serialization_filter("drop", lambda key, data: {k: v for k, v in data.items() if k != "excluded"})
-    report = ClinicalVerifier().verify_response("q doi", text, tool_results)
+    report = TribosVerifier().verify_response("q doi", text, tool_results)
     assert [d for d in report.defects if d.category == "CITATION"]
     assert tool_results["lithoscribe"].data["excluded"] == {"doi": doi}  # the filter worked on a copy
 
@@ -309,7 +309,7 @@ def test_evidence_doc_provider_and_claim_support(isolated):
         f"{NCT} was a phase 1 trial assessing the effect of itraconazole on AZD9291 pharmacokinetics.\n\n"
         f"| NCT ID | Phase |\n|---|---|\n| {NCT} | PHASE1 |"
     )
-    report = ClinicalVerifier().verify_response("itraconazole AZD9291", response, _trial_result())
+    report = TribosVerifier().verify_response("itraconazole AZD9291", response, _trial_result())
     assert seen["keys"] == [f"NCT:{NCT}"]
     assert seen["table_rows"] == ["| NCT ID | Phase |", f"| {NCT} | PHASE1 |"]
     assert report.claim_support and report.claim_support[0]["evidence_key"] == f"NCT:{NCT}"
@@ -321,7 +321,7 @@ def test_registered_check_defects_are_scored(isolated):
         "always", lambda vctx: [{"category": "NUMERICAL", "severity": "CRITICAL", "description": "d", "suggested_correction": "s", "claim": "c"}]
     )
     hooks.register_verification_check("broken", lambda vctx: 1 / 0)
-    report = ClinicalVerifier().verify_response("Mos simulation", "Mos simulation answered.", {})
+    report = TribosVerifier().verify_response("Mos simulation", "Mos simulation answered.", {})
     assert [d for d in report.defects if d.category == "NUMERICAL" and d.claim == "c"]
     assert report.passed is False
 
@@ -333,7 +333,7 @@ def test_synthesis_system_prompt_composition(isolated):
     hooks.register_prompt_rule("r1", "First test rule.")
     hooks.register_prompt_rule("r2", "Second test rule.")
     prompt = get_synthesis_system_prompt()
-    assert "- BioDiscovery: an evidence-weighted hypothesis ranking computed from the outputs above\n- Lithoscribe also searches a test registry\n" in prompt
+    assert "- Discovery: an evidence-weighted hypothesis ranking computed from the outputs above\n- Lithoscribe also searches a test registry\n" in prompt
     assert "</grounding_rules>\n\n<additional_rules>\n9. First test rule.\n10. Second test rule.\n</additional_rules>\n" in prompt
     for word in ("openai", "nvidia", "langgraph"):
         assert word not in prompt.lower()
@@ -380,7 +380,7 @@ async def test_result_fields_default(monkeypatch, tmp_path):
     # The offline fallback answer cites only identifiers present in the fake tool outputs.
     assert isinstance(res.citations, dict)
     assert set(res.citations.get("entries", {})) <= {"KEGG:hsa04010", "ENSG:ENSG00000133703", "PMID:123456"}
-    assert res.run_manifest["schema_version"] == "phronesis.run_manifest/1" and res.run_manifest["tool_calls"]
+    assert res.run_manifest["schema_version"] == "tribos.run_manifest/1" and res.run_manifest["tool_calls"]
     assert isinstance(res.query_context, dict) and res.query_context["primary_target"] == "KRAS"
     json.dumps(res.to_dict())
     casual = await orch.execute_inquiry("hello", thread_id="t-hi", enable_web_search=False)
@@ -449,7 +449,7 @@ async def test_recorder_noop_and_registry_reporting(monkeypatch):
         assert (await reg.execute("websurfer_search", query="heat equation")).success
         # record_tool_call was monkeypatched for every call, so nothing reached the recorder.
         m = await rec.finalize(response="r", duration=1.0)
-        assert m["schema_version"] == "phronesis.run_manifest/1" and m["tool_calls"] == []
+        assert m["schema_version"] == "tribos.run_manifest/1" and m["tool_calls"] == []
         assert m["response_sha256"] == hashlib.sha256(b"r").hexdigest()
     finally:
         run_manifest.reset_recorder(token)
@@ -458,14 +458,14 @@ async def test_recorder_noop_and_registry_reporting(monkeypatch):
 
 # 13. Memory harvests identifier families.
 def test_memory_collects_family_identifiers():
-    ids = ClinicalMemoryEngine.collect_identifiers(_trial_data())
+    ids = ResearchMemoryEngine.collect_identifiers(_trial_data())
     assert ids["nct"] == [NCT]
     assert {"biomodels", "pmids", "dois", "ensembl", "uniprot", "chembl", "rsid"} <= set(ids)
 
 
 @pytest.mark.asyncio
 async def test_memory_history_returns_family_identifiers(tmp_path):
-    mem = ClinicalMemoryEngine(storage_dir=str(tmp_path))
+    mem = ResearchMemoryEngine(storage_dir=str(tmp_path))
     await mem.consolidate_turn("t", "q", "r", {"lithoscribe_trials": _trial_data()}, is_turn_verified=True)
     assert NCT in mem.get_verified_identifiers("t")["nct"]
 
@@ -481,8 +481,8 @@ def test_chat_rejects_bad_dataset_id(api_client):  # noqa: F811
 
 
 def test_source_run_state_shares_one_task():
-    from phronesis.agents.query_context import QueryContext
-    from phronesis.sources import SourceRunState
+    from tribos.agents.query_context import QueryContext
+    from tribos.sources import SourceRunState
 
     async def main():
         state = SourceRunState(None, QueryContext(raw_query="q", clean_query="q"))

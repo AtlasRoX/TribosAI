@@ -1,21 +1,21 @@
-"""The one sentence splitter (phronesis.utils.text.sentence_spans) and the one source-name registry
-(phronesis.sources.names), and the call sites that now use them."""
+"""The one sentence splitter (tribos.utils.text.sentence_spans) and the one source-name registry
+(tribos.sources.names), and the call sites that now use them."""
 
 from __future__ import annotations
 
 from types import SimpleNamespace
 
-from phronesis.agentic import approval, nli
-from phronesis.agentic.counter_evidence import _sentences as counter_sentences
-from phronesis.agentic.gaps import hedged_sentences
-from phronesis.agents import citations
-from phronesis.evals import scoring
-from phronesis.export.report_model import _reproducibility
-from phronesis.lithoscribe.synthesis_engine import _section_sentences
-from phronesis.verify import verifier
-from phronesis.sources import names
-from phronesis.utils import text
-from phronesis.utils.memory.clinical_memory import classify_instructions
+from tribos.agentic import approval, nli
+from tribos.agentic.counter_evidence import _sentences as counter_sentences
+from tribos.agentic.gaps import hedged_sentences
+from tribos.agents import citations
+from tribos.evals import scoring
+from tribos.export.report_model import _reproducibility
+from tribos.lithoscribe.synthesis_engine import _section_sentences
+from tribos.verify import verifier
+from tribos.sources import names
+from tribos.utils import text
+from tribos.utils.memory.research_memory import classify_instructions
 
 
 def _cut(t: str):
@@ -42,7 +42,7 @@ def test_sentence_spans_abbreviations_newlines_and_tables():
 
 def test_verifier_split_sentences_matches_spans():
     t = "KRAS G12C is common. Sotorasib (e.g. in CodeBreaK) works.\n- A bullet."
-    assert verifier.ClinicalVerifier._split_sentences(t) == [s.strip() for s in _cut(t)]
+    assert verifier.TribosVerifier._split_sentences(t) == [s.strip() for s in _cut(t)]
 
 
 def test_nli_split_sentences_uses_shared_splitter():

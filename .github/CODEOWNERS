@@ -5,11 +5,11 @@
 # * @gurdeep330
 
 # Specific module owners
-# /phronesis/vivarix/ @gurdeep330
-# /phronesis/lithoscribe/ @gurdeep330
-# /phronesis/lumicell/ @gurdeep330
-# /phronesis/synapta/ @gurdeep330
-# /phronesis/phronesis/ @gurdeep330
+# /tribos/vivarix/ @gurdeep330
+# /tribos/lithoscribe/ @gurdeep330
+# /tribos/lumicell/ @gurdeep330
+# /tribos/synapta/ @gurdeep330
+# /tribos/tribos/ @gurdeep330
 
 # CI/CD and configuration
 # /.github/ @gurdeep330

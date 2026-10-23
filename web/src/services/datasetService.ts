@@ -10,7 +10,7 @@ export const ACCEPTED_EXTENSIONS = [".h5ad", ".csv", ".tsv", ".xml", ".sbml"] as
 export const ACCEPT_ATTR = ACCEPTED_EXTENSIONS.join(",");
 
 const MB = 1024 * 1024;
-// Server defaults (PHRONESIS_UPLOAD_MAX_MB_*); the server re-checks every upload.
+// Server defaults (TRIBOS_UPLOAD_MAX_MB_*); the server re-checks every upload.
 export const CLIENT_SIZE_LIMITS: Record<DatasetKind, number> = { h5ad: 500 * MB, table: 100 * MB, sbml: 10 * MB };
 
 export class DatasetApiError extends ApiError {

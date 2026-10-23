@@ -1,4 +1,4 @@
-"""Evidence-integrity regressions from the KRAS G12C run review (Phronesis_Run_Analysis_and_Claude_Code_Fix_Prompt.md,
+"""Evidence-integrity regressions from the KRAS G12C run review (Tribos_Run_Analysis_and_Claude_Code_Fix_Prompt.md,
 findings E1-E3, E6): which evidence may support which claim, disease context, figure matching and regimen labels.
 
 Offline: the verifier is exercised directly with hand-built tool results. Hand-built passages are parser and policy
@@ -10,10 +10,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from phronesis.verify import verifier as vmod
-from phronesis.verify.verifier import ClaimRecord, ClinicalVerifier, VerificationReport
-from phronesis.tools.registry import ToolResult
-from phronesis.utils.text import fold_typography, fold_typography_with_map
+from tribos.verify import verifier as vmod
+from tribos.verify.verifier import ClaimRecord, TribosVerifier, VerificationReport
+from tribos.tools.registry import ToolResult
+from tribos.utils.text import fold_typography, fold_typography_with_map
 
 Q = "KRAS G12C inhibitors in NSCLC and colorectal cancer: FDA-approved indications and clinical evidence"
 
@@ -51,7 +51,7 @@ def web(url: str, title: str) -> ToolResult:
 
 
 def test_simulation_and_target_association_cannot_support_an_approval_claim():
-    report = ClinicalVerifier().verify_response(Q, APPROVAL, {"vivarix": SIMULATION, "synapta": ASSOCIATION})
+    report = TribosVerifier().verify_response(Q, APPROVAL, {"vivarix": SIMULATION, "synapta": ASSOCIATION})
     c = claim_for(report, "accelerated approval")
     assert c.status == "unsupported" and "no FDA label or approval record" in c.reason
     assert not any(e.source_key in ("tool:vivarix", "tool:synapta") for e in c.evidence)
@@ -61,21 +61,21 @@ def test_simulation_and_target_association_cannot_support_an_approval_claim():
 def test_an_fda_gov_page_or_openfda_record_supports_the_approval_claim():
     fda_page = web("https://www.fda.gov/drugs/resources-information-approved-drugs/fda-grants-accelerated-approval-sotorasib",
                    "FDA grants accelerated approval to sotorasib for KRAS G12C-mutated NSCLC")
-    report = ClinicalVerifier().verify_response(Q, APPROVAL, {"synapta": ASSOCIATION, "websurfer": fda_page})
+    report = TribosVerifier().verify_response(Q, APPROVAL, {"synapta": ASSOCIATION, "websurfer": fda_page})
     c = claim_for(report, "accelerated approval")
     assert c.status == "supported" and c.evidence[0].source_key == "tool:websurfer"
 
     openfda = tool("openfda_drug_safety", {"drugs": [{"ingredient": "sotorasib", "approval": {
         "application_number": "NDA214665", "approval_type": "accelerated approval",
         "indication": "KRAS G12C-mutated locally advanced or metastatic NSCLC"}}]})
-    report = ClinicalVerifier().verify_response(Q, APPROVAL, {"vivarix": SIMULATION, "agent.plan.3.openfda": openfda})
+    report = TribosVerifier().verify_response(Q, APPROVAL, {"vivarix": SIMULATION, "agent.plan.3.openfda": openfda})
     assert claim_for(report, "accelerated approval").status == "supported"
 
 
 def test_a_manufacturer_press_release_is_not_an_fda_record():
     release = web("https://www.amgen.com/newsroom/press-releases/2021/05/sotorasib-approval",
                   "Amgen announces FDA accelerated approval of sotorasib for KRAS G12C NSCLC")
-    report = ClinicalVerifier().verify_response(Q, APPROVAL, {"websurfer": release})
+    report = TribosVerifier().verify_response(Q, APPROVAL, {"websurfer": release})
     assert claim_for(report, "accelerated approval").status == "unsupported"
 
 
@@ -83,7 +83,7 @@ def test_trial_paper_cited_for_an_approval_is_not_enough():
     paper = lit([{"pmid": "42636835", "passage_id": "p1", "title": "Ifebemtinib plus garsorasib in KRAS G12C colorectal cancer",
                   "passage_text": "Garsorasib received accelerated approval for KRAS G12C-mutated NSCLC in China."}])
     answer = "Garsorasib received accelerated approval for KRAS G12C-mutated NSCLC (PMID: 42636835)."
-    report = ClinicalVerifier().verify_response(Q, answer, {"lit": paper})
+    report = TribosVerifier().verify_response(Q, answer, {"lit": paper})
     assert claim_for(report, "accelerated approval").status == "unsupported"
 
 
@@ -91,7 +91,7 @@ def test_simulation_cannot_support_a_patient_outcome_claim():
     sim = tool("vivarix_simulate_time_course", {"model_name": "sotorasib docetaxel survival model",
                                                  "description": "sotorasib docetaxel overall survival response"})
     answer = "Sotorasib improved the objective response rate over docetaxel in pretreated patients."
-    report = ClinicalVerifier().verify_response(Q, answer, {"vivarix": sim})
+    report = TribosVerifier().verify_response(Q, answer, {"vivarix": sim})
     c = claim_for(report, "objective response rate")
     assert c.status == "unsupported" and "simulation and target-association outputs" in c.reason
 
@@ -99,10 +99,10 @@ def test_simulation_cannot_support_a_patient_outcome_claim():
 def test_bare_years_in_an_approvals_table_are_not_species_concentrations():
     sim = tool("vivarix_simulate_time_course", {"final_concentrations": {"KRAS": 5.0}, "initial_concentrations": {"KRAS": 1.0}})
     answer = "| Target | First approval year |\n|---|---|\n| KRAS | 2021 |\n"
-    report = ClinicalVerifier().verify_response(Q, answer, {"vivarix": sim})
+    report = TribosVerifier().verify_response(Q, answer, {"vivarix": sim})
     assert "NUMERICAL" not in categories(report)
     sim_table = "| Species | Final (nmol) |\n|---|---|\n| KRAS | 9.0 |\n"
-    assert "NUMERICAL" in categories(ClinicalVerifier().verify_response(Q, sim_table, {"vivarix": sim}))
+    assert "NUMERICAL" in categories(TribosVerifier().verify_response(Q, sim_table, {"vivarix": sim}))
 
 
 # Cited source that does not support the claim -----------------------------------------------------------------
@@ -114,14 +114,14 @@ def test_support_from_another_paper_than_the_cited_one_is_recorded():
          "passage_text": "Adagrasib produced an objective response rate of 42.9% in pretreated KRAS G12C NSCLC."},
     ])
     answer = "Adagrasib produced an objective response rate of 42.9% in pretreated KRAS G12C NSCLC (PMID: 111)."
-    report = ClinicalVerifier().verify_response(Q, answer, {"lit": passages})
+    report = TribosVerifier().verify_response(Q, answer, {"lit": passages})
     c = claim_for(report, "42.9%")
     assert c.status == "supported" and c.evidence[0].source_key == "PMID:222"
     assert c.cited_source_supported is False and "not by the cited PMID:111" in c.reason
     assert "CITATION_MISMATCH" in categories(report)
 
     right = answer.replace("PMID: 111", "PMID: 222")
-    report = ClinicalVerifier().verify_response(Q, right, {"lit": passages})
+    report = TribosVerifier().verify_response(Q, right, {"lit": passages})
     assert claim_for(report, "42.9%").cited_source_supported is True and "CITATION_MISMATCH" not in categories(report)
 
 
@@ -136,7 +136,7 @@ NSCLC_PAPER = {
 
 def test_an_nsclc_paper_cannot_support_a_crc_claim_even_when_the_question_covers_both():
     answer = "In colorectal cancer, KRAS mutations confer resistance to gefitinib and erlotinib (PMID: 00000004)."
-    report = ClinicalVerifier().verify_response(Q, answer, {"lit": lit([NSCLC_PAPER])})
+    report = TribosVerifier().verify_response(Q, answer, {"lit": lit([NSCLC_PAPER])})
     assert claim_for(report, "gefitinib").status == "unsupported"
     defect = next(d for d in report.defects if d.category == "POPULATION_MISMATCH")
     assert "lung cancer study" in defect.description and "colorectal cancer" in defect.description
@@ -144,17 +144,17 @@ def test_an_nsclc_paper_cannot_support_a_crc_claim_even_when_the_question_covers
 
 def test_correct_numbers_in_the_wrong_disease_fail_and_in_the_right_disease_pass():
     wrong = "In colorectal cancer, the objective response rate to erlotinib was 5.0% in KRAS-mutant tumours (PMID: 00000004)."
-    report = ClinicalVerifier().verify_response(Q, wrong, {"lit": lit([NSCLC_PAPER])})
+    report = TribosVerifier().verify_response(Q, wrong, {"lit": lit([NSCLC_PAPER])})
     assert claim_for(report, "5.0%").status == "unsupported" and "POPULATION_MISMATCH" in categories(report)
     right = wrong.replace("In colorectal cancer", "In advanced NSCLC")
-    report = ClinicalVerifier().verify_response(Q, right, {"lit": lit([NSCLC_PAPER])})
+    report = TribosVerifier().verify_response(Q, right, {"lit": lit([NSCLC_PAPER])})
     assert claim_for(report, "5.0%").status == "supported" and "POPULATION_MISMATCH" not in categories(report)
 
 
 def test_a_source_that_also_discusses_the_claims_disease_is_accepted():
     both = dict(NSCLC_PAPER, passage_text=NSCLC_PAPER["passage_text"] + " Similar resistance is reported in colorectal cancer.")
     answer = "In colorectal cancer, KRAS mutations confer resistance to gefitinib and erlotinib (PMID: 00000004)."
-    report = ClinicalVerifier().verify_response(Q, answer, {"lit": lit([both])})
+    report = TribosVerifier().verify_response(Q, answer, {"lit": lit([both])})
     assert "POPULATION_MISMATCH" not in categories(report)
 
 
@@ -176,17 +176,17 @@ SYNTHETIC_CLAIM = (
 
 
 def test_lancet_style_middle_dot_values_are_supported():
-    report = ClinicalVerifier().verify_response(Q, SYNTHETIC_CLAIM, {"lit": lit([SYNTHETIC_ABSTRACT])})
+    report = TribosVerifier().verify_response(Q, SYNTHETIC_CLAIM, {"lit": lit([SYNTHETIC_ABSTRACT])})
     c = claim_for(report, "10.2 months")
     assert c.status == "supported", c.reason
     assert c.cited_source_supported is True
 
 
 def test_both_arm_sizes_are_checked():
-    metrics = ClinicalVerifier._claim_metrics("N=102/164")
+    metrics = TribosVerifier._claim_metrics("N=102/164")
     assert sorted(m.value for m in metrics if m.kind == "n") == [102.0, 164.0]
     wrong = SYNTHETIC_CLAIM.replace("N=102/164", "N=102/170")
-    report = ClinicalVerifier().verify_response(Q, wrong, {"lit": lit([SYNTHETIC_ABSTRACT])})
+    report = TribosVerifier().verify_response(Q, wrong, {"lit": lit([SYNTHETIC_ABSTRACT])})
     assert claim_for(report, "10.2 months").status == "unsupported"
 
 
@@ -198,12 +198,12 @@ def test_figures_split_across_two_passages_of_one_article_are_supported():
          "passage_text": "For sotorasib versus docetaxel the hazard ratio for death was 1.02 (95% CI 0.75-1.38)."},
     ])
     answer = "Median overall survival was 10.2 months with sotorasib versus docetaxel (HR 1.02, 95% CI 0.75-1.38) (PMID: 5)."
-    report = ClinicalVerifier().verify_response(Q, answer, {"lit": passages})
+    report = TribosVerifier().verify_response(Q, answer, {"lit": passages})
     assert claim_for(report, "10.2 months").status == "supported"
     # Passages of a different article never pool with this one.
     other = lit([dict(passages.data["ranked_passages"][0]),
                  dict(passages.data["ranked_passages"][1], pmid="6")])
-    report = ClinicalVerifier().verify_response(Q, answer, {"lit": other})
+    report = TribosVerifier().verify_response(Q, answer, {"lit": other})
     assert claim_for(report, "10.2 months").status == "unsupported"
 
 
@@ -211,7 +211,7 @@ def test_unit_written_once_after_an_interval_or_a_comparator():
     assert vmod.attach_units("10.2 (95% ci 8.1-12.0) months") == "10.2 months (95% ci 8.1-12.0)"
     assert vmod.attach_units("10.2 vs 8.1 months") == "10.2 months vs 8.1 months"
     doc = vmod._Doc("PMID:7", "median overall survival with sotorasib was 10.2 (95% ci 8.1-12.0) months.", None, "")
-    report_status = ClinicalVerifier()._clinical_verdict(
+    report_status = TribosVerifier()._clinical_verdict(
         "Median overall survival with sotorasib was 10.2 months (PMID: 7).", {"PMID:7"}, [doc]
     )
     assert report_status[0] == "supported"

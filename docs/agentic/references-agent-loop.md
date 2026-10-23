@@ -1,4 +1,4 @@
-# Phronesis agentic features: verified literature (agent loop and reasoning)
+# Tribos agentic features: verified literature (agent loop and reasoning)
 
 Every paper below was checked against its arXiv abstract or HTML page, an official proceedings page (PMLR, ICLR, ACL Anthology), or the bioRxiv PDF. Specific numbers (thresholds, prompts, counts) were read from the paper's full text, not just the abstract. Details marked "(confirm in PDF)" come from the paper body and were not re-read in this session. Check those before hard-coding them.
 
@@ -48,7 +48,7 @@ Every paper below was checked against its arXiv abstract or HTML page, an offici
     - **Ambiguous:** otherwise. Combine both sources.
     - Example thresholds: PopQA (0.59, -0.99); PubHealth (0.5, -0.91).
     - Decompose-then-recompose: split documents into strips, filter strips scoring below -0.5, keep the top 5, and concatenate them in order.
-  - In Phronesis, swap web search for a reformulated EuropePMC query.
+  - In Tribos, swap web search for a reformulated EuropePMC query.
   - Verified via: https://arxiv.org/html/2401.15884
 
 - **Language agents achieve superhuman synthesis of scientific knowledge (PaperQA2)**: Michael D. Skarlinski et al., 2024, arXiv preprint. arXiv:2409.13740. https://arxiv.org/abs/2409.13740
@@ -77,7 +77,7 @@ Every paper below was checked against its arXiv abstract or HTML page, an offici
   - Verified via: https://arxiv.org/abs/2210.03350
 
 - **Decomposed Prompting: A Modular Approach for Solving Complex Tasks**: Tushar Khot et al., 2022, ICLR 2023. arXiv:2210.02406. https://arxiv.org/abs/2210.02406
-  - Technique to borrow: a decomposer prompt sends sub-tasks to a library of sub-task handlers. Each handler can be another prompt, a further decomposition, a trained model or a symbolic function. Long inputs can be reduced recursively. This matches routing sub-questions to typed Phronesis tools (ChEMBL lookup, COPASI simulation, Scanpy analysis).
+  - Technique to borrow: a decomposer prompt sends sub-tasks to a library of sub-task handlers. Each handler can be another prompt, a further decomposition, a trained model or a symbolic function. Long inputs can be reduced recursively. This matches routing sub-questions to typed Tribos tools (ChEMBL lookup, COPASI simulation, Scanpy analysis).
   - Verified via: https://arxiv.org/abs/2210.02406
 
 ---
@@ -141,7 +141,7 @@ Every paper below was checked against its arXiv abstract or HTML page, an offici
     - Meta-review feedback is appended to the other agents' prompts. This gives test-time improvement without fine-tuning.
   - Verified via: https://arxiv.org/abs/2502.18864 and https://arxiv.org/html/2502.18864v1
 
-- **BioDiscoveryAgent: An AI Agent for Designing Genetic Perturbation Experiments**: Yusuf Roohani et al., 2024, ICLR 2025. arXiv:2405.17631. https://arxiv.org/abs/2405.17631
+- **DiscoveryAgent: An AI Agent for Designing Genetic Perturbation Experiments**: Yusuf Roohani et al., 2024, ICLR 2025. arXiv:2405.17631. https://arxiv.org/abs/2405.17631
   - Technique to borrow: a closed-loop experiment design.
     - Each round the prompt holds the research problem, the measurement definition, results from previous rounds and an exclusion list ("Do not include any genes from this prompt (since they're already tested)").
     - The agent returns a Reflection, a Research Plan (at most 5 sentences) and a Solution (a batch of 128 genes, or 32 for small screens). Invalid or repeated genes trigger re-prompting.

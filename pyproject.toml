@@ -3,8 +3,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "phronesis"
-description = "AI Agents for drug discovery, drug development, and other pharmaceutical R&D."
+name = "tribos"
+description = "Engineering and scientific R&D assistant for mathematics, physics and engineering."
 readme = "README.md"
 requires-python = ">=3.12"
 classifiers = [
@@ -14,68 +14,41 @@ classifiers = [
 ]
 dependencies = [
   "anndata==0.12.2",
-  "cell2sentence==1.1.0",
   "copasi_basico==0.84",
-  "einops==0.8.1",
   "fastapi==0.143.0",
   "uvicorn==0.54.0",
-  "gdown==5.2.0",
-  "gravis==0.1.0",
-  "gseapy==1.1.10",
   "h5py==3.14.0",
   "httpx==0.28.1",
   "huggingface_hub==0.34.4",
   "hydra-core==1.3.2",
-  "igraph==0.11.9",
-  "joblib==1.5.2",
   "langchain==0.3.7",
   "langchain-community==0.3.5",
   "langchain-core==0.3.40",
   "langchain-experimental==0.3.4",
-  "langchain-milvus==0.2.1",
-  "langchain-nvidia-ai-endpoints==0.3.9",
   "langchain-openai==0.3.0",
-  "langchain_ollama==0.2.3",
   "langgraph==0.3.34",
-  "langgraph_supervisor==0.0.9",
   "matplotlib==3.10.6",
-  "nbformat==5.10.4",
+  "mpmath==1.3.0",
+  "networkx==3.5",
   "numpy==1.26.4",
-  "ollama==0.4.7",
   "openai==1.59.6",
   "openpyxl==3.1.5",
   "pandas==2.3.3",
-  "pcst_fast==1.0.10",
-  "plotly==6.3.0",
-  "plotly-express==0.4.1",
-  "pubchempy==1.0.5",
+  "pint==0.26.2",
   "pydantic==2.11.9",
   "PyJWT==2.10.1",
-  "pygeneconverter==0.3",
-  "pymilvus==2.6.2",
   "pypdf==6.1.1",
-  "pyzotero==1.6.16",
   "requests==2.32.5",
-  "scanpy==1.11.4",
   "scipy==1.16.2",
-  "seaborn==0.13.2",
   "sentence_transformers==3.3.1",
-  "streamlit==1.50.0",
-  "streamlit-feedback==0.1.4",
+  "sympy==1.14.0",
   "tabulate==0.9.0",
   "torch==2.8.0",
-  "torch_geometric==2.6.1",
   "tqdm==4.67.1",
   "transformers==4.55.2",
-  "umap-learn==0.5.9.post2",
   "xlsxwriter==3.2.9",
-  "python-magic==0.4.27",
   "pyarrow==21.0.0",
-  "datasets==4.1.1",
   "beautifulsoup4==4.14.2",
-  "cloudscraper==1.2.71",
-  "azure-identity==1.25.0",
-  "duckduckgo-search==8.1.1",
   "python-multipart==0.0.32",
   "python-docx==1.2.0",
   "fpdf2==2.8.9",
@@ -84,8 +57,7 @@ dependencies = [
 version = "1.49.1"
 
 [project.scripts]
-phronesis-eval = "phronesis.evals.cli:main"
-phronesis-primekg = "phronesis.kgintel.cli:main"
+tribos-eval = "tribos.evals.cli:main"
 
 [project.optional-dependencies]
 dev = [
@@ -108,7 +80,6 @@ dev = [
 docs = [
   "mkdocs==1.6.1",
   "mkdocs-include-markdown-plugin==7.2.0",
-  "mkdocs-jupyter==0.25.1",
   "mkdocs-material==9.6.21",
   "mkdocstrings==0.30.1",
   "mkdocstrings-python==1.18.2",
@@ -136,11 +107,11 @@ ignore_merge_commits = true
 
 
 [tool.hatch.build.targets.wheel]
-packages = ["phronesis"]
+packages = ["tribos"]
 exclude = [
-  "phronesis/synapta/tests/files",
-  "phronesis/synapta/tests/files/**/*",
-  "phronesis/**/tests/files/**/*",
+  "tribos/synapta/tests/files",
+  "tribos/synapta/tests/files/**/*",
+  "tribos/**/tests/files/**/*",
   "dist/*",
   ".venv/*",
   "node_modules/*",
@@ -149,9 +120,9 @@ exclude = [
 
 [tool.hatch.build.targets.sdist]
 exclude = [
-  "phronesis/synapta/tests/files",
-  "phronesis/synapta/tests/files/**/*",
-  "phronesis/**/tests/files/**/*",
+  "tribos/synapta/tests/files",
+  "tribos/synapta/tests/files/**/*",
+  "tribos/**/tests/files/**/*",
   "dist/*",
   ".venv/*",
   "node_modules/*",
@@ -163,7 +134,7 @@ testpaths = ["tests"]
 markers = [
   "integration: marks tests as integration tests",
   "unit_mock: marks tests that are fully mocked and avoid external resources",
-  "network: calls live upstream APIs or the configured LLM; skipped unless PHRONESIS_LIVE_TESTS=1",
+  "network: calls live upstream APIs or the configured LLM; skipped unless TRIBOS_LIVE_TESTS=1",
   "live: end-to-end against a running backend or real model; run only on demand",
   "slow: takes more than a few seconds offline; deselect with -m 'not slow'",
 ]
@@ -240,7 +211,7 @@ skips = [
 skips = ["*_test.py", "*/test_*.py"]
 
 [tool.coverage.run]
-source = ["phronesis"]
+source = ["tribos"]
 omit = ["*/tests/*", "*/test_*", "docs/*", "app/*"]
 
 [tool.coverage.report]

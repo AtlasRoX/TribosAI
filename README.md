@@ -1,23 +1,23 @@
-# Phronesis
+# Tribos
 
-> **Phronesis** — Biomedical Research Assistant for Clinical and Translational R&D  
-> **Made by ChronoStrider Engineering (ChronoStrider Enginnerings)**
+> **Tribos** — Biomedical Research Assistant for Clinical and Translational R&D  
+> **Made by ChronoStrider Engineering**
 
-[![Tests](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/tests_phronesis.yml/badge.svg)](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/tests_phronesis.yml)
-[![Web](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/tests_web.yml/badge.svg)](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/tests_web.yml)
-[![Evals](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/evals.yml/badge.svg)](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/evals.yml)
-[![Docs](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/mkdocs_deploy.yml/badge.svg)](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/mkdocs_deploy.yml)
+[![Tests](https://github.com/AtlasRoX/trib/actions/workflows/tests_tribos.yml/badge.svg)](https://github.com/AtlasRoX/trib/actions/workflows/tests_tribos.yml)
+[![Web](https://github.com/AtlasRoX/trib/actions/workflows/tests_web.yml/badge.svg)](https://github.com/AtlasRoX/trib/actions/workflows/tests_web.yml)
+[![Evals](https://github.com/AtlasRoX/trib/actions/workflows/evals.yml/badge.svg)](https://github.com/AtlasRoX/trib/actions/workflows/evals.yml)
+[![Docs](https://github.com/AtlasRoX/trib/actions/workflows/mkdocs_deploy.yml/badge.svg)](https://github.com/AtlasRoX/trib/actions/workflows/mkdocs_deploy.yml)
 
-Phronesis is an advanced research assistant for clinical and translational R&D, created and engineered by **ChronoStrider Engineering** (**ChronoStrider Enginnerings**). It answers questions about targets,
+Tribos is an advanced research assistant for clinical and translational R&D, created and engineered by **ChronoStrider Engineering** (**ChronoStrider Engineering**). It answers questions about targets,
 drugs, trials, variants and pathways by planning tool calls across public biomedical sources, then writing
 an answer whose claims are checked against the evidence it retrieved and cited inline (PMIDs, NCT ids, ChEMBL
 ids, FDA application numbers, DrugBank ids).
 
 The stack:
 
-- **Backend:** FastAPI (`app/backend/main.py`), with the orchestrator, tools and verifier in `phronesis/`.
+- **Backend:** FastAPI (`app/backend/main.py`), with the orchestrator, tools and verifier in `tribos/`.
 - **Web app:** Next.js (`web/`).
-- **Specialist agents** (`phronesis/`):
+- **Specialist agents** (`tribos/`):
   - Vivarix: systems-biology models through COPASI/BioModels.
   - Synapta: knowledge graphs, including the full PrimeKG.
   - Lithoscribe: literature.
@@ -26,7 +26,7 @@ The stack:
 
 ## Agent modes
 
-Choose a mode per request with `framework`, or set a default with `PHRONESIS_DEFAULT_FRAMEWORK`.
+Choose a mode per request with `framework`, or set a default with `TRIBOS_DEFAULT_FRAMEWORK`.
 `GET /api/frameworks` lists the modes.
 
 | Mode | `framework` | What it does |
@@ -43,7 +43,7 @@ All modes share:
 - human-in-the-loop controls: clarifying questions, plan approval, steering and cancelling a run;
 - background jobs you can reattach to;
 - project memory;
-- an opt-in code-analysis sandbox (`PHRONESIS_SANDBOX=on`);
+- an opt-in code-analysis sandbox (`TRIBOS_SANDBOX=on`);
 - an MCP server (`POST /mcp`) and an A2A endpoint (`/.well-known/agent-card.json`).
 
 [docs/agentic/README.md](docs/agentic/README.md) indexes the features against their papers and documents the
@@ -59,14 +59,14 @@ API.
 | Chemistry and pharmacology | ChEMBL, DGIdb, Pharos, BindingDB, PubChem |
 | Pathways and networks | KEGG, Reactome, STRING, SynLethDB (local file), PrimeKG (local build) |
 | Structure | AlphaFold DB, PDB |
-| Optional | DepMap gene effect (local file, `PHRONESIS_DEPMAP_DIR`); Tavily web search (`TAVILY_API_KEY`) |
+| Optional | DepMap gene effect (local file, `TRIBOS_DEPMAP_DIR`); Tavily web search (`TAVILY_API_KEY`) |
 
 The local-file sources are skipped, with a note in the answer, until they are configured:
 
-- SynLethDB: `PHRONESIS_SYNLETHDB_DIR`, downloaded with `scripts/download_synlethdb.py`.
-- DepMap: `PHRONESIS_DEPMAP_DIR`.
-- PrimeKG: built with `uv run phronesis-primekg build` (about 520 MB downloaded, a 63 MB store). The store
-  is kept in `PHRONESIS_PRIMEKG_DIR` (default `~/.cache/phronesis/primekg`); see
+- SynLethDB: `TRIBOS_SYNLETHDB_DIR`, downloaded with `scripts/download_synlethdb.py`.
+- DepMap: `TRIBOS_DEPMAP_DIR`.
+- PrimeKG: built with `uv run tribos-primekg build` (about 520 MB downloaded, a 63 MB store). The store
+  is kept in `TRIBOS_PRIMEKG_DIR` (default `~/.cache/tribos/primekg`); see
   [docs/synapta/primekg_full_graph.md](docs/synapta/primekg_full_graph.md).
 
 ## Quick start
@@ -74,14 +74,14 @@ The local-file sources are skipped, with a note in the answer, until they are co
 Requires Python 3.12+, [uv](https://docs.astral.sh/uv/) and Node.js 22+.
 
 ```sh
-git clone https://github.com/AtlasRoX/phronesis-CS && cd phronesis-CS
+git clone https://github.com/AtlasRoX/trib && cd tribos-CS
 uv sync --extra dev --frozen
 cp .env.example .env        # then uncomment and fill in what you need (at least one LLM key)
 ```
 
-Authentication: every data-bearing endpoint needs a bearer token. Set `PHRONESIS_API_TOKENS="token:user,..."`
-or `PHRONESIS_JWT_SECRET`. If neither is set the API answers `503`. For single-user local development,
-`PHRONESIS_AUTH_MODE=disabled` runs every request as one local user.
+Authentication: every data-bearing endpoint needs a bearer token. Set `TRIBOS_API_TOKENS="token:user,..."`
+or `TRIBOS_JWT_SECRET`. If neither is set the API answers `503`. For single-user local development,
+`TRIBOS_AUTH_MODE=disabled` runs every request as one local user.
 
 ```sh
 # Terminal 1: API on http://127.0.0.1:8000
@@ -102,7 +102,7 @@ where it is read. [`.env.example`](.env.example) is a commented template.
 Both files are generated by `python scripts/gen_env_reference.py`. Re-run it after adding a variable;
 `--check` reports drift.
 
-State is kept in one data root when `PHRONESIS_DATA_DIR` is set. It holds:
+State is kept in one data root when `TRIBOS_DATA_DIR` is set. It holds:
 
 - `memory/`
 - `runs/`
@@ -111,24 +111,24 @@ State is kept in one data root when `PHRONESIS_DATA_DIR` is set. It holds:
 - `tool_cache/`
 - `biomodels_cache/`
 
-A specific variable such as `PHRONESIS_RUNS_DIR` overrides the data root for its own store. With nothing
+A specific variable such as `TRIBOS_RUNS_DIR` overrides the data root for its own store. With nothing
 set, each store keeps its historical location in the workspace.
 
 Retention:
 
 - Expired tool-cache rows are purged.
-- Finished jobs are deleted after `PHRONESIS_JOB_TTL_DAYS` (default 30).
-- Only the newest `PHRONESIS_MAX_RUNS` run manifests are kept (default 500).
+- Finished jobs are deleted after `TRIBOS_JOB_TTL_DAYS` (default 30).
+- Only the newest `TRIBOS_MAX_RUNS` run manifests are kept (default 500).
 
 ## Evaluation
 
-`phronesis-eval` (`python -m phronesis.evals`) scores routing, retrieval against gold papers, and full
+`tribos-eval` (`python -m tribos.evals`) scores routing, retrieval against gold papers, and full
 answers. Suites cover curated clinical questions and public benchmarks.
 
 ```sh
-uv run python -m phronesis.evals run --level plan                  # offline routing check, seconds
-uv run python -m phronesis.evals run --level answer --judge        # full answers with a rubric judge
-uv run python -m phronesis.evals compare eval_runs/<a> eval_runs/<b>
+uv run python -m tribos.evals run --level plan                  # offline routing check, seconds
+uv run python -m tribos.evals run --level answer --judge        # full answers with a rubric judge
+uv run python -m tribos.evals compare eval_runs/<a> eval_runs/<b>
 ```
 
 [docs/evals.md](docs/evals.md) covers suites, golden facts, gates, baselines and CI.
@@ -137,7 +137,7 @@ uv run python -m phronesis.evals compare eval_runs/<a> eval_runs/<b>
 
 ```sh
 uv run pytest -q tests/                  # backend tests
-uv run ruff check phronesis app tests    # lint
+uv run ruff check tribos app tests    # lint
 uv run mkdocs serve                      # documentation site
 ```
 
@@ -147,5 +147,5 @@ uv run mkdocs serve                      # documentation site
 
 ## Acknowledgements & Credits
 
-- **Engineering & Architecture:** **ChronoStrider Engineering** (**ChronoStrider Enginnerings**).
+- **Engineering & Architecture:** **ChronoStrider Engineering** (**ChronoStrider Engineering**).
 

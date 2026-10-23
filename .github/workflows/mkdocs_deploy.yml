@@ -6,7 +6,7 @@ on:
     paths:
       - "docs/**"
       - "mkdocs.yml"
-      - "phronesis/**"
+      - "tribos/**"
       - "pyproject.toml"
   workflow_dispatch:
 permissions:

@@ -1,4 +1,4 @@
-"""phronesis.utils.http: retries, Retry-After, typed errors, cache and limiter (offline, httpx.MockTransport)."""
+"""tribos.utils.http: retries, Retry-After, typed errors, cache and limiter (offline, httpx.MockTransport)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import List
 import httpx
 import pytest
 
-from phronesis.utils.http import (
+from tribos.utils.http import (
     ANY_STATUS,
     HttpError,
     get_json,
@@ -17,7 +17,7 @@ from phronesis.utils.http import (
     request,
     retry_after_seconds,
 )
-from phronesis.utils.http_limits import TTLCache
+from tribos.utils.http_limits import TTLCache
 
 URL = "https://api.example.org/v1/thing"
 

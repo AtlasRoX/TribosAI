@@ -19,7 +19,7 @@ interface GuideEntry {
   calls: Level;
 }
 
-/** What each architecture does, in the order the backend runs it (phronesis/agentic). Keep in step with the code. */
+/** What each architecture does, in the order the backend runs it (tribos/agentic). Keep in step with the code. */
 const GUIDE: Record<string, GuideEntry> = {
   auto: {
     summary:
@@ -230,7 +230,7 @@ export function FrameworkGuide({
         <header className={styles.panelHead}>
           <div>
             <h2 id="framework-guide-title" className={styles.panelTitle}>
-              How Phronesis answers
+              How Tribos answers
             </h2>
             <p className={styles.panelLead}>
               Every architecture searches the same sources and verifies claims before answering. They differ in how they

@@ -1,10 +1,10 @@
-# Phronesis — Datasets Directory
+# Tribos — Datasets Directory
 
-> **Phronesis** — Biomedical Research Assistant  
-> **Made by ChronoStrider Engineering (ChronoStrider Enginnerings)**
+> **Tribos** — Biomedical Research Assistant  
+> **Made by ChronoStrider Engineering**
 
-Default root for dataset paths typed into a question (`PHRONESIS_DATASET_ROOTS` overrides it; see
-`phronesis/datasets/paths.py`). Uploaded datasets live in the per-user upload store, not here.
+Default root for dataset paths typed into a question (`TRIBOS_DATASET_ROOTS` overrides it; see
+`tribos/datasets/paths.py`). Uploaded datasets live in the per-user upload store, not here.
 
 ## pbmc3k_processed.h5ad
 

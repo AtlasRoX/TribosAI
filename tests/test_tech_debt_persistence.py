@@ -1,4 +1,4 @@
-"""Track P: one data root (PHRONESIS_DATA_DIR), retention sweeps and bounded ad-hoc caches."""
+"""Track P: one data root (TRIBOS_DATA_DIR), retention sweeps and bounded ad-hoc caches."""
 
 from __future__ import annotations
 
@@ -9,24 +9,24 @@ from pathlib import Path
 
 import pytest
 
-from phronesis.agentic import jobs
-from phronesis.datasets import store as dataset_store
-from phronesis.provenance import run_store
-from phronesis.tools import reliability
-from phronesis.utils import maintenance, paths
-from phronesis.utils.http_limits import TTLCache
+from tribos.agentic import jobs
+from tribos.datasets import store as dataset_store
+from tribos.provenance import run_store
+from tribos.tools import reliability
+from tribos.utils import maintenance, paths
+from tribos.utils.http_limits import TTLCache
 
 _SPECIFIC = (
-    "PHRONESIS_MEMORY_DIR",
-    "PHRONESIS_RUNS_DIR",
-    "PHRONESIS_UPLOAD_ROOT",
-    "PHRONESIS_JOBS_DIR",
-    "PHRONESIS_TOOL_CACHE_DIR",
-    "PHRONESIS_DATA_DIR",
-    "PHRONESIS_MAINTENANCE",
-    "PHRONESIS_MAINTENANCE_INTERVAL_H",
-    "PHRONESIS_JOB_TTL_DAYS",
-    "PHRONESIS_MAX_RUNS",
+    "TRIBOS_MEMORY_DIR",
+    "TRIBOS_RUNS_DIR",
+    "TRIBOS_UPLOAD_ROOT",
+    "TRIBOS_JOBS_DIR",
+    "TRIBOS_TOOL_CACHE_DIR",
+    "TRIBOS_DATA_DIR",
+    "TRIBOS_MAINTENANCE",
+    "TRIBOS_MAINTENANCE_INTERVAL_H",
+    "TRIBOS_JOB_TTL_DAYS",
+    "TRIBOS_MAX_RUNS",
 )
 
 
@@ -52,48 +52,48 @@ def test_data_dir_unset_is_none():
 
 def test_defaults_unchanged_without_any_env():
     # Historical defaults (pytest guards included) are kept when nothing is configured.
-    assert run_store._default_root().name == "phronesis_runs_pytest"
-    assert dataset_store.default_upload_root() == Path(dataset_store.__file__).resolve().parents[2] / ".phronesis_uploads"
-    assert os.path.basename(jobs.default_jobs_dir()) == "phronesis_jobs_pytest"
+    assert run_store._default_root().name == "tribos_runs_pytest"
+    assert dataset_store.default_upload_root() == Path(dataset_store.__file__).resolve().parents[2] / ".tribos_uploads"
+    assert os.path.basename(jobs.default_jobs_dir()) == "tribos_jobs_pytest"
     assert reliability._cache_dir() is None
 
 
 def test_data_dir_drives_every_state_dir(monkeypatch, tmp_path):
-    monkeypatch.setenv("PHRONESIS_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("TRIBOS_DATA_DIR", str(tmp_path))
     assert run_store._default_root() == tmp_path / "runs"
     assert dataset_store.default_upload_root() == tmp_path / "uploads"
     assert Path(jobs.default_jobs_dir()) == tmp_path / "jobs"
     assert reliability._cache_dir() == tmp_path / "tool_cache"
 
-    from phronesis.utils.memory.clinical_memory import ClinicalMemoryEngine
+    from tribos.utils.memory.research_memory import ResearchMemoryEngine
 
-    engine = ClinicalMemoryEngine()
+    engine = ResearchMemoryEngine()
     assert Path(engine.storage_dir) == tmp_path / "memory"
-    assert (tmp_path / "memory" / "clinical_memory_v2.db").is_file()
+    assert (tmp_path / "memory" / "research_memory_v2.db").is_file()
 
-    from phronesis.vivarix.engine import VivarixSimulationEngine
+    from tribos.vivarix.engine import VivarixSimulationEngine
 
     assert VivarixSimulationEngine._cache_dir() == tmp_path / "biomodels_cache"
 
 
 def test_specific_env_wins_over_data_dir(monkeypatch, tmp_path):
-    monkeypatch.setenv("PHRONESIS_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("PHRONESIS_RUNS_DIR", str(tmp_path / "r"))
-    monkeypatch.setenv("PHRONESIS_UPLOAD_ROOT", str(tmp_path / "u"))
-    monkeypatch.setenv("PHRONESIS_MEMORY_DIR", str(tmp_path / "m"))
+    monkeypatch.setenv("TRIBOS_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("TRIBOS_RUNS_DIR", str(tmp_path / "r"))
+    monkeypatch.setenv("TRIBOS_UPLOAD_ROOT", str(tmp_path / "u"))
+    monkeypatch.setenv("TRIBOS_MEMORY_DIR", str(tmp_path / "m"))
     assert run_store._default_root() == tmp_path / "r"
     assert dataset_store.default_upload_root() == tmp_path / "u"
     # The runs dir keeps priority for the jobs store and tool cache, as before.
     assert Path(jobs.default_jobs_dir()) == tmp_path / "r" / "jobs"
     assert reliability._cache_dir() == tmp_path / "r" / "tool_cache"
-    monkeypatch.setenv("PHRONESIS_JOBS_DIR", str(tmp_path / "j"))
-    monkeypatch.setenv("PHRONESIS_TOOL_CACHE_DIR", str(tmp_path / "c"))
+    monkeypatch.setenv("TRIBOS_JOBS_DIR", str(tmp_path / "j"))
+    monkeypatch.setenv("TRIBOS_TOOL_CACHE_DIR", str(tmp_path / "c"))
     assert Path(jobs.default_jobs_dir()) == tmp_path / "j"
     assert reliability._cache_dir() == tmp_path / "c"
 
-    from phronesis.utils.memory.clinical_memory import ClinicalMemoryEngine
+    from tribos.utils.memory.research_memory import ResearchMemoryEngine
 
-    assert Path(ClinicalMemoryEngine().storage_dir) == tmp_path / "m"
+    assert Path(ResearchMemoryEngine().storage_dir) == tmp_path / "m"
 
 
 # -----------------------------------------------------------------------------
@@ -121,7 +121,7 @@ def _count(path: Path) -> int:
 
 
 def test_purge_expired_cache_deletes_and_vacuums(monkeypatch, tmp_path):
-    monkeypatch.setenv("PHRONESIS_TOOL_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("TRIBOS_TOOL_CACHE_DIR", str(tmp_path))
     db = tmp_path / "tool_cache.sqlite3"
     _seed_cache(db, expired=400, live=5)
     before = db.stat().st_size
@@ -133,13 +133,13 @@ def test_purge_expired_cache_deletes_and_vacuums(monkeypatch, tmp_path):
 
 def test_purge_expired_cache_without_store_is_noop(monkeypatch, tmp_path):
     assert reliability.purge_expired_cache() == {"deleted": 0, "vacuumed": False}
-    monkeypatch.setenv("PHRONESIS_TOOL_CACHE_DIR", str(tmp_path / "missing"))
+    monkeypatch.setenv("TRIBOS_TOOL_CACHE_DIR", str(tmp_path / "missing"))
     assert reliability.purge_expired_cache(vacuum=True) == {"deleted": 0, "vacuumed": False}
     assert not (tmp_path / "missing").exists()
 
 
 def test_first_open_purges_expired_rows(monkeypatch, tmp_path):
-    monkeypatch.setenv("PHRONESIS_TOOL_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("TRIBOS_TOOL_CACHE_DIR", str(tmp_path))
     db = tmp_path / "tool_cache.sqlite3"
     _seed_cache(db, expired=3, live=2, payload_size=10)
     reliability._cache_get("new0")  # any SQLite access triggers the startup purge
@@ -184,9 +184,9 @@ def test_finished_jobs_past_ttl_are_purged(tmp_path):
 def test_job_ttl_env_and_zero_disables(monkeypatch, tmp_path):
     store = jobs.JobStore(str(tmp_path))
     jid = _job(store, "cancelled", 3)
-    monkeypatch.setenv("PHRONESIS_JOB_TTL_DAYS", "0")
+    monkeypatch.setenv("TRIBOS_JOB_TTL_DAYS", "0")
     assert store.purge_finished() == 0
-    monkeypatch.setenv("PHRONESIS_JOB_TTL_DAYS", "1")
+    monkeypatch.setenv("TRIBOS_JOB_TTL_DAYS", "1")
     assert jobs.purge_finished_jobs(str(tmp_path)) == 1
     assert store.get(jid) is None
     assert jobs.purge_finished_jobs(str(tmp_path / "none")) == 0
@@ -198,8 +198,8 @@ def test_job_store_open_purges_when_maintenance_on(monkeypatch, tmp_path):
     jid = _job(store, "succeeded", 45)
     jobs.JobStore(str(tmp_path))  # maintenance is off under pytest by default
     assert store.get(jid) is not None
-    monkeypatch.setenv("PHRONESIS_MAINTENANCE", "on")
-    monkeypatch.setenv("PHRONESIS_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("TRIBOS_MAINTENANCE", "on")
+    monkeypatch.setenv("TRIBOS_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setattr(maintenance, "schedule_maintenance", lambda: False)
     jobs.JobStore(str(tmp_path))
     assert store.get(jid) is None
@@ -227,9 +227,9 @@ def test_run_store_prune_keeps_newest(monkeypatch, tmp_path):
     assert store.load("alice", ids[0]) is None and store.load("alice", ids[1]) is None
     assert all(store.load("alice", rid) is not None for rid in ids[2:])
     assert (tmp_path / "alice" / "notes.json").exists()
-    monkeypatch.setenv("PHRONESIS_MAX_RUNS", "2")
+    monkeypatch.setenv("TRIBOS_MAX_RUNS", "2")
     assert store.prune() == 2
-    monkeypatch.setenv("PHRONESIS_MAX_RUNS", "0")
+    monkeypatch.setenv("TRIBOS_MAX_RUNS", "0")
     assert store.prune() == 0
     assert run_store.RunStore(tmp_path / "missing").prune(keep=1) == 0
 
@@ -254,14 +254,14 @@ def test_maintenance_disabled_under_pytest_by_default():
 
 
 def test_run_maintenance_applies_every_rule_and_rate_limits(monkeypatch, tmp_path):
-    monkeypatch.setenv("PHRONESIS_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("PHRONESIS_MAX_RUNS", "1")
+    monkeypatch.setenv("TRIBOS_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("TRIBOS_MAX_RUNS", "1")
     _seed_cache(tmp_path / "tool_cache" / "tool_cache.sqlite3", expired=2, live=1, payload_size=10)
     jstore = jobs.JobStore()
     assert jstore.storage_dir == str(tmp_path / "jobs")
     jid = _job(jstore, "failed", 60)
     _save_runs(run_store.RunStore(tmp_path / "runs"), 3)
-    monkeypatch.setenv("PHRONESIS_MAINTENANCE", "on")
+    monkeypatch.setenv("TRIBOS_MAINTENANCE", "on")
 
     out = maintenance.run_maintenance()
     assert out["ran"] is True
@@ -274,13 +274,13 @@ def test_run_maintenance_applies_every_rule_and_rate_limits(monkeypatch, tmp_pat
 
     assert maintenance.run_maintenance() == {"ran": False, "reason": "not_due"}
     assert maintenance.run_maintenance(force=True)["ran"] is True
-    monkeypatch.setenv("PHRONESIS_MAINTENANCE_INTERVAL_H", "0")
+    monkeypatch.setenv("TRIBOS_MAINTENANCE_INTERVAL_H", "0")
     assert maintenance.run_maintenance()["ran"] is True
 
 
 def test_schedule_maintenance_runs_in_background_once(monkeypatch, tmp_path):
-    monkeypatch.setenv("PHRONESIS_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("PHRONESIS_MAINTENANCE", "on")
+    monkeypatch.setenv("TRIBOS_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("TRIBOS_MAINTENANCE", "on")
     calls = []
     monkeypatch.setattr(maintenance, "run_maintenance", lambda **kw: calls.append(kw) or {"ran": True})
     assert maintenance.schedule_maintenance() is True
@@ -293,8 +293,8 @@ def test_schedule_maintenance_runs_in_background_once(monkeypatch, tmp_path):
 
 
 def test_schedule_skips_when_stamp_is_recent(monkeypatch, tmp_path):
-    monkeypatch.setenv("PHRONESIS_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("PHRONESIS_MAINTENANCE", "on")
+    monkeypatch.setenv("TRIBOS_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("TRIBOS_MAINTENANCE", "on")
     maintenance._mark(time.time())
     assert maintenance.schedule_maintenance() is False
 
@@ -334,17 +334,17 @@ def _gen_module():
 def test_env_reference_scan_and_secrets_blank():
     gen = _gen_module()
     found = gen.scan()
-    for name in gen.REQUIRED + ("PHRONESIS_JOB_TTL_DAYS", "PHRONESIS_MAX_RUNS", "PHRONESIS_RUNS_DIR"):
+    for name in gen.REQUIRED + ("TRIBOS_JOB_TTL_DAYS", "TRIBOS_MAX_RUNS", "TRIBOS_RUNS_DIR"):
         assert name in found, name
-    assert found["PHRONESIS_JOB_TTL_DAYS"].defaults == {"30.0"}
-    assert found["PHRONESIS_MAINTENANCE"].defaults == {"auto"}  # `os.getenv(...) or "auto"`
+    assert found["TRIBOS_JOB_TTL_DAYS"].defaults == {"30.0"}
+    assert found["TRIBOS_MAINTENANCE"].defaults == {"auto"}  # `os.getenv(...) or "auto"`
     example = gen.render_example(found)
     for line in example.splitlines():
         if line.startswith("# ") and "=" in line and not line.startswith("# ---"):
             name, _, value = line[2:].partition("=")
             if gen.SECRET_RE.search(name):
                 assert value == "", line
-    assert "# TAVILY_API_KEY=\n" in example and "# PHRONESIS_DATA_DIR=\n" in example
-    assert not gen.SECRET_RE.search("PHRONESIS_AGENT_MAX_TOKENS")
+    assert "# TAVILY_API_KEY=\n" in example and "# TRIBOS_DATA_DIR=\n" in example
+    assert not gen.SECRET_RE.search("TRIBOS_AGENT_MAX_TOKENS")
     doc = gen.render_markdown(found)
-    assert "## PHRONESIS_JOB" in doc and "`phronesis/utils/paths.py`" in doc
+    assert "## TRIBOS_JOB" in doc and "`tribos/utils/paths.py`" in doc

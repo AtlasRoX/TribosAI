@@ -1,40 +1,40 @@
-# Phronesis
+# Tribos
 
-> **Phronesis** — Biomedical Research Assistant for Clinical and Translational R&D  
-> **Made by ChronoStrider Engineering (ChronoStrider Enginnerings)**
+> **Tribos** — Biomedical Research Assistant for Clinical and Translational R&D  
+> **Made by ChronoStrider Engineering**
 
 <!--  Project Info -->
 
-![RELEASE](https://img.shields.io/github/v/release/AtlasRoX/phronesis-CS?label=RELEASE)
-![Python Version from PEP 621 TOML](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fatlasrox%2FPhronesis%2Frefs%2Fheads%2Fmain%2Fpyproject.toml)
+![RELEASE](https://img.shields.io/github/v/release/AtlasRoX/trib?label=RELEASE)
+![Python Version from PEP 621 TOML](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fatlasrox%2FTribos%2Frefs%2Fheads%2Fmain%2Fpyproject.toml)
 
 <!--  Deployment Workflows -->
 
-[![Pages Deployment](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/pages/pages-build-deployment/badge.svg)](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/pages/pages-build-deployment)
-[![MkDocs Deploy](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/mkdocs_deploy.yml/badge.svg)](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/mkdocs_deploy.yml)
-[![Release](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/release.yml/badge.svg)](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/release.yml)
-[![Docker Build & Push](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/docker_build.yml/badge.svg)](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/docker_build.yml)
+[![Pages Deployment](https://github.com/AtlasRoX/trib/actions/workflows/pages/pages-build-deployment/badge.svg)](https://github.com/AtlasRoX/trib/actions/workflows/pages/pages-build-deployment)
+[![MkDocs Deploy](https://github.com/AtlasRoX/trib/actions/workflows/mkdocs_deploy.yml/badge.svg)](https://github.com/AtlasRoX/trib/actions/workflows/mkdocs_deploy.yml)
+[![Release](https://github.com/AtlasRoX/trib/actions/workflows/release.yml/badge.svg)](https://github.com/AtlasRoX/trib/actions/workflows/release.yml)
+[![Docker Build & Push](https://github.com/AtlasRoX/trib/actions/workflows/docker_build.yml/badge.svg)](https://github.com/AtlasRoX/trib/actions/workflows/docker_build.yml)
 
 <!--  Tests -->
 
-[![TESTS Phronesis](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/tests_phronesis.yml/badge.svg)](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/tests_phronesis.yml)
-[![Vivarix](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/tests_vivarix.yml/badge.svg)](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/tests_vivarix.yml)
-[![Synapta](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/tests_synapta.yml/badge.svg)](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/tests_synapta.yml)
-[![TESTS Lithoscribe](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/tests_lithoscribe.yml/badge.svg)](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/tests_lithoscribe.yml)
-[![Lumicell](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/tests_lumicell.yml/badge.svg)](https://github.com/AtlasRoX/phronesis-CS/actions/workflows/tests_lumicell.yml)
+[![TESTS Tribos](https://github.com/AtlasRoX/trib/actions/workflows/tests_tribos.yml/badge.svg)](https://github.com/AtlasRoX/trib/actions/workflows/tests_tribos.yml)
+[![Vivarix](https://github.com/AtlasRoX/trib/actions/workflows/tests_vivarix.yml/badge.svg)](https://github.com/AtlasRoX/trib/actions/workflows/tests_vivarix.yml)
+[![Synapta](https://github.com/AtlasRoX/trib/actions/workflows/tests_synapta.yml/badge.svg)](https://github.com/AtlasRoX/trib/actions/workflows/tests_synapta.yml)
+[![TESTS Lithoscribe](https://github.com/AtlasRoX/trib/actions/workflows/tests_lithoscribe.yml/badge.svg)](https://github.com/AtlasRoX/trib/actions/workflows/tests_lithoscribe.yml)
+[![Lumicell](https://github.com/AtlasRoX/trib/actions/workflows/tests_lumicell.yml/badge.svg)](https://github.com/AtlasRoX/trib/actions/workflows/tests_lumicell.yml)
 
 <!--  Docker Pulls -->
 
-![Phronesis Pulls](https://img.shields.io/docker/pulls/vpatientengine/phronesis?label=Phronesis%20Pulls&color=blue&logo=docker&style=flat-square)
+![Tribos Pulls](https://img.shields.io/docker/pulls/vpatientengine/tribos?label=Tribos%20Pulls&color=blue&logo=docker&style=flat-square)
 ![Vivarix Pulls](https://img.shields.io/docker/pulls/vpatientengine/vivarix?label=Vivarix%20Pulls&color=blue&logo=docker&style=flat-square)
 ![Synapta Pulls](https://img.shields.io/docker/pulls/vpatientengine/synapta?label=Synapta%20Pulls&color=blue&logo=docker&style=flat-square)
 ![Lithoscribe Pulls](https://img.shields.io/docker/pulls/vpatientengine/lithoscribe?label=Lithoscribe%20Pulls&color=blue&logo=docker&style=flat-square)
 
 ## Introduction
 
-Welcome to **Phronesis** — engineered and maintained by **ChronoStrider Engineering** (**ChronoStrider Enginnerings**).
+Welcome to **Tribos** — engineered and maintained by **ChronoStrider Engineering** (**ChronoStrider Engineering**).
 
-Phronesis brings together AI-driven tools and autonomous agents to help researchers and pharma interact seamlessly with complex biological data.
+Tribos brings together AI-driven tools and autonomous agents to help researchers and pharma interact seamlessly with complex biological data.
 
 Our toolkit currently consists of the following agents:
 
@@ -42,9 +42,9 @@ Our toolkit currently consists of the following agents:
 - **Synapta** _(v1 in progress)_: Access and explore complex biological knowledge graphs for insightful data connections.
 - **Lithoscribe** _(v1 in progress)_: Get recommendations for articles related to your choice. Download, query, and write/retrieve them to your reference manager (currently supporting Zotero).
 - **Lumicell** _(v1 in progress)_: Query and analyze sequencing data with ease.
-- **Phronesis** _(v1 in progress)_: Converse with all the agents above (currently supports Vivarix and Synapta)
+- **Tribos** _(v1 in progress)_: Converse with all the agents above (currently supports Vivarix and Synapta)
 
-![Phronesis agents](assets/t2agents_diagram.png)
+![Tribos agents](assets/t2agents_diagram.png)
 
 ## News
 
@@ -67,19 +67,19 @@ _We now have all the agents available on Docker Hub._
 
 Choose your agent below for detailed Docker instructions:
 
-- [Phronesis](https://github.com/AtlasRoX/phronesis-CS/blob/main/phronesis/phronesis/install.md)
-- [Synapta](https://github.com/AtlasRoX/phronesis-CS/blob/main/phronesis/synapta/install.md)
-- [Vivarix](https://github.com/AtlasRoX/phronesis-CS/blob/main/phronesis/vivarix/install.md)
-- [Lithoscribe](https://github.com/AtlasRoX/phronesis-CS/blob/main/phronesis/lithoscribe/install.md)
+- [Tribos](https://github.com/AtlasRoX/trib/blob/main/tribos/tribos/install.md)
+- [Synapta](https://github.com/AtlasRoX/trib/blob/main/tribos/synapta/install.md)
+- [Vivarix](https://github.com/AtlasRoX/trib/blob/main/tribos/vivarix/install.md)
+- [Lithoscribe](https://github.com/AtlasRoX/trib/blob/main/tribos/lithoscribe/install.md)
 
 #### Option 2: git (for developers and contributors)
 
-![Python Version from PEP 621 TOML](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fatlasrox%2FPhronesis%2Frefs%2Fheads%2Fmain%2Fpyproject.toml)
+![Python Version from PEP 621 TOML](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fatlasrox%2FTribos%2Frefs%2Fheads%2Fmain%2Fpyproject.toml)
 
 1. **Clone the repository:**
 
 ```sh
-git clone https://github.com/AtlasRoX/phronesis-CS && cd phronesis-CS
+git clone https://github.com/AtlasRoX/trib && cd tribos-CS
 ```
 
 2. **Install dependencies:**
@@ -135,7 +135,7 @@ streamlit run app/frontend/streamlit_app_<agent>.py
 
 _Replace `<agent>` with the agent name you are interested to launch:_
 
-- `phronesis`
+- `tribos`
 - `vivarix`
 - `synapta`
 - `lithoscribe`
@@ -151,7 +151,7 @@ To use the **Agents**, you need a free **NVIDIA API key**. Create an account and
 **Lithoscribe** and **Synapta** requires Milvus to be set up as the vector database — install Milvus depending on your setup by following the official instructions for [CPU](https://milvus.io/docs/install_standalone-docker-compose.md) or [GPU](https://milvus.io/docs/install_standalone-docker-compose-gpu.md). You will also need a **Zotero API key**, which you can generate [here](https://www.zotero.org/user/login#applications). _(The Zotero key is only required for Lithoscribe; all other agents do not need it.)_
 
 > By default, `synapta` includes a small subset of the PrimeKG knowledge graph, allowing users to start interacting with it out of the box.
-> To switch to a different knowledge graph or use your own, refer to the [deployment guide](https://atlasrox.github.io/Phronesis/synapta/deployment/).
+> To switch to a different knowledge graph or use your own, refer to the [deployment guide](https://atlasrox.github.io/Tribos/synapta/deployment/).
 > Additionally on **Windows**, the `pcst_fast 1.0.10` library requires **Microsoft Visual C++ 14.0 or greater**.
 > You can download the **Microsoft C++ Build Tools** [here](https://visualstudio.microsoft.com/visual-cpp-build-tools/).
 
@@ -165,17 +165,17 @@ If you skip the previous step, it will default to the name `default`.
 
 #### Option 3: pip (beta-release)
 
-![Python Version from PEP 621 TOML](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fatlasrox%2FPhronesis%2Frefs%2Fheads%2Fmain%2Fpyproject.toml)
+![Python Version from PEP 621 TOML](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fatlasrox%2FTribos%2Frefs%2Fheads%2Fmain%2Fpyproject.toml)
 
 ```sh
-pip install phronesis
+pip install tribos
 ```
 
 Check out the tutorials on each agent for detailed instructions.
 
 ## Contributing
 
-We welcome your support to make **Phronesis** even better.
+We welcome your support to make **Tribos** even better.
 All types of contributions are appreciated — whether you're fixing bugs, adding features, improving documentation, or helping with testing, every contribution is valuable.
 
 #### Development Setup
@@ -214,8 +214,8 @@ uv run ruff format .  # Format code
 uv run pre-commit run --all-files  # Run all checks (linting, formatting, security)
 
 # Run submodule-specific checks (pylint configuration in pyproject.toml)
-uv run pylint phronesis/lithoscribe/
-uv run coverage run --include="phronesis/lithoscribe/*" -m pytest --cache-clear phronesis/lithoscribe/tests/ && uv run coverage report
+uv run pylint tribos/lithoscribe/
+uv run coverage run --include="tribos/lithoscribe/*" -m pytest --cache-clear tribos/lithoscribe/tests/ && uv run coverage report
 ```
 
 6. Commit and push your changes:

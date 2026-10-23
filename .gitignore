@@ -194,18 +194,18 @@ node_modules/
 # Local archives and memory databases
 *.zip
 *.tmp.zip
-.phronesis_memory/
-.phronesis_uploads/
-.phronesis_runs/
+.tribos_memory/
+.tribos_uploads/
+.tribos_runs/
 
-# Evaluation harness outputs (python -m phronesis.evals)
+# Evaluation harness outputs (python -m tribos.evals)
 eval_runs/
 
 # Large scientific data files: fetch them instead of committing (see data/README.md)
 data/*.h5ad
 data/*.h5ad.*
 
-# NOTE: phronesis/synapta/tests/files (~334 MB of fixtures) is deliberately NOT ignored: the Synapta
+# NOTE: tribos/synapta/tests/files (~334 MB of fixtures) is deliberately NOT ignored: the Synapta
 # tests need it. Moving it to Git LFS or a fixture-download step is a pending decision.
 
 # Runtime state written by the app (job queue, router outcomes)

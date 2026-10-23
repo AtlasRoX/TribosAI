@@ -2,7 +2,7 @@
 
 Run control, background jobs, research projects, the MCP server and the A2A endpoint (features 13, 15, 16, 17
 of `docs/plans/agentic-system.md`). All routes use the same bearer authentication as `/api/chat`
-(`PHRONESIS_API_TOKENS`, `PHRONESIS_JWT_SECRET`, or `PHRONESIS_AUTH_MODE=disabled` for local development) and
+(`TRIBOS_API_TOKENS`, `TRIBOS_JWT_SECRET`, or `TRIBOS_AUTH_MODE=disabled` for local development) and
 are scoped to the authenticated user: another user's run, job, project or task id answers exactly like an
 unknown one (404, or JSON-RPC `-32001` for A2A).
 
@@ -38,7 +38,7 @@ A plan approval payload:
 Plan approval runs on interactive runs when `agent_options.require_plan_approval` is set or expensive work is
 routed (simulation, parameter scan, single-cell analysis, calibration, docking, sandboxed analysis). A
 non-interactive run with `require_plan_approval` is approved automatically and recorded as `auto`. With no
-answer within `PHRONESIS_APPROVAL_TIMEOUT_S` (default 300 s) the plan runs as proposed (`timeout`).
+answer within `TRIBOS_APPROVAL_TIMEOUT_S` (default 300 s) the plan runs as proposed (`timeout`).
 
 A clarifying question ends the turn instead: the response is the question with numbered options,
 `task_status.task_status` is `needs_input`, and the artifact `clarification` is
@@ -138,10 +138,10 @@ Methods: `initialize`, `notifications/initialized` (202, no body), `ping`, `serv
 `isError: true`.
 
 Tools:
-- `phronesis_research` `{question, framework?, enable_web_search?, thread_id?}` runs the full orchestrator
+- `tribos_research` `{question, framework?, enable_web_search?, thread_id?}` runs the full orchestrator
   non-interactively. It returns the answer as text plus `structuredContent`
   `{answer, citations, verification, task_status, framework, thread_id}`.
-- Read-only registry tools from `PHRONESIS_MCP_TOOLS` (comma-separated). The default list is the OpenTargets
+- Read-only registry tools from `TRIBOS_MCP_TOOLS` (comma-separated). The default list is the OpenTargets
   search and associations, KEGG, literature, clinical trials, ChEMBL resolve and profile, disease targets,
   variant intelligence and PrimeKG query, plus structure and omics tools when they are registered. Each
   `inputSchema` is the tool's pydantic schema. Tools whose names suggest writes, uploads, code execution,
@@ -158,10 +158,10 @@ Client configuration (Claude Desktop, Claude Code or any client that supports re
 ```json
 {
   "mcpServers": {
-    "phronesis": {
+    "tribos": {
       "type": "http",
       "url": "http://localhost:8000/mcp",
-      "headers": {"Authorization": "Bearer YOUR_PHRONESIS_TOKEN"}
+      "headers": {"Authorization": "Bearer YOUR_TRIBOS_TOKEN"}
     }
   }
 }
@@ -172,9 +172,9 @@ Security, following Hou et al. 2025 (arXiv:2503.23278):
 - No write tools are exposed.
 - Tool descriptions are static.
 - Bearer authentication is required.
-- `Origin` is checked against `PHRONESIS_CORS_ORIGINS` plus `PHRONESIS_MCP_ALLOWED_ORIGINS` (DNS-rebinding
+- `Origin` is checked against `TRIBOS_CORS_ORIGINS` plus `TRIBOS_MCP_ALLOWED_ORIGINS` (DNS-rebinding
   protection).
-- Each user can run at most `PHRONESIS_MCP_MAX_CONCURRENT` (default 2) `tools/call` requests at once.
+- Each user can run at most `TRIBOS_MCP_MAX_CONCURRENT` (default 2) `tools/call` requests at once.
 - The server is stateless: no sessions and no sampling.
 
 ## A2A: `/.well-known/agent-card.json` and `POST /a2a`
@@ -188,7 +188,7 @@ Methods: `SendMessage`, `GetTask`, `ListTasks` and `CancelTask`. The pre-1.0 ali
 - The task `id` is the job id and `contextId` is the thread.
 - `status.state` is one of `submitted`, `working`, `input-required`, `completed`, `failed` or `canceled`.
 - A completed task carries the answer as a text artifact.
-- `configuration.blocking: true` waits for the answer, up to `PHRONESIS_A2A_BLOCKING_TIMEOUT_S` (default
+- `configuration.blocking: true` waits for the answer, up to `TRIBOS_A2A_BLOCKING_TIMEOUT_S` (default
   300 s).
 
 Errors: `-32001` task not found, `-32002` task not cancelable.
@@ -204,18 +204,18 @@ curl -X POST http://localhost:8000/a2a -H "Authorization: Bearer $TOKEN" -H "Con
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `PHRONESIS_APPROVAL_TIMEOUT_S` | 300 | how long a plan approval waits |
-| `PHRONESIS_JOBS_DIR` | `$PHRONESIS_RUNS_DIR/jobs`, else `data/jobs` | job store |
-| `PHRONESIS_JOB_WORKERS` | 2 | asyncio job workers |
-| `PHRONESIS_MAX_JOBS_PER_USER` | 3 | queued + running jobs per user |
-| `PHRONESIS_JOB_MAX_EVENTS` | 20000 | log cap (token deltas are dropped past it) |
-| `PHRONESIS_JOB_CANCEL_GRACE_S` | 20 | after this long a cancelled agentic job's task is cancelled outright |
-| `PHRONESIS_PROJECTS_DIR` | next to the clinical memory store | project store |
-| `PHRONESIS_MCP_TOOLS` | built-in read-only list | MCP registry-tool allowlist |
-| `PHRONESIS_MCP_MAX_CONCURRENT` | 2 | concurrent MCP `tools/call` per user |
-| `PHRONESIS_MCP_ALLOWED_ORIGINS` | (none) | extra allowed `Origin` values for `/mcp` |
-| `PHRONESIS_MCP_RESEARCH_TIMEOUT_S` | 900 | `phronesis_research` timeout |
-| `PHRONESIS_A2A_BLOCKING_TIMEOUT_S` | 300 | blocking `SendMessage` wait |
+| `TRIBOS_APPROVAL_TIMEOUT_S` | 300 | how long a plan approval waits |
+| `TRIBOS_JOBS_DIR` | `$TRIBOS_RUNS_DIR/jobs`, else `data/jobs` | job store |
+| `TRIBOS_JOB_WORKERS` | 2 | asyncio job workers |
+| `TRIBOS_MAX_JOBS_PER_USER` | 3 | queued + running jobs per user |
+| `TRIBOS_JOB_MAX_EVENTS` | 20000 | log cap (token deltas are dropped past it) |
+| `TRIBOS_JOB_CANCEL_GRACE_S` | 20 | after this long a cancelled agentic job's task is cancelled outright |
+| `TRIBOS_PROJECTS_DIR` | next to the clinical memory store | project store |
+| `TRIBOS_MCP_TOOLS` | built-in read-only list | MCP registry-tool allowlist |
+| `TRIBOS_MCP_MAX_CONCURRENT` | 2 | concurrent MCP `tools/call` per user |
+| `TRIBOS_MCP_ALLOWED_ORIGINS` | (none) | extra allowed `Origin` values for `/mcp` |
+| `TRIBOS_MCP_RESEARCH_TIMEOUT_S` | 900 | `tribos_research` timeout |
+| `TRIBOS_A2A_BLOCKING_TIMEOUT_S` | 300 | blocking `SendMessage` wait |
 
 Jobs and run controls assume one server process per jobs directory. Startup recovery marks every running job
 interrupted.

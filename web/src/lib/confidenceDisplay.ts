@@ -20,7 +20,7 @@ export function scoreBand(v: number, highAt = 0.75, mediumAt = 0.45): "high" | "
 
 const SOURCE_TEXT: Record<string, string> = {
   default: "no calibration file (uncalibrated defaults)",
-  package_default: "the calibration file shipped with Phronesis",
+  package_default: "the calibration file shipped with Tribos",
   file: "a site calibration file",
   env: "an environment override",
 };

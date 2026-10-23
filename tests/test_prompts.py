@@ -4,8 +4,8 @@ Offline tests for the orchestrator prompt builders and the end-to-end prompt the
 
 import pytest
 
-from phronesis.agents import authoritative_orchestrator as orch_module
-from phronesis.agents.prompts import (
+from tribos.agents import authoritative_orchestrator as orch_module
+from tribos.agents.prompts import (
     CORRECTION_SYSTEM_PROMPT,
     SYNTHESIS_SYSTEM_PROMPT,
     build_correction_request,
@@ -14,7 +14,7 @@ from phronesis.agents.prompts import (
     build_tool_status_block,
     get_synthesis_system_prompt,
 )
-from phronesis.tools.registry import ErrorType, ToolResult
+from tribos.tools.registry import ErrorType, ToolResult
 from tests.test_audit_regressions import offline_orchestrator  # noqa: F401  (fixture)
 
 
@@ -83,7 +83,7 @@ def test_system_prompts_avoid_vendor_names():
 
 def _composed_prompt_with_all_extensions():
     """The synthesis prompt with every feature's components and rules, as the real registry registers them."""
-    from phronesis.extensions import hooks, load_extensions
+    from tribos.extensions import hooks, load_extensions
 
     with hooks.isolated_hooks():
         for module in load_extensions():

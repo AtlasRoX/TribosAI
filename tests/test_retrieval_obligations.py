@@ -16,10 +16,10 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
-from phronesis.lithoscribe.identifiers import extract_literature_ids, normalize_literature_id, strip_literature_ids
-from phronesis.lithoscribe.synthesis_engine import LiteratureSynthesisEngine
-from phronesis.tools import registry as registry_module
-from phronesis.utils.biocontext import BioContextMCPClient
+from tribos.lithoscribe.identifiers import extract_literature_ids, normalize_literature_id, strip_literature_ids
+from tribos.lithoscribe.synthesis_engine import LiteratureSynthesisEngine
+from tribos.tools import registry as registry_module
+from tribos.utils.biocontext import BioContextMCPClient
 
 SYN_PMID = "90000001"
 SYN_ERRATUM = "90000002"
@@ -82,18 +82,18 @@ def test_explicit_identifiers_are_extracted_and_normalized():
 def _registered(monkeypatch: Any, fake: FakeEuropePMC) -> Any:
     monkeypatch.setattr(BioContextMCPClient, "async_query_europepmc", lambda self, *a, **k: fake.async_query_europepmc(*a, **k))
     monkeypatch.setattr(BioContextMCPClient, "async_fetch_europepmc_fulltext", lambda self, *a, **k: fake.async_fetch_europepmc_fulltext(*a, **k))
-    reg = registry_module.BiomedicalToolRegistry()
-    registry_module.register_default_biomedical_tools(reg)
+    reg = registry_module.ToolRegistry()
+    registry_module.register_default_tools(reg)
     return reg
 
 
 def test_schema_exposes_pinned_ids_and_the_planner_sees_them():
-    from phronesis.agentic.tool_retrieval import tool_card
+    from tribos.agentic.tool_retrieval import tool_card
 
     inp = registry_module.LithoscribeSynthesisInput.model_validate({"query": "x", "pinned_ids": ["PMID:39369609"]})
     assert inp.pinned_ids == ["PMID:39369609"]
-    reg = registry_module.BiomedicalToolRegistry()
-    registry_module.register_default_biomedical_tools(reg)
+    reg = registry_module.ToolRegistry()
+    registry_module.register_default_tools(reg)
     card = tool_card(reg.get_entry("lithoscribe_literature_synthesis"))
     assert "pinned_ids" in card["args"] and "exact" in card["args"]["pinned_ids"].get("description", "").lower()
 
@@ -216,21 +216,21 @@ def test_correction_linkage_is_retrieved_and_reported(monkeypatch):
     ],
 )
 def test_distinct_clinical_requirements_are_never_duplicates(first, second):
-    from phronesis.agentic.gaps import near_duplicate, requirement_keys
+    from tribos.agentic.gaps import near_duplicate, requirement_keys
 
     assert requirement_keys(first) != requirement_keys(second)
     assert not near_duplicate(second, [first])
 
 
 def test_equivalent_rephrasings_are_still_duplicates():
-    from phronesis.agentic.gaps import near_duplicate
+    from tribos.agentic.gaps import near_duplicate
 
     assert near_duplicate("sotorasib FDA approval KRAS G12C", ["KRAS G12C sotorasib FDA approval"])
     assert near_duplicate("FDA approval sotorasib KRAS G12C colorectal", ["KRAS G12C sotorasib FDA approval CRC"])
 
 
 def test_off_topic_results_are_not_stored_by_fetch_new_literature():
-    from phronesis.agentic.specialists import fetch_new_literature
+    from tribos.agentic.specialists import fetch_new_literature
 
     stored: Dict[str, Any] = {}
 
@@ -262,7 +262,7 @@ def test_off_topic_results_are_not_stored_by_fetch_new_literature():
 
 
 def test_gap_outcomes_are_classified():
-    from phronesis.agentic.gaps import gap_outcome
+    from tribos.agentic.gaps import gap_outcome
 
     assert gap_outcome([{"status": "error"}]) == "error"
     assert gap_outcome([{"status": "ok", "new": 2, "kept": 0}]) == "off_topic"
@@ -278,7 +278,7 @@ QUERY_EXCLUSIONS = "No FDA sweep, simulation, omics, hypothesis generation or de
 
 
 def test_exclusion_list_is_detected():
-    from phronesis.agents.query_planner import detect_excluded_modules
+    from tribos.agents.query_planner import detect_excluded_modules
 
     assert detect_excluded_modules(QUERY_EXCLUSIONS) >= {"fda_sweep", "simulation", "omics", "hypothesis", "debate"}
     assert detect_excluded_modules("Do not generate hypotheses. Skip the debate.") >= {"hypothesis", "debate"}
@@ -295,14 +295,14 @@ def test_exclusion_list_is_detected():
     ],
 )
 def test_exclusion_false_positive_controls(text):
-    from phronesis.agents.query_planner import detect_excluded_modules
+    from tribos.agents.query_planner import detect_excluded_modules
 
     assert not ({"hypothesis", "debate", "omics", "fda_sweep", "regulatory"} & detect_excluded_modules(text))
 
 
 def _ctx(query: str) -> Any:
-    from phronesis.agents.query_context import QueryContext
-    from phronesis.agents.query_planner import apply_simulation_request
+    from tribos.agents.query_context import QueryContext
+    from tribos.agents.query_planner import apply_simulation_request
 
     ctx = QueryContext(raw_query=query, clean_query=query)
     apply_simulation_request(ctx, query)
@@ -310,9 +310,9 @@ def _ctx(query: str) -> Any:
 
 
 def test_excluded_modules_do_not_run():
-    from phronesis.agentic.hypothesis import HypothesisPhase
-    from phronesis.agentic.plan_graph import policy_violation
-    from phronesis.agentic.router import EscalationPhase
+    from tribos.agentic.hypothesis import HypothesisPhase
+    from tribos.agentic.plan_graph import policy_violation
+    from tribos.agentic.router import EscalationPhase
 
     q = "Retrieve PMID 39369609 by exact identifier. " + QUERY_EXCLUSIONS
     ctx = _ctx(q)
@@ -322,12 +322,12 @@ def test_excluded_modules_do_not_run():
                             llm=SimpleNamespace(available=True), options={})
     assert not HypothesisPhase().applies(state)
     assert not EscalationPhase().applies(state)
-    reg = registry_module.BiomedicalToolRegistry()
-    registry_module.register_default_biomedical_tools(reg)
-    from phronesis.extensions import load_extensions
+    reg = registry_module.ToolRegistry()
+    registry_module.register_default_tools(reg)
+    from tribos.extensions import load_extensions
 
     load_extensions()
-    from phronesis.extensions import register_extension_tools
+    from tribos.extensions import register_extension_tools
 
     register_extension_tools(reg)
     omics = [e for e in reg.list_tools() if e.name.startswith(("gtex", "gwas", "depmap"))]

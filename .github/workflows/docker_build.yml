@@ -18,33 +18,33 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - image: phronesis
-            dockerfile: phronesis/phronesis/Dockerfile
+          - image: tribos
+            dockerfile: tribos/tribos/Dockerfile
             suffix: ""
             latest_tag: latest
             install_cuda: "true"
-          - image: phronesis
-            dockerfile: phronesis/phronesis/Dockerfile
+          - image: tribos
+            dockerfile: tribos/tribos/Dockerfile
             suffix: "-cpu"
             latest_tag: latest-cpu
             install_cuda: "false"
           - image: vivarix
-            dockerfile: phronesis/vivarix/Dockerfile
+            dockerfile: tribos/vivarix/Dockerfile
             suffix: ""
             latest_tag: latest
             install_cuda: "false"
           - image: lithoscribe
-            dockerfile: phronesis/lithoscribe/Dockerfile
+            dockerfile: tribos/lithoscribe/Dockerfile
             suffix: ""
             latest_tag: latest
             install_cuda: "false"
           - image: synapta
-            dockerfile: phronesis/synapta/Dockerfile
+            dockerfile: tribos/synapta/Dockerfile
             suffix: ""
             latest_tag: latest
             install_cuda: "true"
           - image: synapta
-            dockerfile: phronesis/synapta/Dockerfile
+            dockerfile: tribos/synapta/Dockerfile
             suffix: "-cpu"
             latest_tag: latest-cpu
             install_cuda: "false"

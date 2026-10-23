@@ -21,13 +21,13 @@ import httpx
 import pypdf
 import pytest
 
-from phronesis.agents.query_context import DatasetRef
-from phronesis.provenance import run_manifest as rm
-from phronesis.provenance import source_versions as sv
-from phronesis.provenance.rerun import diff_runs, numeric_change
-from phronesis.provenance.run_store import RunStore, get_run_store
-from phronesis.tools.registry import AdapterType, ErrorType, ToolResult, ToolUniverseEntry
-from phronesis.utils.memory.clinical_memory import ClinicalMemoryEngine
+from tribos.agents.query_context import DatasetRef
+from tribos.provenance import run_manifest as rm
+from tribos.provenance import source_versions as sv
+from tribos.provenance.rerun import diff_runs, numeric_change
+from tribos.provenance.run_store import RunStore, get_run_store
+from tribos.tools.registry import AdapterType, ErrorType, ToolResult, ToolUniverseEntry
+from tribos.utils.memory.research_memory import ResearchMemoryEngine
 from tests import fakes
 from tests.fakes import build_recording_registry, make_offline_orchestrator
 
@@ -47,7 +47,7 @@ def _png_bytes() -> bytes:
 @pytest.fixture
 def runs_dir(monkeypatch, tmp_path):
     path = tmp_path / "runs"
-    monkeypatch.setenv("PHRONESIS_RUNS_DIR", str(path))
+    monkeypatch.setenv("TRIBOS_RUNS_DIR", str(path))
     return path
 
 
@@ -77,11 +77,11 @@ def api(monkeypatch, tmp_path, runs_dir):
 
     from app.backend import main as backend_main
 
-    engine = ClinicalMemoryEngine(storage_dir=str(tmp_path / "api_mem"))
-    monkeypatch.setattr(backend_main, "get_clinical_memory_engine", lambda: engine)
-    monkeypatch.delenv("PHRONESIS_AUTH_MODE", raising=False)
-    monkeypatch.delenv("PHRONESIS_JWT_SECRET", raising=False)
-    monkeypatch.setenv("PHRONESIS_API_TOKENS", "alice-token:alice,bob-token:bob")
+    engine = ResearchMemoryEngine(storage_dir=str(tmp_path / "api_mem"))
+    monkeypatch.setattr(backend_main, "get_research_memory_engine", lambda: engine)
+    monkeypatch.delenv("TRIBOS_AUTH_MODE", raising=False)
+    monkeypatch.delenv("TRIBOS_JWT_SECRET", raising=False)
+    monkeypatch.setenv("TRIBOS_API_TOKENS", "alice-token:alice,bob-token:bob")
     return TestClient(backend_main.app)
 
 
@@ -102,7 +102,7 @@ async def test_manifest_records_validated_tool_calls(offline, with_plot, runs_di
     orch, _ = offline
     res = await orch.execute_inquiry(SIM_QUERY, thread_id="t-manifest", user_id="alice")
     m = res.run_manifest
-    assert m and m["schema_version"] == "phronesis.run_manifest/1"
+    assert m and m["schema_version"] == "tribos.run_manifest/1"
 
     viv = _calls_named(m, "vivarix_simulate_time_course")
     assert viv and viv[0]["inputs"]["biomodel_id"] == "BIOMD0000000010"
@@ -325,8 +325,8 @@ def _epmc_passage(**overrides):
 
 
 def test_source_records_no_fabrication():
-    from phronesis.extensions import hooks, load_extensions
-    from phronesis.extensions.export import build_source_records
+    from tribos.extensions import hooks, load_extensions
+    from tribos.extensions.export import build_source_records
 
     load_extensions()
     assert any(getattr(fn, "__name__", "") == "_sources_artifact" for fn in hooks.get_artifact_builders())
@@ -398,7 +398,7 @@ def _message(content: str = ANSWER_MD, manifest: Dict[str, Any] | None = None) -
 
 
 def test_render_docx_sections():
-    from phronesis.export import build_report_model, render_docx
+    from tribos.export import build_report_model, render_docx
 
     report = build_report_model("What does BIOMD0000000010 predict for Mos?", _message())
     doc = docx.Document(io.BytesIO(render_docx(report)))
@@ -420,11 +420,11 @@ def test_render_docx_sections():
     assert any(r.font.name == "Consolas" for p in doc.paragraphs for r in p.runs)
     assert doc.styles["Normal"].font.name == "Google Sans" and doc.styles["Heading 1"].font.name == "Google Sans"
     assert any("(https://doi.org/10.1046/j.1432-1327.2000.01197.x)" in t for t in texts)
-    assert doc.core_properties.title == "Phronesis Investigation Report"
+    assert doc.core_properties.title == "Tribos Investigation Report"
 
 
 def test_render_pdf_text():
-    from phronesis.export import build_report_model, render_pdf
+    from tribos.export import build_report_model, render_pdf
 
     report = build_report_model("🔬 What does BIOMD0000000010 predict? 📚", _message())
     data = render_pdf(report)
@@ -445,15 +445,15 @@ def test_render_pdf_text():
 
 
 def test_banner_stripped_and_section_present():
-    from phronesis.export import build_report_model, render_markdown
-    from phronesis.export.report_model import strip_verification_banner
+    from tribos.export import build_report_model, render_markdown
+    from tribos.export.report_model import strip_verification_banner
 
     assert strip_verification_banner(ANSWER_MD).startswith("### 🧬 Kinetic evidence")
     assert strip_verification_banner("Plain answer") == "Plain answer"
     report = build_report_model("q", _message())
     assert "Scientific Verification Notice" not in report.answer_markdown
     md = render_markdown(report).decode("utf-8")
-    assert md.startswith("**Phronesis** · Investigation report\n\n# Q\n")
+    assert md.startswith("**Tribos** · Investigation report\n\n# Q\n")
     assert "simulation.png" not in md and "included in the PDF and Word exports" in md
     verification = md.split("## Verification", 1)[1].split("## Evidence limitations", 1)[0]
     assert "did not pass" in verification and "0.62 / 1.00" in verification
@@ -479,7 +479,7 @@ def test_export_endpoint_auth_and_types(api, offline):
     assert res.status_code == 200
     assert res.headers["content-type"] == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     disposition = res.headers["content-disposition"]
-    assert disposition.startswith("attachment;") and "phronesis-what-does-biomd0000000010-predict-for-mos-" in disposition
+    assert disposition.startswith("attachment;") and "tribos-what-does-biomd0000000010-predict-for-mos-" in disposition
     assert res.content[:2] == b"PK"
 
     md = api.post("/api/export/md", json=body, headers=ALICE)
@@ -616,8 +616,8 @@ def test_run_store_rejects_traversal(tmp_path):
 # =============================================================================
 
 def test_pdf_never_loads_markdown_images(tmp_path):
-    from phronesis.export import build_report_model, render_pdf
-    from phronesis.export.markdown_blocks import render_html
+    from tribos.export import build_report_model, render_pdf
+    from tribos.export.markdown_blocks import render_html
 
     local = tmp_path / "server_secret.png"
     local.write_bytes(_png_bytes())
@@ -632,7 +632,7 @@ def test_pdf_never_loads_markdown_images(tmp_path):
 
 
 def test_renderers_survive_control_chars_and_corrupt_plot():
-    from phronesis.export import build_report_model, render_docx, render_pdf
+    from tribos.export import build_report_model, render_docx, render_pdf
 
     corrupt = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"truncated").decode()
     msg = {
@@ -645,9 +645,9 @@ def test_renderers_survive_control_chars_and_corrupt_plot():
 
 
 def test_sources_dedupe_and_carry_retraction():
-    from phronesis.export import build_report_model
-    from phronesis.extensions.export import build_source_records
-    from phronesis.sources import CitationRecord, EvidenceSource, register_source, unregister_source
+    from tribos.export import build_report_model
+    from tribos.extensions.export import build_source_records
+    from tribos.sources import CitationRecord, EvidenceSource, register_source, unregister_source
 
     class _Grading(EvidenceSource):
         key = "review_fake_grading"
@@ -670,7 +670,7 @@ def test_sources_dedupe_and_carry_retraction():
     msg["execution_artifacts"]["sources"] = records
     report = build_report_model("q", msg)
     assert len(report.citations) == 1 and report.citations[0].retracted is True
-    assert "RETRACTED" in __import__("phronesis.export.report_model", fromlist=["x"]).citation_line(report.citations[0])
+    assert "RETRACTED" in __import__("tribos.export.report_model", fromlist=["x"]).citation_line(report.citations[0])
 
 
 def test_export_flags_posted_values_that_differ_from_stored_run(api, offline):

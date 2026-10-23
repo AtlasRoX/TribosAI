@@ -1,9 +1,9 @@
-# Contributing Guidelines — Phronesis
+# Contributing Guidelines — Tribos
 
-> **Phronesis** — Biomedical Research Assistant  
-> **Made by ChronoStrider Engineering (ChronoStrider Enginnerings)**
+> **Tribos** — Biomedical Research Assistant  
+> **Made by ChronoStrider Engineering**
 
-Thank you for your interest in contributing to **Phronesis**. Whether it's a bug report, new feature, correction, or additional
+Thank you for your interest in contributing to **Tribos**. Whether it's a bug report, new feature, correction, or additional
 documentation, we greatly value feedback and contributions from our community.
 
 Please read through this document before submitting any issues or pull requests to ensure we have all the necessary
@@ -15,7 +15,7 @@ In addition, please review our [CodeOps](./ops/CodeOps.md) to understand our app
 
 ### Reporting Bugs/Feature Requests
 
-Please use the [GitHub issue tracker](https://github.com/AtlasRoX/phronesis-CS/issues) to report bugs or suggest features.
+Please use the [GitHub issue tracker](https://github.com/AtlasRoX/trib/issues) to report bugs or suggest features.
 
 When filing an issue, please check existing open, or recently closed, issues to make sure somebody else hasn't already
 reported the issue. Please try to include as much information as you can following the bug and feature templates that we provide.

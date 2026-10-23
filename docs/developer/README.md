@@ -1,9 +1,9 @@
-# Phronesis Developer Guide
+# Tribos Developer Guide
 
-> **Phronesis** — Biomedical Research Assistant  
-> **Made by ChronoStrider Engineering (ChronoStrider Enginnerings)**
+> **Tribos** — Biomedical Research Assistant  
+> **Made by ChronoStrider Engineering**
 
-This guide covers the complete development setup, tooling, and workflow for the **Phronesis** project, made by **ChronoStrider Engineering** (**ChronoStrider Enginnerings**).
+This guide covers the complete development setup, tooling, and workflow for the **Tribos** project, made by **ChronoStrider Engineering** (**ChronoStrider Engineering**).
 
 ## 📋 Table of Contents
 
@@ -38,8 +38,8 @@ This guide covers the complete development setup, tooling, and workflow for the 
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/AtlasRoX/phronesis-CS
-cd Phronesis
+git clone https://github.com/AtlasRoX/trib
+cd Tribos
 
 # 2. Install dependencies (creates virtual environment automatically)
 uv sync --extra dev --frozen
@@ -54,7 +54,7 @@ export ZOTERO_API_KEY=...
 export ZOTERO_USER_ID=...
 
 # 5. Test installation
-uv run python -c "import phronesis; print('✅ Installation successful!')"
+uv run python -c "import tribos; print('✅ Installation successful!')"
 ```
 
 ---
@@ -83,13 +83,13 @@ This project uses a modern Python development stack:
 ## 📂 Project Structure
 
 ```
-Phronesis/
-├── phronesis/           # Main package
+Tribos/
+├── tribos/           # Main package
 │   ├── vivarix/        # Systems biology agent
 │   ├── synapta/  # Knowledge graph agent
 │   ├── lithoscribe/         # Scientific literature agent
 │   ├── lumicell/            # Single cell analysis agent
-│   └── phronesis/  # Meta-agent (orchestrator)
+│   └── tribos/  # Meta-agent (orchestrator)
 ├── app/                       # Streamlit applications
 ├── docs/                      # Documentation
 ├── pyproject.toml            # Project configuration (dependencies, tools)
@@ -123,20 +123,20 @@ uv run ruff format .
 
 ```bash
 # Analyze entire codebase (configuration in pyproject.toml)
-uv run pylint phronesis/
+uv run pylint tribos/
 
 # Analyze specific component
-uv run pylint phronesis/lithoscribe/
+uv run pylint tribos/lithoscribe/
 
 # Generate JSON report for CI/CD
-uv run pylint phronesis/ --output-format=json --reports=no > pylint-report.json
+uv run pylint tribos/ --output-format=json --reports=no > pylint-report.json
 ```
 
 #### 🔍 **MyPy** - Static Type Checking
 
 ```bash
 # Type check the main package
-uv run mypy phronesis/
+uv run mypy tribos/
 
 # Type check everything
 uv run mypy .
@@ -148,10 +148,10 @@ uv run mypy .
 
 ```bash
 # Scan for security issues
-uv run bandit -r phronesis/
+uv run bandit -r tribos/
 
 # Generate detailed report
-uv run bandit -r phronesis/ -f json -o security-report.json
+uv run bandit -r tribos/ -f json -o security-report.json
 ```
 
 #### 🔒 **Dependency Vulnerability Scanning**
@@ -262,10 +262,10 @@ uv sync --extra dev --frozen
 uv run pytest
 
 # Run with coverage
-uv run pytest --cov=phronesis
+uv run pytest --cov=tribos
 
 # Run specific test file
-uv run pytest phronesis/vivarix/tests/test_api.py
+uv run pytest tribos/vivarix/tests/test_api.py
 
 # Run integration tests only
 uv run pytest -m integration
@@ -304,11 +304,11 @@ jobs:
 ```bash
 # Run the same checks as CI locally
 uv run pytest                    # Tests
-uv run pylint phronesis/   # Static analysis (config in pyproject.toml)
+uv run pylint tribos/   # Static analysis (config in pyproject.toml)
 uv run pip-audit                 # Security scan
 uv run safety check              # Alternative security scan
-uv run bandit -r phronesis/ # Security scan
-uv run mypy phronesis/     # Type checking
+uv run bandit -r tribos/ # Security scan
+uv run mypy tribos/     # Type checking
 ```
 
 ### Automated Security Workflows
@@ -325,7 +325,7 @@ The project includes comprehensive automated security scanning:
 # Manual security audit
 uv run pip-audit --desc
 uv run safety check --json
-uv run bandit -c pyproject.toml -r phronesis/
+uv run bandit -c pyproject.toml -r tribos/
 ```
 
 ---
@@ -338,7 +338,7 @@ Each agent has its own Dockerfile:
 
 ```bash
 # Build specific agent
-docker build -f phronesis/lithoscribe/Dockerfile -t lithoscribe .
+docker build -f tribos/lithoscribe/Dockerfile -t lithoscribe .
 
 # Build all with docker-compose
 docker-compose build
@@ -355,7 +355,7 @@ uv sync --frozen
 uv build
 
 # Install built package
-pip install dist/phronesis-*.whl
+pip install dist/tribos-*.whl
 ```
 
 ---
@@ -368,7 +368,7 @@ pip install dist/phronesis-*.whl
 # Weekly security scan (runs automatically in CI)
 uv run pip-audit --desc
 uv run safety check --json
-uv run bandit -c pyproject.toml -r phronesis/
+uv run bandit -c pyproject.toml -r tribos/
 
 # Check for outdated packages with vulnerabilities
 uv run pip-audit --desc --format=json
@@ -450,8 +450,8 @@ uv run pre-commit install
 ```bash
 # 1. Run quality checks
 uv run ruff check --fix .
-uv run pylint phronesis/
-uv run mypy phronesis/
+uv run pylint tribos/
+uv run mypy tribos/
 
 # 2. Run tests
 uv run pytest
@@ -466,7 +466,7 @@ git commit -m "your message"
 
 ### Adding a New Agent
 
-1. Create new directory: `phronesis/talk2newagent/`
+1. Create new directory: `tribos/talk2newagent/`
 2. Add dependencies to `pyproject.toml`
 3. Update package configuration
 4. Add tests and documentation
@@ -501,7 +501,7 @@ uv run pre-commit autoupdate
 
 ```bash
 # Verify installation
-uv run python -c "import phronesis; print('OK')"
+uv run python -c "import tribos; print('OK')"
 
 # Check Python path
 uv run python -c "import sys; print(sys.path)"
@@ -514,7 +514,7 @@ uv run python -c "import sys; print(sys.path)"
 uv add --group dev types-requests types-PyYAML
 
 # Run with verbose output
-uv run mypy --verbose phronesis/
+uv run mypy --verbose tribos/
 ```
 
 ### Performance Issues

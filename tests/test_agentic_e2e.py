@@ -7,8 +7,8 @@ import json
 
 import pytest
 
-from phronesis.agentic import config as agent_config
-from phronesis.agentic.control import ApprovalDecision, create_control
+from tribos.agentic import config as agent_config
+from tribos.agentic.control import ApprovalDecision, create_control
 from tests.agentic_fakes import collect_events, make_agentic_orchestrator
 
 QUESTION = "What diseases is KRAS associated with, and which pathways is it part of?"

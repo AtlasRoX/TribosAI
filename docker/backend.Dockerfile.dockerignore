@@ -4,7 +4,7 @@
 !pyproject.toml
 !uv.lock
 !README.md
-!phronesis/
+!tribos/
 !app/
 **/__pycache__
 **/*.py[cod]

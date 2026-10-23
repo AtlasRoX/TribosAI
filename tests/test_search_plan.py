@@ -6,9 +6,9 @@ from typing import Any, Dict, List
 
 import pytest
 
-from phronesis.agents import query_planner as qp
-from phronesis.agents.search_plan import SearchPlan, classify_question, merge_llm_plan
-from phronesis.lithoscribe.synthesis_engine import LiteratureSynthesisEngine
+from tribos.agents import query_planner as qp
+from tribos.agents.search_plan import SearchPlan, classify_question, merge_llm_plan
+from tribos.lithoscribe.synthesis_engine import LiteratureSynthesisEngine
 
 
 async def _plan(query: str) -> SearchPlan:

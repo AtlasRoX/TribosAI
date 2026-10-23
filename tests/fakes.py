@@ -17,16 +17,16 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 from pydantic import BaseModel
 
-from phronesis.agents import authoritative_orchestrator as orch_module
-from phronesis.agents.authoritative_orchestrator import AuthoritativeOrchestrator
-from phronesis.tools import registry as registry_module
-from phronesis.tools.registry import (
+from tribos.agents import authoritative_orchestrator as orch_module
+from tribos.agents.authoritative_orchestrator import AuthoritativeOrchestrator
+from tribos.tools import registry as registry_module
+from tribos.tools.registry import (
     AdapterType,
-    BiomedicalToolRegistry,
+    ToolRegistry,
     ToolResult,
     ToolUniverseEntry,
 )
-from phronesis.utils.memory.clinical_memory import ClinicalMemoryEngine
+from tribos.utils.memory.research_memory import ResearchMemoryEngine
 
 ExtraTools = Dict[str, Tuple[Type[BaseModel], Callable[[Dict[str, Any]], Any]]]
 Calls = List[Tuple[str, Dict[str, Any]]]
@@ -81,7 +81,7 @@ def _fake_output(tool_name: str, kwargs: Dict[str, Any]) -> Dict[str, Any]:
     return {"results": []}
 
 
-def _register(reg: BiomedicalToolRegistry, name: str, schema: Type[BaseModel], executor: Callable[..., Any]) -> None:
+def _register(reg: ToolRegistry, name: str, schema: Type[BaseModel], executor: Callable[..., Any]) -> None:
     reg.register(
         ToolUniverseEntry(
             name=name,
@@ -97,10 +97,10 @@ def _register(reg: BiomedicalToolRegistry, name: str, schema: Type[BaseModel], e
     )
 
 
-def build_recording_registry(extra_tools: Optional[ExtraTools] = None) -> Tuple[BiomedicalToolRegistry, Calls]:
+def build_recording_registry(extra_tools: Optional[ExtraTools] = None) -> Tuple[ToolRegistry, Calls]:
     """Registry with the real input schemas and fake executors that record validated calls."""
     calls: Calls = []
-    reg = BiomedicalToolRegistry()
+    reg = ToolRegistry()
     for name, schema in _TOOL_SCHEMAS.items():
         def make_executor(tool_name: str):
             def executor(**kwargs: Any) -> Dict[str, Any]:
@@ -125,14 +125,14 @@ def make_offline_orchestrator(monkeypatch, tmp_path, extra_tools: Optional[Extra
     """The offline_orchestrator fixture as a function: recording registry, no LLM, memory under tmp_path."""
     reg, calls = build_recording_registry(extra_tools)
     monkeypatch.setattr(orch_module, "get_tool_registry", lambda: reg)
-    monkeypatch.setenv("PHRONESIS_RUNS_DIR", str(tmp_path / "runs"))
+    monkeypatch.setenv("TRIBOS_RUNS_DIR", str(tmp_path / "runs"))
 
     def no_llm(*_args, **_kwargs):
         raise RuntimeError("LLM disabled in offline tests")
 
     monkeypatch.setattr(orch_module, "get_llm", no_llm)
     orch = AuthoritativeOrchestrator()
-    orch.memory = ClinicalMemoryEngine(storage_dir=str(tmp_path / "mem"))
+    orch.memory = ResearchMemoryEngine(storage_dir=str(tmp_path / "mem"))
     monkeypatch.setattr(orch.vivarix, "search_models", lambda *_a, **_k: [{"accession": "BIOMD0000000010"}])
     return orch, calls
 

@@ -40,8 +40,8 @@ jobs:
 
       - name: Run quality checks
         run: |
-          uv run ruff check phronesis/
-          uv run bandit -c pyproject.toml -r phronesis/
+          uv run ruff check tribos/
+          uv run bandit -c pyproject.toml -r tribos/
 
       - name: Semantic release
         id: release
@@ -56,7 +56,7 @@ jobs:
         if: steps.release.outputs.released == 'true'
         run: |
           rm -rf dist build release *.egg-info
-          rm -f phronesis-compose-*.tar.gz phronesis-compose-*.zip
+          rm -f tribos-compose-*.tar.gz tribos-compose-*.zip
           uv build
 
       - name: Verify package integrity
@@ -77,8 +77,8 @@ jobs:
           rm -rf release
           mkdir -p release
 
-          for app in phronesis lithoscribe synapta; do
-            app_path="phronesis/$app/docker-compose"
+          for app in tribos lithoscribe synapta; do
+            app_path="tribos/$app/docker-compose"
 
             if [ -d "$app_path" ]; then
               mkdir -p "release/$app/cpu"
@@ -95,12 +95,12 @@ jobs:
           done
 
           cat > release/README.md <<EOF
-          # Phronesis Compose Bundle ${VERSION}
+          # Tribos Compose Bundle ${VERSION}
 
           This archive contains Docker Compose configurations for the published release tag.
 
           Included applications:
-          - phronesis
+          - tribos
           - lithoscribe
           - synapta
 
@@ -111,7 +111,7 @@ jobs:
           \`\`\`
           EOF
 
-          cat > "release/phronesis/cpu/.env.example" <<'EOF'
+          cat > "release/tribos/cpu/.env.example" <<'EOF'
           OPENAI_API_KEY=your_openai_api_key_here
           LANGCHAIN_TRACING_V2=true
           LANGCHAIN_API_KEY=your_langchain_api_key_here
@@ -123,7 +123,7 @@ jobs:
           MILVUS_DATABASE=synapta_primekg
           BATCH_SIZE=500
           EOF
-          cp "release/phronesis/cpu/.env.example" "release/phronesis/gpu/.env.example"
+          cp "release/tribos/cpu/.env.example" "release/tribos/gpu/.env.example"
 
           cat > "release/synapta/cpu/.env.example" <<'EOF'
           OPENAI_API_KEY=your_openai_api_key_here
@@ -153,8 +153,8 @@ jobs:
           EOF
           cp "release/lithoscribe/cpu/.env.example" "release/lithoscribe/gpu/.env.example"
 
-          tar -czf "phronesis-compose-${VERSION}.tar.gz" -C release .
-          zip -rq "phronesis-compose-${VERSION}.zip" release
+          tar -czf "tribos-compose-${VERSION}.tar.gz" -C release .
+          zip -rq "tribos-compose-${VERSION}.zip" release
 
       - name: Publish to PyPI
         if: steps.release.outputs.released == 'true'
@@ -173,8 +173,8 @@ jobs:
         run: |
           gh release upload "${{ steps.release.outputs.tag }}" \
             dist/* \
-            "phronesis-compose-${{ steps.release.outputs.tag }}.tar.gz" \
-            "phronesis-compose-${{ steps.release.outputs.tag }}.zip" \
+            "tribos-compose-${{ steps.release.outputs.tag }}.tar.gz" \
+            "tribos-compose-${{ steps.release.outputs.tag }}.zip" \
             --clobber
 
   docker:
@@ -186,33 +186,33 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - image: phronesis
-            dockerfile: phronesis/phronesis/Dockerfile
+          - image: tribos
+            dockerfile: tribos/tribos/Dockerfile
             suffix: ""
             latest_tag: latest
             install_cuda: "true"
-          - image: phronesis
-            dockerfile: phronesis/phronesis/Dockerfile
+          - image: tribos
+            dockerfile: tribos/tribos/Dockerfile
             suffix: "-cpu"
             latest_tag: latest-cpu
             install_cuda: "false"
           - image: vivarix
-            dockerfile: phronesis/vivarix/Dockerfile
+            dockerfile: tribos/vivarix/Dockerfile
             suffix: ""
             latest_tag: latest
             install_cuda: "false"
           - image: lithoscribe
-            dockerfile: phronesis/lithoscribe/Dockerfile
+            dockerfile: tribos/lithoscribe/Dockerfile
             suffix: ""
             latest_tag: latest
             install_cuda: "false"
           - image: synapta
-            dockerfile: phronesis/synapta/Dockerfile
+            dockerfile: tribos/synapta/Dockerfile
             suffix: ""
             latest_tag: latest
             install_cuda: "true"
           - image: synapta
-            dockerfile: phronesis/synapta/Dockerfile
+            dockerfile: tribos/synapta/Dockerfile
             suffix: "-cpu"
             latest_tag: latest-cpu
             install_cuda: "false"

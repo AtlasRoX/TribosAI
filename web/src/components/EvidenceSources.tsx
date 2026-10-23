@@ -52,7 +52,7 @@ const COUNT_WORD: Record<StudyTypeKey, [string, string]> = {
   unclassified: ["unclassified", "unclassified"],
 };
 
-// Mirrors STUDY_TYPE_POLICY tiers in phronesis/lithoscribe/evidence_grading.py.
+// Mirrors STUDY_TYPE_POLICY tiers in tribos/lithoscribe/evidence_grading.py.
 const TIER: Record<StudyTypeKey, number> = {
   meta_analysis: 1,
   systematic_review: 1,

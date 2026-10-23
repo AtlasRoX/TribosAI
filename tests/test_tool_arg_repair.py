@@ -1,5 +1,5 @@
 """
-Offline tests for the conservative tool-argument repair (phronesis/tools/arg_repair.py) at every point that
+Offline tests for the conservative tool-argument repair (tribos/tools/arg_repair.py) at every point that
 validates tool inputs (registry, specialist tool calls, plan nodes), for repeated identical specialist calls being
 reused rather than shown as errors.
 """
@@ -13,12 +13,12 @@ from typing import Any, Dict, List, Optional, Tuple
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, constr
 
-from phronesis.agentic.plan_graph import parse_plan, validate_plan, validated_inputs
-from phronesis.agentic.specialists import SPECS_BY_NAME, Specialist
-from phronesis.agentic.topologies import REUSED_PREFIX, call_step_status, run_specialist_tool
-from phronesis.agents.query_context import QueryContext, ResolvedEntity
-from phronesis.tools.arg_repair import adjustment_text, repair_arguments
-from phronesis.tools.registry import AdapterType, BiomedicalToolRegistry, ErrorType, ToolResult, ToolUniverseEntry
+from tribos.agentic.plan_graph import parse_plan, validate_plan, validated_inputs
+from tribos.agentic.specialists import SPECS_BY_NAME, Specialist
+from tribos.agentic.topologies import REUSED_PREFIX, call_step_status, run_specialist_tool
+from tribos.agents.query_context import QueryContext, ResolvedEntity
+from tribos.tools.arg_repair import adjustment_text, repair_arguments
+from tribos.tools.registry import AdapterType, ToolRegistry, ErrorType, ToolResult, ToolUniverseEntry
 
 
 # Sample tool input schemas with the field shapes the repair has to handle: a patterned id, bounded integers,
@@ -157,8 +157,8 @@ def test_adjustment_text():
 # Registry
 # -----------------------------------------------------------------------------
 
-def _registry(calls: List[Tuple[str, Dict[str, Any]]]) -> BiomedicalToolRegistry:
-    reg = BiomedicalToolRegistry()
+def _registry(calls: List[Tuple[str, Dict[str, Any]]]) -> ToolRegistry:
+    reg = ToolRegistry()
 
     def add(name: str, schema: Any, domain: str = "synapta") -> None:
         async def execute(**kwargs: Any) -> Dict[str, Any]:
@@ -200,7 +200,7 @@ def test_registry_repairs_and_records_the_adjustment():
 # Specialist tool calls (supervisor / swarm)
 # -----------------------------------------------------------------------------
 
-def _specialist_state(reg: BiomedicalToolRegistry) -> SimpleNamespace:
+def _specialist_state(reg: ToolRegistry) -> SimpleNamespace:
     state = SimpleNamespace(ctx=QueryContext(raw_query="q", clean_query="q"), bag={}, tool_results={}, n=0)
 
     def next_key(phase: str, tool: str) -> str:
@@ -217,7 +217,7 @@ def _specialist_state(reg: BiomedicalToolRegistry) -> SimpleNamespace:
     return state
 
 
-def _chemistry(reg: BiomedicalToolRegistry) -> Specialist:
+def _chemistry(reg: ToolRegistry) -> Specialist:
     return Specialist(SPECS_BY_NAME["chemistry"], [reg.get_entry("chembl_drug_profile"), reg.get_entry("chembl_resolve_drugs")])
 
 

@@ -33,7 +33,7 @@ function yyyymmdd(d: Date = new Date()): string {
 }
 
 export function exportFilename(fmt: ExportFormat, question: string): string {
-  return `phronesis-${slugify(question)}-${yyyymmdd()}.${EXTENSIONS[fmt]}`;
+  return `tribos-${slugify(question)}-${yyyymmdd()}.${EXTENSIONS[fmt]}`;
 }
 
 /** Errors read "<what> failed: <status> <detail or status text>". */

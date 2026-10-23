@@ -7,7 +7,7 @@ on:
     paths:
       - "pyproject.toml"
       - "uv.lock"
-      - "phronesis/**"
+      - "tribos/**"
   workflow_dispatch:
 
 jobs:
@@ -34,8 +34,8 @@ jobs:
 
       - name: Run pre-build quality checks
         run: |
-          uv run ruff check phronesis/
-          uv run bandit -c pyproject.toml -r phronesis/
+          uv run ruff check tribos/
+          uv run bandit -c pyproject.toml -r tribos/
 
       - name: Get package version
         id: version
@@ -96,7 +96,7 @@ jobs:
             source .venv/bin/activate
           fi
           uv pip install dist/*.whl
-          uv run python -c "import phronesis; print('Package import successful')"
+          uv run python -c "import tribos; print('Package import successful')"
 
   # Summary job
   package-validation:

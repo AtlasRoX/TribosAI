@@ -1,9 +1,9 @@
-# Testing, Linting, and Code Coverage with UV — Phronesis
+# Testing, Linting, and Code Coverage with UV — Tribos
 
-> **Phronesis** — Biomedical Research Assistant  
-> **Made by ChronoStrider Engineering (ChronoStrider Enginnerings)**
+> **Tribos** — Biomedical Research Assistant  
+> **Made by ChronoStrider Engineering**
 
-This guide covers how to run tests, perform linting, and generate code coverage reports for the **Phronesis** project, made by **ChronoStrider Engineering** (**ChronoStrider Enginnerings**).
+This guide covers how to run tests, perform linting, and generate code coverage reports for the **Tribos** project, made by **ChronoStrider Engineering** (**ChronoStrider Engineering**).
 
 ## Quick Reference
 
@@ -24,10 +24,10 @@ uv run coverage report
 # Run linting
 uv run ruff check .
 uv run ruff check --fix .  # Auto-fix issues
-uv run pylint phronesis/
+uv run pylint tribos/
 
 # Run security scanning
-uv run bandit -r phronesis/
+uv run bandit -r tribos/
 uv run pip-audit
 
 # Format code
@@ -66,8 +66,8 @@ pip install uv
 
 ```bash
 # Clone repository
-git clone https://github.com/AtlasRoX/phronesis-CS
-cd phronesis-CS
+git clone https://github.com/AtlasRoX/trib
+cd tribos-CS
 
 # Sync dependencies (creates .venv; pytest, coverage, ruff and pylint are in the dev extra)
 uv sync --frozen --extra dev
@@ -208,10 +208,10 @@ uv run pytest
 uv run pytest -v
 
 # Run specific test file
-uv run pytest phronesis/lithoscribe/tests/test_main_agent.py
+uv run pytest tribos/lithoscribe/tests/test_main_agent.py
 
 # Run specific test function
-uv run pytest phronesis/lithoscribe/tests/test_main_agent.py::test_specific_function
+uv run pytest tribos/lithoscribe/tests/test_main_agent.py::test_specific_function
 
 # Run tests matching a pattern
 uv run pytest -k "test_pdf"
@@ -221,11 +221,11 @@ uv run pytest -k "test_pdf"
 
 ```bash
 # Test individual agents
-uv run pytest phronesis/lithoscribe/tests/
-uv run pytest phronesis/vivarix/tests/
-uv run pytest phronesis/synapta/tests/
-uv run pytest phronesis/phronesis/tests/
-uv run pytest phronesis/lumicell/tests/
+uv run pytest tribos/lithoscribe/tests/
+uv run pytest tribos/vivarix/tests/
+uv run pytest tribos/synapta/tests/
+uv run pytest tribos/tribos/tests/
+uv run pytest tribos/lumicell/tests/
 ```
 
 ### Submodule-Specific Quality Checks
@@ -234,35 +234,35 @@ uv run pytest phronesis/lumicell/tests/
 
 ```bash
 # Run pylint on specific submodules (configuration in pyproject.toml)
-uv run pylint phronesis/lithoscribe/
-uv run pylint phronesis/vivarix/
-uv run pylint phronesis/synapta/
-uv run pylint phronesis/phronesis/
-uv run pylint phronesis/lumicell/
+uv run pylint tribos/lithoscribe/
+uv run pylint tribos/vivarix/
+uv run pylint tribos/synapta/
+uv run pylint tribos/tribos/
+uv run pylint tribos/lumicell/
 ```
 
 #### Coverage for Individual Submodules
 
 ```bash
 # Run coverage on specific submodules
-uv run coverage run --include="phronesis/lithoscribe/*" -m pytest --cache-clear phronesis/lithoscribe/tests/ && uv run coverage report
-uv run coverage run --include="phronesis/vivarix/*" -m pytest --cache-clear phronesis/vivarix/tests/ && uv run coverage report
-uv run coverage run --include="phronesis/synapta/*" -m pytest --cache-clear phronesis/synapta/tests/ && uv run coverage report
-uv run coverage run --include="phronesis/phronesis/*" -m pytest --cache-clear phronesis/phronesis/tests/ && uv run coverage report
-uv run coverage run --include="phronesis/lumicell/*" -m pytest --cache-clear phronesis/lumicell/tests/ && uv run coverage report
+uv run coverage run --include="tribos/lithoscribe/*" -m pytest --cache-clear tribos/lithoscribe/tests/ && uv run coverage report
+uv run coverage run --include="tribos/vivarix/*" -m pytest --cache-clear tribos/vivarix/tests/ && uv run coverage report
+uv run coverage run --include="tribos/synapta/*" -m pytest --cache-clear tribos/synapta/tests/ && uv run coverage report
+uv run coverage run --include="tribos/tribos/*" -m pytest --cache-clear tribos/tribos/tests/ && uv run coverage report
+uv run coverage run --include="tribos/lumicell/*" -m pytest --cache-clear tribos/lumicell/tests/ && uv run coverage report
 ```
 
 #### Pre-commit Hooks for Specific Files/Directories
 
 ```bash
 # Run pre-commit on specific submodule
-uv run pre-commit run --files phronesis/lithoscribe/*.py
-uv run pre-commit run --files phronesis/vivarix/*.py
-uv run pre-commit run --files phronesis/synapta/*.py
+uv run pre-commit run --files tribos/lithoscribe/*.py
+uv run pre-commit run --files tribos/vivarix/*.py
+uv run pre-commit run --files tribos/synapta/*.py
 
 # Run specific hook on specific submodule
-uv run pre-commit run ruff --files phronesis/lithoscribe/*.py
-uv run pre-commit run bandit --files phronesis/synapta/*.py
+uv run pre-commit run ruff --files tribos/lithoscribe/*.py
+uv run pre-commit run bandit --files tribos/synapta/*.py
 ```
 
 #### Test Configuration
@@ -318,20 +318,20 @@ uv run coverage xml
 ```bash
 # Coverage for specific component (standard configuration)
 # Note: Use quotes on macOS/zsh shell, GitHub Actions CI doesn't require them
-uv run coverage run --include="phronesis/lithoscribe/*" -m pytest --cache-clear phronesis/lithoscribe/tests/ && uv run coverage report
+uv run coverage run --include="tribos/lithoscribe/*" -m pytest --cache-clear tribos/lithoscribe/tests/ && uv run coverage report
 
 # Run coverage on each subfolder individually (local development - use quotes for macOS/zsh)
-uv run coverage run --include="phronesis/lithoscribe/*" -m pytest --cache-clear phronesis/lithoscribe/tests/ && uv run coverage report
-uv run coverage run --include="phronesis/vivarix/*" -m pytest --cache-clear phronesis/vivarix/tests/ && uv run coverage report
-uv run coverage run --include="phronesis/synapta/*" -m pytest --cache-clear phronesis/synapta/tests/ && uv run coverage report
-uv run coverage run --include="phronesis/phronesis/*" -m pytest --cache-clear phronesis/phronesis/tests/ && uv run coverage report
-uv run coverage run --include="phronesis/lumicell/*" -m pytest --cache-clear phronesis/lumicell/tests/ && uv run coverage report
+uv run coverage run --include="tribos/lithoscribe/*" -m pytest --cache-clear tribos/lithoscribe/tests/ && uv run coverage report
+uv run coverage run --include="tribos/vivarix/*" -m pytest --cache-clear tribos/vivarix/tests/ && uv run coverage report
+uv run coverage run --include="tribos/synapta/*" -m pytest --cache-clear tribos/synapta/tests/ && uv run coverage report
+uv run coverage run --include="tribos/tribos/*" -m pytest --cache-clear tribos/tribos/tests/ && uv run coverage report
+uv run coverage run --include="tribos/lumicell/*" -m pytest --cache-clear tribos/lumicell/tests/ && uv run coverage report
 
 # Alternative format for CI environments (without quotes)
-# uv run coverage run --include=phronesis/lithoscribe/* -m pytest --cache-clear phronesis/lithoscribe/tests/
+# uv run coverage run --include=tribos/lithoscribe/* -m pytest --cache-clear tribos/lithoscribe/tests/
 
 # Coverage with source specification (all components)
-uv run coverage run --source=phronesis -m pytest
+uv run coverage run --source=tribos -m pytest
 
 # Show missing lines
 uv run coverage report -m
@@ -344,7 +344,7 @@ uv run coverage report --show-missing
 
 ```toml
 [tool.coverage.run]
-source = ["phronesis"]
+source = ["tribos"]
 omit = [
     "*/tests/*",
     "*/test_*",
@@ -398,7 +398,7 @@ fi
 uv run ruff check .
 
 # Check specific directory
-uv run ruff check phronesis/
+uv run ruff check tribos/
 
 # Fix auto-fixable issues
 uv run ruff check --fix .
@@ -442,25 +442,25 @@ ignore = [
 
 ```bash
 # Run pylint on entire codebase
-uv run pylint phronesis/
+uv run pylint tribos/
 
 # Run on specific component
-uv run pylint phronesis/lithoscribe/
+uv run pylint tribos/lithoscribe/
 
 # Standard configuration (disabled rules configured in pyproject.toml)
-uv run pylint phronesis/
+uv run pylint tribos/
 
 # Run on each subfolder individually
-uv run pylint phronesis/lithoscribe/
-uv run pylint phronesis/vivarix/
-uv run pylint phronesis/synapta/
-uv run pylint phronesis/lumicell/
+uv run pylint tribos/lithoscribe/
+uv run pylint tribos/vivarix/
+uv run pylint tribos/synapta/
+uv run pylint tribos/lumicell/
 
 # Generate JSON report
-uv run pylint phronesis/ --output-format=json --reports=no > pylint-report.json
+uv run pylint tribos/ --output-format=json --reports=no > pylint-report.json
 
 # Show only errors and warnings
-uv run pylint phronesis/ --errors-only
+uv run pylint tribos/ --errors-only
 ```
 
 #### Pylint Configuration (`pyproject.toml`)
@@ -483,16 +483,16 @@ disable = ["R0801", "R0902", "W0221", "W0122"]
 
 ```bash
 # Scan entire codebase
-uv run bandit -r phronesis/
+uv run bandit -r tribos/
 
 # Use configuration from pyproject.toml
-uv run bandit -c pyproject.toml -r phronesis/
+uv run bandit -c pyproject.toml -r tribos/
 
 # Generate JSON report
-uv run bandit -c pyproject.toml -f json -o bandit-report.json -r phronesis/
+uv run bandit -c pyproject.toml -f json -o bandit-report.json -r tribos/
 
 # Show only high severity issues
-uv run bandit -r phronesis/ -ll
+uv run bandit -r tribos/ -ll
 ```
 
 #### Bandit Configuration (`pyproject.toml`)
@@ -547,13 +547,13 @@ MyPy is currently **disabled** in pre-commit due to 1,121 type annotation errors
 
 ```bash
 # Run mypy (will show many errors)
-uv run mypy phronesis/
+uv run mypy tribos/
 
 # Run with lenient settings
-uv run mypy phronesis/ --ignore-missing-imports --show-error-codes
+uv run mypy tribos/ --ignore-missing-imports --show-error-codes
 
 # Check specific component
-uv run mypy phronesis/lithoscribe/ --ignore-missing-imports
+uv run mypy tribos/lithoscribe/ --ignore-missing-imports
 ```
 
 #### MyPy Configuration (`pyproject.toml`)
@@ -630,8 +630,8 @@ uv run pre-commit run check-yaml --all-files
 uv run pre-commit run check-added-large-files --all-files
 
 # Run on specific files
-uv run pre-commit run ruff --files phronesis/lithoscribe/main.py
-uv run pre-commit run bandit --files phronesis/synapta/tools/*.py
+uv run pre-commit run ruff --files tribos/lithoscribe/main.py
+uv run pre-commit run bandit --files tribos/synapta/tools/*.py
 ```
 
 ### Bypassing Hooks (Emergency Use)
@@ -657,8 +657,8 @@ All these tools are integrated into our CI/CD pipeline:
 uv run pytest                                    # Tests
 uv run coverage run -m pytest && coverage report # Coverage
 uv run ruff check .                              # Linting
-uv run pylint phronesis/                   # Static analysis
-uv run bandit -c pyproject.toml -r phronesis/ # Security
+uv run pylint tribos/                   # Static analysis
+uv run bandit -c pyproject.toml -r tribos/ # Security
 uv run pip-audit                                 # Vulnerabilities
 ```
 
@@ -769,13 +769,13 @@ uv sync --user
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 # Use forward slashes in paths
-uv run pytest phronesis/lithoscribe/tests/
+uv run pytest tribos/lithoscribe/tests/
 ```
 
 ### Getting Help
 
 - **UV Documentation**: https://docs.astral.sh/uv/
 - **pytest Documentation**: https://docs.pytest.org/
-- **Repository Issues**: https://github.com/AtlasRoX/phronesis-CS/issues
+- **Repository Issues**: https://github.com/AtlasRoX/trib/issues
 
 This guide provides a comprehensive overview of testing, linting, and code coverage using UV. The modern toolchain ensures fast, reliable, and secure development practices.

@@ -2,21 +2,21 @@
 
 The default (offline) run must not depend on the developer's machine and must not change it:
 
-* State stores (audit TST-002). Before any test module is imported, ``PHRONESIS_DATA_DIR`` points at a fresh
-  temporary directory and every store-specific override (``PHRONESIS_MEMORY_DIR``, ``PHRONESIS_RUNS_DIR``, ...)
+* State stores (audit TST-002). Before any test module is imported, ``TRIBOS_DATA_DIR`` points at a fresh
+  temporary directory and every store-specific override (``TRIBOS_MEMORY_DIR``, ``TRIBOS_RUNS_DIR``, ...)
   is removed. The clinical memory vault, run manifests, uploads, jobs, tool cache, projects, router outcomes and
-  the BioModels cache therefore all live under that directory (``phronesis.utils.paths``), never in
-  ``<repo>/.phronesis_memory`` or the other workspace defaults. Tests that need their own location still use
+  the BioModels cache therefore all live under that directory (``tribos.utils.paths``), never in
+  ``<repo>/.tribos_memory`` or the other workspace defaults. Tests that need their own location still use
   ``monkeypatch.setenv`` / ``tmp_path``.
-* Environment (audit TST-003). ``PHRONESIS_LOAD_DOTENV=0`` stops ``app.backend.main`` from merging the developer
+* Environment (audit TST-003). ``TRIBOS_LOAD_DOTENV=0`` stops ``app.backend.main`` from merging the developer
   ``.env`` into the test process at import, and every registered setting plus every secret-looking variable
   (``*_API_KEY``, ``*_TOKEN``, ``*SECRET*``, ``*PASSWORD*``) is removed, so offline tests run against code defaults
   exactly as they do in CI, and no LLM/API key is available to a call that a test forgot to fake.
 * Network (audit TST-008). A socket guard refuses DNS lookups and connections to anything but loopback. A test
   that tries anyway fails with the blocked targets listed. Tests that genuinely need the internet are marked
-  ``@pytest.mark.network``; they are skipped unless ``PHRONESIS_LIVE_TESTS=1``, and only then may they connect.
+  ``@pytest.mark.network``; they are skipped unless ``TRIBOS_LIVE_TESTS=1``, and only then may they connect.
 
-Live runs (``PHRONESIS_LIVE_TESTS=1``) keep the caller's keys, also load ``<repo>/.env`` when it exists (without
+Live runs (``TRIBOS_LIVE_TESTS=1``) keep the caller's keys, also load ``<repo>/.env`` when it exists (without
 overriding variables already set), and still use the temporary state directory.
 """
 
@@ -41,7 +41,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _live_tests_enabled() -> bool:
-    return os.getenv("PHRONESIS_LIVE_TESTS", "").strip().lower() in ("1", "true", "yes")
+    return os.getenv("TRIBOS_LIVE_TESTS", "").strip().lower() in ("1", "true", "yes")
 
 
 LIVE_TESTS = _live_tests_enabled()
@@ -50,18 +50,18 @@ LIVE_TESTS = _live_tests_enabled()
 # 1. Environment and state directories (applied at conftest import, before test modules import the app)
 # ---------------------------------------------------------------------------------------------------------------
 
-# Store-specific locations; PHRONESIS_DATA_DIR below replaces all of them.
+# Store-specific locations; TRIBOS_DATA_DIR below replaces all of them.
 STATE_DIR_VARS = (
-    "PHRONESIS_MEMORY_DIR",
-    "PHRONESIS_PROJECTS_DIR",
-    "PHRONESIS_RUNS_DIR",
-    "PHRONESIS_UPLOAD_ROOT",
-    "PHRONESIS_JOBS_DIR",
-    "PHRONESIS_TOOL_CACHE_DIR",
-    "PHRONESIS_ROUTER_DIR",
+    "TRIBOS_MEMORY_DIR",
+    "TRIBOS_PROJECTS_DIR",
+    "TRIBOS_RUNS_DIR",
+    "TRIBOS_UPLOAD_ROOT",
+    "TRIBOS_JOBS_DIR",
+    "TRIBOS_TOOL_CACHE_DIR",
+    "TRIBOS_ROUTER_DIR",
 )
 # Never scrubbed: pytest's own variable and the switch that selects this mode.
-_KEEP = {"PYTEST_CURRENT_TEST", "PHRONESIS_LIVE_TESTS"}
+_KEEP = {"PYTEST_CURRENT_TEST", "TRIBOS_LIVE_TESTS"}
 SECRET_NAME_RE = re.compile(r"(API_KEY|_KEY$|_TOKEN$|_TOKENS$|SECRET|PASSWORD|PASSWD|CREDENTIAL)", re.IGNORECASE)
 
 
@@ -69,7 +69,7 @@ def _registered_setting_names() -> List[str]:
     """Names in the settings registry, loaded from settings.py alone (stdlib only, no package import)."""
     import importlib.util
 
-    path = REPO_ROOT / "phronesis" / "config" / "settings.py"
+    path = REPO_ROOT / "tribos" / "config" / "settings.py"
     try:
         spec = importlib.util.spec_from_file_location("_conftest_settings_registry", path)
         module = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
@@ -112,7 +112,7 @@ def _neutralise_implicit_dotenv() -> None:
     except ImportError:  # pragma: no cover - python-dotenv is a core dependency
         return
     real = dotenv.main.load_dotenv
-    if getattr(real, "_phronesis_hermetic", False):
+    if getattr(real, "_tribos_hermetic", False):
         return
 
     @functools.wraps(real)
@@ -121,7 +121,7 @@ def _neutralise_implicit_dotenv() -> None:
             return False
         return real(dotenv_path, stream, *args, **kwargs)
 
-    load_dotenv._phronesis_hermetic = True  # type: ignore[attr-defined]
+    load_dotenv._tribos_hermetic = True  # type: ignore[attr-defined]
     dotenv.load_dotenv = load_dotenv  # type: ignore[assignment]
     dotenv.main.load_dotenv = load_dotenv  # type: ignore[assignment]
 
@@ -143,9 +143,9 @@ def _prepare_environment() -> Path:
     for name in STATE_DIR_VARS:
         os.environ.pop(name, None)
     # The API module loads .env at import unless told not to (app/backend/main.py).
-    os.environ["PHRONESIS_LOAD_DOTENV"] = "0"
-    state_root = Path(tempfile.mkdtemp(prefix="phronesis-pytest-state-"))
-    os.environ["PHRONESIS_DATA_DIR"] = str(state_root)
+    os.environ["TRIBOS_LOAD_DOTENV"] = "0"
+    state_root = Path(tempfile.mkdtemp(prefix="tribos-pytest-state-"))
+    os.environ["TRIBOS_DATA_DIR"] = str(state_root)
     atexit.register(shutil.rmtree, state_root, ignore_errors=True)
     return state_root
 
@@ -201,7 +201,7 @@ class _NetworkGuard:
             self.attempts.append((test, kind, str(target)))
         cls = _NetworkBlockedDNSError if dns else NetworkBlockedError
         return cls(f"network access is blocked in offline tests ({kind} {target!r}); mark the test "
-                   "@pytest.mark.network and run with PHRONESIS_LIVE_TESTS=1, or use a fake")
+                   "@pytest.mark.network and run with TRIBOS_LIVE_TESTS=1, or use a fake")
 
     def _check_address(self, sock: Any, address: Any) -> None:
         if self.allowed:
@@ -309,7 +309,7 @@ def _offline_network_guard(request):
     if attempts and not may_connect:
         shown = "; ".join(f"{kind} {target}" for _test, kind, target in attempts[:5])
         pytest.fail(f"offline test attempted network access ({len(attempts)} blocked: {shown}). Use a fake, or mark "
-                    "it @pytest.mark.network so it runs only with PHRONESIS_LIVE_TESTS=1.", pytrace=False)
+                    "it @pytest.mark.network so it runs only with TRIBOS_LIVE_TESTS=1.", pytrace=False)
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -321,7 +321,7 @@ def pytest_collection_modifyitems(config, items):
     # Tests marked `network` call live upstream APIs (and the configured LLM); the default run stays offline.
     if LIVE_TESTS:
         return
-    skip = pytest.mark.skip(reason="live network test; set PHRONESIS_LIVE_TESTS=1 to run")
+    skip = pytest.mark.skip(reason="live network test; set TRIBOS_LIVE_TESTS=1 to run")
     for item in items:
         if "network" in item.keywords:
             item.add_marker(skip)
@@ -330,7 +330,7 @@ def pytest_collection_modifyitems(config, items):
 @pytest.fixture
 def offline_biomd10(monkeypatch, tmp_path):
     """Serve BIOMD0000000010 from the bundled SBML fixture through a private model cache: no network."""
-    from phronesis.vivarix.engine import VivarixSimulationEngine
+    from tribos.vivarix.engine import VivarixSimulationEngine
 
     cache = tmp_path / "biomodels_cache"
     cache.mkdir()
@@ -343,7 +343,7 @@ def offline_biomd10(monkeypatch, tmp_path):
 def _load_extensions_once():
     # load_extensions() imports each module once per process; doing it here, before any test enters
     # hooks.isolated_hooks(), keeps a first import inside an isolated block from discarding its registrations.
-    from phronesis.extensions import load_extensions
+    from tribos.extensions import load_extensions
 
     load_extensions()
     yield

@@ -18,9 +18,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
 from app.backend.auth import get_current_user
-from phronesis.datasets.geo import GSE_RE, lookup_geo
-from phronesis.datasets.models import DATASET_ID_RE, DatasetProvenanceIn
-from phronesis.datasets.store import (
+from tribos.datasets.geo import GSE_RE, lookup_geo
+from tribos.datasets.models import DATASET_ID_RE, DatasetProvenanceIn
+from tribos.datasets.store import (
     CHUNK_BYTES,
     EXTENSION_KINDS,
     DatasetStoreError,

@@ -4,7 +4,7 @@ Research projects and their memory (feature 16).
 A project groups threads; its memory is a bi-temporal fact graph (Zep, arXiv:2501.13956) written by the
 project-memory phase from verified tool results (Mem0-style ADD/UPDATE/INVALIDATE/NOOP, arXiv:2504.19413) and
 recalled with Personalized PageRank (HippoRAG, arXiv:2405.14831) plus recency x importance x relevance
-(Generative Agents, arXiv:2304.03442). See phronesis/utils/memory/project_store.py.
+(Generative Agents, arXiv:2304.03442). See tribos/utils/memory/project_store.py.
 
 Routes (all scoped to the authenticated user; another user's project is a 404):
 - POST /api/projects {name, description}, GET /api/projects
@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 
 from app.backend.auth import get_current_user
-from phronesis.utils.memory.project_store import (
+from tribos.utils.memory.project_store import (
     FACT_ID_RE,
     PROJECT_ID_RE,
     ProjectStoreError,

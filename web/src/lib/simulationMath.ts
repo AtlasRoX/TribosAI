@@ -1,7 +1,7 @@
 // Pure helpers behind the simulation card (SCI-013, SCI-015). Framework-free and erasable-TypeScript-only so
 // `node --test` can import it.
 
-/** Below this magnitude a start value counts as zero (same threshold as phronesis/vivarix engine.py). */
+/** Below this magnitude a start value counts as zero (same threshold as tribos/vivarix engine.py). */
 export const ZERO_ABS = 1e-12;
 
 /**

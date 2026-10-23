@@ -10,18 +10,18 @@ from typing import Any, Dict, List
 
 import pytest
 
-from phronesis.agentic import approval as approval_mod
-from phronesis.agentic import clarify as clarify_mod
-from phronesis.agentic import config as agent_config
-from phronesis.agentic import jobs as jobs_mod
-from phronesis.agentic import project_memory as pm_mod
-from phronesis.agentic.budget import RunBudget
-from phronesis.agentic.control import ApprovalDecision, RunControl, create_control
-from phronesis.agentic.llm import AgentLLM
-from phronesis.agentic.runtime import register_phase, restore_phases, snapshot_phases
-from phronesis.agentic.state import AgentState
-from phronesis.tools.registry import ToolResult
-from phronesis.utils.memory.project_store import FactInput, ProjectStore, personalized_pagerank
+from tribos.agentic import approval as approval_mod
+from tribos.agentic import clarify as clarify_mod
+from tribos.agentic import config as agent_config
+from tribos.agentic import jobs as jobs_mod
+from tribos.agentic import project_memory as pm_mod
+from tribos.agentic.budget import RunBudget
+from tribos.agentic.control import ApprovalDecision, RunControl, create_control
+from tribos.agentic.llm import AgentLLM
+from tribos.agentic.runtime import register_phase, restore_phases, snapshot_phases
+from tribos.agentic.state import AgentState
+from tribos.tools.registry import ToolResult
+from tribos.utils.memory.project_store import FactInput, ProjectStore, personalized_pagerank
 from tests.agentic_fakes import collect_events, make_agentic_orchestrator
 from tests.fakes import build_recording_registry, called
 
@@ -38,7 +38,7 @@ KRAS_Q = "What diseases is KRAS associated with?"
 def only_phases():
     """Run only the phases a test names (other packages' phases stay out of these probes)."""
     saved = snapshot_phases()
-    from phronesis.extensions import load_extensions
+    from tribos.extensions import load_extensions
 
     load_extensions()
     clarify_mod.clear_markers()
@@ -57,8 +57,8 @@ def only_phases():
 
 @pytest.fixture
 def stores(monkeypatch, tmp_path):
-    monkeypatch.setenv("PHRONESIS_PROJECTS_DIR", str(tmp_path / "projects"))
-    monkeypatch.setenv("PHRONESIS_JOBS_DIR", str(tmp_path / "jobs"))
+    monkeypatch.setenv("TRIBOS_PROJECTS_DIR", str(tmp_path / "projects"))
+    monkeypatch.setenv("TRIBOS_JOBS_DIR", str(tmp_path / "jobs"))
     yield tmp_path
     jobs_mod.set_job_manager(None)
 
@@ -69,9 +69,9 @@ def api(monkeypatch, stores):
 
     from app.backend import main as backend_main
 
-    monkeypatch.delenv("PHRONESIS_AUTH_MODE", raising=False)
-    monkeypatch.delenv("PHRONESIS_JWT_SECRET", raising=False)
-    monkeypatch.setenv("PHRONESIS_API_TOKENS", "alice-token:alice,bob-token:bob")
+    monkeypatch.delenv("TRIBOS_AUTH_MODE", raising=False)
+    monkeypatch.delenv("TRIBOS_JWT_SECRET", raising=False)
+    monkeypatch.setenv("TRIBOS_API_TOKENS", "alice-token:alice,bob-token:bob")
     with TestClient(backend_main.app) as client:
         yield client
 
@@ -354,7 +354,7 @@ def test_job_lifecycle_and_event_replay(api, stores):
 
 
 def test_job_cancel_limit_and_resume(api, stores, monkeypatch):
-    monkeypatch.setenv("PHRONESIS_MAX_JOBS_PER_USER", "1")
+    monkeypatch.setenv("TRIBOS_MAX_JOBS_PER_USER", "1")
     manager = _install_jobs(stores, waiting_runner)
     job_id = api.post("/api/jobs", headers=ALICE, json={"message": KRAS_Q}).json()["job_id"]
     assert _wait_job(api, job_id, ("running",))["status"] == "running"
@@ -481,7 +481,7 @@ def test_ppr_recall_follows_graph_links(tmp_path):
 
 def test_project_memory_routes(api, stores):
     pid = api.post("/api/projects", headers=ALICE, json={"name": "p"}).json()["id"]
-    from phronesis.utils.memory.project_store import get_project_store
+    from tribos.utils.memory.project_store import get_project_store
 
     store = get_project_store()
     store.upsert_facts(pid, "alice", [FactInput("sotorasib", "targets", "KRAS"), FactInput("EGFR", "associated_with", "NSCLC")])
@@ -514,7 +514,7 @@ def _tool_results() -> Dict[str, Any]:
 
 
 def test_consolidation_extracts_facts_and_recall_injects_them(stores):
-    from phronesis.utils.memory.project_store import get_project_store
+    from tribos.utils.memory.project_store import get_project_store
 
     store = get_project_store()
     pid = store.create_project("alice", "KRAS")["id"]
@@ -557,7 +557,7 @@ def test_consolidation_extracts_facts_and_recall_injects_them(stores):
 
 def test_project_memory_through_the_orchestrator(monkeypatch, tmp_path, only_phases, stores):
     only_phases(pm_mod.ProjectRecallPhase(), pm_mod.ProjectConsolidatePhase())
-    from phronesis.utils.memory.project_store import get_project_store
+    from tribos.utils.memory.project_store import get_project_store
 
     pid = get_project_store().create_project("u1", "KRAS")["id"]
     orch, _calls, llm = make_agentic_orchestrator(monkeypatch, tmp_path)
@@ -598,17 +598,17 @@ def _rpc(client, method, params=None, rid=1, headers=None):
 def test_mcp_handshake_and_tool_listing(mcp):
     c = mcp.client
     init = _rpc(c, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}).json()["result"]
-    assert init["protocolVersion"] == "2025-06-18" and init["capabilities"] == {"tools": {"listChanged": False}} and init["serverInfo"]["name"] == "phronesis"
+    assert init["protocolVersion"] == "2025-06-18" and init["capabilities"] == {"tools": {"listChanged": False}} and init["serverInfo"]["name"] == "tribos"
     assert _rpc(c, "initialize", {"protocolVersion": "1999-01-01"}).json()["result"]["protocolVersion"] == "2025-11-25"
     assert _rpc(c, "notifications/initialized", rid=None).status_code == 202
     assert _rpc(c, "ping").json()["result"] == {}
     disc = _rpc(c, "server/discover", headers={"MCP-Protocol-Version": "2026-07-28"}).json()["result"]
     assert "2026-07-28" in disc["supportedVersions"] and disc["capabilities"]["tools"]
     tools = {t["name"]: t for t in _rpc(c, "tools/list").json()["result"]["tools"]}
-    assert "phronesis_research" in tools and "synapta_kegg_pathways" in tools and "lithoscribe_literature_synthesis" in tools
+    assert "tribos_research" in tools and "synapta_kegg_pathways" in tools and "lithoscribe_literature_synthesis" in tools
     assert "vivarix_simulate_time_course" not in tools and "lumicell_analyze_single_cell" not in tools
     assert tools["synapta_kegg_pathways"]["inputSchema"]["properties"]["target_symbol"]
-    assert tools["phronesis_research"]["inputSchema"]["required"] == ["question"]
+    assert tools["tribos_research"]["inputSchema"]["required"] == ["question"]
     assert tools["synapta_kegg_pathways"]["description"] == "KEGG pathways that contain a gene symbol."
 
 
@@ -622,16 +622,16 @@ def test_mcp_tool_calls(mcp, monkeypatch):
     assert bad["isError"] is True
     unknown = _rpc(c, "tools/call", {"name": "vivarix_simulate_time_course", "arguments": {}}).json()
     assert unknown["error"]["code"] == -32602
-    res = _rpc(c, "tools/call", {"name": "phronesis_research", "arguments": {"question": "KRAS?", "framework": agent_config.DEBATE}}).json()["result"]
+    res = _rpc(c, "tools/call", {"name": "tribos_research", "arguments": {"question": "KRAS?", "framework": agent_config.DEBATE}}).json()["result"]
     assert res["content"][0]["text"] == "Research answer for KRAS?" and res["isError"] is False
     assert res["structuredContent"]["citations"] == {"pmids": ["123456"]} and res["structuredContent"]["verification"]["passed"] is True
     assert mcp.seen[-1][0] == "alice" and mcp.seen[-1][1].framework == agent_config.DEBATE
-    invalid = _rpc(c, "tools/call", {"name": "phronesis_research", "arguments": {"question": "x", "framework": "bogus"}}).json()["result"]
+    invalid = _rpc(c, "tools/call", {"name": "tribos_research", "arguments": {"question": "x", "framework": "bogus"}}).json()["result"]
     assert invalid["isError"] is True
     # Denied names stay hidden even when an operator lists them.
-    monkeypatch.setenv("PHRONESIS_MCP_TOOLS", "synapta_kegg_pathways,analysis_run_python,dataset_upload")
+    monkeypatch.setenv("TRIBOS_MCP_TOOLS", "synapta_kegg_pathways,analysis_run_python,dataset_upload")
     names = [t["name"] for t in _rpc(c, "tools/list").json()["result"]["tools"]]
-    assert names == ["phronesis_research", "synapta_kegg_pathways"]
+    assert names == ["tribos_research", "synapta_kegg_pathways"]
 
 
 def test_mcp_errors_and_auth(mcp):
@@ -668,7 +668,7 @@ def _msg(text: str, **extra: Any) -> Dict[str, Any]:
 
 def test_a2a_agent_card(api):
     card = api.get("/.well-known/agent-card.json").json()
-    assert card["name"] == "Phronesis" and card["url"] == "http://testserver/a2a"
+    assert card["name"] == "Tribos" and card["url"] == "http://testserver/a2a"
     assert card["capabilities"]["streaming"] is False and card["defaultInputModes"] == ["text/plain"]
     assert {s["id"] for s in card["skills"]} == {"biomedical-research", "model-simulation"}
     assert card["securitySchemes"]["bearer"]["scheme"] == "bearer" and card["protocolVersion"] == "1.0.0"

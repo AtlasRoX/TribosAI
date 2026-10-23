@@ -1,15 +1,15 @@
-# Phronesis — Web Application
+# Tribos — Web Application
 
-> **Phronesis** — Clinical and Translational R&D Web Interface  
-> **Made by ChronoStrider Engineering (ChronoStrider Enginnerings)**
+> **Tribos** — Clinical and Translational R&D Web Interface  
+> **Made by ChronoStrider Engineering**
 
-This is the Next.js frontend application for **Phronesis**, the biomedical research assistant.
+This is the Next.js frontend application for **Tribos**, the biomedical research assistant.
 
 ## Getting Started
 
 ### 1. Prerequisites
 - Node.js 20+ (Node 22+ recommended)
-- Running Phronesis FastAPI backend (default: `http://127.0.0.1:8000`)
+- Running Tribos FastAPI backend (default: `http://127.0.0.1:8000`)
 
 ### 2. Run the Development Server
 
@@ -18,7 +18,7 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to access the Phronesis research interface.
+Open [http://localhost:3000](http://localhost:3000) with your browser to access the Tribos research interface.
 
 ### 3. Build & Production
 
@@ -34,7 +34,7 @@ npm start
 - **Framework:** Next.js (App Router)
 - **Styling:** Tailwind CSS
 - **Icons:** Lucide React
-- **Backend API:** Connects to Phronesis FastAPI via `NEXT_PUBLIC_API_URL` (default `http://127.0.0.1:8000`)
+- **Backend API:** Connects to Tribos FastAPI via `NEXT_PUBLIC_API_URL` (default `http://127.0.0.1:8000`)
 
 ---
-**Phronesis** — Engineered by **ChronoStrider Engineering** (**ChronoStrider Enginnerings**).
+**Tribos** — Engineered by **ChronoStrider Engineering** (**ChronoStrider Engineering**).

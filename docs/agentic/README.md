@@ -1,10 +1,10 @@
-# Phronesis Agentic System
+# Tribos Agentic System
 
-> **Phronesis** — Multi-Framework Agent Architecture  
-> **Made by ChronoStrider Engineering (ChronoStrider Enginnerings)**
+> **Tribos** — Multi-Framework Agent Architecture  
+> **Made by ChronoStrider Engineering**
 
-Phronesis can run each question through one of five orchestration frameworks. Choose one per request with
-`framework`, or set a default with `PHRONESIS_DEFAULT_FRAMEWORK`. The API default is `auto`, which routes each question to one of the agentic frameworks ([auto-routing.md](auto-routing.md)).
+Tribos can run each question through one of five orchestration frameworks. Choose one per request with
+`framework`, or set a default with `TRIBOS_DEFAULT_FRAMEWORK`. The API default is `auto`, which routes each question to one of the agentic frameworks ([auto-routing.md](auto-routing.md)).
 
 | Framework id | What it does |
 |---|---|
@@ -28,7 +28,7 @@ Phronesis can run each question through one of five orchestration frameworks. Ch
 | 2 | Gap-driven re-retrieval | Self-RAG (ICLR 2024, arXiv:2310.11511); FLARE (EMNLP 2023, arXiv:2305.06983); CRAG (arXiv:2401.15884); IRCoT (ACL 2023, arXiv:2212.10509); PaperQA2 (arXiv:2409.13740) |
 | 3 | Question decomposition | Least-to-Most (ICLR 2023, arXiv:2205.10625); Self-Ask (arXiv:2210.03350); Decomposed Prompting (ICLR 2023, arXiv:2210.02406); Adaptive-RAG (NAACL 2024, arXiv:2403.14403) |
 | 4 | Supervisor, swarm and debate | Magentic-One (arXiv:2411.04468); AutoGen (COLM 2024, arXiv:2308.08155); MetaGPT (ICLR 2024, arXiv:2308.00352); Multi-agent debate (ICML 2024, arXiv:2305.14325); CRITIC (arXiv:2305.11738); Chain-of-Verification (arXiv:2309.11495) |
-| 6 | Hypothesis to experiment loop | AI co-scientist (arXiv:2502.18864); BioDiscoveryAgent (ICLR 2025, arXiv:2405.17631); Robin (arXiv:2505.13400) |
+| 6 | Hypothesis to experiment loop | AI co-scientist (arXiv:2502.18864); DiscoveryAgent (ICLR 2025, arXiv:2405.17631); Robin (arXiv:2505.13400) |
 | 7 | Counter-evidence search | PaperQA2 / ContraCrow (arXiv:2409.13740); SciFact (EMNLP 2020, arXiv:2004.14974); SciFact-Open (arXiv:2210.13777) |
 | 8 | NLI claim verification | SummaC (TACL 2022, arXiv:2111.09525); FActScore (EMNLP 2023, arXiv:2305.14251); MiniCheck (EMNLP 2024, arXiv:2404.10774); AlignScore (ACL 2023, arXiv:2305.16739); MultiVerS (arXiv:2112.01640) |
 | 9 | Calibrated confidence | Guo et al. 2017 temperature scaling (arXiv:1706.04599); Mohri & Hashimoto conformal factuality (ICML 2024, arXiv:2402.10978); Kadavath et al. (arXiv:2207.05221); Xiong et al. (ICLR 2024, arXiv:2306.13063); Farquhar et al. semantic entropy (Nature 2024) |
