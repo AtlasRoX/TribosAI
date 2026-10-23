@@ -47,7 +47,7 @@ NO_DEFAULT_HELPERS = {"_switch"}  # off|auto|on switches whose default is "auto"
 HELPER_DEFAULTS = {"_switch": "auto", "env_flag": "auto"}
 
 # Variables that must appear even if a future refactor hides them from the scan, with a short description.
-REQUIRED = ("TAVILY_API_KEY", "NVIDIA_API_KEY", "PHRONESIS_SYNLETHDB_DIR", "PHRONESIS_DEPMAP_DIR", "PHRONESIS_DATA_DIR",
+REQUIRED = ("TAVILY_API_KEY", "NVIDIA_API_KEY", "PHRONESIS_DATA_DIR",
             "PHRONESIS_AUTH_MODE")
 
 SETTINGS_PATH = ROOT / "phronesis" / "config" / "settings.py"

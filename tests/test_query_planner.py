@@ -19,11 +19,9 @@ from phronesis.agents import query_planner as qp
 from phronesis.agents.discovery import BioDiscoveryEngine
 from phronesis.agents.prompts import build_evidence_block
 from phronesis.agents.query_context import QueryContext, ResolvedEntity
-from phronesis.extensions.entities import EntityResolveInput, render_query_entities
-from phronesis.phronesis.agents.verifier import ClinicalVerifier
+from phronesis.verify.verifier import ClinicalVerifier
 from phronesis.tools.registry import ToolResult
 from tests.fakes import build_recording_registry, called, make_offline_orchestrator
-from tests.test_entity_resolver import SHP2_Q, Upstream, _resolve_question, _resolver
 
 
 async def _ctx(query: str, registry: Any = None, **kw: Any) -> QueryContext:
@@ -63,18 +61,6 @@ async def test_aliases_and_multi_gene_questions():
     family = await _ctx("PI3K inhibitors in breast cancer")
     assert family.primary_target is None and family.genes[0].ambiguous_with[:2] == ["PIK3CA", "PIK3CB"]
     assert family.decisions["synapta"].reason == "gene family is ambiguous"
-
-
-@pytest.mark.asyncio
-async def test_shp2_question_offline_picks_the_intervention_gene():
-    ctx = await _ctx(SHP2_Q)
-    assert ctx.normalization == "offline_lexicon"
-    assert ctx.primary_symbol == "PTPN11" and ctx.primary_target == "PTPN11"
-    kras_variant = next(v for v in ctx.variants if v.protein_change == "G12C")
-    assert kras_variant.gene == "KRAS" and kras_variant.label == "KRAS G12C"
-    assert [d.mention for d in ctx.drugs] == ["sotorasib"] and not ctx.drugs[0].validated
-    assert all(not e.ids for e in ctx.entities if e.type != "variant")  # the lexicon never supplies identifiers
-    assert "Target: PTPN11 (SHP2)" in ctx.plan_facts()
 
 
 @pytest.mark.parametrize(
@@ -154,16 +140,6 @@ async def test_hard_guard_dataset_path_and_biomodel_hint():
 # 2. The live resolver through the registry (fake tool fed by recorded responses)
 # =============================================================================
 
-async def _recorded_resolution(query: str) -> Dict[str, Any]:
-    return await _resolve_question(_resolver(Upstream()), query)
-
-
-def _resolver_tool(data: Dict[str, Any]):
-    def fake(_kwargs: Dict[str, Any]) -> Dict[str, Any]:
-        return json.loads(json.dumps(data))
-
-    return {"synapta_resolve_entities": (EntityResolveInput, fake)}
-
 
 class _CapturingLLM:
     def __init__(self, sink: Dict[str, Any], answer: str) -> None:
@@ -172,83 +148,6 @@ class _CapturingLLM:
     async def ainvoke(self, messages):
         self.sink.setdefault("calls", []).append(messages)
         return SimpleNamespace(content=self.answer)
-
-
-@pytest.mark.asyncio
-async def test_resolved_entities_drive_synapta_and_stay_out_of_tool_results(monkeypatch, tmp_path):
-    data = await _recorded_resolution(SHP2_Q)
-    orch, calls = make_offline_orchestrator(monkeypatch, tmp_path, extra_tools=_resolver_tool(data))
-    sink: Dict[str, Any] = {}
-    monkeypatch.setattr(orch_module, "get_llm", lambda *a, **k: _CapturingLLM(sink, "PTPN11 (SHP2) is the queried target."))
-    seen: Dict[str, Any] = {}
-    real_map = orch_module.build_citation_map
-
-    def spy(response, tool_results, *args, **kwargs):
-        seen["tool_results"] = dict(tool_results)
-        return real_map(response, tool_results, *args, **kwargs)
-
-    monkeypatch.setattr(orch_module, "build_citation_map", spy)
-    res = await orch.execute_inquiry(SHP2_Q, thread_id="t-resolve", enable_web_search=False)
-
-    assert called(calls, "synapta_kegg_pathways") == [{"target_symbol": "PTPN11"}]
-    assert called(calls, "synapta_opentargets_associations")[0]["ensembl_id"] == "ENSG00000179295"
-    assert not called(calls, "synapta_opentargets_search")
-    assert len(called(calls, "synapta_resolve_entities")) == 1
-
-    plan = next(t for t in res.thoughts if t["id"] == "plan")
-    assert "Target: PTPN11 (SHP2)" in plan["text"]
-    ids = {k: v for e in plan["extra"]["entities"] for k, v in e["ids"].items()}
-    assert ids["chembl_id"] in ("CHEMBL4650521", "CHEMBL4535757")
-    assert {e["ids"].get("chembl_id") for e in plan["extra"]["entities"]} >= {"CHEMBL4535757", "CHEMBL4650521"}
-    assert "MONDO_0005233" in {e["ids"].get("ontology_id") for e in plan["extra"]["entities"]}
-    assert plan["extra"]["normalization"] == "resolved" and plan["extra"]["planner"] == "deterministic"
-
-    assert res.query_context["primary_symbol"] == "PTPN11"
-    assert "synapta_resolve_entities" not in seen["tool_results"] and "entities" not in seen["tool_results"]
-    assert not [t for t in res.thoughts if "resolve" in t["id"]]
-
-    system, human = next(c for c in sink["calls"] if "routing plan" not in c[0].content)  # the synthesis call
-    block = human.content
-    assert block.index("<query_entities") < block.index("<synapta")
-    assert 'hgnc_id="HGNC:9644"' in block and 'chembl_id="CHEMBL4535757"' in block
-    assert "<query_entities>" in system.content  # the registered usage rule
-
-
-@pytest.mark.asyncio
-async def test_resolver_failure_falls_back_to_lexicon(monkeypatch, tmp_path):
-    def broken(_kwargs):
-        return ToolResult(success=False, tool_name="synapta_resolve_entities", error="upstream down")
-
-    orch, calls = make_offline_orchestrator(monkeypatch, tmp_path, extra_tools={"synapta_resolve_entities": (EntityResolveInput, broken)})
-    # Not "papers only": that restricts the turn to literature, and this test needs Synapta to run.
-    res = await orch.execute_inquiry("Summarize KRAS signaling literature.", thread_id="t-fallback", enable_web_search=False)
-    plan = next(t for t in res.thoughts if t["id"] == "plan")
-    assert plan["extra"]["normalization"] == "offline_lexicon"
-    assert "Target: KRAS" in plan["text"] and called(calls, "synapta_kegg_pathways") == [{"target_symbol": "KRAS"}]
-    assert called(calls, "synapta_opentargets_search")  # no Ensembl id offline, so Synapta searches as before
-
-
-@pytest.mark.asyncio
-async def test_latency_budget_is_respected():
-    # Audit TST-009: no sub-second wall-clock assert (it failed on loaded runners with no code change). The resolver
-    # never answers, so only the 0.2 s budget can end the wait; if the budget were ignored, the generous outer
-    # timeout fails the test instead of a hang.
-    async def slow():
-        await asyncio.sleep(3600)
-        return {"entities": []}
-
-    reg, _ = build_recording_registry({"synapta_resolve_entities": (EntityResolveInput, lambda _kw: slow())})
-    ctx = await asyncio.wait_for(_ctx("Find KRAS papers only.", registry=reg, budget_s=0.2), timeout=60)
-    assert ctx.normalization == "offline_lexicon" and ctx.primary_symbol == "KRAS"
-
-
-@pytest.mark.asyncio
-async def test_resolver_disabled_by_env(monkeypatch):
-    data = await _recorded_resolution(SHP2_Q)
-    reg, calls = build_recording_registry(_resolver_tool(data))
-    monkeypatch.setenv("PHRONESIS_RESOLVER_DISABLED", "1")
-    ctx = await _ctx(SHP2_Q, registry=reg)
-    assert ctx.normalization == "offline_lexicon" and not called(calls, "synapta_resolve_entities")
 
 
 # =============================================================================
@@ -490,31 +389,6 @@ async def test_model_reasoning_is_not_shown_by_default(monkeypatch, tmp_path):
 # 5. Verifier, discovery and the evidence block
 # =============================================================================
 
-@pytest.mark.asyncio
-async def test_verifier_accepts_resolved_ids_only():
-    data = await _recorded_resolution(SHP2_Q)
-    reg, _ = build_recording_registry(_resolver_tool(data))
-    ctx = await _ctx(SHP2_Q, registry=reg)
-    observed = ctx.observed_identifiers()
-    assert {"CHEMBL4535757", "CHEMBL4650521"} <= observed["chembl"] and "HGNC:9644" in observed["hgnc"]
-    assert "MONDO_0005233" in observed["ontology"] and "ENSG00000179295" in observed["ensembl"]
-
-    tool_results = {"lithoscribe": ToolResult(success=True, tool_name="lithoscribe", data={"ranked_passages": []})}
-    v = ClinicalVerifier()
-    report = v.verify_response(
-        SHP2_Q,
-        "Sotorasib (CHEMBL4535757) targets KRAS G12C; CHEMBL9999999 and MONDO_0000001 are also relevant.",
-        tool_results,
-        context_identifiers=observed,
-        query_context=ctx,
-    )
-    flagged = {d.claim for d in report.defects if d.category == "IDENTIFIER"}
-    assert "CHEMBL9999999" in flagged and "MONDO_0000001" in flagged and "CHEMBL4535757" not in flagged
-    assert "CHEMBL:CHEMBL4535757" in report.verified_identifiers
-
-    typed = v.verify_response("What does rs113488022 do?", "rs113488022 is a BRAF variant.", tool_results)
-    assert not [d for d in typed.defects if d.category == "IDENTIFIER"]
-
 
 def test_unvalidated_entities_never_whitelist_ids():
     ctx = QueryContext(raw_query="q", clean_query="q")
@@ -533,23 +407,3 @@ def test_discovery_matches_species_through_aliases():
     assert "model species" in json.dumps(without.model_dump())
 
 
-def test_query_entities_xml_is_escaped():
-    ctx = QueryContext(raw_query="q", clean_query="q")
-    ctx.entities = [
-        ResolvedEntity(type="gene", mention='SH"P2<', label="PTPN11", ids={"hgnc_id": "HGNC:9644"}, source="HGNC", validated=True),
-        ResolvedEntity(type="variant", mention="G12C", label="KRAS G12C", gene="KRAS", variant_kind="protein_change"),
-    ]
-    xml = render_query_entities(ctx)
-    assert xml.startswith('<query_entities source="HGNC / OpenTargets / ChEMBL / dbSNP">')
-    assert 'mention="SH&quot;P2&lt;"' in xml and 'hgnc_id="HGNC:9644"' in xml and 'validated="true"' in xml
-    assert 'gene="KRAS"' in xml and 'validated="false"' in xml
-    assert render_query_entities(QueryContext(raw_query="q", clean_query="q")) == ""
-    ctx.normalization = "offline_lexicon"
-    assert render_query_entities(ctx).startswith('<query_entities source="HGNC / OpenTargets / ChEMBL / dbSNP" normalization="offline_lexicon">')
-    ctx.normalization = "skipped"
-
-    tr = {"lithoscribe": ToolResult(success=True, tool_name="l", data={"ranked_passages": [{"pmid": "1", "passage_text": "t"}]})}
-    plain = build_evidence_block(tr, "ranking")
-    assert plain == build_evidence_block(tr, "ranking", query_context=None) and "<query_entities" not in plain
-    with_ctx = build_evidence_block(tr, "ranking", query_context=ctx)
-    assert with_ctx.startswith("<evidence>\n<query_entities") and with_ctx.replace(xml + "\n", "", 1) == plain

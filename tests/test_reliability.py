@@ -139,11 +139,11 @@ async def test_local_compute_is_never_cached_or_retried():
         extra_tools={"fake_timeout": (QueryInput, lambda kw: timeout_error("fake_timeout"))}
     )
     for _ in range(2):
-        res = await reg.execute("synapta_kegg_pathways", target_symbol="KRAS")
+        res = await reg.execute("websurfer_search", query="heat equation")
         assert res.success and "cache" not in res.metadata
     bad = await reg.execute("fake_timeout", query="x")
     assert bad.error_type == ErrorType.TIMEOUT and "failure_class" not in bad.metadata and "retries" not in bad.metadata
-    assert [n for n, _ in calls] == ["synapta_kegg_pathways", "synapta_kegg_pathways", "fake_timeout"]
+    assert [n for n, _ in calls] == ["websurfer_search", "websurfer_search", "fake_timeout"]
     snap = rel.reliability_snapshot()
     assert snap["breakers"] == {} and snap["cache"]["stores"] == 0 and snap["retries"]["total"] == 0
 

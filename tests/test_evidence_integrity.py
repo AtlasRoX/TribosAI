@@ -10,10 +10,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from phronesis.phronesis.agents import verifier as vmod
-from phronesis.phronesis.agents.verifier import ClaimRecord, ClinicalVerifier, VerificationReport
+from phronesis.verify import verifier as vmod
+from phronesis.verify.verifier import ClaimRecord, ClinicalVerifier, VerificationReport
 from phronesis.tools.registry import ToolResult
-from phronesis.trials import trial_grounding
 from phronesis.utils.text import fold_typography, fold_typography_with_map
 
 Q = "KRAS G12C inhibitors in NSCLC and colorectal cancer: FDA-approved indications and clinical evidence"
@@ -224,17 +223,7 @@ def test_middle_dot_decimals_fold_only_between_digits():
     assert folded == "a 1.5 b" and len(offsets) == len(folded) + 1
 
 
-def test_registry_figures_with_thousands_separators_match():
-    assert trial_grounding._figure_in("1234", "enrolled 1,234 participants")
-    assert trial_grounding._figure_in("10.2", "median 10·2 months")
-
-
 # E6: combination described as monotherapy ---------------------------------------------------------------------
-def test_a_combination_called_monotherapy_is_flagged():
-    answer = "Ifebemtinib plus garsorasib monotherapy achieved an objective response rate of 90.3% in KRAS G12C CRC."
-    report = ClinicalVerifier().verify_response(Q, answer, {})
-    defect = next(d for d in report.defects if d.category == "REGIMEN_MISMATCH")
-    assert "ifebemtinib + garsorasib" in defect.description
 
 
 def test_comparing_monotherapy_with_a_combination_is_not_flagged():

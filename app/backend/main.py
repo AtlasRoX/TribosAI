@@ -58,33 +58,6 @@ def _package_version(default: str = "1.0.0") -> str:
         return default
 
 
-def _preload_primekg() -> None:
-    """Load the local PrimeKG graph in the background so the first question does not wait for it."""
-    if os.getenv("PHRONESIS_PRIMEKG_PRELOAD", "1").strip().lower() in ("0", "off", "false", "no"):
-        return
-    if "PYTEST_CURRENT_TEST" in os.environ:
-        return
-    try:
-        from phronesis.kgintel.store import store_available
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("PrimeKG preload unavailable: %s", exc)
-        return
-    if not store_available():
-        logger.info("PrimeKG store not built; run `phronesis-primekg build` to enable knowledge-graph analyses")
-        return
-
-    def _load() -> None:
-        try:
-            from phronesis.kgintel.graph import get_primekg
-
-            kg = get_primekg()
-            logger.info("PrimeKG loaded: %s nodes, %s edges", f"{kg.n:,}", f"{kg.n_edges:,}")
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("PrimeKG preload failed: %s", exc)
-
-    threading.Thread(target=_load, name="primekg-preload", daemon=True).start()
-
-
 def _check_config() -> List[str]:
     """Log every configuration problem as a warning; PHRONESIS_STRICT_CONFIG=1 turns them into a startup error.
 
@@ -100,7 +73,6 @@ def _check_config() -> List[str]:
 @contextlib.asynccontextmanager
 async def _lifespan(_app: FastAPI):
     _check_config()
-    _preload_primekg()
     job_manager = None
     try:
         from phronesis.agentic.jobs import get_job_manager
@@ -480,8 +452,8 @@ def _provider_flags() -> dict[str, dict[str, bool]]:
 
 @app.get("/api/health")
 async def health_check() -> dict[str, Any]:
-    """Public status: booleans and status words only (SEC-005). Configured URLs, upstream error text and the
-    vector-store location are served to authenticated callers by /api/health/details."""
+    """Public status: booleans and status words only (SEC-005). Configured URLs and upstream error text are served
+    to authenticated callers by /api/health/details."""
     observed_readiness = await _service_readiness()
     return {
         "status": "healthy",
@@ -504,14 +476,12 @@ async def health_details(user_id: str = Depends(get_current_user)) -> dict[str, 
     """Diagnostics for authenticated callers: adapter latencies and error types, configured endpoints with
     credentials, query strings and fragments removed."""
     observed_readiness = await _service_readiness()
-    milvus_uri = os.getenv("MILVUS_URI")
     return {
         "status": "healthy",
         "llm_providers": {
             **{k: {**v} for k, v in _provider_flags().items()},
             "default_orchestrator": DEFAULT_ORCHESTRATOR_MODEL,
         },
-        "vector_store": {"uri": _redact_url(milvus_uri) if milvus_uri else "Milvus Lite (embedded)"},
         "biocontext_service_readiness": _detailed_readiness(observed_readiness),
         "disabled_routers": dict(DISABLED_ROUTERS),
         "config_problems": len(validate_environment()),

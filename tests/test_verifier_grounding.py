@@ -19,7 +19,7 @@ from typing import Any, Dict, List
 
 import pytest
 
-from phronesis.phronesis.agents.verifier import ClaimRecord, ClinicalVerifier, VerificationReport, _Doc, is_regulatory_doc
+from phronesis.verify.verifier import ClaimRecord, ClinicalVerifier, VerificationReport, _Doc, is_regulatory_doc
 from phronesis.tools.registry import ToolResult
 from phronesis.utils import source_authority as sa
 
@@ -262,15 +262,6 @@ def test_correct_claims_from_the_real_abstract_are_supported():
         report = ClinicalVerifier().verify_response(Q, answer, passages)
         c = claim_for(report, "median overall survival")
         assert c.status == "supported", (answer, c.reason)
-
-
-def test_swapping_the_2l_plus_sotorasib_cohort_for_the_comparator_arm_fails():
-    swapped = ("In the 2L+ setting, median overall survival was 7.2 months with docetaxel (N=164) "
-               "(PMID: 39369609).")
-    report = ClinicalVerifier().verify_response(Q, swapped, {"lit": lit([_primary_passage()])})
-    c = claim_for(report, "median overall survival")
-    assert c.status == "unsupported", c.reason
-    assert "NUMERIC_RELATION_MISMATCH" in categories(report)
 
 
 # Operational status sentences ------------------------------------------------------------------------------------

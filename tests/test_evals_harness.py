@@ -335,11 +335,6 @@ def test_audit_suite_converts_the_script_cases_with_assertions():
     assert len(all_ids) == len(set(all_ids))
 
 
-def test_audit_script_prints_deprecation_and_exits():
-    out = subprocess.run([sys.executable, str(ROOT / "scripts" / "audit_evaluation_runner.py")], capture_output=True, text=True, timeout=60)
-    assert out.returncode == 0 and "deprecated" in out.stderr and "--suite audit" in out.stderr
-
-
 def test_cli_list_marks_live_suites(capsys):
     assert cli_main(["list"]) == 0
     out = capsys.readouterr().out

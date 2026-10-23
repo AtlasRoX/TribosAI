@@ -1,8 +1,7 @@
 """
 Offline tests for the conservative tool-argument repair (phronesis/tools/arg_repair.py) at every point that
 validates tool inputs (registry, specialist tool calls, plan nodes), for repeated identical specialist calls being
-reused rather than shown as errors, and for the openFDA safety lookup falling back to the drug name when ChEMBL is
-down.
+reused rather than shown as errors.
 """
 
 from __future__ import annotations
@@ -12,24 +11,45 @@ from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, constr
 
 from phronesis.agentic.plan_graph import parse_plan, validate_plan, validated_inputs
 from phronesis.agentic.specialists import SPECS_BY_NAME, Specialist
 from phronesis.agentic.topologies import REUSED_PREFIX, call_step_status, run_specialist_tool
 from phronesis.agents.query_context import QueryContext, ResolvedEntity
-from phronesis.drugintel import chembl_client
-from phronesis.drugintel.schemas import (
-    MAX_RESOLVE_NAMES,
-    ChemblProfileInput,
-    ChemblResolveInput,
-    OpenFdaSafetyInput,
-)
-from phronesis.drugintel.sources import OpenFdaSource, chembl_unavailable
-from phronesis.extensions.primekg import PrimeKGInvestigateInput
-from phronesis.sources import SourceRunState
 from phronesis.tools.arg_repair import adjustment_text, repair_arguments
 from phronesis.tools.registry import AdapterType, BiomedicalToolRegistry, ErrorType, ToolResult, ToolUniverseEntry
+
+
+# Sample tool input schemas with the field shapes the repair has to handle: a patterned id, bounded integers,
+# capped lists of names and of patterned ids, and lists of strings an agent may send as objects.
+ChemblId = constr(pattern=r"^CHEMBL\d{1,9}$")
+DrugName = constr(min_length=2, max_length=80)
+MAX_RESOLVE_NAMES = 8
+
+
+class ChemblResolveInput(BaseModel):
+    names: List[DrugName] = Field(default_factory=list, max_length=MAX_RESOLVE_NAMES)
+    chembl_ids: List[ChemblId] = Field(default_factory=list, max_length=3)
+    target_symbol: Optional[constr(max_length=40)] = None
+
+
+class ChemblProfileInput(BaseModel):
+    parent_chembl_ids: List[ChemblId] = Field(default_factory=list, max_length=3)
+    target_chembl_id: Optional[str] = Field(default=None, pattern=r"^CHEMBL\d{1,9}$")
+    activity_limit: int = Field(default=10, ge=1, le=50)
+
+
+class OpenFdaSafetyInput(BaseModel):
+    ingredient: str = Field(..., min_length=2, max_length=80, pattern=r"^[A-Za-z0-9][A-Za-z0-9 \-]*$")
+    top_n: int = Field(default=10, ge=1, le=100)
+
+
+class PrimeKGInvestigateInput(BaseModel):
+    query: str = Field(max_length=4000)
+    drugs: List[str] = Field(default_factory=list, max_length=8)
+    diseases: List[str] = Field(default_factory=list, max_length=4)
+    genes: List[str] = Field(default_factory=list, max_length=200)
 
 
 def run(coro):
@@ -279,118 +299,3 @@ def test_plan_validation_repairs_node_arguments_before_rejecting():
     # The executor's duplicate check sees the call the registry will make.
     entry = reg.get_entry("chembl_drug_profile")
     assert validated_inputs(entry, {"target_chembl_id": "CHEMBL203", "activity_limit": 80})["activity_limit"] == 50
-
-
-# -----------------------------------------------------------------------------
-# openFDA safety lookup when ChEMBL is down
-# -----------------------------------------------------------------------------
-
-class _SafetyRegistry:
-    """chembl_resolve_drugs answers with `resolve`; openfda_drug_safety records the ingredient it was asked for."""
-
-    def __init__(self, resolve: ToolResult) -> None:
-        self.resolve = resolve
-        self.safety_calls: List[str] = []
-
-    async def execute(self, tool_name: str, **kwargs: Any) -> ToolResult:
-        if tool_name == "chembl_resolve_drugs":
-            return self.resolve
-        assert tool_name == "openfda_drug_safety"
-        ing = kwargs["ingredient"]
-        self.safety_calls.append(ing)
-        return ToolResult(success=True, tool_name=tool_name, data={
-            "ingredient": ing, "total_reports": 1234, "serious_reports": 800,
-            "top_reactions": [{"term": "COLITIS", "count": 90}], "label": None, "label_error": None,
-            "approval": {"status": "approved", "ingredient": ing, "application_number": "BLA125514",
-                         "applications": [{"application_number": "BLA125514"}]},
-            "citation_records": [], "faers_search": f'activesubstancename:"{ing}"',
-        })
-
-
-def _pembro_ctx() -> QueryContext:
-    q = "What are the safety warnings for pembrolizumab in melanoma?"
-    ctx = QueryContext(raw_query=q, clean_query=q)
-    ctx.entities = [ResolvedEntity(type="drug", mention="pembrolizumab", label="PEMBROLIZUMAB",
-                                   ids={"chembl_id": "CHEMBL3137343"}, source="OpenTargets", validated=True)]
-    return ctx
-
-
-CHEMBL_500 = ToolResult(success=False, tool_name="chembl_resolve_drugs", error_type=ErrorType.UPSTREAM_API_ERROR,
-                        error="ChEMBL HTTP 500 for molecule/CHEMBL3137343.json")
-
-
-def test_openfda_falls_back_to_the_drug_name_when_chembl_is_down():
-    ctx = _pembro_ctx()
-    reg = _SafetyRegistry(CHEMBL_500)
-    res = run(OpenFdaSource().run(ctx, reg, SourceRunState(reg, ctx)))
-    assert res.success, res.error
-    assert reg.safety_calls == ["pembrolizumab"]  # the user's words, not the ChEMBL id
-    entry = res.data["safety"][0]
-    assert entry["matched_by_name"] is True and entry["chembl_id"] == "CHEMBL3137343"
-    assert res.data["chembl_unavailable"]["drugs"] == ["pembrolizumab"]
-    notes = OpenFdaSource().scope_notes(ctx, res)
-    assert any("ChEMBL was unavailable" in n and "by the drug name as written" in n for n in notes)
-    title, detail = OpenFdaSource().describe(res, ctx)
-    assert title == "FAERS: 1,234 reports mention pembrolizumab"
-    assert "ChEMBL unavailable: matched by name (pembrolizumab)" in detail
-    xml = OpenFdaSource().evidence_xml(res)
-    assert "<chembl_unavailable" in xml and 'matched_by="name (ChEMBL unavailable)"' in xml
-
-
-def test_openfda_still_fails_when_chembl_rejects_the_request():
-    ctx = _pembro_ctx()
-    bad = ToolResult(success=False, tool_name="chembl_resolve_drugs", error_type=ErrorType.VALIDATION_ERROR, error="bad")
-    reg = _SafetyRegistry(bad)
-    res = run(OpenFdaSource().run(ctx, reg, SourceRunState(reg, ctx)))
-    assert not res.success and "could not be identified in ChEMBL first" in res.error
-    assert reg.safety_calls == []
-    assert chembl_unavailable(CHEMBL_500) and not chembl_unavailable(bad)
-
-
-def test_openfda_keeps_skipping_unapproved_drugs_when_chembl_answers():
-    ctx = _pembro_ctx()
-    ok = ToolResult(success=True, tool_name="chembl_resolve_drugs", data={
-        "drugs": [{"query_name": "CHEMBL3137343", "chembl_id": "CHEMBL3137343", "pref_name": "PEMBROLIZUMAB",
-                   "max_phase": 2.0, "max_phase_meaning": "reached phase 2 clinical trials", "matched_via": "chembl_id"}],
-        "unresolved_names": [], "invalid_chembl_ids": [], "lookup_errors": []})
-    reg = _SafetyRegistry(ok)
-    res = run(OpenFdaSource().run(ctx, reg, SourceRunState(reg, ctx)))
-    assert res.success and res.data["safety"] == [] and reg.safety_calls == []
-    assert "chembl_unavailable" not in res.data
-
-
-def test_openfda_queries_by_name_only_the_drugs_whose_chembl_lookup_failed():
-    q = "Compare the adverse events of imatinib and dasatinib"
-    ctx = QueryContext(raw_query=q, clean_query=q)
-    partial = ToolResult(success=True, tool_name="chembl_resolve_drugs", data={
-        "drugs": [{"query_name": "imatinib", "chembl_id": "CHEMBL941", "pref_name": "IMATINIB", "max_phase": 4.0,
-                   "max_phase_meaning": "approved", "matched_via": "pref_name"}],
-        "unresolved_names": [], "invalid_chembl_ids": [],
-        "lookup_errors": [{"query": "dasatinib", "error": "ChEMBL request timed out"}]})
-    reg = _SafetyRegistry(partial)
-    res = run(OpenFdaSource().run(ctx, reg, SourceRunState(reg, ctx)))
-    assert sorted(reg.safety_calls) == ["dasatinib", "imatinib"]
-    by_name = [e for e in res.data["safety"] if e.get("matched_by_name")]
-    assert [e["ingredient"] for e in by_name] == ["dasatinib"]
-    assert res.data["chembl_unavailable"]["drugs"] == ["dasatinib"]
-
-
-def test_openfda_name_fallback_with_the_real_engine(monkeypatch):
-    """ChEMBL answers 500 to everything; FAERS and the label are still fetched for imatinib by name."""
-    from tests.test_drug_intel import Upstream, _drug_registry
-
-    class ChemblDown(Upstream):
-        def _chembl(self, path, q):  # noqa: ANN001
-            import httpx
-
-            return httpx.Response(500, json={"error": "down"})
-
-    monkeypatch.setattr(chembl_client, "RETRY_BACKOFF_S", 0.0)
-    chembl_client.clear_release_cache()
-    chembl_client.clear_lookup_cache()
-    reg, _ = _drug_registry(ChemblDown())
-    ctx = QueryContext(raw_query="What are the adverse events of imatinib?", clean_query="What are the adverse events of imatinib?")
-    res = run(OpenFdaSource().run(ctx, reg, SourceRunState(reg, ctx)))
-    assert res.success, res.error
-    assert OpenFdaSource().describe(res, ctx)[0] == "FAERS: 46,623 reports mention imatinib"
-    assert res.data["chembl_unavailable"]["drugs"] == ["imatinib"]

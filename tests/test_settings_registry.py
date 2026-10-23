@@ -89,7 +89,7 @@ def test_registry_entries_are_well_formed():
         if _gen_module().SECRET_RE.search(name):
             assert setting.secret, name
     for secret in ("TAVILY_API_KEY", "NVIDIA_API_KEY", "OPENAI_API_KEY", "PHRONESIS_JWT_SECRET", "PHRONESIS_API_TOKENS",
-                   "MILVUS_PASSWORD", "MILVUS_TOKEN", "PHRONESIS_EVAL_TOKEN"):
+                   "NVIDIA_NIM_API_KEY", "PHRONESIS_USER_HASH_SALT", "PHRONESIS_EVAL_TOKEN"):
         assert REGISTRY[secret].secret, secret
 
 
@@ -179,7 +179,7 @@ def test_get_bool_words_and_fallback(monkeypatch, caplog):
         assert get_bool("PHRONESIS_SANDBOX") is expected, word
     monkeypatch.delenv("PHRONESIS_SANDBOX", raising=False)
     assert get_bool("PHRONESIS_SANDBOX") is False
-    assert get_bool("PHRONESIS_PRIMEKG_PRELOAD") is True or "PHRONESIS_PRIMEKG_PRELOAD" in os.environ
+    assert get_bool("PHRONESIS_LLM_FALLBACK") is True or "PHRONESIS_LLM_FALLBACK" in os.environ
     with caplog.at_level(logging.WARNING, logger="phronesis.config.settings"):
         monkeypatch.setenv("PHRONESIS_SANDBOX", "maybe")
         assert get_bool("PHRONESIS_SANDBOX") is False

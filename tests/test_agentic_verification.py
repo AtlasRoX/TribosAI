@@ -23,7 +23,7 @@ from phronesis.agentic.config import AGENTIC
 from phronesis.agentic.control import RunControl
 from phronesis.agentic.llm import AgentLLM
 from phronesis.agentic.state import AgentState
-from phronesis.phronesis.agents.verifier import ClinicalVerifier
+from phronesis.verify.verifier import ClinicalVerifier
 from phronesis.tools.registry import ToolResult
 from tests.agentic_fakes import ScriptedLLM, collect_events, make_agentic_orchestrator
 

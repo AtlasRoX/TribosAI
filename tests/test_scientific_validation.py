@@ -31,9 +31,8 @@ from phronesis.tools.registry import (
 )
 from phronesis.utils.biocontext import BioContextMCPClient
 from phronesis.vivarix.engine import VivarixSimulationEngine
-from phronesis.lumicell.engine import LumicellAnalysisEngine
 from phronesis.lithoscribe.synthesis_engine import LiteratureSynthesisEngine
-from phronesis.phronesis.agents.verifier import ClinicalVerifier, DefectSeverity
+from phronesis.verify.verifier import ClinicalVerifier, DefectSeverity
 from phronesis.utils.memory import MemoryType, VerificationStatus
 from phronesis.utils.memory.clinical_memory import ClinicalMemoryEngine
 from phronesis.agents.discovery import BioDiscoveryEngine
@@ -190,37 +189,6 @@ def test_vivarix_parameter_scan(offline_biomd10):
 # =============================================================================
 # 4. LUMICELL SINGLE-CELL TRANSCRIPTOMICS ANALYTICS (BixBench-inspired)
 # =============================================================================
-
-def test_lumicell_requires_real_dataset_without_fabrication(tmp_path):
-    """Regression test: Lumicell must reject unprovided dataset with DATASET_REQUIRED, and only analyze real AnnData files."""
-    engine = LumicellAnalysisEngine()
-
-    # 1. Product path without dataset must fail honestly
-    res_no_data = engine.execute_single_cell_pipeline(target_gene="KRAS")
-    assert res_no_data.success is False
-    assert res_no_data.error_type == ErrorType.DATASET_REQUIRED
-
-    # 2. Test-isolated fixture AnnData file with real counts matrix
-    import anndata
-    import numpy as np
-    import pandas as pd
-
-    genes = ["KRAS", "EGFR", "GAPDH", "ACTB", "TP53", "BRAF", "MYC", "CDK4", "MT-CO1", "MT-CO2"]
-    np.random.seed(42)
-    X = np.random.poisson(lam=3.0, size=(40, len(genes))).astype(np.float32)
-    var = pd.DataFrame(index=genes)
-    obs = pd.DataFrame(index=[f"cell_{i}" for i in range(40)])
-    obs["donor_id"] = ["donor_1"] * 20 + ["donor_2"] * 20
-    adata = anndata.AnnData(X=X, obs=obs, var=var)
-    adata_path = str(tmp_path / "test_tissue_atlas.h5ad")
-    adata.write_h5ad(adata_path)
-
-    res_with_data = engine.execute_single_cell_pipeline(dataset_path=adata_path, target_gene="KRAS", max_pct_mt=80.0, n_neighbors=5, resolution=0.5)
-    assert res_with_data.success is True
-    assert res_with_data.tool_name == "lumicell_analyze_single_cell"
-    assert res_with_data.data["dataset_path"] == adata_path
-    assert res_with_data.data["n_cells_post_qc"] > 0
-    assert "top_markers_by_cluster" in res_with_data.data
 
 
 # =============================================================================

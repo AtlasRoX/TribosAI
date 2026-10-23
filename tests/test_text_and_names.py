@@ -9,16 +9,13 @@ from phronesis.agentic import approval, nli
 from phronesis.agentic.counter_evidence import _sentences as counter_sentences
 from phronesis.agentic.gaps import hedged_sentences
 from phronesis.agents import citations
-from phronesis.drugintel import checks as drug_checks
-from phronesis.drugintel import sources as drug_sources
 from phronesis.evals import scoring
 from phronesis.export.report_model import _reproducibility
 from phronesis.lithoscribe.synthesis_engine import _section_sentences
-from phronesis.phronesis.agents import verifier
+from phronesis.verify import verifier
 from phronesis.sources import names
 from phronesis.utils import text
 from phronesis.utils.memory.clinical_memory import classify_instructions
-from phronesis.variants import render as variant_render
 
 
 def _cut(t: str):
@@ -73,11 +70,6 @@ def test_section_sentences_filter_and_abbreviations():
     ]
 
 
-def test_drugintel_checks_take_verifier_sentences():
-    assert drug_checks._sentences(SimpleNamespace(sentences=["a", "b"])) == ["a", "b"]
-    assert drug_checks._sentences(SimpleNamespace(sentences=None)) == []
-
-
 def test_kept_local_splitters_differ_on_purpose():
     # Memory splits at ';' so each clause is its own instruction with its own scope.
     scopes = dict(classify_instructions("Only use human data; from now on exclude preprints."))
@@ -102,24 +94,6 @@ def test_public_names_and_aliases():
     assert names.version_label("clinicaltrials") == "ClinicalTrials.gov data timestamp"
     assert names.description("primekg") == "PrimeKG knowledge-graph analysis"
     assert set(names.INTERNAL_ONLY_KEYS).isdisjoint(names.SOURCE_REGISTRY)
-
-
-def test_call_site_maps_keep_their_strings():
-    assert approval.SOURCE_LABELS == {
-        "synapta": "Target-disease associations and pathways (OpenTargets, KEGG)",
-        "lithoscribe": "Literature search (Europe PMC, Semantic Scholar)",
-        "websurfer": "Web search",
-        "vivarix": "Kinetic model simulation (Vivarix, COPASI)",
-        "lumicell": "Single-cell analysis of the attached dataset (Lumicell, Scanpy)",
-        "clinical_trials": "Clinical trials registry (ClinicalTrials.gov)",
-        "chembl": "Drug mechanisms and bioactivity (ChEMBL)",
-        "openfda": "Drug safety reports and labels (openFDA)",
-        "disease_targets": "Disease-to-target ranking (OpenTargets)",
-        "primekg": "PrimeKG knowledge-graph analysis",
-        "variant_intel": "Variant evidence (ClinVar, CIViC, cBioPortal, gnomAD)",
-    }
-    assert drug_sources._SOURCE_NAMES == {"chembl": "ChEMBL", "primekg": "PrimeKG"}
-    assert variant_render.SOURCE_LABELS == {"clinvar": "ClinVar", "civic": "CIViC", "cbioportal": "cBioPortal", "gnomad": "gnomAD"}
 
 
 def test_report_reproducibility_labels_unchanged():

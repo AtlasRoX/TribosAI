@@ -157,78 +157,6 @@ def _basico_or_skip():
         pytest.skip(f"basico unavailable: {exc}")
 
 
-def test_basico_calibration_of_uploaded_sbml(upload_store):
-    _basico_or_skip()
-    from phronesis.agents.query_context import DatasetRef
-    from phronesis.extensions.calibration import attachment_table_path, run_calibration_tool, run_list_parameters_tool
-
-    single = _upload(upload_store, "single.xml", _sbml({"k1": 0.1}, "c*k1*A").encode())
-    product = _upload(upload_store, "product.xml", _sbml({"k1": 0.5, "k2": 0.4}, "c*k1*k2*A").encode())
-    table = _upload(upload_store, "timecourse.csv", _table(0.21).to_csv(index=False).encode())
-    resolved, errors = upload_store.resolve_for_user("alice", [single.id, product.id, table.id])
-    assert not errors
-    paths = {a.id: a for a in resolved}
-    tref = DatasetRef(id=table.id, kind="table", display_name="timecourse.csv", analysis_path=paths[table.id].analysis_path)
-    data_path = attachment_table_path(tref)
-    assert data_path and data_path.endswith("original.csv")
-
-    listed = run_list_parameters_tool(biomodel_id=single.id, sbml_path=paths[single.id].model_path)
-    if not listed.success:
-        pytest.skip(f"basico could not load the test model: {listed.error}")
-    assert {p["name"] for p in listed.data["global_parameters"]} == {"k1"}
-
-    res = run_calibration_tool(
-        biomodel_id=single.id, sbml_path=paths[single.id].model_path, data_path=data_path, parameter_names=["k1"],
-        profile=True, profile_points=7, max_nfev=200, n_starts=1,
-    )
-    assert res.success, res.error
-    k1 = _param(res.data, "k1")
-    assert k1["estimate"] == pytest.approx(0.21, rel=1e-2)
-    assert k1["identifiability"] == "identifiable" and k1["ci_low"] < 0.21 < k1["ci_high"]
-    assert res.data["backend"] == "least_squares" and res.data["model_source"] == "user_upload"
-
-    res2 = run_calibration_tool(
-        biomodel_id=product.id, sbml_path=paths[product.id].model_path, data_path=data_path, parameter_names=["k1", "k2"],
-    )
-    assert res2.success, res2.error
-    assert {p["identifiability"] for p in res2.data["parameters"]} == {"structurally_non_identifiable"}
-
-
-def test_basico_copasi_backend_smoke(upload_store, monkeypatch):
-    _basico_or_skip()
-    from phronesis.extensions.calibration import attachment_table_path, run_calibration_tool
-    from phronesis.agents.query_context import DatasetRef
-
-    single = _upload(upload_store, "single.xml", _sbml({"k1": 0.1}, "c*k1*A").encode())
-    table = _upload(upload_store, "tc.csv", _table(0.3).to_csv(index=False).encode())
-    resolved, _ = upload_store.resolve_for_user("alice", [single.id, table.id])
-    paths = {a.id: a for a in resolved}
-    data_path = attachment_table_path(DatasetRef(id=table.id, kind="table", display_name="tc.csv", analysis_path=paths[table.id].analysis_path))
-    monkeypatch.setenv("PHRONESIS_CALIBRATION_BACKEND", "copasi")
-    res = run_calibration_tool(biomodel_id=single.id, sbml_path=paths[single.id].model_path, data_path=data_path, parameter_names=["k1"], profile=False)
-    if not res.success:
-        pytest.skip(f"COPASI backend unavailable here: {res.error}")
-    assert _param(res.data, "k1")["estimate"] == pytest.approx(0.3, rel=2e-2)
-    assert res.data["backend"] in ("copasi", "least_squares")  # least_squares only when COPASI's task failed (noted)
-
-
-def test_calibration_tool_rejects_non_attachment_paths(upload_store, tmp_path):
-    from phronesis.extensions.calibration import VivarixCalibrateInput, register_tools, run_calibration_tool
-    from phronesis.tools.registry import AdapterType, BiomedicalToolRegistry
-
-    stray = tmp_path / "elsewhere.csv"
-    _table(0.3).to_csv(stray, index=False)
-    res = run_calibration_tool(biomodel_id="BIOMD0000000010", data_path=str(stray), parameter_names=["k1"])
-    assert not res.success and res.metadata["validation_code"] == "DATA_PATH_REJECTED"
-    with pytest.raises(ValueError):
-        VivarixCalibrateInput(data_path="x.csv", parameter_names=["k1"])  # no model
-    reg = BiomedicalToolRegistry()
-    register_tools(reg)
-    entry = reg.get_entry("vivarix_calibrate_parameters")
-    assert entry.adapter_type == AdapterType.LOCAL_COMPUTE and entry.timeout_seconds == 300.0
-    assert reg.get_entry("vivarix_list_parameters") is not None
-
-
 # -----------------------------------------------------------------------------
 # Hypothesis phase: helpers
 # -----------------------------------------------------------------------------
@@ -499,19 +427,6 @@ def test_calibrate_phase_never_runs_when_simulation_suppressed(monkeypatch, tmp_
     assert not called(calls, "vivarix_calibrate_parameters")
     art = res.execution_artifacts.get("model_calibration")
     assert art is not None and art["status"] == "skipped"
-
-
-def test_calibration_intent_regex():
-    from phronesis.agentic.calibrate import has_calibration_intent
-
-    for q in ("Calibrate the model", "fit the model to my data", "run parameter estimation", "estimate the parameters k1"):
-        assert has_calibration_intent(q), q
-    assert not has_calibration_intent("What diseases is KRAS associated with?")
-    for q in ("Calibrate BIOMD0000000010 against my time-course data", "run model calibration", "calibrate the ODE parameters"):
-        assert has_calibration_intent(q), q
-    # "calibrated" as an adjective is not a request to fit a model.
-    for q in ("synthesize a calibrated therapeutic strategy", "give calibrated confidence for each claim"):
-        assert not has_calibration_intent(q), q
 
 
 def test_tumour_suppressor_hypotheses_target_synthetic_lethal_partners_not_the_gene():

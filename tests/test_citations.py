@@ -19,7 +19,7 @@ from phronesis.agents.citations import (
     scan_answer,
     scan_keys,
 )
-from phronesis.phronesis.agents.verifier import ClinicalVerifier, DefectItem, DefectSeverity, VerificationReport
+from phronesis.verify.verifier import ClinicalVerifier, DefectItem, DefectSeverity, VerificationReport
 from phronesis.sources.base import CitationRecord
 from phronesis.tools.registry import ToolResult
 from tests.fakes import make_offline_orchestrator

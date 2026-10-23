@@ -32,7 +32,7 @@ from phronesis.datasets.provenance import postprocess_lumicell_result, postproce
 from phronesis.datasets.store import DatasetNotFound, DatasetStoreError, get_dataset_store, reset_dataset_store
 from phronesis.extensions import hooks, load_extensions
 from phronesis.extensions import uploads as uploads_ext
-from phronesis.phronesis.agents.verifier import ClinicalVerifier
+from phronesis.verify.verifier import ClinicalVerifier
 from phronesis.tools.registry import ToolResult
 from tests.fakes import called, make_offline_orchestrator
 
@@ -247,25 +247,6 @@ async def test_total_quota_and_dataset_count(store, monkeypatch):
 # =============================================================================
 # 6. CSV/TSV conversion and a real Lumicell run
 # =============================================================================
-
-@pytest.mark.asyncio
-async def test_csv_converts_to_h5ad_and_lumicell_runs(store):
-    from phronesis.lumicell.engine import LumicellAnalysisEngine
-
-    rec = await store.create_from_stream("alice", [_atlas_csv()], "atlas.csv", _prov())
-    assert rec.kind.value == "table" and rec.validation.format == "csv->anndata"
-    assert (rec.validation.n_obs, rec.validation.n_vars) == (40, 10)
-    analysis_path, model_path = store.file_paths("alice", rec)
-    assert model_path is None and analysis_path.endswith("data.h5ad")
-    assert rec.derived_sha256 == hashlib.sha256(Path(analysis_path).read_bytes()).hexdigest()
-
-    res = LumicellAnalysisEngine().execute_single_cell_pipeline(dataset_path=analysis_path, dataset_name=rec.display_name)
-    assert res.success, res.error
-    assert res.data["n_cells_initial"] == 40 and res.data["dataset_name"] == "atlas.csv"
-
-    tsv = _atlas_csv(transpose=True).decode().replace(",", "\t").encode()
-    rec2 = await store.create_from_stream("alice", [tsv], "genes_by_cells.tsv", _prov(table_orientation="genes_by_cells"))
-    assert (rec2.validation.n_obs, rec2.validation.n_vars) == (40, 10)
 
 
 @pytest.mark.asyncio
@@ -514,44 +495,6 @@ def test_api_geo_lookup_endpoint(client, geo_mock):
 # 16-20. Orchestrator routing
 # =============================================================================
 
-@pytest.mark.asyncio
-async def test_orchestrator_routes_h5ad_attachment_to_lumicell(store, upload_root, upload_hooks, monkeypatch, tmp_path):
-    rec = await store.create_from_stream("alice", [ATLAS.read_bytes()], "test_atlas.h5ad", _prov(consent_status="public_deidentified"))
-    analysis_path, _ = store.file_paths("alice", rec)
-    orch, calls = make_offline_orchestrator(monkeypatch, tmp_path)
-    res = await orch.execute_inquiry("Cluster this dataset", thread_id="t-ds", enable_web_search=False, user_id="alice", dataset_ids=[rec.id])
-
-    lum_calls = called(calls, "lumicell_analyze_single_cell")
-    assert len(lum_calls) == 1
-    assert lum_calls[0]["dataset_path"] == analysis_path and lum_calls[0]["dataset_name"] == "test_atlas.h5ad"
-    art = res.execution_artifacts
-    assert art["datasets"][0]["id"] == rec.id
-    assert art["lumicell"]["dataset_path"] == f"upload://{rec.id}/test_atlas.h5ad"
-    assert art["lumicell"]["dataset_provenance"]["declared_by"] == "uploader"
-    step = next(t for t in res.thoughts if t["id"] == "attachments")
-    assert step["status"] == "done" and "test_atlas.h5ad (40 cells × 10 genes)" in step["title"]
-    lum_step = next(t for t in res.thoughts if t["id"] == "lumicell" and t["status"] == "done")
-    assert "provenance declared by uploader" in lum_step["text"]
-    serialized = json.dumps(res.to_dict(), default=str)
-    assert str(upload_root) not in serialized and str(upload_root).replace("\\", "\\\\") not in serialized
-
-
-@pytest.mark.asyncio
-async def test_real_lumicell_run_on_upload_redacts_server_paths(store, upload_root, upload_hooks, monkeypatch, tmp_path):
-    from phronesis.lumicell.engine import LumicellAnalysisEngine
-    from phronesis.tools.registry import LumicellPipelineInput
-
-    rec = await store.create_from_stream("alice", [ATLAS.read_bytes()], "test_atlas.h5ad", _prov())
-    real = {"lumicell_analyze_single_cell": (LumicellPipelineInput, lambda kw: LumicellAnalysisEngine().execute_single_cell_pipeline(**kw))}
-    orch, _ = make_offline_orchestrator(monkeypatch, tmp_path, extra_tools=real)
-    res = await orch.execute_inquiry("Cluster this dataset", thread_id="t-real", enable_web_search=False, user_id="alice", dataset_ids=[rec.id])
-    lum = res.execution_artifacts["lumicell"]
-    assert lum["n_cells_initial"] == 40 and lum["dataset_name"] == "test_atlas.h5ad"
-    assert lum["dataset_path"] == f"upload://{rec.id}/test_atlas.h5ad"
-    assert lum["dataset_provenance"]["file_path"] == "test_atlas.h5ad" and lum["dataset_provenance"]["sha256"] == rec.sha256
-    serialized = json.dumps(res.to_dict(), default=str)
-    assert str(upload_root) not in serialized and str(upload_root).replace("\\", "\\\\") not in serialized
-
 
 @pytest.mark.asyncio
 async def test_orchestrator_routes_sbml_attachment_to_vivarix(store, upload_hooks, monkeypatch, tmp_path):
@@ -630,38 +573,6 @@ async def _geo_verified_context(store, monkeypatch) -> tuple:
     )
     assert res.success, res.error
     return rec, ctx, postprocess_lumicell_result(res, ctx)
-
-
-@pytest.mark.asyncio
-async def test_verifier_geo_and_dataset_identifiers(store, monkeypatch, upload_hooks):
-    rec, ctx, lum = await _geo_verified_context(store, monkeypatch)
-    assert (lum.canonical_ids.get("declared_source_pmids") == "32451460" or lum.canonical_ids.get("pmids") == "32451460") and lum.canonical_ids["geo_accessions"] == "GSE132465"
-    verifier = ClinicalVerifier()
-    good = f"The uploader reports that dataset {rec.id} comes from GEO series GSE132465 (PMID 32451460)."
-    report = verifier.verify_response("Cluster this dataset", good, {"lumicell": lum})
-    assert not [d for d in report.defects if d.category == "IDENTIFIER"], report.defects
-
-    bare = ToolResult(success=True, tool_name="lumicell_analyze_single_cell", data={"n_clusters": lum.data["n_clusters"]})
-    report = verifier.verify_response("Cluster this dataset", "This dataset comes from GEO series GSE132465.", {"lumicell": bare})
-    assert any(d.category == "IDENTIFIER" and d.severity.value == "CRITICAL" and "GSE132465" in d.description for d in report.defects)
-    report = verifier.verify_response("Cluster this dataset", "Results come from dataset ds_0123456789ab.", {"lumicell": lum})
-    assert any(d.category == "IDENTIFIER" and "ds_0123456789ab" in d.description for d in report.defects)
-
-    irb = "The uploaded dataset was IRB-approved for this analysis."
-    report = verifier.verify_response("Cluster this dataset", irb, {"lumicell": lum}, query_context=ctx)
-    assert any(d.category == "PROVENANCE" and d.severity.value == "MAJOR" for d in report.defects)
-
-
-@pytest.mark.asyncio
-async def test_evidence_block_carries_declared_provenance_without_paths(store, upload_root, monkeypatch, upload_hooks):
-    rec, ctx, lum = await _geo_verified_context(store, monkeypatch)
-    block = build_evidence_block({"lumicell": lum}, "ranking", query_context=ctx)
-    tag = re.search(r"<dataset_provenance [^>]*/>", block).group(0)
-    assert f'id="{rec.id}"' in tag and 'declared_by="uploader"' in tag and 'geo_verified="true"' in tag
-    assert 'geo_accession="GSE132465"' in tag and f'sha256_prefix="{rec.sha256[:12]}"' in tag
-    assert str(upload_root) not in block and "original.h5ad" not in block
-    assert not re.search(r"[A-Za-z]:\\\\|/tmp/|\\\\Users\\\\", block)
-    assert lum.data["dataset_provenance"]["file_path"] == "crc_atlas.h5ad"
 
 
 # =============================================================================

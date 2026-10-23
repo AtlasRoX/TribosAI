@@ -339,9 +339,3 @@ def test_excluded_modules_do_not_run():
     assert ctx.literature_ids == ["39369609"]
 
 
-def test_openfda_regulatory_sweep_is_skipped_when_excluded():
-    from phronesis.drugintel.sources import OpenFdaSource
-
-    ctx = _ctx("What are the FDA-approved indications for KRAS G12C inhibitors? No FDA sweep is needed.")
-    decision = OpenFdaSource().should_run(ctx)
-    assert not decision.run and "excluded" in decision.reason

@@ -1,6 +1,6 @@
 """Calendar dates are not study figures (a run removed a correct approval-date claim as a 'pancreatic' figure)."""
 
-from phronesis.phronesis.agents.verifier import bare_numbers
+from phronesis.verify.verifier import bare_numbers
 
 
 def test_calendar_dates_are_not_figures():

@@ -6,7 +6,7 @@ Feature tests add their own tools with extra_tools={"tool_name": (InputSchema, f
 returns the tool's data dict or a ToolResult. Fakes must return trimmed real responses, never invented data.
 
 Evidence-source tests that call ``registry.execute(tool, **kwargs)`` directly use RecordingRegistry (any
-handler) or DrugToolRegistry (the ChEMBL/openFDA tools on a DrugIntelEngine).
+handler).
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ from pydantic import BaseModel
 
 from phronesis.agents import authoritative_orchestrator as orch_module
 from phronesis.agents.authoritative_orchestrator import AuthoritativeOrchestrator
-from phronesis.drugintel.schemas import ChemblProfileInput, ChemblResolveInput, OpenFdaSafetyInput
 from phronesis.tools import registry as registry_module
 from phronesis.tools.registry import (
     AdapterType,
@@ -33,25 +32,15 @@ ExtraTools = Dict[str, Tuple[Type[BaseModel], Callable[[Dict[str, Any]], Any]]]
 Calls = List[Tuple[str, Dict[str, Any]]]
 
 _TOOL_SCHEMAS = {
-    "synapta_opentargets_search": registry_module.SynaptaSearchInput,
-    "synapta_opentargets_associations": registry_module.SynaptaAssocInput,
-    "synapta_kegg_pathways": registry_module.SynaptaKeggInput,
     "vivarix_simulate_time_course": registry_module.VivarixSimInput,
     "vivarix_compute_steady_state": registry_module.VivarixSteadyStateInput,
     "vivarix_parameter_scan": registry_module.VivarixParamScanInput,
-    "lumicell_analyze_single_cell": registry_module.LumicellPipelineInput,
     "lithoscribe_literature_synthesis": registry_module.LithoscribeSynthesisInput,
     "websurfer_search": registry_module.WebSurferSearchInput,
 }
 
 
 def _fake_output(tool_name: str, kwargs: Dict[str, Any]) -> Dict[str, Any]:
-    if tool_name == "synapta_opentargets_search":
-        return {"results": [{"id": "ENSG00000133703", "name": kwargs["query"]}]}
-    if tool_name == "synapta_opentargets_associations":
-        return {"associations": [{"disease_name": "pancreatic carcinoma", "overall_association_score": 0.83}]}
-    if tool_name == "synapta_kegg_pathways":
-        return {"results": [{"id": "hsa04010", "description": "MAPK signaling pathway - Homo sapiens (human)"}]}
     if tool_name == "vivarix_simulate_time_course":
         return {
             "model_id": kwargs["biomodel_id"],
@@ -86,14 +75,6 @@ def _fake_output(tool_name: str, kwargs: Dict[str, Any]) -> Dict[str, Any]:
                 for i, v in enumerate(step_vals)
             ],
             "failed_points": [],
-        }
-    if tool_name == "lumicell_analyze_single_cell":
-        return {
-            "dataset_path": kwargs["dataset_path"],
-            "n_cells_post_qc": 100,
-            "n_clusters": 2,
-            "top_markers_by_cluster": {"0": [{"gene": "CD3E", "cluster": "0", "log_fold_change": 2.0, "p_adj": 0.001}]},
-            "target_expression_summary": {},
         }
     if tool_name == "lithoscribe_literature_synthesis":
         return {"ranked_passages": [{"pmid": "123456", "passage_text": "KRAS signaling in pancreatic cancer."}]}
@@ -191,20 +172,3 @@ class RecordingRegistry:
             return await result if inspect.isawaitable(result) else result
         finally:
             self.active -= 1
-
-
-class DrugToolRegistry(RecordingRegistry):
-    """Executes the drug tools on a DrugIntelEngine after validating their inputs, as the registry would."""
-
-    def __init__(self, engine: Any) -> None:
-        super().__init__(self._dispatch)
-        self.engine = engine
-
-    async def _dispatch(self, tool: str, kwargs: Dict[str, Any]) -> ToolResult:
-        if tool == "chembl_resolve_drugs":
-            return await self.engine.resolve_drugs(**ChemblResolveInput(**kwargs).model_dump())
-        if tool == "chembl_drug_profile":
-            return await self.engine.drug_profile(**ChemblProfileInput(**kwargs).model_dump())
-        if tool == "openfda_drug_safety":
-            return await self.engine.drug_safety(**OpenFdaSafetyInput(**kwargs).model_dump())
-        raise AssertionError(tool)

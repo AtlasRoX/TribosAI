@@ -309,33 +309,6 @@ def test_stamp_defaults_to_temp_without_data_dir():
 # Bounded ad-hoc caches
 # -----------------------------------------------------------------------------
 
-def test_source_caches_are_bounded_ttl_caches():
-    from phronesis.sources_extra import bindingdb, depmap
-
-    for cache in (bindingdb._CACHE, bindingdb._KEY_CACHE, depmap._HEADER_CACHE, depmap._RESULT_CACHE):
-        assert isinstance(cache, TTLCache)
-        assert cache.maxsize <= 100_000
-    assert bindingdb._CACHE.maxsize == bindingdb._CACHE_MAX
-    assert bindingdb._CACHE.ttl_s == bindingdb._CACHE_TTL_S
-
-
-def test_bindingdb_key_cache_remembers_none(monkeypatch):
-    from phronesis.sources_extra import bindingdb
-
-    bindingdb._KEY_CACHE.clear()
-    calls = []
-
-    def fake_key(smi):
-        calls.append(smi)
-        return None
-
-    monkeypatch.setattr(bindingdb, "skeleton_key", fake_key)
-    monkeypatch.setattr(bindingdb, "heavy_atoms", lambda smi: 3)
-    rows = [{"smiles": "CCO"}, {"smiles": "CCO"}]
-    assert bindingdb._match_keys(rows, {"drug": "3:abc"}) == {}
-    assert calls == ["CCO"]  # a None key is cached too
-    bindingdb._KEY_CACHE.clear()
-
 
 # -----------------------------------------------------------------------------
 # Generated configuration reference

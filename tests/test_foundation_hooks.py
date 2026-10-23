@@ -19,7 +19,7 @@ from phronesis.agents import authoritative_orchestrator as orch_module
 from phronesis.agents.prompts import SYNTHESIS_SYSTEM_PROMPT, build_evidence_block, get_synthesis_system_prompt
 from phronesis.agents.query_context import SourceDecision
 from phronesis.extensions import hooks
-from phronesis.phronesis.agents.verifier import ClinicalVerifier
+from phronesis.verify.verifier import ClinicalVerifier
 from phronesis.provenance import run_manifest
 from phronesis.sources import CitationRecord, EvidenceSource, register_source, unregister_source
 from phronesis.tools.registry import ErrorType, ToolResult, WebSurferSearchInput
@@ -434,19 +434,19 @@ async def test_recorder_noop_and_registry_reporting(monkeypatch):
         assert run_manifest.current_recorder() is rec
         seen: List[Dict[str, Any]] = []
         monkeypatch.setattr(run_manifest, "record_tool_call", lambda **kw: seen.append(kw))
-        ok = await reg.execute("synapta_kegg_pathways", target_symbol="KRAS")
-        bad = await reg.execute("synapta_kegg_pathways", query="x")
+        ok = await reg.execute("websurfer_search", query="heat equation")
+        bad = await reg.execute("websurfer_search", max_results=99)
         missing = await reg.execute("not_a_tool")
         assert ok.success and bad.error_type == ErrorType.VALIDATION_ERROR and missing.error_type == ErrorType.NOT_FOUND
-        assert [s["tool_name"] for s in seen] == ["synapta_kegg_pathways", "synapta_kegg_pathways", "not_a_tool"]
-        assert seen[0]["inputs"] == {"target_symbol": "KRAS"} and seen[1]["inputs"] is None
-        assert seen[1]["raw_inputs"] == {"query": "x"} and seen[0]["entry"].name == "synapta_kegg_pathways"
+        assert [s["tool_name"] for s in seen] == ["websurfer_search", "websurfer_search", "not_a_tool"]
+        assert seen[0]["inputs"] == {"query": "heat equation", "max_results": 3} and seen[1]["inputs"] is None
+        assert seen[1]["raw_inputs"] == {"max_results": 99} and seen[0]["entry"].name == "websurfer_search"
 
         def boom(**_kw):
             raise RuntimeError("recorder bug")
 
         monkeypatch.setattr(run_manifest, "record_tool_call", boom)
-        assert (await reg.execute("synapta_kegg_pathways", target_symbol="KRAS")).success
+        assert (await reg.execute("websurfer_search", query="heat equation")).success
         # record_tool_call was monkeypatched for every call, so nothing reached the recorder.
         m = await rec.finalize(response="r", duration=1.0)
         assert m["schema_version"] == "phronesis.run_manifest/1" and m["tool_calls"] == []

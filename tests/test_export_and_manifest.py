@@ -183,7 +183,7 @@ async def test_registry_records_failures(runs_dir):
 
     # Without an active recorder the registry is unaffected.
     assert rm.current_recorder() is None
-    ok = await reg.execute("synapta_kegg_pathways", target_symbol="KRAS")
+    ok = await reg.execute("websurfer_search", query="heat equation")
     assert ok.success
 
     rec = rm.RunRecorder(query="q", thread_id="t", model_name="m", enable_web_search=False, user_id="alice", api_key_supplied=False)
@@ -208,7 +208,7 @@ async def test_registry_records_failures(runs_dir):
     assert by_name["slow_tool"]["error_type"] == "TIMEOUT" and by_name["slow_tool"]["timeout_seconds"] == 0.05
     assert by_name["not_a_tool"]["error_type"] == "NOT_FOUND"
     assert by_name["weird"]["success"] is False and by_name["weird"]["error"]
-    assert "synapta_kegg_pathways" not in by_name
+    assert "websurfer_search" not in by_name
     assert not list(runs_dir.glob("**/*.json"))  # persist=False
 
 

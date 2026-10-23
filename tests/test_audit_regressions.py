@@ -14,7 +14,7 @@ import pytest
 from phronesis.agents import authoritative_orchestrator as orch_module
 from phronesis.agents.authoritative_orchestrator import AuthoritativeOrchestrator
 from phronesis.agents.discovery import BioDiscoveryEngine
-from phronesis.phronesis.agents.verifier import ClinicalVerifier
+from phronesis.verify.verifier import ClinicalVerifier
 from phronesis.tools import registry as registry_module
 from phronesis.tools.registry import (
     AdapterType,
@@ -45,14 +45,6 @@ def _called(calls, tool_name):
 # =============================================================================
 # FINDING-01 / FINDING-02: routing
 # =============================================================================
-
-@pytest.mark.asyncio
-async def test_single_cell_runs_without_target_gene(offline_orchestrator):
-    orch, calls = offline_orchestrator
-    res = await orch.execute_inquiry("Analyze this uploaded test_atlas.h5ad dataset.", thread_id="t-sc", enable_web_search=False)
-    assert _called(calls, "lumicell_analyze_single_cell") == [{"dataset_path": "test_atlas.h5ad", "target_gene": None, "dataset_name": None, "max_pct_mt": 20.0, "n_neighbors": None, "resolution": 0.5}]
-    assert "Lumicell" in res.selected_agents
-    assert not _called(calls, "vivarix_simulate_time_course")
 
 
 @pytest.mark.asyncio
@@ -110,20 +102,6 @@ async def test_single_cell_intent_without_dataset_reports_dataset_required(offli
 # =============================================================================
 # FINDING-03: KEGG argument contract
 # =============================================================================
-
-@pytest.mark.asyncio
-async def test_kegg_called_with_target_symbol_and_validates(offline_orchestrator):
-    orch, calls = offline_orchestrator
-    res = await orch.execute_inquiry("What KEGG pathways involve KRAS?", thread_id="t-kegg", enable_web_search=False)
-    assert _called(calls, "synapta_kegg_pathways") == [{"target_symbol": "KRAS"}]
-    assert "MAPK signaling pathway" in res.response
-
-
-@pytest.mark.asyncio
-async def test_kegg_schema_rejects_legacy_query_argument():
-    reg, _ = build_recording_registry()
-    bad = await reg.execute("synapta_kegg_pathways", query="pathway/KRAS")
-    assert bad.success is False and bad.error_type == ErrorType.VALIDATION_ERROR
 
 
 # =============================================================================
@@ -299,27 +277,6 @@ def test_verifier_complex_name_is_not_a_value_of_its_component():
         {"vivarix": sim},
     )
     assert not [d for d in report.defects if d.category == "NUMERICAL"], [d.description for d in report.defects]
-
-
-def test_faers_counts_with_unicode_thousands_separators():
-    # Found by the evaluation harness: "272 899 reports" (narrow no-break space) was read as 899.
-    from phronesis.drugintel.checks import COUNT_RE, _as_int
-
-    assert _as_int(COUNT_RE.search("mentioned in 272 899 reports").group(1)) == 272899
-    assert _as_int(COUNT_RE.search("seen in 1,234 serious reports").group(1)) == 1234
-
-
-def test_label_and_development_status_sentences_are_not_misread():
-    # Found by the evaluation harness: label wording ("contraindicated due to the risk of lactic acidosis") was
-    # read as a FAERS causation claim, and "X has advanced to phase 3 (CTR...)" as a preclinical paper's design.
-    from phronesis.drugintel.checks import _LABEL_RE, _REPORTS_RE
-    from phronesis.extensions.grading import _DEVELOPMENT_STATUS_RE
-
-    label = "The FDA label contraindicates metformin in severe renal impairment due to the risk of lactic acidosis (openFDA label set_id: x)."
-    assert _LABEL_RE.search(label) and not _REPORTS_RE.search(label)
-    assert _REPORTS_RE.search("FAERS reports show 120 cases caused by the drug.")
-    assert _DEVELOPMENT_STATUS_RE.search("HRS-4642 has advanced to phase 3 trials (CTR20254212)")
-    assert not _DEVELOPMENT_STATUS_RE.search("In a phase 3 trial, the drug improved survival")
 
 
 def test_verifier_accepts_identifiers_from_verified_memory():

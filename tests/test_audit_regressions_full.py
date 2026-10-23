@@ -18,7 +18,7 @@ from phronesis.agents import authoritative_orchestrator as orch_module
 from phronesis.agents import query_planner as qp
 from phronesis.agents.authoritative_orchestrator import AuthoritativeOrchestrator
 from phronesis.agents.query_context import QueryContext, SimulationPlan, TaskOutcome
-from phronesis.phronesis.agents.verifier import ClinicalVerifier, DefectSeverity
+from phronesis.verify.verifier import ClinicalVerifier, DefectSeverity
 from phronesis.tools import registry as registry_module
 from phronesis.tools.registry import BiomedicalToolRegistry, ErrorType, ToolResult
 from phronesis.utils.memory.clinical_memory import ClinicalMemoryEngine
@@ -90,7 +90,6 @@ def test_case_03_known_parameter_override_applied(offline_biomd10):
     assert res.success is True
     applied = res.data["applied_overrides"]
     assert any((o.get("requested") == "V1" or o.get("resolved") == "V1" or o.get("parameter") == "V1") and o.get("applied_value") == 2.5 for o in applied) or applied == {"V1": 2.5}
-
 
 
 # =============================================================================
@@ -233,7 +232,6 @@ async def test_case_11_followup_its_safety_resolved(offline_orchestrator):
     assert "osimertinib" in turn2_query or "osimertinib" in turn2_kws or res2.query_context.get("primary_target") == "EGFR"
 
 
-
 # =============================================================================
 # 12. New independent investigation: No prior turn's temporary constraint applied
 # =============================================================================
@@ -347,39 +345,11 @@ def test_case_17_methods_only_excerpt_no_article_wide_absence():
 # =============================================================================
 # 18. Missing AnnData: Needs input; no invented cells or clusters
 # =============================================================================
-@pytest.mark.asyncio
-async def test_case_18_missing_anndata_needs_input(offline_orchestrator):
-    orch, calls = offline_orchestrator
-    query = (
-        "Perform single-cell clustering and identify KRAS-associated marker genes in pancreatic tumors. "
-        "I have not attached a dataset. Do not use example, synthetic, or unrelated data. Tell me exactly what input is required."
-    )
-    res = await orch.execute_inquiry(query, thread_id="t-c18", enable_web_search=False)
-    assert not _called(calls, "lumicell_analyze_single_cell")
-    assert res.task_status["task_status"] == "needs_input"
-    assert res.task_status["request_match"] is False
-    assert "lumicell" not in res.execution_artifacts
 
 
 # =============================================================================
 # 19. Raw versus processed AnnData: Correct representation selected
 # =============================================================================
-def test_case_19_raw_vs_processed_anndata():
-    import anndata
-    import numpy as np
-    from scipy import sparse
-    from phronesis.lumicell.engine import LumicellAnalysisEngine
-
-    engine = LumicellAnalysisEngine()
-    X_raw = sparse.csr_matrix(np.random.poisson(lam=3.0, size=(50, 20)).astype(np.float32))
-    adata_raw = anndata.AnnData(X=X_raw)
-    scale_raw = engine._detect_matrix_scale(adata_raw)
-    assert scale_raw in ("raw_counts", "counts")
-
-    X_log = sparse.csr_matrix(np.log1p(X_raw.toarray()))
-    adata_log = anndata.AnnData(X=X_log)
-    scale_log = engine._detect_matrix_scale(adata_log)
-    assert scale_log in ("log_normalized", "processed", "log1p", "log1p_counts")
 
 
 # =============================================================================
@@ -399,7 +369,6 @@ def test_case_20_truncated_anndata_rejected():
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
-
 
 
 # =============================================================================

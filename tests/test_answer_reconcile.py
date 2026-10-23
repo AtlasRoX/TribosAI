@@ -9,7 +9,7 @@ from typing import Any, Dict, List
 import pytest
 
 from phronesis.agents.orchestration import verify as verify_stage
-from phronesis.phronesis.agents.verifier import (
+from phronesis.verify.verifier import (
     COMPUTED_CONFIDENCE_NOTE,
     prefer_primary_trial_reports,
     reconcile_confidence_line,
@@ -213,7 +213,7 @@ def test_other_sentences_are_untouched():
 
 
 def test_verify_helper_keeps_text_on_failure(monkeypatch):
-    from phronesis.phronesis.agents import verifier as verifier_mod
+    from phronesis.verify import verifier as verifier_mod
 
     def boom(*_a: Any) -> Any:
         raise RuntimeError("x")

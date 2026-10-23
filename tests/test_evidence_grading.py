@@ -25,7 +25,7 @@ from phronesis.lithoscribe.integrity import (
     parse_crossref_updates,
 )
 from phronesis.lithoscribe.synthesis_engine import LiteratureSynthesisEngine
-from phronesis.phronesis.agents.verifier import ClinicalVerifier
+from phronesis.verify.verifier import ClinicalVerifier
 from phronesis.tools.registry import LithoscribeSynthesisInput, ToolResult
 from phronesis.utils.biocontext.client import BioContextMCPClient
 from tests.fakes import make_offline_orchestrator

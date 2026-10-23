@@ -17,7 +17,7 @@ Precedence for state directories: a specific variable (`PHRONESIS_MEMORY_DIR`, `
 `PHRONESIS_UPLOAD_ROOT`, `PHRONESIS_JOBS_DIR`, `PHRONESIS_TOOL_CACHE_DIR`) wins over `PHRONESIS_DATA_DIR`; with
 neither set, every store keeps its historical location under the workspace.
 
-168 variables.
+130 variables.
 
 ## State directories
 
@@ -63,7 +63,6 @@ neither set, every store keeps its historical location under the workspace.
 | `PHRONESIS_HEALTH_CACHE_S` | float (>= 0) | `60.0` | `app/backend/main.py` | Seconds the upstream readiness probes of /api/health are cached. |
 | `PHRONESIS_MAX_CONCURRENT_CHATS_PER_USER` | int (>= 1) | `2` | `app/backend/main.py` | Questions one user may have running at once (over it the request is refused). |
 | `PHRONESIS_MAX_CONCURRENT_TITLES_PER_USER` | int (>= 1) | `2` | `app/backend/main.py` | Model-generated thread titles per user at once (over it a heuristic title is used). |
-| `PHRONESIS_PRIMEKG_PRELOAD` | bool | `true` | `app/backend/main.py` | Load the local PrimeKG graph in the background at startup (0/off/false/no disables). |
 | `PHRONESIS_SSE_HEARTBEAT_S` | float (>= 0.05) | `15.0` | `app/backend/main.py`<br>`app/backend/routers/jobs.py` | Seconds between keep-alive comments on chat and job event streams. |
 | `PHRONESIS_STRICT_CONFIG` | bool | `false` | `app/backend/main.py` | Fail startup when configuration validation reports a problem instead of only logging it. |
 | `PHRONESIS_STRICT_ROUTERS` | bool | `false` | `app/backend/main.py` | Fail startup when an optional API router cannot be imported instead of disabling it. |
@@ -91,13 +90,13 @@ neither set, every store keeps its historical location under the workspace.
 
 | Variable | Type | Default | Read at | Description |
 | --- | --- | --- | --- | --- |
-| `AIAGENTS4PHARMA_LLM_MODEL` | str | `gpt-4o-mini` | `phronesis/evals/cassette.py`<br>`phronesis/evals/runner.py`<br>`phronesis/lumicell/agents/scp_agent.py` (+1) | Default model id when a request names none (the orchestrator default when unset; gpt-4o-mini for the Lumicell SCP agent). |
+| `AIAGENTS4PHARMA_LLM_MODEL` | str | unset | `phronesis/evals/cassette.py`<br>`phronesis/evals/runner.py`<br>`phronesis/utils/llm/llm_factory.py` | Default model id when a request names none (the orchestrator default when unset; gpt-4o-mini for the Lumicell SCP agent). |
 | `LLM_STREAM_TIMEOUT` | float | `120.0` | `phronesis/utils/llm/llm_factory.py` | Read timeout in seconds between streamed completion chunks. |
 | `LLM_STREAM_TOTAL_TIMEOUT` | float | `1800.0` | `phronesis/utils/llm/llm_factory.py` | Wall-clock cap in seconds on one streamed completion. |
 | `LLM_TIMEOUT` | float | `60.0` | `phronesis/utils/llm/llm_factory.py` | Per-request LLM client timeout in seconds. |
-| `NVIDIA_API_KEY` | str | (secret, unset) | `phronesis/structintel/clients.py`<br>`phronesis/utils/llm/llm_factory.py`<br>`app/backend/main.py` (+1) | NVIDIA NIM models (default LLM provider) and the NIM structure tools. |
+| `NVIDIA_API_KEY` | str | (secret, unset) | `phronesis/utils/llm/llm_factory.py`<br>`app/backend/main.py` | NVIDIA NIM models (default LLM provider) and the NIM structure tools. |
 | `NVIDIA_NIM_API_KEY` | str | (secret, unset) | `phronesis/utils/llm/llm_factory.py`<br>`app/backend/main.py` | Alternative name for NVIDIA_API_KEY (used when that one is unset). |
-| `OPENAI_API_KEY` | str | (secret, unset) | `phronesis/utils/llm/llm_factory.py`<br>`app/backend/main.py`<br>`app/frontend/streamlit_app.py` (+1) | OpenAI models; also the fallback when no NVIDIA key is set. |
+| `OPENAI_API_KEY` | str | (secret, unset) | `phronesis/utils/llm/llm_factory.py`<br>`app/backend/main.py` | OpenAI models; also the fallback when no NVIDIA key is set. |
 | `PHRONESIS_ALLOWED_MODELS` | list | unset | `phronesis/utils/llm/llm_factory.py` | Extra comma-separated model ids callers may select besides the built-in catalog. |
 | `PHRONESIS_LLM_FALLBACK` | bool | `true` | `phronesis/utils/llm/llm_factory.py` | Allow fallback to an available provider when the requested model key is unset. |
 | `PHRONESIS_SYNTHESIS_MODEL` | str | unset | `phronesis/agents/orchestration/draft.py` | Model that writes the final answer (default: the turn's model). |
@@ -196,22 +195,12 @@ neither set, every store keeps its historical location under the workspace.
 
 | Variable | Type | Default | Read at | Description |
 | --- | --- | --- | --- | --- |
-| `BIOCONTEXT_MCP_URL` | str | `https://mcp.biocontext.ai/mcp/` | `phronesis/utils/biocontext/client.py`<br>`app/frontend/utils/streamlit_utils.py` | BioContext MCP server URL. |
+| `BIOCONTEXT_MCP_URL` | str | `https://mcp.biocontext.ai/mcp/` | `phronesis/utils/biocontext/client.py` | BioContext MCP server URL. |
 | `BIOCONTEXT_TIMEOUT` | float | `25.0` | `phronesis/utils/biocontext/client.py` | BioContext and direct-adapter request timeout in seconds. |
-| `NCBI_API_KEY` | str | (secret, unset) | `phronesis/datasets/geo.py`<br>`phronesis/lithoscribe/pubmed_fallback.py`<br>`phronesis/utils/biocontext/entity_resolver.py` (+2) | NCBI E-utilities key (raises the rate limit from 3 to 10 requests/s). |
-| `NCBI_EMAIL` | str | unset | `phronesis/datasets/geo.py`<br>`phronesis/lithoscribe/pubmed_fallback.py`<br>`phronesis/variants/clients.py` | Contact e-mail sent with NCBI E-utilities requests. |
-| `OPENFDA_API_KEY` | str | (secret, unset) | `phronesis/drugintel/openfda_client.py` | openFDA key (raises the daily request quota). |
+| `NCBI_API_KEY` | str | (secret, unset) | `phronesis/datasets/geo.py`<br>`phronesis/lithoscribe/pubmed_fallback.py`<br>`phronesis/utils/biocontext/entity_resolver.py` (+1) | NCBI E-utilities key (raises the rate limit from 3 to 10 requests/s). |
+| `NCBI_EMAIL` | str | unset | `phronesis/datasets/geo.py`<br>`phronesis/lithoscribe/pubmed_fallback.py` | Contact e-mail sent with NCBI E-utilities requests. |
 | `PHRONESIS_CROSSREF_MAILTO` | str | unset | `phronesis/lithoscribe/integrity.py` | Contact e-mail for the Crossref polite pool (citation integrity checks). |
-| `PHRONESIS_DEPMAP_DIR` | path | unset | `phronesis/sources_extra/depmap.py` | Directory with DepMap CRISPRGeneEffect.csv (optional source). |
-| `PHRONESIS_DEPMAP_RELEASE` | str | unset | `phronesis/sources_extra/depmap.py` | DepMap release label recorded in provenance (default: the directory name). |
-| `PHRONESIS_DRUGINTEL_TIMEOUT` | float | `12.0` | `phronesis/drugintel/chembl_client.py`<br>`phronesis/drugintel/structures.py` | ChEMBL request timeout in seconds. |
-| `PHRONESIS_OMICS_PROMPT_RULES` | bool | `false` | `phronesis/extensions/omics_sources.py` | Register the static omics prompt hooks alongside the omics source tools. |
-| `PHRONESIS_OPENFDA_TIMEOUT` | float | `10.0` | `phronesis/drugintel/openfda_client.py` | openFDA request timeout in seconds. |
-| `PHRONESIS_PRIMEKG_DIR` | path | unset | `phronesis/kgintel/store.py` | Local PrimeKG store directory (default ~/.cache/phronesis/primekg). |
 | `PHRONESIS_PROVENANCE_PROBES` | off \| auto \| on | `auto` | `phronesis/provenance/source_versions.py` | Live source-version probes for run manifests: off, auto (off under pytest) or on. |
-| `PHRONESIS_SYNLETHDB_DIR` | path | unset | `phronesis/sources_extra/synlethdb.py` | Directory with the SynLethDB human SL bulk file (source skipped without it). |
-| `PHRONESIS_SYNLETHDB_RELEASE` | str | unset | `phronesis/sources_extra/synlethdb.py` | SynLethDB release label recorded in provenance (default: the file name). |
-| `SYNAPTA_TRUST_LOCAL_PICKLES` | bool | `false` | `phronesis/synapta/utils/integrity.py` | Load unverified local pickles without SHA-256 sidecars in Synapta (unsafe). |
 
 ## PHRONESIS_UPLOAD_*: Uploads and datasets
 
@@ -231,8 +220,6 @@ neither set, every store keeps its historical location under the workspace.
 | `PHRONESIS_BIOMODELS_REVISION_TTL_S` | float (>= 0) | `86400.0` | `phronesis/vivarix/engine.py` | Seconds a cached BioModels SBML download is trusted before checking its revision. |
 | `PHRONESIS_CALIBRATION_BACKEND` | least_squares \| copasi | `least_squares` | `phronesis/vivarix/calibration.py` | Model calibration backend: least_squares or copasi. |
 | `PHRONESIS_COPASI_LOCK_WAIT` | float | `20.0` | `phronesis/vivarix/engine.py` | Seconds a simulation waits for COPASI to be free before timing out. |
-| `PHRONESIS_LUMICELL_MAX_CELLS` | int (>= 1) | `50000` | `phronesis/lumicell/engine.py` | Cells kept for single-cell analysis (larger datasets are subsampled). |
-| `PHRONESIS_LUMICELL_UMAP_MAX_CELLS` | int (>= 1) | `20000` | `phronesis/lumicell/engine.py` | Cells embedded for the UMAP plot. |
 
 ## PHRONESIS_SANDBOX_*: Code sandbox
 
@@ -250,44 +237,9 @@ neither set, every store keeps its historical location under the workspace.
 | `PHRONESIS_EVAL_CACHE` | path | unset | `phronesis/evals/datasets.py` | Downloaded benchmark datasets cache (default ~/.cache/phronesis/evals). |
 | `PHRONESIS_EVAL_TOKEN` | str | (secret, unset) | `phronesis/evals/runner.py` | Bearer token the eval runner sends to a remote Phronesis API. |
 
-## Milvus and PrimeKG vector dump
-
-| Variable | Type | Default | Read at | Description |
-| --- | --- | --- | --- | --- |
-| `AUTO_INSTALL_PACKAGES` | bool | `true` | `phronesis/synapta/milvus_data_dump.py` | Let the PrimeKG vector dump pip-install missing packages (`true` only). |
-| `BATCH_SIZE` | int (>= 1) | `500` | `phronesis/synapta/milvus_data_dump.py` | Rows per Milvus insert in the PrimeKG vector dump. |
-| `CAGRA_GRAPH_DEGREE` | int (>= 1) | `32` | `phronesis/synapta/milvus_data_dump.py` | GPU_CAGRA index graph degree. |
-| `CAGRA_INTERMEDIATE_GRAPH_DEGREE` | int (>= 1) | `40` | `phronesis/synapta/milvus_data_dump.py` | GPU_CAGRA index intermediate graph degree. |
-| `CAGRA_SEARCH_WIDTH` | int (>= 1) | `64` | `phronesis/synapta/milvus_data_dump.py` | GPU_CAGRA index search width. |
-| `CHUNK_SIZE` | int (>= 1) | `5` | `phronesis/synapta/milvus_data_dump.py` | Parquet chunks loaded at once by the PrimeKG vector dump. |
-| `DATA_DIR` | path | `default_data_dir` | `phronesis/synapta/milvus_data_dump.py` | PrimeKG vector dump input directory (default: the bundled data directory). |
-| `FORCE_CPU` | bool | `false` | `phronesis/synapta/milvus_data_dump.py` | Force CPU mode in the PrimeKG vector dump even when GPU libraries exist (`true` only). |
-| `HNSW_EF_CONSTRUCTION` | int (>= 1) | `200` | `phronesis/synapta/milvus_data_dump.py` | HNSW index efConstruction. |
-| `HNSW_M` | int (>= 1) | `16` | `phronesis/synapta/milvus_data_dump.py` | HNSW index M (links per node). |
-| `LOG_LEVEL` | str | `INFO` | `phronesis/lithoscribe/tools/pdf/question_and_answer.py`<br>`phronesis/lithoscribe/tools/pdf/utils/collection_manager.py`<br>`phronesis/lithoscribe/tools/pdf/utils/generate_answer.py` (+3) | Logging level of the LithoScribe PDF tools (uppercase: DEBUG, INFO, WARNING, ERROR). |
-| `MILVUS_DATABASE` | str | `t2kg_primekg` | `phronesis/synapta/milvus_data_dump.py` | Milvus database the PrimeKG vector dump writes to. |
-| `MILVUS_HOST` | str | `127.0.0.1` / `localhost` | `phronesis/lithoscribe/tools/pdf/utils/vector_store.py`<br>`phronesis/synapta/milvus_data_dump.py` | Milvus host when no MILVUS_URI is set. |
-| `MILVUS_PASSWORD` | str | (secret) | `phronesis/synapta/milvus_data_dump.py` | Milvus password for the PrimeKG vector dump (stock credential when unset). |
-| `MILVUS_PORT` | int (1 to 65535) | `19530` | `phronesis/lithoscribe/tools/pdf/utils/vector_store.py`<br>`phronesis/synapta/milvus_data_dump.py` | Milvus port when no MILVUS_URI is set. |
-| `MILVUS_TOKEN` | str | (secret, unset) | `phronesis/lithoscribe/tools/pdf/utils/singleton_manager.py`<br>`phronesis/lithoscribe/tools/pdf/utils/vector_store.py`<br>`phronesis/synapta/utils/database/milvus_connection_manager.py` | Milvus/Zilliz access token. |
-| `MILVUS_URI` | str | unset | `phronesis/lithoscribe/tools/pdf/utils/singleton_manager.py`<br>`phronesis/lithoscribe/tools/pdf/utils/vector_store.py`<br>`phronesis/synapta/utils/database/milvus_connection_manager.py` (+2) | Milvus URI (Zilliz Cloud, server or Milvus Lite file); unset uses host/port or embedded Milvus Lite. |
-| `MILVUS_USER` | str | `root` | `phronesis/synapta/milvus_data_dump.py` | Milvus user for the PrimeKG vector dump. |
-
-## Streamlit frontend
-
-| Variable | Type | Default | Read at | Description |
-| --- | --- | --- | --- | --- |
-| `AZURE_OPENAI_API_VERSION` | str | `2024-02-01` | `app/frontend/utils/streamlit_utils.py` | Azure OpenAI API version. |
-| `AZURE_OPENAI_DEPLOYMENT` | str | unset | `app/frontend/utils/streamlit_utils.py` | Azure OpenAI deployment name. |
-| `AZURE_OPENAI_ENDPOINT` | str | unset | `app/frontend/utils/streamlit_utils.py` | Azure OpenAI endpoint for `Azure/` models in the Streamlit apps. |
-| `AZURE_OPENAI_MODEL_NAME` | str | `dic_llm_models[model_name]` | `app/frontend/utils/streamlit_utils.py` | Azure OpenAI model name (default: the selected catalog model). |
-| `AZURE_OPENAI_MODEL_VERSION` | str | unset | `app/frontend/utils/streamlit_utils.py` | Azure OpenAI model version. |
-| `OPENAI_BASE_URL` | str | unset | `app/frontend/utils/streamlit_utils.py` | Custom OpenAI-compatible base URL for `OpenAI/` models in the Streamlit apps. |
-| `PHRONESIS_STREAMLIT_USER` | str | `cfg.app.frontend.default_user` | `app/frontend/utils/streamlit_utils.py` | User id that labels uploads and memory in the Streamlit apps (default from the app config). |
-
 ## Testing
 
 | Variable | Type | Default | Read at | Description |
 | --- | --- | --- | --- | --- |
 | `PHRONESIS_LOAD_DOTENV` | bool | `true` | `app/backend/main.py` | Load the workspace `.env` when the API module is imported; tests/conftest.py sets 0 so a developer `.env` never reaches pytest. |
-| `PYTEST_CURRENT_TEST` | str | unset | `phronesis/agentic/jobs.py`<br>`phronesis/agentic/router_store.py`<br>`phronesis/provenance/run_store.py` (+7) | Set by pytest; `auto` switches and default stores treat its presence as a test run. Never set it yourself. |
+| `PYTEST_CURRENT_TEST` | str | unset | `phronesis/agentic/jobs.py`<br>`phronesis/agentic/router_store.py`<br>`phronesis/provenance/run_store.py` (+6) | Set by pytest; `auto` switches and default stores treat its presence as a test run. Never set it yourself. |

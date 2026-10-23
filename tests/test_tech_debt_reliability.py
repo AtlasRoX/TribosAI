@@ -31,7 +31,7 @@ REPO = Path(__file__).resolve().parents[1]
 # 1. One typography fold ------------------------------------------------------------------------------------------
 def test_orchestrator_and_verifier_fold_the_same_characters():
     from phronesis.agents.authoritative_orchestrator import normalize_typography
-    from phronesis.phronesis.agents.verifier import ClinicalVerifier
+    from phronesis.verify.verifier import ClinicalVerifier
     from phronesis.utils.text import fold_typography
 
     sample = "Mos\u2011P \u2212 0.4\u2009mM, on\u2010target\u2012x, hyphen\u00adated, et\u202fal., a\u00a0b, c\u2007d, e\u200af"
@@ -50,7 +50,7 @@ def _defect(sentence: str) -> Any:
 
 
 def test_remove_flagged_sentences_matches_through_typography():
-    from phronesis.phronesis.agents.verifier import remove_flagged_sentences
+    from phronesis.verify.verifier import remove_flagged_sentences
     from phronesis.utils.text import fold_typography
 
     original = ("Intro sentence here. Sotorasib\u00ad cures every KRAS\u2011mutant patient\u2009today. Another fact.\n")
@@ -63,10 +63,10 @@ def test_remove_flagged_sentences_matches_through_typography():
 
 
 def test_remove_flagged_sentences_logs_when_a_sentence_is_missing(caplog):
-    from phronesis.phronesis.agents.verifier import remove_flagged_sentences
+    from phronesis.verify.verifier import remove_flagged_sentences
 
     text = "Intro sentence here. Another fact.\n"
-    with caplog.at_level(logging.WARNING, logger="phronesis.phronesis.agents.verifier"):
+    with caplog.at_level(logging.WARNING, logger="phronesis.verify.verifier"):
         out, removed = remove_flagged_sentences(text, [_defect("A sentence that is not there.")])
     assert out == text and removed == []
     assert any("not found" in r.getMessage() for r in caplog.records)
@@ -79,21 +79,6 @@ def test_find_folded_maps_positions_back():
     start, end = find_folded(hay, "ab-c")
     assert hay[start:end] == "a\u00adb\u2011c"
     assert find_folded(hay, "zz") == (-1, -1)
-
-
-# 2. Lazy legacy imports ------------------------------------------------------------------------------------------
-def test_legacy_agents_package_does_not_import_main_agent_eagerly():
-    init = REPO / "phronesis" / "phronesis" / "agents" / "__init__.py"
-    tree = ast.parse(init.read_text(encoding="utf-8"))
-    top_level_imports = [n for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom))]
-    assert not any(
-        any(a.name == "main_agent" for a in n.names) for n in top_level_imports
-    ), "main_agent must be loaded lazily"
-    import phronesis.phronesis.agents as legacy
-
-    assert "main_agent" in dir(legacy)
-    with pytest.raises(AttributeError):
-        getattr(legacy, "no_such_submodule")
 
 
 # 3. Registry ---------------------------------------------------------------------------------------------------
