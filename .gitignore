@@ -207,3 +207,7 @@ data/*.h5ad.*
 
 # NOTE: phronesis/synapta/tests/files (~334 MB of fixtures) is deliberately NOT ignored: the Synapta
 # tests need it. Moving it to Git LFS or a fixture-download step is a pending decision.
+
+# Runtime state written by the app (job queue, router outcomes)
+data/jobs/
+data/router/
