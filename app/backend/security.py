@@ -23,14 +23,15 @@ import ipaddress
 import json
 import logging
 import os
-from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional
+from collections.abc import Awaitable, Callable, Iterable
+from typing import Any
 
 from starlette.exceptions import HTTPException
 
 logger = logging.getLogger("tribos.backend.security")
 
-Scope = Dict[str, Any]
-Message = Dict[str, Any]
+Scope = dict[str, Any]
+Message = dict[str, Any]
 Receive = Callable[[], Awaitable[Message]]
 Send = Callable[[Message], Awaitable[None]]
 ASGIApp = Callable[[Scope, Receive, Send], Awaitable[None]]
@@ -42,7 +43,7 @@ _LARGE_BODY_PREFIXES = ("/api/export/", "/api/runs/rerun")
 _UNCOUNTED = (("POST", "/api/datasets"),)  # multipart upload: streamed with its own limits in the datasets router
 
 
-def _truthy(value: Optional[str]) -> bool:
+def _truthy(value: str | None) -> bool:
     return (value or "").strip().lower() in ("1", "true", "yes", "on")
 
 
@@ -54,7 +55,7 @@ def _mb(name: str, default: float) -> int:
     return int(max(0.01, value) * 1024 * 1024)
 
 
-def max_body_bytes(method: str, path: str) -> Optional[int]:
+def max_body_bytes(method: str, path: str) -> int | None:
     if (method, path.rstrip("/")) in _UNCOUNTED:
         return None
     if any(path.startswith(p) for p in _LARGE_BODY_PREFIXES):
@@ -62,7 +63,7 @@ def max_body_bytes(method: str, path: str) -> Optional[int]:
     return _mb("TRIBOS_MAX_BODY_MB", 2.0)
 
 
-def cors_origins() -> List[str]:
+def cors_origins() -> list[str]:
     """TRIBOS_CORS_ORIGINS without wildcards: '*' together with credentials would let any page read responses."""
     raw = os.getenv("TRIBOS_CORS_ORIGINS", DEFAULT_CORS_ORIGINS)
     out = []
@@ -77,7 +78,7 @@ def cors_origins() -> List[str]:
     return out
 
 
-def allowed_origins() -> List[str]:
+def allowed_origins() -> list[str]:
     extra = [o.strip().rstrip("/") for o in os.getenv("TRIBOS_MCP_ALLOWED_ORIGINS", "").split(",") if o.strip()]
     return list(dict.fromkeys(cors_origins() + [o for o in extra if "*" not in o]))
 
@@ -88,7 +89,7 @@ def _auth_disabled() -> bool:
     return auth_disabled()
 
 
-def allowed_hosts() -> Optional[List[str]]:
+def allowed_hosts() -> list[str] | None:
     """Host names requests may address, or None when no Host check applies (bearer auth and no explicit list)."""
     raw = [h.strip().lower() for h in os.getenv("TRIBOS_ALLOWED_HOSTS", "").split(",") if h.strip()]
     if raw:
@@ -111,7 +112,7 @@ def _host_name(host_header: str) -> str:
     return host
 
 
-def is_loopback_client(client: Optional[Iterable[Any]]) -> bool:
+def is_loopback_client(client: Iterable[Any] | None) -> bool:
     if not client:
         return False
     host = str(list(client)[0])
@@ -127,8 +128,8 @@ def insecure_allowed() -> bool:
     return _truthy(os.getenv("TRIBOS_ALLOW_INSECURE"))
 
 
-def _headers(scope: Scope) -> Dict[str, str]:
-    out: Dict[str, str] = {}
+def _headers(scope: Scope) -> dict[str, str]:
+    out: dict[str, str] = {}
     for key, value in scope.get("headers") or []:
         try:
             out[key.decode("latin-1").lower()] = value.decode("latin-1")

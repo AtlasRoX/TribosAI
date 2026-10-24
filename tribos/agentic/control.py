@@ -21,8 +21,9 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any
 
 
 class RunCancelled(RuntimeError):
@@ -32,7 +33,7 @@ class RunCancelled(RuntimeError):
 @dataclass
 class ApprovalDecision:
     approved: bool
-    payload: Optional[Dict[str, Any]] = None  # an edited plan or other edited payload, when the user changed it
+    payload: dict[str, Any] | None = None  # an edited plan or other edited payload, when the user changed it
     message: str = ""
     source: str = "user"  # user | auto | timeout | unattended | error (only "user" and "auto" can approve)
 
@@ -41,13 +42,13 @@ class ApprovalDecision:
 class _Pending:
     approval_id: str
     kind: str
-    payload: Dict[str, Any]
-    future: "asyncio.Future[ApprovalDecision]"
+    payload: dict[str, Any]
+    future: asyncio.Future[ApprovalDecision]
     created: float = field(default_factory=time.time)
 
 
 class RunControl:
-    def __init__(self, user_id: str, interactive: bool, run_id: Optional[str] = None) -> None:
+    def __init__(self, user_id: str, interactive: bool, run_id: str | None = None) -> None:
         self.run_id = run_id or f"run_{uuid.uuid4().hex[:16]}"
         self.user_id = user_id
         self.interactive = interactive
@@ -56,9 +57,9 @@ class RunControl:
         self.human_attached = bool(interactive)
         self.cancelled = False
         self.cancel_reason = ""
-        self._steering: List[str] = []
-        self._pending: Dict[str, _Pending] = {}
-        self.decisions: List[Dict[str, Any]] = []
+        self._steering: list[str] = []
+        self._pending: dict[str, _Pending] = {}
+        self.decisions: list[dict[str, Any]] = []
         self.created = time.time()
 
     # Cancellation --------------------------------------------------------------------------------------------
@@ -79,15 +80,15 @@ class RunControl:
         if message:
             self._steering.append(message[:2000])
 
-    def drain_steering(self) -> List[str]:
+    def drain_steering(self) -> list[str]:
         out, self._steering = self._steering, []
         return out
 
-    def peek_steering(self) -> List[str]:
+    def peek_steering(self) -> list[str]:
         return list(self._steering)
 
     # Approval ------------------------------------------------------------------------------------------------
-    def pending(self) -> List[Dict[str, Any]]:
+    def pending(self) -> list[dict[str, Any]]:
         return [
             {"approval_id": p.approval_id, "kind": p.kind, "payload": p.payload, "created": p.created}
             for p in self._pending.values()
@@ -106,9 +107,9 @@ class RunControl:
     async def request_approval(
         self,
         kind: str,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
         timeout_seconds: float = 300.0,
-        announce: Optional[Callable[[str], Awaitable[None]]] = None,
+        announce: Callable[[str], Awaitable[None]] | None = None,
     ) -> ApprovalDecision:
         """Wait for the user's decision. A never-interactive run approves automatically; once a human could answer,
         a timeout, the watcher leaving or a failed wait refuse (fail closed).
@@ -125,7 +126,7 @@ class RunControl:
             self.decisions.append({"kind": kind, "approved": True, "source": "auto"})
             return decision
         approval_id = f"apr_{uuid.uuid4().hex[:10]}"
-        fut: "asyncio.Future[ApprovalDecision]" = asyncio.get_running_loop().create_future()
+        fut: asyncio.Future[ApprovalDecision] = asyncio.get_running_loop().create_future()
         self._pending[approval_id] = _Pending(approval_id, kind, payload, fut)
         if announce is not None:
             try:
@@ -134,7 +135,7 @@ class RunControl:
                 pass  # the request stays answerable through GET /api/agent/runs/{run_id}
         try:
             decision = await asyncio.wait_for(asyncio.shield(fut), timeout=timeout_seconds)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             decision = ApprovalDecision(
                 approved=False, message=f"no answer within {timeout_seconds:.0f}s; the guarded work was not run", source="timeout"
             )
@@ -168,7 +169,7 @@ class RunControl:
         p.future.set_result(decision)
         return True
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "run_id": self.run_id,
             "interactive": self.interactive,
@@ -179,11 +180,11 @@ class RunControl:
         }
 
 
-_CONTROLS: Dict[str, RunControl] = {}
+_CONTROLS: dict[str, RunControl] = {}
 _MAX_AGE_SECONDS = 6 * 3600
 
 
-def create_control(user_id: str, interactive: bool, run_id: Optional[str] = None) -> RunControl:
+def create_control(user_id: str, interactive: bool, run_id: str | None = None) -> RunControl:
     now = time.time()
     for rid, c in list(_CONTROLS.items()):
         if now - c.created > _MAX_AGE_SECONDS:
@@ -193,7 +194,7 @@ def create_control(user_id: str, interactive: bool, run_id: Optional[str] = None
     return control
 
 
-def get_control(run_id: str, user_id: str) -> Optional[RunControl]:
+def get_control(run_id: str, user_id: str) -> RunControl | None:
     c = _CONTROLS.get(run_id)
     return c if c is not None and c.user_id == user_id else None
 

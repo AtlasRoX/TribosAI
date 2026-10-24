@@ -39,7 +39,7 @@ import math
 import re
 from dataclasses import dataclass, field
 from html import escape
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from ..verify.verifier import truncate_words
 from .budget import BudgetExhausted
@@ -108,26 +108,26 @@ class Hypothesis:
     id: str
     statement: str
     mechanism: str
-    kind: Optional[str]
-    parameter: Optional[str]  # the model quantity overridden (species, global or "(reaction).k")
-    factor: Optional[float]
-    readout: Optional[str]
+    kind: str | None
+    parameter: str | None  # the model quantity overridden (species, global or "(reaction).k")
+    factor: float | None
+    readout: str | None
     prediction: str  # increase | decrease
     source: str = "deterministic"  # llm | deterministic | evidence | evolved
     prediction_basis: str = ""
-    parent: Optional[str] = None
-    evidence_keys: List[str] = field(default_factory=list)
+    parent: str | None = None
+    evidence_keys: list[str] = field(default_factory=list)
     evidence_score: float = 0.0
     status: str = "untested"  # untested | tested | failed
     note: str = ""
-    result: Optional[Dict[str, Any]] = None
+    result: dict[str, Any] | None = None
     elo: float = ELO_START
     rank: int = 0
 
-    def perturbation(self) -> Tuple[str, str, float]:
+    def perturbation(self) -> tuple[str, str, float]:
         return (str(self.parameter or ""), str(self.kind or ""), round(float(self.factor or 0.0), 6))
 
-    def to_artifact(self) -> Dict[str, Any]:
+    def to_artifact(self) -> dict[str, Any]:
         result = self.result or {}
         return {
             "id": self.id,
@@ -159,23 +159,23 @@ class Hypothesis:
 class ModelRef:
     biomodel_id: str
     label: str
-    sim_kwargs: Dict[str, Any] = field(default_factory=dict)  # sbml_path, model_label, model_provenance
+    sim_kwargs: dict[str, Any] = field(default_factory=dict)  # sbml_path, model_label, model_provenance
 
 
 @dataclass
 class ModelInfo:
-    species: Dict[str, Optional[float]] = field(default_factory=dict)  # name -> initial concentration
-    parameters: Dict[str, Dict[str, Any]] = field(default_factory=dict)  # override name -> {value, short, reaction}
-    reactions: List[Tuple[str, List[str], List[str]]] = field(default_factory=list)  # (name, substrates, products)
+    species: dict[str, float | None] = field(default_factory=dict)  # name -> initial concentration
+    parameters: dict[str, dict[str, Any]] = field(default_factory=dict)  # override name -> {value, short, reaction}
+    reactions: list[tuple[str, list[str], list[str]]] = field(default_factory=list)  # (name, substrates, products)
     source: str = "none"  # list_tool | vivarix_result | none
 
-    def short_names(self) -> Dict[str, List[str]]:
-        out: Dict[str, List[str]] = {}
+    def short_names(self) -> dict[str, list[str]]:
+        out: dict[str, list[str]] = {}
         for full, meta in self.parameters.items():
             out.setdefault(str(meta.get("short") or full).lower(), []).append(full)
         return out
 
-    def resolve(self, name: Optional[str]) -> Optional[Tuple[str, str]]:
+    def resolve(self, name: str | None) -> tuple[str, str] | None:
         """(override name, 'species'|'parameter') for a species/parameter name as written, or None."""
         if not name:
             return None
@@ -196,7 +196,7 @@ class ModelInfo:
             return short[0], "parameter"
         return None
 
-    def baseline_value(self, name: str) -> Optional[float]:
+    def baseline_value(self, name: str) -> float | None:
         if name in self.species:
             return self.species[name]
         meta = self.parameters.get(name)
@@ -207,7 +207,7 @@ class ModelInfo:
 # Helpers
 # -----------------------------------------------------------------------------
 
-def _num(value: Any) -> Optional[float]:
+def _num(value: Any) -> float | None:
     try:
         out = float(value)
     except (TypeError, ValueError):
@@ -215,7 +215,7 @@ def _num(value: Any) -> Optional[float]:
     return out if math.isfinite(out) else None
 
 
-def _data(res: Any) -> Dict[str, Any]:
+def _data(res: Any) -> dict[str, Any]:
     data = getattr(res, "data", None)
     return data if isinstance(data, dict) and getattr(res, "success", False) else {}
 
@@ -233,7 +233,7 @@ def simulation_block_reason(ctx: Any) -> str:
     return ""
 
 
-def model_in_play(ctx: Any, tool_results: Dict[str, Any]) -> Optional[ModelRef]:
+def model_in_play(ctx: Any, tool_results: dict[str, Any]) -> ModelRef | None:
     """The kinetic model this turn is about: an uploaded SBML model, a typed accession, or the Vivarix result's."""
     att = getattr(ctx, "model_attachment", None)
     if att is not None and getattr(att, "model_path", None):
@@ -260,26 +260,26 @@ def expected_score(ra: float, rb: float) -> float:
     return 1.0 / (1.0 + 10.0 ** ((rb - ra) / 400.0))
 
 
-def elo_update(ra: float, rb: float, score_a: float, k: float = ELO_K) -> Tuple[float, float]:
+def elo_update(ra: float, rb: float, score_a: float, k: float = ELO_K) -> tuple[float, float]:
     """Elo ratings after one match; score_a is 1 (A wins), 0.5 (draw) or 0 (B wins)."""
     ea = expected_score(ra, rb)
     return ra + k * (score_a - ea), rb + k * ((1.0 - score_a) - (1.0 - ea))
 
 
-def log2_fold_change(baseline: float, perturbed: float) -> Tuple[float, float]:
+def log2_fold_change(baseline: float, perturbed: float) -> tuple[float, float]:
     """(log2FC, eps): zeros are guarded with eps = 1e-9 x max(|baseline|, |perturbed|) (or 1e-300 when both are 0)."""
     b, p = max(0.0, float(baseline)), max(0.0, float(perturbed))
     eps = max(EPS_RELATIVE * max(b, p), 1e-300)
     return math.log2((p + eps) / (b + eps)), eps
 
 
-def _scheme_sides(scheme: str) -> Tuple[List[str], List[str]]:
+def _scheme_sides(scheme: str) -> tuple[list[str], list[str]]:
     body = str(scheme or "").split(";", 1)[0]
     parts = re.split(r"->|=", body, maxsplit=1)
     if len(parts) != 2:
         return [], []
 
-    def names(side: str) -> List[str]:
+    def names(side: str) -> list[str]:
         out = []
         for term in side.split("+"):
             term = re.sub(r"^\s*\d+(?:\.\d+)?\s*\*?\s*", "", term).strip()
@@ -290,7 +290,7 @@ def _scheme_sides(scheme: str) -> Tuple[List[str], List[str]]:
     return names(parts[0]), names(parts[1])
 
 
-def _mentions(text: str, name: str) -> Optional[int]:
+def _mentions(text: str, name: str) -> int | None:
     """Position of a whole-name mention in text, or None (case-insensitive from 3 characters; 'A' never matches 'a')."""
     if not name:
         return None
@@ -298,7 +298,7 @@ def _mentions(text: str, name: str) -> Optional[int]:
     return m.start() if m else None
 
 
-def _target_keys(ctx: Any) -> List[str]:
+def _target_keys(ctx: Any) -> list[str]:
     names = [getattr(ctx, "primary_symbol", None) or ""]
     try:
         names += list(ctx.primary_aliases())
@@ -371,9 +371,9 @@ def is_near_duplicate(h: Hypothesis, kept: Hypothesis) -> bool:
     return _word_jaccard(h.statement, kept.statement) >= TEXT_DUPLICATE_JACCARD
 
 
-def dedupe_ranked(ranked: List[Hypothesis], rejected: List[Dict[str, str]]) -> List[Hypothesis]:
+def dedupe_ranked(ranked: list[Hypothesis], rejected: list[dict[str, str]]) -> list[Hypothesis]:
     """`ranked` (best first) without near-duplicates; each dropped one is noted in `rejected`."""
-    out: List[Hypothesis] = []
+    out: list[Hypothesis] = []
     for h in ranked:
         dup = next((k for k in out if is_near_duplicate(h, k)), None)
         if dup is None:
@@ -383,7 +383,7 @@ def dedupe_ranked(ranked: List[Hypothesis], rejected: List[Dict[str, str]]) -> L
     return out
 
 
-def _species_names_target(species: str, keys: List[str]) -> bool:
+def _species_names_target(species: str, keys: list[str]) -> bool:
     from ..agents.discovery import _species_names_target as match
 
     return match(species, keys)
@@ -393,7 +393,7 @@ async def fetch_model_info(state: AgentState, model: ModelRef, phase: str) -> Mo
     """The model's species, parameters and reactions (vivarix_list_parameters), else the Vivarix result's species."""
     info = ModelInfo()
     if state.registry.get_entry(LIST_TOOL) is not None:
-        kwargs: Dict[str, Any] = {"biomodel_id": model.biomodel_id}
+        kwargs: dict[str, Any] = {"biomodel_id": model.biomodel_id}
         if model.sim_kwargs.get("sbml_path"):
             kwargs.update(sbml_path=model.sim_kwargs["sbml_path"], model_label=model.sim_kwargs.get("model_label"))
         res = await state.call_tool(LIST_TOOL, phase=phase, purpose=f"list the parameters of {model.label}", store=False, **kwargs)
@@ -452,8 +452,8 @@ class HypothesisPhase(AgentPhase):
         question = state.clean_query or state.query
         model = model_in_play(ctx, state.tool_results)
         block = simulation_block_reason(ctx)
-        notes: List[str] = []
-        artifact: Dict[str, Any] = {
+        notes: list[str] = []
+        artifact: dict[str, Any] = {
             "target": getattr(ctx, "primary_display", None) or getattr(ctx, "primary_symbol", None),
             "model_id": model.biomodel_id if model else None,
             "method": "elo-tournament",
@@ -470,7 +470,7 @@ class HypothesisPhase(AgentPhase):
             notes.append(f"No in-silico experiment was run: {block}.")
             state.scope_notes.append(f"Hypotheses were not tested in silico because {block}; they are labelled untested.")
 
-        llm_meta: Dict[str, Any] = {}
+        llm_meta: dict[str, Any] = {}
         hypotheses, rejected = await self._generate(state, question, model, info, llm_meta)
         artifact["generator"] = llm_meta.get("generator", "deterministic")
         if llm_meta.get("reflection"):
@@ -485,7 +485,7 @@ class HypothesisPhase(AgentPhase):
 
         self._score_evidence(state, hypotheses)
         experiments = 0
-        baseline: Optional[Dict[str, Any]] = None
+        baseline: dict[str, Any] | None = None
         can_test = model is not None and not block and info.source != "none"
         if model is not None and not block and info.source == "none":
             notes.append("The model's parameters could not be listed, so no perturbation could be validated or run.")
@@ -509,7 +509,7 @@ class HypothesisPhase(AgentPhase):
                                     "not run (experiment budget or no validated perturbation)")
                 )
 
-        judge_meta: Dict[str, Any] = {"llm": 0, "deterministic": 0, "matches": []}
+        judge_meta: dict[str, Any] = {"llm": 0, "deterministic": 0, "matches": []}
         await self._tournament(state, question, hypotheses, judge_meta)
 
         top = max(hypotheses, key=lambda h: (h.elo, self._det_score(h)))
@@ -563,7 +563,7 @@ class HypothesisPhase(AgentPhase):
     async def _model_info(self, state: AgentState, model: ModelRef) -> ModelInfo:
         return await fetch_model_info(state, model, PHASE)
 
-    def _choose_readout(self, question: str, info: ModelInfo, keys: List[str], baseline_final: Dict[str, Any]) -> Optional[str]:
+    def _choose_readout(self, question: str, info: ModelInfo, keys: list[str], baseline_final: dict[str, Any]) -> str | None:
         species = list(info.species) or list(baseline_final)
         if not species:
             return None
@@ -593,12 +593,12 @@ class HypothesisPhase(AgentPhase):
 
     # -- generation -----------------------------------------------------------------------------------------
     async def _generate(
-        self, state: AgentState, question: str, model: Optional[ModelRef], info: ModelInfo, meta: Dict[str, Any]
-    ) -> Tuple[List[Hypothesis], List[Dict[str, str]]]:
-        rejected: List[Dict[str, str]] = []
+        self, state: AgentState, question: str, model: ModelRef | None, info: ModelInfo, meta: dict[str, Any]
+    ) -> tuple[list[Hypothesis], list[dict[str, str]]]:
+        rejected: list[dict[str, str]] = []
         viv_final = _data(state.tool_results.get("vivarix")).get("final_concentrations") or {}
         readout = self._choose_readout(question, info, _target_keys(state.ctx), viv_final) if model is not None else None
-        hyps: List[Hypothesis] = []
+        hyps: list[Hypothesis] = []
         if state.llm.available:
             try:
                 hyps = await self._llm_generate(state, question, model, info, readout, rejected, meta)
@@ -618,17 +618,17 @@ class HypothesisPhase(AgentPhase):
             h.id = f"H{i}"
         return hyps[:MAX_HYPOTHESES], rejected
 
-    def _deterministic_model_hypotheses(self, question: str, info: ModelInfo, readout: Optional[str], keys: List[str]) -> List[Hypothesis]:
+    def _deterministic_model_hypotheses(self, question: str, info: ModelInfo, readout: str | None, keys: list[str]) -> list[Hypothesis]:
         if readout is None:
             return []
         over = bool(_OVEREXPRESS_RE.search(question))
-        picks: List[Tuple[str, str, str]] = []  # (override name, species|parameter, why)
+        picks: list[tuple[str, str, str]] = []  # (override name, species|parameter, why)
 
         def add(name: str, kind: str, why: str) -> None:
             if name != readout and all(p[0] != name for p in picks):
                 picks.append((name, kind, why))
 
-        named: List[Tuple[int, str, str]] = []
+        named: list[tuple[int, str, str]] = []
         for s in info.species:
             pos = _mentions(question, s)
             if pos is not None:
@@ -654,7 +654,7 @@ class HypothesisPhase(AgentPhase):
             for full in list(info.parameters)[:3]:
                 add(full, "parameter", "model rate constant")
 
-        out: List[Hypothesis] = []
+        out: list[Hypothesis] = []
         for name, qkind, why in picks[: MAX_EXPERIMENTS - 1]:
             kind = "overexpression" if over else ("knockdown" if qkind == "species" else "inhibition")
             factor = DEFAULT_FACTORS[kind]
@@ -675,7 +675,7 @@ class HypothesisPhase(AgentPhase):
         return out
 
     @staticmethod
-    def _prior_direction(name: str, qkind: str, readout: str, info: ModelInfo) -> Tuple[str, str]:
+    def _prior_direction(name: str, qkind: str, readout: str, info: ModelInfo) -> tuple[str, str]:
         """Predicted effect of lowering `name` on the readout, from the reaction schemes (first-order reasoning)."""
         if qkind == "parameter":
             meta = info.parameters.get(name, {})
@@ -692,7 +692,7 @@ class HypothesisPhase(AgentPhase):
                 return "decrease", f"{name} is a substrate of {rname}, which produces {readout}"
         return "decrease", f"default prior: less {name} is assumed to lower {readout}"
 
-    def _evidence_hypotheses(self, state: AgentState) -> List[Hypothesis]:
+    def _evidence_hypotheses(self, state: AgentState) -> list[Hypothesis]:
         """Untested hypotheses from the retrieved evidence: resistance or combination hypotheses when the question
         is about those and a retrieved passage names the same variant/drugs, then target-disease association
         hypotheses (one per distinct disease). Nothing is stated that the evidence does not name; no mechanism is
@@ -700,7 +700,7 @@ class HypothesisPhase(AgentPhase):
         ctx = state.ctx
         target = getattr(ctx, "primary_symbol", None)
         question = state.clean_query or state.query or ""
-        out: List[Hypothesis] = self._question_specific_hypotheses(state, question, target)
+        out: list[Hypothesis] = self._question_specific_hypotheses(state, question, target)
         if not target:
             return out
         if is_loss_of_function_target(target, question):
@@ -718,7 +718,7 @@ class HypothesisPhase(AgentPhase):
             # The question names its disease: a hypothesis about another one (KRAS in Noonan syndrome for an NSCLC
             # question) answers nothing that was asked.
             assocs = [a for a in assocs if any(_same_disease(_disease_key(str(a["disease_name"])), k) for k in asked_keys)]
-        used: List[set] = [_disease_key(h.readout or "") for h in out if h.readout]
+        used: list[set] = [_disease_key(h.readout or "") for h in out if h.readout]
         for a in assocs:
             if len(out) >= 3:
                 break
@@ -741,7 +741,7 @@ class HypothesisPhase(AgentPhase):
             )
         return out
 
-    def _synthetic_lethal_hypotheses(self, state: AgentState, target: str) -> List[Hypothesis]:
+    def _synthetic_lethal_hypotheses(self, state: AgentState, target: str) -> list[Hypothesis]:
         """"Inhibiting PARP1 is predicted to be selectively lethal in BRCA2-deficient <disease>" for each SynLethDB
         partner with screen or experimental evidence: partners with an approved drug acting on them first (the drug
         named in the rationale), then the rest, best evidence first. None without such evidence: nothing is invented.
@@ -758,7 +758,7 @@ class HypothesisPhase(AgentPhase):
         # Druggable partners first (in the enrichment's evidence order, including partners ranked below the shown
         # list), then the other experimental partners.
         by_name = {str(p["partner"]).upper(): p for p in items}
-        ordered: List[Dict[str, Any]] = []
+        ordered: list[dict[str, Any]] = []
         for name, r in druggable.items():
             if name in TUMOUR_SUPPRESSORS or name == (target or "").upper():
                 continue
@@ -766,7 +766,7 @@ class HypothesisPhase(AgentPhase):
                                       "pmids": r.get("sl_pmids") or []}
             ordered.append(p)
         ordered += [p for p in items if str(p["partner"]).upper() not in druggable]
-        out: List[Hypothesis] = []
+        out: list[Hypothesis] = []
         for p in ordered[:3]:
             partner = str(p["partner"])
             pmids = [str(x) for x in (p.get("pmids") or [])][:3]
@@ -798,7 +798,7 @@ class HypothesisPhase(AgentPhase):
             )
         return out
 
-    def _question_specific_hypotheses(self, state: AgentState, question: str, target: Optional[str]) -> List[Hypothesis]:
+    def _question_specific_hypotheses(self, state: AgentState, question: str, target: str | None) -> list[Hypothesis]:
         """Resistance and combination hypotheses, only when a retrieved passage names the same variant or drugs."""
         from .specialists import iter_passages, passage_source_key
 
@@ -809,13 +809,13 @@ class HypothesisPhase(AgentPhase):
         if not passages:
             return []
 
-        def cite(*terms: str) -> Optional[Tuple[str, str]]:
+        def cite(*terms: str) -> tuple[str, str] | None:
             for key, text in passages:
                 if all(_mentions(text, t) is not None for t in terms if t):
                     return key, text
             return None
 
-        out: List[Hypothesis] = []
+        out: list[Hypothesis] = []
         gene = f"{target} " if target else ""
         if _RESISTANCE_RE.search(question):
             for variant in variants[:3]:
@@ -858,9 +858,9 @@ class HypothesisPhase(AgentPhase):
         return unique[:3]
 
     async def _llm_generate(
-        self, state: AgentState, question: str, model: Optional[ModelRef], info: ModelInfo, readout: Optional[str],
-        rejected: List[Dict[str, str]], meta: Dict[str, Any],
-    ) -> List[Hypothesis]:
+        self, state: AgentState, question: str, model: ModelRef | None, info: ModelInfo, readout: str | None,
+        rejected: list[dict[str, str]], meta: dict[str, Any],
+    ) -> list[Hypothesis]:
         system = (
             "[phase:hypothesis_generate] You are the Generation and Reflection agent of an AI co-scientist. Propose "
             "mechanistic perturbation hypotheses that an ODE model can test in silico. "
@@ -890,7 +890,7 @@ class HypothesisPhase(AgentPhase):
             raise ValueError("hypothesis generation reply was not a JSON object")
         meta["reflection"] = neutralise(str(reply.get("reflection") or ""))[:800]
         meta["research_plan"] = neutralise(str(reply.get("research_plan") or ""))[:800]
-        out: List[Hypothesis] = []
+        out: list[Hypothesis] = []
         seen = set()
         for raw in (reply.get("hypotheses") or [])[:MAX_HYPOTHESES]:
             h, reason = self._validate(raw, model, info, source="llm")
@@ -904,7 +904,7 @@ class HypothesisPhase(AgentPhase):
             out.append(h)
         return out
 
-    def _validate(self, raw: Any, model: Optional[ModelRef], info: ModelInfo, source: str) -> Tuple[Optional[Hypothesis], str]:
+    def _validate(self, raw: Any, model: ModelRef | None, info: ModelInfo, source: str) -> tuple[Hypothesis | None, str]:
         """Reflection step: a hypothesis is kept only if its perturbation and readout exist in the model."""
         if not isinstance(raw, dict):
             return None, "not an object"
@@ -941,7 +941,7 @@ class HypothesisPhase(AgentPhase):
 
     @staticmethod
     def _evidence_digest(state: AgentState) -> str:
-        parts: List[str] = []
+        parts: list[str] = []
         viv = _data(state.tool_results.get("vivarix"))
         if viv.get("final_concentrations"):
             finals = list(viv["final_concentrations"].items())[:10]
@@ -956,8 +956,8 @@ class HypothesisPhase(AgentPhase):
                 parts.append(f"Passage (PMID {p.get('pmid')}): {str(p.get('passage_text') or '')[:300]}")
         return "\n".join(parts) or "none"
 
-    def _score_evidence(self, state: AgentState, hyps: List[Hypothesis]) -> None:
-        texts: Dict[str, str] = {}
+    def _score_evidence(self, state: AgentState, hyps: list[Hypothesis]) -> None:
+        texts: dict[str, str] = {}
         for key in ("synapta", "lithoscribe", "websurfer"):
             data = _data(state.tool_results.get(key))
             if data:
@@ -975,13 +975,13 @@ class HypothesisPhase(AgentPhase):
 
     # -- experiments ----------------------------------------------------------------------------------------
     @staticmethod
-    def _duration(state: AgentState) -> Tuple[float, int]:
+    def _duration(state: AgentState) -> tuple[float, int]:
         viv = _data(state.tool_results.get("vivarix"))
         duration = _num(viv.get("duration_seconds")) or _num(getattr(state.ctx, "sim_duration", None)) or 60.0
         intervals = int(_num(viv.get("intervals")) or 40)
         return max(1.0, min(5000.0, duration)), max(5, min(500, intervals))
 
-    async def _baseline(self, state: AgentState, model: ModelRef) -> Optional[Dict[str, Any]]:
+    async def _baseline(self, state: AgentState, model: ModelRef) -> dict[str, Any] | None:
         duration, intervals = self._duration(state)
         viv_res = state.tool_results.get("vivarix")
         viv = _data(viv_res)
@@ -997,7 +997,7 @@ class HypothesisPhase(AgentPhase):
             return None
         return {"final": dict(data["final_concentrations"]), "key": key, "duration": duration, "intervals": intervals}
 
-    async def _experiment(self, state: AgentState, model: ModelRef, info: ModelInfo, baseline: Dict[str, Any], h: Hypothesis) -> int:
+    async def _experiment(self, state: AgentState, model: ModelRef, info: ModelInfo, baseline: dict[str, Any], h: Hypothesis) -> int:
         """Run one perturbation; returns 1 when a simulation was attempted."""
         base_value = info.baseline_value(str(h.parameter))
         if base_value is None or not math.isfinite(base_value) or base_value <= 0:
@@ -1055,7 +1055,7 @@ class HypothesisPhase(AgentPhase):
             return 0.5 * min(lfc, 5.0) / 5.0
         return 1.0 + 0.5 * min(1.0, h.evidence_score)
 
-    async def _judge(self, state: AgentState, question: str, a: Hypothesis, b: Hypothesis, meta: Dict[str, Any]) -> Tuple[float, str, str]:
+    async def _judge(self, state: AgentState, question: str, a: Hypothesis, b: Hypothesis, meta: dict[str, Any]) -> tuple[float, str, str]:
         """(score for a, judge, reason): pairwise model judge when available, else effect size and evidence."""
         if state.llm.available and meta["llm"] < MAX_JUDGE_CALLS:
             system = (
@@ -1088,32 +1088,32 @@ class HypothesisPhase(AgentPhase):
         return (1.0 if sa > sb else 0.0), "deterministic", "larger supported effect / more evidence"
 
     @staticmethod
-    def _judge_view(h: Hypothesis) -> Dict[str, Any]:
+    def _judge_view(h: Hypothesis) -> dict[str, Any]:
         view = h.to_artifact()
         return {k: view[k] for k in ("statement", "mechanism", "intervention", "readout", "prediction", "status", "result", "note")}
 
-    async def _match(self, state: AgentState, question: str, a: Hypothesis, b: Hypothesis, meta: Dict[str, Any]) -> None:
+    async def _match(self, state: AgentState, question: str, a: Hypothesis, b: Hypothesis, meta: dict[str, Any]) -> None:
         score, judge, reason = await self._judge(state, question, a, b, meta)
         a.elo, b.elo = elo_update(a.elo, b.elo, score)
         meta["matches"].append(
             {"a": a.id, "b": b.id, "winner": a.id if score == 1.0 else b.id if score == 0.0 else "draw", "judge": judge, "reason": reason}
         )
 
-    async def _tournament(self, state: AgentState, question: str, hyps: List[Hypothesis], meta: Dict[str, Any]) -> None:
+    async def _tournament(self, state: AgentState, question: str, hyps: list[Hypothesis], meta: dict[str, Any]) -> None:
         for i in range(len(hyps)):
             for j in range(i + 1, len(hyps)):
                 await self._match(state, question, hyps[i], hyps[j], meta)
 
     # -- evolution ------------------------------------------------------------------------------------------
     async def _evolve(
-        self, state: AgentState, question: str, top: Hypothesis, hyps: List[Hypothesis], info: ModelInfo,
-        tested: set, meta: Dict[str, Any],
-    ) -> Optional[Hypothesis]:
+        self, state: AgentState, question: str, top: Hypothesis, hyps: list[Hypothesis], info: ModelInfo,
+        tested: set, meta: dict[str, Any],
+    ) -> Hypothesis | None:
         model = model_in_play(state.ctx, state.tool_results)
         if top.kind is None or top.parameter is None or top.source == "evidence":
             return None
         excluded = {h.perturbation() for h in hyps} | set(tested)
-        child: Optional[Hypothesis] = None
+        child: Hypothesis | None = None
         if state.llm.available:
             system = (
                 "[phase:hypothesis_evolve] You are the Evolution agent of an AI co-scientist. Refine the top-ranked "
@@ -1145,7 +1145,7 @@ class HypothesisPhase(AgentPhase):
         return child
 
     @staticmethod
-    def _deterministic_evolution(top: Hypothesis) -> Optional[Hypothesis]:
+    def _deterministic_evolution(top: Hypothesis) -> Hypothesis | None:
         result = top.result or {}
         lfc = _num(result.get("log2_fold_change"))
         factor = float(top.factor or DEFAULT_FACTORS.get(str(top.kind), 0.1))
@@ -1171,7 +1171,7 @@ class HypothesisPhase(AgentPhase):
         )
 
     # -- output ---------------------------------------------------------------------------------------------
-    def _publish(self, state: AgentState, artifact: Dict[str, Any], ranked: List[Hypothesis], model: Optional[ModelRef]) -> None:
+    def _publish(self, state: AgentState, artifact: dict[str, Any], ranked: list[Hypothesis], model: ModelRef | None) -> None:
         from ..tools.registry import ToolResult
 
         summary = {k: v for k, v in artifact.items() if k not in ("matches", "rejected")}

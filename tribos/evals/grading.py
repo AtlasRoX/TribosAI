@@ -14,7 +14,8 @@ import asyncio
 import json
 import logging
 import re
-from typing import Any, Callable, Dict, Optional, Sequence
+from collections.abc import Callable, Sequence
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -28,13 +29,13 @@ _EXTRACT_SYSTEM = (
 
 JUDGE_DIMENSIONS = ("correctness", "grounding", "completeness", "calibration", "clarity")
 _JUDGE_SYSTEM = (
-    "You are a senior clinician-scientist grading an AI research assistant's answer. Score each dimension from 1 "
-    "(poor) to 5 (excellent):\n"
-    "- correctness: agreement with established knowledge and with the reference answer when one is given\n"
-    "- grounding: specific claims are tied to cited sources; no invented studies, numbers or identifiers\n"
-    "- completeness: covers what an expert would consider essential for this question\n"
-    "- calibration: certainty matches the evidence; gaps and limitations are acknowledged without over-hedging\n"
-    "- clarity: direct, well organised, appropriately concise\n"
+    "You are a senior physicist, mathematician, and research engineer grading an AI scientific assistant's answer. "
+    "Score each dimension from 1 (poor) to 5 (excellent):\n"
+    "- correctness: agreement with established physical laws, mathematical theorems, engineering formulas, and the reference answer when one is given\n"
+    "- grounding: specific claims, equations, and numerical values are tied to cited sources or derived from first principles; no invented papers, numbers, or identifiers\n"
+    "- completeness: covers what an expert in mathematics, physics, or engineering would consider essential for this question\n"
+    "- calibration: certainty matches the mathematical proof or empirical evidence; approximations, boundary conditions, and limitations are stated without over-hedging\n"
+    "- clarity: direct, well organised, dimensionally consistent, and appropriately concise\n"
     "Every identifier in <verified_sources> was checked against the retrieved literature and exists, even if it is "
     "newer than your knowledge; never call it fabricated. Judge grounding by whether claims are tied to those "
     "sources and accurately reflect them, and treat an identifier cited in the answer but absent from "
@@ -50,7 +51,7 @@ def _strip_think(text: str) -> str:
     return text[text.lower().rfind("</think>") + 8:] if "</think>" in text.lower() else text
 
 
-def _first_json(text: str) -> Optional[Dict[str, Any]]:
+def _first_json(text: str) -> dict[str, Any] | None:
     decoder = json.JSONDecoder()
     for m in re.finditer(r"\{", text or ""):
         try:
@@ -62,7 +63,7 @@ def _first_json(text: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-async def _ask(llm_factory: Optional[LLMFactory], model_name: Optional[str], system: str, user: str, timeout_s: float) -> Optional[Dict[str, Any]]:
+async def _ask(llm_factory: LLMFactory | None, model_name: str | None, system: str, user: str, timeout_s: float) -> dict[str, Any] | None:
     if llm_factory is None:
         return None
     try:
@@ -81,9 +82,9 @@ async def _ask(llm_factory: Optional[LLMFactory], model_name: Optional[str], sys
 
 
 async def extract_label(
-    question: str, answer: str, options: Sequence[str], *, llm_factory: Optional[LLMFactory], model_name: Optional[str] = None,
+    question: str, answer: str, options: Sequence[str], *, llm_factory: LLMFactory | None, model_name: str | None = None,
     timeout_s: float = 60.0,
-) -> Optional[str]:
+) -> str | None:
     """The option the answer commits to, matched back to the option list; None when undecidable."""
     listed = "\n".join(f"- {o}" for o in options)
     obj = await _ask(llm_factory, model_name, _EXTRACT_SYSTEM,
@@ -101,9 +102,9 @@ async def extract_label(
 
 
 async def judge(
-    question: str, answer: str, reference: Optional[str], *, llm_factory: Optional[LLMFactory], model_name: Optional[str] = None,
+    question: str, answer: str, reference: str | None, *, llm_factory: LLMFactory | None, model_name: str | None = None,
     sources: Sequence[str] = (), timeout_s: float = 180.0,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Rubric scores {dimension: 1-5, overall, rationale}, or None when no model answered with valid scores.
     sources: the answer's verified citations ("PMID:123 | title | journal year"), so recent papers are not
     mistaken for fabrications."""
@@ -114,7 +115,7 @@ async def judge(
                      f"<answer>\n{answer[:8000]}\n</answer>", timeout_s)
     if not obj:
         return None
-    scores: Dict[str, Any] = {}
+    scores: dict[str, Any] = {}
     for dim in (*JUDGE_DIMENSIONS, "overall"):
         try:
             value = float(obj.get(dim))

@@ -1,21 +1,25 @@
+from __future__ import annotations
+
+import pytest
+
+pytest.importorskip('tribos.vivarix', reason='Legacy vivarix package retired')
 """WP4: hypothesis -> in-silico experiment loop (F6) and SBML model calibration with identifiability (F11)."""
 
-from __future__ import annotations
 
 import asyncio
 import json
 import math
-from typing import Any, Dict, List
+from typing import Any
 
 import numpy as np
 import pandas as pd
 import pytest
-
-from tribos.agentic import config as agent_config
-from tribos.agentic.runtime import register_phase, restore_phases, snapshot_phases
 from tribos.vivarix.calibration import CHI2_THRESHOLD_95, calibrate_parameters, load_timecourse
+
 from tests.agentic_fakes import collect_events, make_agentic_orchestrator
 from tests.fakes import called
+from tribos.agentic import config as agent_config
+from tribos.agentic.runtime import register_phase, restore_phases, snapshot_phases
 
 # -----------------------------------------------------------------------------
 # Tiny models: A -> B (mass action), analytic solutions used as ground truth
@@ -25,7 +29,7 @@ TIMES = np.array([0.0, 0.5, 1.0, 2.0, 3.0, 5.0, 8.0, 12.0])
 A0 = 10.0
 
 
-def _a_to_b(k: float, times: np.ndarray = TIMES) -> Dict[str, np.ndarray]:
+def _a_to_b(k: float, times: np.ndarray = TIMES) -> dict[str, np.ndarray]:
     return {"A": A0 * np.exp(-k * times), "B": A0 * (1.0 - np.exp(-k * times))}
 
 
@@ -33,7 +37,7 @@ def _table(k: float) -> pd.DataFrame:
     return pd.DataFrame({"time": TIMES, **_a_to_b(k)})
 
 
-def _sbml(params: Dict[str, float], law: str) -> str:
+def _sbml(params: dict[str, float], law: str) -> str:
     plist = "".join(f'<parameter id="{n}" value="{v}"/>' for n, v in params.items())
     ci = "".join(f"<ci>{t}</ci>" for t in law.split("*"))
     return f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -56,7 +60,7 @@ def _sbml(params: Dict[str, float], law: str) -> str:
 </sbml>"""
 
 
-def _param(result: Dict[str, Any], name: str) -> Dict[str, Any]:
+def _param(result: dict[str, Any], name: str) -> dict[str, Any]:
     return next(p for p in result["parameters"] if p["name"] == name)
 
 
@@ -182,13 +186,13 @@ def test_elo_and_fold_change_helpers():
 TOY_PARAMS = {"(R1).k1": 0.3, "(R2).k2": 0.1}
 
 
-def _toy_endpoint(k1: float, k2: float, t: float) -> Dict[str, float]:
+def _toy_endpoint(k1: float, k2: float, t: float) -> dict[str, float]:
     a = A0 * math.exp(-k1 * t)
     b = A0 * k1 / (k2 - k1) * (math.exp(-k1 * t) - math.exp(-k2 * t))
     return {"A": a, "B": b}
 
 
-def _toy_sim(kw: Dict[str, Any]) -> Dict[str, Any]:
+def _toy_sim(kw: dict[str, Any]) -> dict[str, Any]:
     params = dict(TOY_PARAMS)
     applied = []
     for name, value in (kw.get("parameter_overrides") or {}).items():
@@ -209,7 +213,7 @@ def _toy_sim(kw: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _toy_params(_kw: Dict[str, Any]) -> Dict[str, Any]:
+def _toy_params(_kw: dict[str, Any]) -> dict[str, Any]:
     return {
         "model_id": "BIOMD0000000010",
         "species": [{"name": "A", "initial_concentration": A0}, {"name": "B", "initial_concentration": 0.0}],
@@ -222,7 +226,7 @@ def _toy_params(_kw: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _toy_tools() -> Dict[str, Any]:
+def _toy_tools() -> dict[str, Any]:
     from tribos.extensions.calibration import VivarixListParametersInput
     from tribos.tools.registry import VivarixSimInput
 
@@ -250,7 +254,7 @@ def wp4_phases():
 QUESTION = "In BIOMD0000000010, what happens to B if k1 is inhibited? Generate and test hypotheses in silico."
 
 
-def _overridden(calls) -> List[Dict[str, Any]]:
+def _overridden(calls) -> list[dict[str, Any]]:
     return [kw for kw in called(calls, "vivarix_simulate_time_course") if kw.get("parameter_overrides")]
 
 

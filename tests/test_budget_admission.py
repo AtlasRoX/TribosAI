@@ -7,20 +7,20 @@ from __future__ import annotations
 import asyncio
 import time
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import pytest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
+from tests.agentic_fakes import collect_events, make_agentic_orchestrator
 from tribos.agentic import config as agent_config
 from tribos.agentic.budget import BudgetExhausted, RunBudget, RunDeadlineExceeded
 from tribos.agentic.control import RunCancelled, RunControl
 from tribos.agentic.llm import AgentLLM
 from tribos.agents.orchestration.agent_rounds import generation_allocation
 from tribos.agents.orchestration.context import RunContext
-from tests.agentic_fakes import collect_events, make_agentic_orchestrator
 
 QUERY = "What diseases is KRAS associated with?"
 
@@ -29,7 +29,7 @@ class CapUsingModel(BaseChatModel):
     """A chat model that reports exact usage: 1,000 input tokens and an output as long as the max_tokens it was
     sent (a provider may legally use its whole cap), or 8,000 tokens when no cap was sent."""
 
-    caps: List[Optional[int]] = []
+    caps: list[int | None] = []
     delay: float = 0.02
 
     @property
@@ -51,11 +51,11 @@ class CapUsingModel(BaseChatModel):
 PROMPT = "x" * 4_000  # exactly 1,000 estimated input tokens, matching the reported usage
 
 
-def _parallel(budget: RunBudget, n: int, phase: str = "debate") -> List[Any]:
+def _parallel(budget: RunBudget, n: int, phase: str = "debate") -> list[Any]:
     model = CapUsingModel(caps=[])
     llm = AgentLLM(lambda **_k: model, "m", None, budget)
 
-    async def go() -> List[Any]:
+    async def go() -> list[Any]:
         return await asyncio.gather(*(llm.complete("[phase:debate]", PROMPT, phase=phase) for _ in range(n)),
                                     return_exceptions=True)
 
@@ -165,7 +165,7 @@ def test_regression_f1_no_uncharged_first_draft_after_hard_exhaustion(monkeypatc
 
 
 def test_first_draft_streams_with_its_admitted_output_cap(monkeypatch, tmp_path):
-    seen: List[Dict[str, Any]] = []
+    seen: list[dict[str, Any]] = []
     orch, _calls, llm = make_agentic_orchestrator(monkeypatch, tmp_path)
     from tribos.agents import authoritative_orchestrator as orch_module
 
@@ -180,8 +180,8 @@ def test_first_draft_streams_with_its_admitted_output_cap(monkeypatch, tmp_path)
 
 
 # F4 --------------------------------------------------------------------------------------------------------------
-def _run_context(budget: Optional[RunBudget] = None, control: Optional[RunControl] = None) -> RunContext:
-    async def cb(_ev: Dict[str, Any]) -> None:
+def _run_context(budget: RunBudget | None = None, control: RunControl | None = None) -> RunContext:
+    async def cb(_ev: dict[str, Any]) -> None:
         return None
 
     rc = RunContext(
@@ -235,7 +235,7 @@ def test_a_call_that_delays_its_cancellation_does_not_hold_the_run(monkeypatch):
     control = RunControl("u", interactive=False)
     rc = _run_context(RunBudget(), control)
 
-    seen: Dict[str, Any] = {}
+    seen: dict[str, Any] = {}
 
     async def go() -> None:
         asyncio.get_running_loop().call_later(0.05, control.cancel)
@@ -254,7 +254,7 @@ def test_a_call_that_delays_its_cancellation_does_not_hold_the_run(monkeypatch):
 def test_a_lost_client_cancels_the_watched_call(monkeypatch):
     monkeypatch.setenv("TRIBOS_PROGRESS_HEARTBEAT_S", "0")
     rc = _run_context(RunBudget())
-    inner: Dict[str, Any] = {}
+    inner: dict[str, Any] = {}
 
     async def call() -> None:
         try:

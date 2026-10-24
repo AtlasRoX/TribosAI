@@ -1,6 +1,6 @@
 # Tribos Developer Guide
 
-> **Tribos** — Biomedical Research Assistant  
+> **Tribos** — Engineering & Scientific R&D Assistant  
 > **Made by ChronoStrider Engineering**
 
 This guide covers the complete development setup, tooling, and workflow for the **Tribos** project, made by **ChronoStrider Engineering** (**ChronoStrider Engineering**).
@@ -11,11 +11,11 @@ This guide covers the complete development setup, tooling, and workflow for the 
 2. [Development Environment Setup](#development-environment-setup)
 3. [Project Structure](#project-structure)
 4. [Development Tools](#development-tools)
-5. [Code Quality & Security](#code-quality--security)
+5. [Code Quality & Security](#code-quality-security)
 6. [Dependency Management](#dependency-management)
 7. [Testing](#testing)
 8. [CI/CD Pipeline](#cicd-pipeline)
-9. [Docker & Deployment](#docker--deployment)
+9. [Docker & Deployment](#docker-deployment)
 10. [Security Best Practices](#security-best-practices)
 11. [Common Development Tasks](#common-development-tasks)
 12. [Troubleshooting](#troubleshooting)

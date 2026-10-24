@@ -37,14 +37,14 @@ import asyncio
 import logging
 import os
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
+from ..sources.names import labels as source_labels
 from .config import env_float
 from .control import ApprovalDecision
 from .guardrails import neutralise
 from .runtime import AgentPhase, PhaseOutcome, register_phase
 from .state import AgentState
-from ..sources.names import labels as source_labels
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ EXPENSIVE_SOURCES = ("vivarix", "lumicell")
 FAIL_CLOSED_SOURCES = ("timeout", "unattended", "error")
 
 # The approval card's label for each source switch (tribos.sources.names: SourceName.description).
-SOURCE_LABELS: Dict[str, str] = source_labels("description")
+SOURCE_LABELS: dict[str, str] = source_labels("description")
 
 _CALIBRATION_RE = re.compile(r"\b(calibrat\w*|fit(?:ting)?\s+(?:the\s+)?(?:model|parameters?)|estimat\w*\s+(?:the\s+)?(?:kinetic\s+)?parameters?|parameter\s+estimation)\b", re.I)
 _ANALYSIS_RE = re.compile(r"\b(analy[sz]e|analysis|regression|statistic\w*|differential\s+expression|cluster\w*|correlat\w*|plot)\b", re.I)
@@ -74,10 +74,10 @@ def on_no_answer() -> str:
     return "reject" if value == "reject" else "withhold_expensive"
 
 
-def expensive_work(state: AgentState) -> List[str]:
+def expensive_work(state: AgentState) -> list[str]:
     """The expensive or long-running work this turn is routed to (empty when there is none)."""
     ctx = state.ctx
-    out: List[str] = []
+    out: list[str] = []
     should = getattr(ctx, "should_run", None)
     if callable(should) and should("vivarix"):
         plan = getattr(ctx, "simulation_plan", None)
@@ -97,8 +97,8 @@ def expensive_work(state: AgentState) -> List[str]:
     return list(dict.fromkeys(out))
 
 
-def source_rows(ctx: Any) -> List[Dict[str, Any]]:
-    rows: List[Dict[str, Any]] = []
+def source_rows(ctx: Any) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
     for key, decision in (getattr(ctx, "decisions", None) or {}).items():
         rows.append(
             {
@@ -112,8 +112,8 @@ def source_rows(ctx: Any) -> List[Dict[str, Any]]:
 
 
 async def request_approval_event(
-    state: AgentState, kind: str, payload: Dict[str, Any], timeout_seconds: Optional[float] = None
-) -> Tuple[Optional[str], ApprovalDecision]:
+    state: AgentState, kind: str, payload: dict[str, Any], timeout_seconds: float | None = None
+) -> tuple[str | None, ApprovalDecision]:
     """Ask for approval and tell the client: the approval_request event carries the id RunControl created.
 
     Non-interactive runs get RunControl's automatic approval and no event. RunControl registers the request
@@ -121,7 +121,7 @@ async def request_approval_event(
     """
     control = state.control
     timeout = approval_timeout() if timeout_seconds is None else timeout_seconds
-    announced: List[str] = []
+    announced: list[str] = []
 
     async def announce(approval_id: str) -> None:
         announced.append(approval_id)
@@ -133,9 +133,9 @@ async def request_approval_event(
     return (announced[0] if announced else None), decision
 
 
-def _edited_off(original: List[Dict[str, Any]], edited: Any) -> List[str]:
+def _edited_off(original: list[dict[str, Any]], edited: Any) -> list[str]:
     """Keys the researcher switched off in an edited payload (lists of rows or {key: bool} maps)."""
-    wanted: Dict[str, bool] = {}
+    wanted: dict[str, bool] = {}
     rows = edited.get("sources") if isinstance(edited, dict) else None
     if isinstance(rows, dict):
         wanted = {str(k): bool(v) for k, v in rows.items()}
@@ -147,10 +147,10 @@ def _edited_off(original: List[Dict[str, Any]], edited: Any) -> List[str]:
     return [k for k in running if wanted.get(k) is False]
 
 
-def _switch_off(ctx: Any, keys: List[str], reason: str = SWITCHED_OFF_REASON) -> List[str]:
+def _switch_off(ctx: Any, keys: list[str], reason: str = SWITCHED_OFF_REASON) -> list[str]:
     from ..agents.query_context import SourceDecision
 
-    done: List[str] = []
+    done: list[str] = []
     for key in keys:
         current = ctx.decisions.get(key)
         if current is not None and current.run:
@@ -167,7 +167,7 @@ def _switch_off(ctx: Any, keys: List[str], reason: str = SWITCHED_OFF_REASON) ->
     return done
 
 
-def withhold_expensive(state: AgentState, expensive: List[str]) -> List[str]:
+def withhold_expensive(state: AgentState, expensive: list[str]) -> list[str]:
     """Keep the expensive work from running (fail closed): switch its sources off and set the hard guards the
     simulation, calibration, single-cell and code-analysis phases check. Returns the source keys switched off."""
     ctx = state.ctx
@@ -212,11 +212,11 @@ class PlanApprovalPhase(AgentPhase):
             return required
         return required or bool(expensive_work(state))
 
-    async def run(self, state: AgentState) -> Optional[PhaseOutcome]:
+    async def run(self, state: AgentState) -> PhaseOutcome | None:
         ctx = state.ctx
         expensive = expensive_work(state)
         sources = source_rows(ctx)
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "sources": sources,
             "expensive": expensive,
             "question": state.clean_query[:500],
@@ -240,8 +240,8 @@ class PlanApprovalPhase(AgentPhase):
             )
         state.control.checkpoint()  # a cancel resolves the request as rejected; stop here instead
 
-        switched: List[str] = []
-        withheld: List[str] = []
+        switched: list[str] = []
+        withheld: list[str] = []
         if decision.source == "auto" and decision.approved:
             status = "auto"
         elif decision.source in FAIL_CLOSED_SOURCES and not decision.approved:

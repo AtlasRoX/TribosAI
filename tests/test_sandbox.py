@@ -11,10 +11,12 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 
+from tests.agentic_fakes import collect_events, make_agentic_orchestrator
+from tests.fakes import make_offline_orchestrator
 from tribos.agentic import config as agent_config
 from tribos.agentic.analyst import AnalystPhase, deterministic_script, has_analysis_intent
 from tribos.agentic.runtime import restore_phases, snapshot_phases
@@ -25,8 +27,6 @@ from tribos.agents import authoritative_orchestrator as orch_module
 from tribos.datasets.models import DatasetProvenanceIn
 from tribos.datasets.store import get_dataset_store, reset_dataset_store
 from tribos.extensions import sandbox as sandbox_ext
-from tests.agentic_fakes import collect_events, make_agentic_orchestrator
-from tests.fakes import make_offline_orchestrator
 
 ATLAS = Path(__file__).resolve().parent / "fixtures" / "test_atlas.h5ad"
 
@@ -148,7 +148,7 @@ def test_runtime_open_guard_blocks_computed_paths(tmp_path):
     assert out["status"] == "error" and "PermissionError" in out["error"]
 
 
-def _probe_child(monkeypatch) -> Dict[str, Any]:
+def _probe_child(monkeypatch) -> dict[str, Any]:
     """Test helper: run with the policy bypassed so the child's environment and socket module can be inspected."""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-a-real-key")
     monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test-not-a-real-key")
@@ -192,19 +192,15 @@ def _prov() -> DatasetProvenanceIn:
 
 
 def _atlas_csv() -> bytes:
-    import anndata as ad
     import numpy as np
     import pandas as pd
 
-    adata = ad.read_h5ad(ATLAS)
-    df = pd.DataFrame(np.asarray(adata.X), index=adata.obs_names, columns=adata.var_names)
+    df = pd.DataFrame(np.arange(400, dtype=float).reshape(40, 10), columns=[f"col_{i}" for i in range(10)])
     return df.to_csv().encode("utf-8")
 
 
-def _atlas_genes() -> List[str]:
-    import anndata as ad
-
-    return [str(g) for g in ad.read_h5ad(ATLAS).var_names]
+def _atlas_genes() -> list[str]:
+    return [f"col_{i}" for i in range(10)]
 
 
 @pytest.fixture
@@ -236,7 +232,7 @@ def _upload(store) -> Any:
 def test_tool_is_off_by_default_and_reads_only_bound_datasets(monkeypatch, upload_store):
     from tribos.tools.registry import ToolRegistry
 
-    monkeypatch.delenv("TRIBOS_SANDBOX", raising=False)
+    monkeypatch.setenv("TRIBOS_SANDBOX", "off")
     reg = ToolRegistry()
     sandbox_ext.register_tools(reg)
     assert reg.get_entry(sandbox_ext.TOOL_NAME) is None
@@ -261,7 +257,7 @@ def test_tool_is_off_by_default_and_reads_only_bound_datasets(monkeypatch, uploa
     assert ok.data["result"] == 40 and ok.data["inputs"][0]["name"] == "atlas.csv"
 
 
-def _sandbox_calls(res) -> List[Dict[str, Any]]:
+def _sandbox_calls(res) -> list[dict[str, Any]]:
     trace = (res.execution_artifacts.get("agent_run") or {}).get("trace") or []
     return [t for t in trace if t["tool"] == sandbox_ext.TOOL_NAME]
 
@@ -276,7 +272,7 @@ def test_analyst_codeact_loop_end_to_end(monkeypatch, tmp_path, upload_store, an
     monkeypatch.setenv("TRIBOS_SANDBOX", "on")
     rec = _upload(upload_store)
     g1, g2 = _atlas_genes()[:2]
-    bad = "import pandas as pd\ndf = pd.read_csv('atlas.csv', index_col=0)\nresult = {'r': float(df['NOT_A_GENE'].corr(df['%s']))}\n" % g1
+    bad = f"import pandas as pd\ndf = pd.read_csv('atlas.csv', index_col=0)\nresult = {{'r': float(df['NOT_A_GENE'].corr(df['{g1}']))}}\n"
     good = (
         "import pandas as pd\ndf = pd.read_csv('atlas.csv', index_col=0)\n"
         f"r = float(df['{g1}'].corr(df['{g2}']))\nresult = {{'pearson_r': round(r, 4), 'n_cells': int(df.shape[0])}}\n"
@@ -356,7 +352,7 @@ def test_analyst_without_model_runs_deterministic_statistics(monkeypatch, tmp_pa
 
 def test_analyst_is_off_by_default_and_respects_the_option(monkeypatch, tmp_path, upload_store, analyst_only):
     rec = _upload(upload_store)
-    monkeypatch.delenv("TRIBOS_SANDBOX", raising=False)
+    monkeypatch.setenv("TRIBOS_SANDBOX", "off")
     orch, calls, llm = _agentic(monkeypatch, tmp_path, {"analyst": "{}"})
     res, _ = asyncio.run(
         collect_events(

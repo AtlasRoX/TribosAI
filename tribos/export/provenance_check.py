@@ -5,35 +5,34 @@ An export names a run id; when that run is in the caller's RunStore the report i
 The body of the report (tables, citations, task status, verification, question) still arrives from the browser,
 so every section that the stored manifest can confirm is compared with it here:
 
-- answer text (sha256, in report_model), verification passed/score/defect count, Vivarix final concentrations;
-- clinical-trial rows (NCT id, phases, status, results posted) against the ClinicalTrials.gov digests;
-- ChEMBL drug rows (ChEMBL id, max phase) against the ChEMBL profile digests;
-- FAERS rows (total and serious report counts) against the openFDA digests;
-- ClinVar rows (accession, classification) and cBioPortal rows (mutated/profiled samples, prevalence) against the
-  variant digests;
+- answer text (sha256, in report_model), verification passed/score/defect count, simulation final values;
+- computation rows (tool, step) against Calcula/sandbox digests;
+- reference data rows (entity, symbol) against Physis digests;
+- simulation rows (model, variable, final value) against Dynamis / Vivarix digests;
 - citation identifiers (PMID, DOI, typed id, URL) against every identifier the run's tool outputs recorded;
 - the task status (the stored one is used) and the question (the stored query is used).
 
 Rows that do not match are marked in the table itself; mismatches become notices; sections the manifest cannot
-confirm (plots, mechanism text, gnomAD frequencies, claim lists, retraction flags) are listed as "not checked".
+confirm (plots, claim lists, retraction flags) are listed as "not checked".
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any
 
 NOT_IN_RUN = "not in stored run"
 
 
 @dataclass
 class CheckResult:
-    notices: List[str] = field(default_factory=list)
-    checked: List[str] = field(default_factory=list)
-    unchecked: List[str] = field(default_factory=list)
-    unmatched_citation_keys: Set[str] = field(default_factory=set)
-    bad_row_keys: Set[str] = field(default_factory=set)
+    notices: list[str] = field(default_factory=list)
+    checked: list[str] = field(default_factory=list)
+    unchecked: list[str] = field(default_factory=list)
+    unmatched_citation_keys: set[str] = field(default_factory=set)
+    bad_row_keys: set[str] = field(default_factory=set)
     mismatch: bool = False
 
     def mismatch_notice(self, text: str) -> None:
@@ -45,14 +44,14 @@ def _text(value: Any) -> str:
     return "" if value is None else str(value).strip()
 
 
-def _calls(manifest: Dict[str, Any], *names: str) -> List[Dict[str, Any]]:
+def _calls(manifest: dict[str, Any], *names: str) -> list[dict[str, Any]]:
     return [
         c for c in manifest.get("tool_calls") or []
         if isinstance(c, dict) and c.get("success") and (not names or c.get("tool_name") in names)
     ]
 
 
-def _digests(manifest: Dict[str, Any], *names: str) -> List[Dict[str, Any]]:
+def _digests(manifest: dict[str, Any], *names: str) -> list[dict[str, Any]]:
     return [c.get("output_digest") or {} for c in _calls(manifest, *names) if isinstance(c.get("output_digest"), dict)]
 
 
@@ -60,7 +59,7 @@ def _norm_phase(value: Any) -> str:
     return re.sub(r"[^A-Z0-9]", "", _text(value).upper())
 
 
-def _num(value: Any) -> Optional[float]:
+def _num(value: Any) -> float | None:
     try:
         if isinstance(value, bool):
             return None
@@ -78,7 +77,7 @@ def _same_number(a: Any, b: Any, rel: float = 1e-9) -> bool:
 
 # --- identifiers the run recorded -------------------------------------------------------------------------------
 
-def _collect_strings(value: Any, out: Set[str], depth: int = 0) -> None:
+def _collect_strings(value: Any, out: set[str], depth: int = 0) -> None:
     if depth > 6:
         return
     if isinstance(value, dict):
@@ -92,9 +91,9 @@ def _collect_strings(value: Any, out: Set[str], depth: int = 0) -> None:
         out.add(value.strip().upper())
 
 
-def recorded_identifiers(manifest: Dict[str, Any]) -> Set[str]:
+def recorded_identifiers(manifest: dict[str, Any]) -> set[str]:
     """Every identifier-like string in the run's successful tool outputs (digests and canonical ids), upper-cased."""
-    out: Set[str] = set()
+    out: set[str] = set()
     for call in _calls(manifest):
         _collect_strings(call.get("output_digest") or {}, out)
         _collect_strings(call.get("canonical_ids") or {}, out)
@@ -103,10 +102,13 @@ def recorded_identifiers(manifest: Dict[str, Any]) -> Set[str]:
     return out
 
 
-def _citation_found(row: Dict[str, Any], ids: Set[str]) -> bool:
+def _citation_found(row: dict[str, Any], ids: set[str]) -> bool:
     candidates = []
     if _text(row.get("pmid")):
         candidates += [_text(row["pmid"]).upper(), f"PMID:{_text(row['pmid'])}".upper()]
+    if _text(row.get("arxiv_id")) or _text(row.get("arxiv")):
+        val = _text(row.get("arxiv_id") or row.get("arxiv")).upper()
+        candidates += [val, f"ARXIV:{val}"]
     if _text(row.get("doi")):
         candidates.append(_text(row["doi"]).upper())
     if _text(row.get("id")):
@@ -119,97 +121,134 @@ def _citation_found(row: Dict[str, Any], ids: Set[str]) -> bool:
 
 # --- per-section checks -----------------------------------------------------------------------------------------
 
-def check_trials(art: Any, manifest: Dict[str, Any]) -> Tuple[Optional[Set[str]], int]:
-    """(NCT ids of posted rows the run does not confirm, rows checked), or (None, 0) when the run has no digest."""
-    trials = [t for t in (art.get("trials") or []) if isinstance(t, dict)] if isinstance(art, dict) else []
-    digests = _digests(manifest, "lithoscribe_clinical_trials_search")
-    if not trials or not digests:
+def check_computations(art: Any, manifest: dict[str, Any]) -> tuple[set[str] | None, int]:
+    """Check computation rows against Calcula/sandbox tool calls in the manifest."""
+    if not art:
         return None, 0
-    recorded: Dict[str, str] = {}
-    with_results: Set[str] = set()
-    for d in digests:
-        recorded.update({str(k): str(v) for k, v in (d.get("trials") or {}).items()})
-        with_results |= {str(x) for x in d.get("with_results") or []}
-    bad: Set[str] = set()
-    for t in trials:
-        nct = _text(t.get("nct_id"))
-        if nct not in recorded:
-            bad.add(nct)
-            continue
-        phases, _, status = recorded[nct].partition("|")
-        posted_phases = "/".join(_text(p) for p in t.get("phases") or [])
-        if _norm_phase(posted_phases) != _norm_phase(phases) or _text(t.get("overall_status")) != status:
-            bad.add(nct)
-        elif bool(t.get("has_results")) != (nct in with_results):
-            bad.add(nct)
-    return bad, len(trials)
+    items = []
+    if isinstance(art, list):
+        items = [x for x in art if isinstance(x, dict)]
+    elif isinstance(art, dict):
+        for key in ("computations", "executions", "calculations", "steps", "items"):
+            val = art.get(key)
+            if isinstance(val, list) and val and isinstance(val[0], dict):
+                items = val
+                break
+        if not items and any(k in art for k in ("code", "result", "stdout", "status", "tool", "tool_name")):
+            items = [art]
 
-
-def check_drugs(art: Any, manifest: Dict[str, Any]) -> Tuple[Optional[Set[str]], int]:
-    chembl = art.get("chembl") if isinstance(art, dict) and isinstance(art.get("chembl"), dict) else {}
-    drugs = [d for d in chembl.get("drugs") or [] if isinstance(d, dict)]
-    digests = _digests(manifest, "chembl_drug_profile")
-    if not drugs or not digests:
+    calls = [
+        c for c in manifest.get("tool_calls") or []
+        if isinstance(c, dict) and any(
+            str(c.get("tool_name", "")).startswith(p)
+            for p in ("calcula", "analysis", "sandbox")
+        )
+    ]
+    if not items or not calls:
         return None, 0
-    recorded: Dict[str, Any] = {}
-    for d in digests:
-        recorded.update({str(k).upper(): v for k, v in (d.get("drugs") or {}).items()})
-    bad: Set[str] = set()
-    for d in drugs:
-        cid = _text(d.get("chembl_id")).upper()
-        if cid not in recorded:
-            bad.add(cid)
-            continue
-        phase, stored = d.get("max_phase"), recorded[cid]
-        if phase is not None and stored is not None and not _same_number(phase, stored):
-            bad.add(cid)
-    return bad, len(drugs)
 
-
-def check_safety(art: Any, manifest: Dict[str, Any]) -> Tuple[Optional[Set[str]], int]:
-    safety = [e for e in (art.get("safety") or []) if isinstance(e, dict)] if isinstance(art, dict) else []
-    digests = _digests(manifest, "openfda_drug_safety")
-    if not safety or not digests:
-        return None, 0
-    pairs = {(_num(d.get("total_reports")), _num(d.get("serious_reports"))) for d in digests}
-    bad: Set[str] = set()
-    for e in safety:
-        if (_num(e.get("total_reports")), _num(e.get("serious_reports"))) not in pairs:
-            bad.add(_text(e.get("ingredient")))
-    return bad, len(safety)
-
-
-def check_variants(art: Any, manifest: Dict[str, Any]) -> Tuple[Optional[Set[str]], int]:
-    if not isinstance(art, dict):
-        return None, 0
-    digests = _digests(manifest, "synapta_variant_intelligence")
-    clinvar = [c for c in art.get("clinvar") or [] if isinstance(c, dict)]
-    cbio = [c for c in art.get("cbioportal") or [] if isinstance(c, dict)]
-    if not (clinvar or cbio) or not digests:
-        return None, 0
-    rec_clinvar: Dict[str, Any] = {}
-    rec_cbio: Dict[str, str] = {}
-    for d in digests:
-        rec_clinvar.update({str(k): v for k, v in (d.get("clinvar") or {}).items()})
-        rec_cbio.update({str(k): str(v) for k, v in (d.get("cbioportal") or {}).items()})
-    bad: Set[str] = set()
-    for c in clinvar:
-        acc = _text(c.get("accession"))
-        posted = c.get("germline_classification") or c.get("somatic_clinical_impact")
-        if acc not in rec_clinvar or _text(posted) != _text(rec_clinvar[acc]):
-            bad.add(acc)
-    for c in cbio:
-        sid = _text(c.get("study_id"))
-        key = _text(c.get("study_name")) or sid  # the cell the table shows
-        mut, prof = c.get("mutated_samples"), c.get("profiled_samples")
-        if sid not in rec_cbio or rec_cbio[sid] != f"{mut}/{prof}":
+    recorded_tools = {_text(c.get("tool_name")).upper() for c in calls if c.get("success")}
+    bad: set[str] = set()
+    for it in items:
+        tool = _text(it.get("tool") or it.get("tool_name") or it.get("step") or it.get("name") or "CALCULA_RUN_PYTHON")
+        key = _text(it.get("tool") or it.get("tool_name") or it.get("step") or it.get("name") or "calculation")
+        if tool.upper() not in recorded_tools and not any(tool.upper() in t or t in tool.upper() for t in recorded_tools):
             bad.add(key)
+    return bad, len(items)
+
+
+def check_reference_data(art: Any, manifest: dict[str, Any]) -> tuple[set[str] | None, int]:
+    """Check physical constants and reference properties against Physis tool calls in the manifest."""
+    if not art:
+        return None, 0
+    items = []
+    if isinstance(art, list):
+        items = [x for x in art if isinstance(x, dict)]
+    elif isinstance(art, dict):
+        for key in ("constants", "materials", "sequences", "units", "properties", "items", "records", "data"):
+            val = art.get(key)
+            if isinstance(val, list) and val and isinstance(val[0], dict):
+                items = val
+                break
+        if not items and any(k in art for k in ("entity", "symbol", "name", "value")):
+            items = [art]
+
+    calls = [
+        c for c in manifest.get("tool_calls") or []
+        if isinstance(c, dict) and str(c.get("tool_name", "")).startswith("physis") and c.get("success")
+    ]
+    if not items or not calls:
+        return None, 0
+
+    ids = recorded_identifiers(manifest)
+    bad: set[str] = set()
+    for it in items:
+        sym = _text(it.get("symbol") or it.get("id"))
+        name = _text(it.get("name") or it.get("entity"))
+        key = sym or name
+        if not key:
             continue
-        pct, m, p = _num(c.get("prevalence_percent")), _num(mut), _num(prof)
-        if pct is not None and m is not None and p:
-            if abs(pct - 100.0 * m / p) > 0.051:  # prevalence is reported to one decimal
-                bad.add(key)
-    return bad, len(clinvar) + len(cbio)
+        if sym.upper() not in ids and name.upper() not in ids:
+            bad.add(key)
+    return bad, len(items)
+
+
+def check_simulations(art: Any, manifest: dict[str, Any]) -> tuple[set[str] | None, int]:
+    """Check Dynamis / Vivarix ODE simulation values against manifest tool calls."""
+    if not art:
+        return None, 0
+    calls = [
+        c for c in manifest.get("tool_calls") or []
+        if isinstance(c, dict) and c.get("success") and any(
+            str(c.get("tool_name", "")).startswith(p) for p in ("dynamis", "vivarix")
+        )
+    ]
+    if not calls:
+        return None, 0
+
+    recorded_final: dict[str, float] = {}
+    for c in calls:
+        digest = c.get("output_digest") or {}
+        if isinstance(digest, dict):
+            for k in ("final_concentrations", "final_state", "summary"):
+                sub = digest.get(k)
+                if isinstance(sub, dict):
+                    for var, val in sub.items():
+                        num = _num(val.get("final") if isinstance(val, dict) else val)
+                        if num is not None:
+                            recorded_final[str(var).upper()] = num
+
+    posted: dict[str, Any] = {}
+    if isinstance(art, dict):
+        if isinstance(art.get("final_concentrations"), dict):
+            posted.update(art["final_concentrations"])
+        elif isinstance(art.get("summary"), dict):
+            for var, val in art["summary"].items():
+                if isinstance(val, dict):
+                    posted[str(var)] = val.get("final")
+        elif isinstance(art.get("fixed_point"), dict):
+            posted.update(art["fixed_point"])
+        elif isinstance(art.get("simulations"), list):
+            for it in art["simulations"]:
+                if isinstance(it, dict) and it.get("variable"):
+                    posted[str(it["variable"])] = it.get("final")
+    elif isinstance(art, list):
+        for it in art:
+            if isinstance(it, dict) and (it.get("variable") or it.get("model")):
+                v = it.get("variable") or it.get("model")
+                posted[str(v)] = it.get("final")
+
+    if not posted or not recorded_final:
+        return None, 0
+
+    bad: set[str] = set()
+    for var, val in posted.items():
+        v_upper = str(var).upper()
+        if v_upper not in recorded_final:
+            bad.add(str(var))
+        elif val is not None and not _same_number(val, recorded_final[v_upper]):
+            bad.add(str(var))
+    return bad, len(posted)
 
 
 def _norm_question(text: str) -> str:
@@ -217,10 +256,10 @@ def _norm_question(text: str) -> str:
 
 
 def check_report(
-    manifest: Dict[str, Any],
+    manifest: dict[str, Any],
     *,
-    artifacts: Dict[str, Any],
-    citation_rows: Iterable[Dict[str, Any]],
+    artifacts: dict[str, Any],
+    citation_rows: Iterable[dict[str, Any]],
     posted_task: Any,
     posted_question: str,
     verification: Any,
@@ -260,10 +299,9 @@ def check_report(
 
     # Tables.
     for label, (bad, n) in (
-        ("clinical trials", check_trials(artifacts.get("clinical_trials"), manifest)),
-        ("ChEMBL drugs", check_drugs(artifacts.get("drug_intel"), manifest)),
-        ("FAERS counts", check_safety(artifacts.get("drug_intel"), manifest)),
-        ("variant evidence", check_variants(artifacts.get("variant_intel"), manifest)),
+        ("computations", check_computations(artifacts.get("calcula") or artifacts.get("sandbox"), manifest)),
+        ("reference data", check_reference_data(artifacts.get("physis") or artifacts.get("reference_data"), manifest)),
+        ("simulations", check_simulations(artifacts.get("dynamis") or artifacts.get("simulation") or artifacts.get("vivarix"), manifest)),
     ):
         if bad is None:
             continue
@@ -276,25 +314,20 @@ def check_report(
                 f"'{NOT_IN_RUN}'."
             )
     has_tables = {
-        "clinical trials": bool(isinstance(artifacts.get("clinical_trials"), dict) and artifacts["clinical_trials"].get("trials")),
-        "ChEMBL drugs": bool(isinstance(artifacts.get("drug_intel"), dict) and (artifacts["drug_intel"].get("chembl") or {}).get("drugs")),
-        "FAERS counts": bool(isinstance(artifacts.get("drug_intel"), dict) and artifacts["drug_intel"].get("safety")),
-        "variant evidence": bool(isinstance(artifacts.get("variant_intel"), dict)
-                                 and (artifacts["variant_intel"].get("clinvar") or artifacts["variant_intel"].get("cbioportal"))),
+        "computations": bool(artifacts.get("calcula") or artifacts.get("sandbox")),
+        "reference data": bool(artifacts.get("physis") or artifacts.get("reference_data")),
+        "simulations": bool(artifacts.get("dynamis") or artifacts.get("simulation")),
     }
     for label, present in has_tables.items():
         if present and label not in out.checked:
             out.unchecked.append(label)
-    drug = artifacts.get("drug_intel") if isinstance(artifacts.get("drug_intel"), dict) else {}
-    if (drug.get("chembl") or {}).get("drugs") if isinstance(drug.get("chembl"), dict) else False:
-        out.unchecked.append("drug mechanisms and bioactivities")
-    variant = artifacts.get("variant_intel") if isinstance(artifacts.get("variant_intel"), dict) else {}
-    if variant.get("gnomad"):
-        out.unchecked.append("gnomAD frequencies")
-    viv = artifacts.get("vivarix") if isinstance(artifacts.get("vivarix"), dict) else {}
-    if viv.get("plot_base64_png"):
+    comp = artifacts.get("calcula") or artifacts.get("sandbox") or {}
+    if isinstance(comp, dict) and comp.get("figures"):
+        out.unchecked.append("computation plots")
+    sim = artifacts.get("dynamis") or artifacts.get("simulation") or artifacts.get("vivarix") or {}
+    if isinstance(sim, dict) and sim.get("plot_base64_png"):
         out.unchecked.append("simulation plot")
-    if viv.get("initial_concentrations") or viv.get("steady_state"):
+    if isinstance(sim, dict) and (sim.get("initial_concentrations") or sim.get("steady_state")):
         out.unchecked.append("initial and steady-state simulation values")
 
     # Citations.
@@ -317,7 +350,7 @@ def check_report(
     return out
 
 
-def mark_rows(tables: List[Any], bad_keys: Set[str]) -> None:
+def mark_rows(tables: list[Any], bad_keys: set[str]) -> None:
     """Append the not-in-run marker to the first cell of each table row whose key is in bad_keys."""
     for table in tables:
         for row in getattr(table, "rows", []) or []:

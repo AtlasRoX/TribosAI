@@ -21,7 +21,7 @@ import re
 import tempfile
 import threading
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ def _user_dir_name(user_id: str) -> str:
 
 
 class RunStore:
-    def __init__(self, root: Optional[os.PathLike | str] = None) -> None:
+    def __init__(self, root: os.PathLike | str | None = None) -> None:
         self.root = Path(root) if root is not None else _default_root()
 
     def _path(self, user_id: str, run_id: str) -> Path:
@@ -98,7 +98,7 @@ class RunStore:
             raise RunStoreError("invalid run id")
         return self.root / _user_dir_name(user_id) / f"{run_id}.json"
 
-    def save(self, user_id: str, manifest: Dict[str, Any], response: Optional[str] = None) -> Path:
+    def save(self, user_id: str, manifest: dict[str, Any], response: str | None = None) -> Path:
         path = self._path(user_id, str(manifest.get("run_id", "")))
         path.parent.mkdir(parents=True, exist_ok=True)
         record = dict(manifest)
@@ -123,7 +123,7 @@ class RunStore:
             pass
         return path
 
-    def prune(self, keep: Optional[int] = None, *, keep_per_user: Optional[int] = None) -> int:
+    def prune(self, keep: int | None = None, *, keep_per_user: int | None = None) -> int:
         """Retention sweep (PRV-005): per-user quota first, then a global cap with fair eviction.
 
         1. Each user keeps their newest `keep_per_user` manifests (default TRIBOS_MAX_RUNS_PER_USER).
@@ -134,7 +134,7 @@ class RunStore:
         per_user = max_runs_per_user() if keep_per_user is None else max(0, int(keep_per_user))
         if not self.root.is_dir():
             return 0
-        by_user: Dict[str, List[Tuple[float, Path]]] = {}
+        by_user: dict[str, list[tuple[float, Path]]] = {}
         for path in self.root.glob("*/*.json"):
             if not _RUN_ID_RE.match(path.stem):
                 continue
@@ -142,7 +142,7 @@ class RunStore:
                 by_user.setdefault(path.parent.name, []).append((path.stat().st_mtime, path))
             except OSError:
                 continue
-        doomed: List[Path] = []
+        doomed: list[Path] = []
         for files in by_user.values():
             files.sort(key=lambda item: item[0], reverse=True)  # newest first
             if per_user > 0 and len(files) > per_user:
@@ -171,19 +171,19 @@ class RunStore:
             logger.info("Run-store retention removed %d manifest(s)", removed)
         return removed
 
-    def _load_record(self, user_id: str, run_id: str) -> Optional[Dict[str, Any]]:
+    def _load_record(self, user_id: str, run_id: str) -> dict[str, Any] | None:
         try:
             path = self._path(user_id, run_id)
         except RunStoreError:
             return None
         try:
-            with open(path, "r", encoding="utf-8") as fh:
+            with open(path, encoding="utf-8") as fh:
                 record = json.load(fh)
         except (OSError, ValueError):
             return None
         return record if isinstance(record, dict) else None
 
-    def load(self, user_id: str, run_id: str) -> Optional[Dict[str, Any]]:
+    def load(self, user_id: str, run_id: str) -> dict[str, Any] | None:
         """The stored manifest (full server copy, without the answer text), or None."""
         record = self._load_record(user_id, run_id)
         if record is None:
@@ -191,17 +191,17 @@ class RunStore:
         record.pop(_RESPONSE_KEY, None)
         return record
 
-    def load_response(self, user_id: str, run_id: str) -> Optional[str]:
+    def load_response(self, user_id: str, run_id: str) -> str | None:
         record = self._load_record(user_id, run_id)
         value = (record or {}).get(_RESPONSE_KEY)
         return value if isinstance(value, str) else None
 
 
-_STORE: Optional[RunStore] = None
+_STORE: RunStore | None = None
 _LOCK = threading.Lock()
 
 
-def get_run_store(storage_dir: Optional[os.PathLike | str] = None) -> RunStore:
+def get_run_store(storage_dir: os.PathLike | str | None = None) -> RunStore:
     """Process-wide store; the root is re-read on each call so tests can point TRIBOS_RUNS_DIR at tmp_path."""
     global _STORE
     if storage_dir is not None:

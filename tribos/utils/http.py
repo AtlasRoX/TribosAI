@@ -21,9 +21,10 @@ from __future__ import annotations
 
 import asyncio
 import math
-from datetime import datetime, timezone
+from collections.abc import Awaitable, Callable, Container, Hashable, Mapping
+from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
-from typing import Any, Awaitable, Callable, Container, Hashable, Mapping, Optional, Union
+from typing import Any
 
 import httpx
 
@@ -48,7 +49,7 @@ ANY_STATUS = range(100, 600)  # accept every status (the caller inspects the res
 BELOW_400 = range(100, 400)
 MAX_RETRY_AFTER_S = 30.0
 
-RetryOn = Union[Container[int], Callable[[httpx.Response], bool]]
+RetryOn = Container[int] | Callable[[httpx.Response], bool]
 Sleep = Callable[[float], Awaitable[Any]]
 
 
@@ -58,11 +59,11 @@ class HttpError(Exception):
     def __init__(
         self,
         kind: str,
-        status: Optional[int],
+        status: int | None,
         message: str,
         *,
-        response: Optional[httpx.Response] = None,
-        cause: Optional[BaseException] = None,
+        response: httpx.Response | None = None,
+        cause: BaseException | None = None,
         attempts: int = 1,
         exhausted: bool = False,
     ) -> None:
@@ -77,7 +78,7 @@ class HttpError(Exception):
 
 
 def retry_after_seconds(
-    source: Union[httpx.Response, Mapping[str, str], str, None],
+    source: httpx.Response | Mapping[str, str] | str | None,
     default: float = 1.0,
     cap: float = MAX_RETRY_AFTER_S,
 ) -> float:
@@ -104,8 +105,8 @@ def retry_after_seconds(
     if when is None:
         return default
     if when.tzinfo is None:
-        when = when.replace(tzinfo=timezone.utc)
-    delta = (when - datetime.now(timezone.utc)).total_seconds()
+        when = when.replace(tzinfo=UTC)
+    delta = (when - datetime.now(UTC)).total_seconds()
     return max(0.0, min(cap, delta)) if math.isfinite(delta) else default
 
 
@@ -127,8 +128,8 @@ async def request(
     method: str,
     url: str,
     *,
-    params: Optional[Mapping[str, Any]] = None,
-    headers: Optional[Mapping[str, str]] = None,
+    params: Mapping[str, Any] | None = None,
+    headers: Mapping[str, str] | None = None,
     json: Any = None,
     content: Any = None,
     retries: int = 1,
@@ -141,7 +142,7 @@ async def request(
     timeout: Any = None,
     limiter: Any = None,
     accept: Container[int] = SUCCESS,
-    sleep: Optional[Sleep] = None,
+    sleep: Sleep | None = None,
 ) -> httpx.Response:
     """Send one request with retries; return the response (status in `accept`) or raise HttpError."""
     attempts = max(0, retries) + 1
@@ -190,7 +191,7 @@ async def request(
     raise AssertionError("unreachable")  # pragma: no cover
 
 
-async def _sleep(sleep: Optional[Sleep], seconds: float) -> None:
+async def _sleep(sleep: Sleep | None, seconds: float) -> None:
     # asyncio.sleep is looked up per call so a test that patches it (or passes `sleep`) controls the wait.
     await (sleep or asyncio.sleep)(seconds)
 
@@ -212,8 +213,8 @@ async def _json_request(
     method: str,
     url: str,
     *,
-    cache: Optional[TTLCache],
-    cache_key: Optional[Hashable],
+    cache: TTLCache | None,
+    cache_key: Hashable | None,
     expect_json: bool,
     **kwargs: Any,
 ) -> Any:
@@ -232,14 +233,14 @@ async def get_json(
     client: httpx.AsyncClient,
     url: str,
     *,
-    params: Optional[Mapping[str, Any]] = None,
-    headers: Optional[Mapping[str, str]] = None,
+    params: Mapping[str, Any] | None = None,
+    headers: Mapping[str, str] | None = None,
     retries: int = 1,
     backoff_s: float = 1.0,
     retry_on: RetryOn = DEFAULT_RETRY_ON,
     timeout: Any = None,
-    cache: Optional[TTLCache] = None,
-    cache_key: Optional[Hashable] = None,
+    cache: TTLCache | None = None,
+    cache_key: Hashable | None = None,
     limiter: Any = None,
     expect_json: bool = True,
     **options: Any,
@@ -261,14 +262,14 @@ async def post_json(
     url: str,
     *,
     json: Any = None,
-    params: Optional[Mapping[str, Any]] = None,
-    headers: Optional[Mapping[str, str]] = None,
+    params: Mapping[str, Any] | None = None,
+    headers: Mapping[str, str] | None = None,
     retries: int = 1,
     backoff_s: float = 1.0,
     retry_on: RetryOn = DEFAULT_RETRY_ON,
     timeout: Any = None,
-    cache: Optional[TTLCache] = None,
-    cache_key: Optional[Hashable] = None,
+    cache: TTLCache | None = None,
+    cache_key: Hashable | None = None,
     limiter: Any = None,
     expect_json: bool = True,
     **options: Any,

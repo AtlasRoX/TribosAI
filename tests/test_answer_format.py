@@ -9,6 +9,8 @@ from datetime import date
 
 import pytest
 
+from tests import fakes
+from tests.test_audit_regressions import offline_orchestrator  # noqa: F401  (fixture)
 from tribos.agents import authoritative_orchestrator as orch_module
 from tribos.agents.prompts import (
     CORRECTION_SYSTEM_PROMPT,
@@ -18,8 +20,6 @@ from tribos.agents.prompts import (
     evidence_level,
 )
 from tribos.tools.registry import ToolResult
-from tests import fakes
-from tests.test_audit_regressions import offline_orchestrator  # noqa: F401  (fixture)
 
 
 def test_prompt_carries_the_expert_brief_rules():
@@ -103,7 +103,7 @@ async def test_orchestrator_sends_date_and_evidence_levels(offline_orchestrator,
     original = fakes._fake_output
 
     def graded(tool_name, kwargs):
-        if tool_name == "lithoscribe_literature_synthesis":
+        if tool_name in ("lithoscribe_literature_synthesis", "archivon_literature_search"):
             return {"ranked_passages": [
                 {"pmid": "123456", "title": "A phase III randomized trial of KRAS inhibition", "year": "2023",
                  "passage_text": "KRAS signaling in pancreatic cancer.", "evidence_grade": {"study_type": "rct", "label": "Randomized controlled trial"},

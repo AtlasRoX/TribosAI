@@ -41,10 +41,62 @@ export function remarkHtmlBreaks() {
 
 const BLOCKED_TAGS = new Set([
   "script", "style", "iframe", "frame", "frameset", "object", "embed", "applet", "form", "button",
-  "textarea", "select", "option", "link", "meta", "base", "svg", "math", "template", "portal", "video", "audio",
+  "textarea", "select", "option", "link", "meta", "base", "template", "portal", "video", "audio",
+  "foreignobject",
 ]);
 
 const URL_PROPERTIES = new Set(["href", "src", "action", "formAction", "xLinkHref", "poster", "background", "cite"]);
+
+const SAFE_KATEX_STYLE_PROPS = new Set([
+  "height", "min-height", "max-height",
+  "width", "min-width", "max-width",
+  "top", "bottom", "left", "right",
+  "vertical-align",
+  "margin", "margin-top", "margin-right", "margin-bottom", "margin-left",
+  "padding", "padding-top", "padding-right", "padding-bottom", "padding-left",
+  "border-bottom-width", "border-top-width", "border-left-width", "border-right-width",
+  "border-color", "border-style", "border-width",
+  "color", "background-color",
+  "font-size", "font-family", "font-style", "font-weight", "line-height",
+  "position", "display", "overflow", "text-align", "white-space", "transform",
+]);
+
+const KATEX_CLASS_PATTERN =
+  /^(?:katex(?:-[a-z0-9-]+)?|m(?:ord|bin|rel|open|close|punct|inner|op|subsup|tight|athnormal|athrm|athit|athbf|athbb|athcal|athfrak|athscr|athsf|athtt)|vlist(?:-[a-z0-9]+)?|p?strut|frac-line|sqrt|delimsizing|nulldelimiter|sizing|reset-size\d+|base|accent(?:-body)?|svg-align|hide-tail|stretchy|op-symbol|op-limits|arraycolsep|col-align-[clr]|eqn-num|mml-eqn-num|tag|sr-only)$/;
+
+function hasKatexClass(props: Record<string, unknown>): boolean {
+  const raw = props.className ?? props.class;
+  const classes = Array.isArray(raw)
+    ? raw.map(String)
+    : typeof raw === "string"
+      ? raw.split(/\s+/)
+      : [];
+  return classes.some((c) => KATEX_CLASS_PATTERN.test(c.trim()));
+}
+
+/** Validates inline CSS produced by KaTeX (`height:0.8141em; vertical-align:0em;` etc.) and rejects any unsafe values. */
+export function isSafeKatexStyle(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (/url\s*\(|expression\s*\(|javascript:|vbscript:|data:|@import|behavior\s*:|-moz-binding/i.test(trimmed)) {
+    return false;
+  }
+  const decls = trimmed.split(";").map((d) => d.trim()).filter(Boolean);
+  if (!decls.length) return false;
+  for (const decl of decls) {
+    const colon = decl.indexOf(":");
+    if (colon <= 0) return false;
+    const prop = decl.slice(0, colon).trim().toLowerCase();
+    const val = decl.slice(colon + 1).trim().toLowerCase();
+    if (!SAFE_KATEX_STYLE_PROPS.has(prop)) return false;
+    if (!val || /[<>\\]/.test(val)) return false;
+    if (prop === "position" && val !== "relative" && val !== "absolute" && val !== "static") {
+      return false;
+    }
+  }
+  return true;
+}
 
 /** http(s), mailto, in-page anchors and relative paths only; anything else (javascript:, data:, vbscript:) is dropped. */
 export function safeUrl(value: unknown): string {
@@ -187,11 +239,12 @@ function imagePlaceholder(props: Record<string, unknown>): HastNode {
  * Trusted plugins (citations, tables) run after this one.
  */
 export function rehypeStripUnsafe() {
-  const clean = (node: HastNode) => {
+  const clean = (node: HastNode, inKatex = false) => {
     if (!node.children) return;
     const next: HastNode[] = [];
     for (const child of node.children) {
       if (child.type === "raw" || child.type === "comment" || child.type === "doctype") continue;
+      let childInKatex = inKatex;
       if (child.type === "element") {
         const tag = String(child.tagName).toLowerCase();
         if (BLOCKED_TAGS.has(tag)) continue;
@@ -202,10 +255,15 @@ export function rehypeStripUnsafe() {
         const props = child.properties || {};
         // GFM task lists render disabled checkboxes; no other input survives.
         if (tag === "input" && (props.type !== "checkbox" || !props.disabled)) continue;
+        childInKatex = inKatex || tag === "math" || tag === "svg" || hasKatexClass(props);
         for (const key of Object.keys(props)) {
           const lower = key.toLowerCase();
-          if (lower.startsWith("on") || lower === "srcdoc" || lower === "style" || lower === "formaction") {
+          if (lower.startsWith("on") || lower === "srcdoc" || lower === "formaction") {
             delete props[key];
+          } else if (lower === "style") {
+            if (!childInKatex || !isSafeKatexStyle(props[key])) {
+              delete props[key];
+            }
           } else if (URL_PROPERTIES.has(key)) {
             const safe = safeUrl(props[key]);
             if (safe) props[key] = safe;
@@ -217,10 +275,10 @@ export function rehypeStripUnsafe() {
         }
         child.properties = props;
       }
-      clean(child);
+      clean(child, childInKatex);
       next.push(child);
     }
     node.children = next;
   };
-  return (tree: HastNode) => clean(tree);
+  return (tree: HastNode) => clean(tree, false);
 }

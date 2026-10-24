@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from itertools import zip_longest
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -27,19 +27,19 @@ MAX_SOURCES = 40  # overall safety cap
 
 class SourceRecord(BaseModel):
     kind: str  # literature | web | the CitationRecord type of a plugin source (nct, chembl, ...)
-    pmid: Optional[str] = None
-    doi: Optional[str] = None
-    pmcid: Optional[str] = None
-    id: Optional[str] = None
-    id_type: Optional[str] = None
+    pmid: str | None = None
+    doi: str | None = None
+    pmcid: str | None = None
+    id: str | None = None
+    id_type: str | None = None
     title: str = ""
     authors: str = ""
     journal: str = ""
     year: str = ""
-    section: Optional[str] = None
-    has_full_text: Optional[bool] = None
-    retracted: Optional[bool] = None  # None when no integrity source answered
-    url: Optional[str] = None
+    section: str | None = None
+    has_full_text: bool | None = None
+    retracted: bool | None = None  # None when no integrity source answered
+    url: str | None = None
     tool: str = ""
 
 
@@ -54,11 +54,11 @@ def _title(value: Any) -> str:
     return clean_title(value) or ""
 
 
-def _literature_records(result: Any) -> List[SourceRecord]:
+def _literature_records(result: Any) -> list[SourceRecord]:
     data = getattr(result, "data", None)
     if not isinstance(data, dict):
         return []
-    out: List[SourceRecord] = []
+    out: list[SourceRecord] = []
     seen = set()
     for p in data.get("ranked_passages") or []:
         if not isinstance(p, dict):
@@ -91,11 +91,11 @@ def _literature_records(result: Any) -> List[SourceRecord]:
     return out
 
 
-def _web_records(result: Any) -> List[SourceRecord]:
+def _web_records(result: Any) -> list[SourceRecord]:
     data = getattr(result, "data", None)
     if not isinstance(data, dict):
         return []
-    out: List[SourceRecord] = []
+    out: list[SourceRecord] = []
     seen = set()
     for r in data.get("results") or []:
         url = _text((r or {}).get("url")) if isinstance(r, dict) else ""
@@ -106,10 +106,10 @@ def _web_records(result: Any) -> List[SourceRecord]:
     return out
 
 
-def _plugin_records(tool_results: Dict[str, Any]) -> List[SourceRecord]:
+def _plugin_records(tool_results: dict[str, Any]) -> list[SourceRecord]:
     from tribos.sources import get_sources
 
-    per_source: List[List[SourceRecord]] = []
+    per_source: list[list[SourceRecord]] = []
     for src in get_sources():
         res = tool_results.get(src.key)
         if res is None or not getattr(res, "success", False):
@@ -119,7 +119,7 @@ def _plugin_records(tool_results: Dict[str, Any]) -> List[SourceRecord]:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Source %s citations failed: %s", src.key, exc)
             continue
-        out: List[SourceRecord] = []
+        out: list[SourceRecord] = []
         per_source.append(out)
         for c in records[: MAX_PER_PLUGIN_SOURCE * 2]:  # deduplicated below; the per-source cap applies after
             ctype, cid = _text(getattr(c, "type", "")).lower(), _text(getattr(c, "id", ""))
@@ -148,9 +148,9 @@ def _plugin_records(tool_results: Dict[str, Any]) -> List[SourceRecord]:
     return [r for group in zip_longest(*capped) for r in group if r is not None]
 
 
-def build_source_records(tool_results: Dict[str, Any]) -> List[Dict[str, Any]]:
+def build_source_records(tool_results: dict[str, Any]) -> list[dict[str, Any]]:
     """Literature first (up to 8), then plugin citations (up to 6 per source), then web results (up to 4)."""
-    records: List[SourceRecord] = []
+    records: list[SourceRecord] = []
     lit = tool_results.get("lithoscribe")
     if lit is not None and getattr(lit, "success", False):
         records.extend(_literature_records(lit)[:MAX_LITERATURE])
@@ -164,8 +164,8 @@ def build_source_records(tool_results: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     from tribos.export.report_model import source_key
 
-    by_key: Dict[str, SourceRecord] = {}
-    unique: List[SourceRecord] = []
+    by_key: dict[str, SourceRecord] = {}
+    unique: list[SourceRecord] = []
     for r in records:
         key = source_key(r.model_dump())
         if not key:
@@ -181,7 +181,7 @@ def build_source_records(tool_results: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [r.model_dump() for r in unique[:MAX_SOURCES]]
 
 
-def _sources_artifact(tool_results: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
+def _sources_artifact(tool_results: dict[str, Any], ctx: Any) -> dict[str, Any]:
     records = build_source_records(tool_results)
     return {"sources": records} if records else {}
 

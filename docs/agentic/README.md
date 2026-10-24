@@ -8,13 +8,13 @@ Tribos can run each question through one of five orchestration frameworks. Choos
 
 | Framework id | What it does |
 |---|---|
-| `authoritative-react-compiler` | The classic fixed pipeline: parallel evidence, simulation and single-cell analysis, then synthesis and a Reflexion audit. It runs no agentic phases. |
+| `authoritative-react-compiler` | The classic fixed pipeline: parallel evidence, symbolic/numerical simulation, and sandboxed data analysis, then synthesis and a Reflexion audit. It runs no agentic phases. |
 | `agentic-plan-execute` | Decomposes the question, runs an LLM-planned tool DAG in parallel (LLMCompiler), re-retrieves to fill gaps, searches for counter-evidence, checks claims with NLI and reports calibrated confidence. |
-| `multi-agent-supervisor` | A supervisor uses a Magentic-One-style task and progress ledger to delegate to specialist agents (literature, target, simulation, omics, chemistry). |
+| `multi-agent-supervisor` | A supervisor uses a Magentic-One-style task and progress ledger to delegate to specialist agents (Archivon, Axiom, Dynamis, Calcula, Physis). |
 | `multi-agent-swarm` | Specialist agents hand control to each other until the task is done. |
 | `multi-agent-debate` | Gathers evidence with plan-and-execute, then critic agents debate the draft before the final answer (Du et al. 2023). |
 
-- Design, contracts and work packages: [`docs/plans/agentic-system.md`](../plans/agentic-system.md)
+- Design, contracts and work packages: [`docs/plans/tribos-transformation.md`](../plans/tribos-transformation.md)
 - Verified references, agent loop and reasoning: [`references-agent-loop.md`](references-agent-loop.md)
 - Verified references, verification, memory, tools and data sources: [`references-verification-tools-data.md`](references-verification-tools-data.md)
 - Platform API (run control, jobs, projects, MCP, A2A): [`platform-api.md`](platform-api.md)

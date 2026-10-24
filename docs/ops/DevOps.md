@@ -10,7 +10,7 @@ hide:
 > **Tribos** — Made by ChronoStrider Engineering<br>
 > **Version** 1.0<br>
 
-1. [Introduction](#Introduction)
+1. [Introduction](#introduction)
 2. [Feedback and Issue Reporting](#feedback-and-issue-reporting)
 3. [GitHub Repo Creation Workflow](#github-repo-creation-workflow)
 4. [How to open and close a Pull request (PR)](#how-to-open-and-close-a-pull-request-pr)

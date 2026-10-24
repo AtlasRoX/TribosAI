@@ -37,7 +37,8 @@ import copy
 import json
 import logging
 import re
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from collections.abc import Iterable, Sequence
+from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -65,22 +66,22 @@ class RefError(ValueError):
 class PlanNode(BaseModel):
     id: str
     tool: str
-    args: Dict[str, Any] = Field(default_factory=dict)
-    depends_on: List[str] = Field(default_factory=list)
+    args: dict[str, Any] = Field(default_factory=dict)
+    depends_on: list[str] = Field(default_factory=list)
     purpose: str = ""
     status: str = "pending"  # pending | running | done | error | skipped
-    result_key: Optional[str] = None
-    error: Optional[str] = None
-    seconds: Optional[float] = None
+    result_key: str | None = None
+    error: str | None = None
+    seconds: float | None = None
     round: int = 0  # 0 = first plan, 1.. = replans
-    resolved_args: Optional[Dict[str, Any]] = None  # args with references filled in, set when the node runs
-    adjusted: List[str] = Field(default_factory=list)  # argument repairs (tools.arg_repair), e.g. "size 100→50"
-    fill_from_run: List[str] = Field(default_factory=list)  # drug arguments left blank: filled at run time
+    resolved_args: dict[str, Any] | None = None  # args with references filled in, set when the node runs
+    adjusted: list[str] = Field(default_factory=list)  # argument repairs (tools.arg_repair), e.g. "size 100→50"
+    fill_from_run: list[str] = Field(default_factory=list)  # drug arguments left blank: filled at run time
 
-    def call_args(self) -> Dict[str, Any]:
+    def call_args(self) -> dict[str, Any]:
         return self.resolved_args if self.resolved_args is not None else self.args
 
-    def to_artifact(self) -> Dict[str, Any]:
+    def to_artifact(self) -> dict[str, Any]:
         out = {
             "id": self.id,
             "tool": self.tool,
@@ -101,13 +102,13 @@ class PlanNode(BaseModel):
 
 class PlanGraph(BaseModel):
     rationale: str = ""
-    nodes: List[PlanNode] = Field(default_factory=list)
-    rejected: List[Dict[str, str]] = Field(default_factory=list)  # [{"node", "reason"}]
+    nodes: list[PlanNode] = Field(default_factory=list)
+    rejected: list[dict[str, str]] = Field(default_factory=list)  # [{"node", "reason"}]
 
-    def get(self, node_id: str) -> Optional[PlanNode]:
+    def get(self, node_id: str) -> PlanNode | None:
         return next((n for n in self.nodes if n.id == node_id), None)
 
-    def ids(self) -> List[str]:
+    def ids(self) -> list[str]:
         return [n.id for n in self.nodes]
 
     def reject(self, node: Any, reason: str) -> None:
@@ -136,8 +137,8 @@ def normalise_id(raw: Any) -> str:
 
 
 # References ---------------------------------------------------------------------------------------------------
-def _parse_path(path: str) -> List[Any]:
-    segs: List[Any] = []
+def _parse_path(path: str) -> list[Any]:
+    segs: list[Any] = []
     for m in _SEG_RE.finditer(path or ""):
         seg = m.group(1) if m.group(1) is not None else m.group(2)
         if seg == "*":
@@ -149,7 +150,7 @@ def _parse_path(path: str) -> List[Any]:
     return segs
 
 
-def _iter_refs(text: str, known: Optional[Set[str]] = None) -> Iterable[Tuple[re.Match, str, List[Any]]]:
+def _iter_refs(text: str, known: set[str] | None = None) -> Iterable[tuple[re.Match, str, list[Any]]]:
     for m in _REF_RE.finditer(text):
         node = normalise_id(m.group("bnode") or m.group("node"))
         if known is not None and node not in known:
@@ -157,9 +158,9 @@ def _iter_refs(text: str, known: Optional[Set[str]] = None) -> Iterable[Tuple[re
         yield m, node, _parse_path(m.group("bpath") if m.group("bnode") else m.group("path") or "")
 
 
-def refs_in(value: Any, known: Optional[Set[str]] = None) -> Set[str]:
+def refs_in(value: Any, known: set[str] | None = None) -> set[str]:
     """Node ids referenced anywhere in an argument value (only ids in `known` when given)."""
-    out: Set[str] = set()
+    out: set[str] = set()
     if isinstance(value, str):
         out.update(node for _m, node, _p in _iter_refs(value, known))
     elif isinstance(value, dict):
@@ -183,7 +184,7 @@ _FIELD_ALIASES = {
 }
 
 
-def _field_alias(value: Dict[str, Any], seg: str) -> Optional[str]:
+def _field_alias(value: dict[str, Any], seg: str) -> str | None:
     """The real field a guessed name most plausibly means, or None when nothing fits unambiguously."""
     low = seg.lower()
     if low in _COLLECTION_GUESSES:
@@ -230,7 +231,7 @@ def _navigate(value: Any, segs: Sequence[Any], where: str) -> Any:
     return value
 
 
-def lookup(results: Dict[str, Any], node: str, segs: Sequence[Any]) -> Any:
+def lookup(results: dict[str, Any], node: str, segs: Sequence[Any]) -> Any:
     """The value a reference names: path into the node's ToolResult.data (or an explicit ToolResult field)."""
     if node not in results:
         raise RefError(f"${node} has no result")
@@ -258,7 +259,7 @@ def _as_text(value: Any) -> str:
     return str(value)
 
 
-def resolve_args(value: Any, results: Dict[str, Any], known: Optional[Set[str]] = None) -> Any:
+def resolve_args(value: Any, results: dict[str, Any], known: set[str] | None = None) -> Any:
     """A deep copy of value with every reference to a node in `results` (or `known`) substituted."""
     known = set(known) if known is not None else set(results)
     if isinstance(value, str):
@@ -283,14 +284,14 @@ def resolve_args(value: Any, results: Dict[str, Any], known: Optional[Set[str]] 
 
 
 # Parsing ------------------------------------------------------------------------------------------------------
-def _first(d: Dict[str, Any], *names: str) -> Any:
+def _first(d: dict[str, Any], *names: str) -> Any:
     for n in names:
         if n in d and d[n] is not None:
             return d[n]
     return None
 
 
-def parse_plan(value: Any, *, round_no: int = 0, taken_ids: Optional[Set[str]] = None) -> PlanGraph:
+def parse_plan(value: Any, *, round_no: int = 0, taken_ids: set[str] | None = None) -> PlanGraph:
     """A PlanGraph from a planner reply ({"rationale", "nodes"|"tasks"|"plan"} or a bare list of nodes).
 
     Malformed entries are listed in `rejected`. Ids are normalised ("1" -> "n1"). In a replan, a new node
@@ -311,8 +312,8 @@ def parse_plan(value: Any, *, round_no: int = 0, taken_ids: Optional[Set[str]] =
         graph.rejected.append({"node": "?", "reason": "the plan's nodes were not a list"})
         return graph
 
-    staged: List[Tuple[PlanNode, str]] = []
-    seen: Set[str] = set()
+    staged: list[tuple[PlanNode, str]] = []
+    seen: set[str] = set()
     for i, raw in enumerate(raw_nodes, 1):
         if not isinstance(raw, dict):
             graph.rejected.append({"node": f"#{i}", "reason": "node is not an object"})
@@ -365,7 +366,7 @@ def parse_plan(value: Any, *, round_no: int = 0, taken_ids: Optional[Set[str]] =
 
 # Policy -------------------------------------------------------------------------------------------------------
 # The pipeline source (ctx.decisions / ctx.source_allowlist key) each tool's evidence counts as.
-TOOL_SOURCES: Dict[str, str] = {
+TOOL_SOURCES: dict[str, str] = {
     "lithoscribe_literature_synthesis": "lithoscribe",
     "lithoscribe_clinical_trials_search": "clinical_trials",
     "websurfer_search": "websurfer",
@@ -410,7 +411,7 @@ def is_expensive_tool(name: str) -> bool:
     )
 
 
-def single_cell_dataset_path(ctx: Any) -> Optional[str]:
+def single_cell_dataset_path(ctx: Any) -> str | None:
     """The AnnData file Lumicell may read this turn: the researcher's attached .h5ad or a typed path that already
     passed is_allowed_typed_path. None when neither exists; a path written by the model is never used."""
     for att in getattr(ctx, "attachments", None) or []:
@@ -425,7 +426,7 @@ def single_cell_dataset_path(ctx: Any) -> Optional[str]:
 OMICS_TOOL_PREFIXES = ("gwas", "gtex", "depmap")
 
 
-def excluded_by_question(entry: Any, ctx: Any) -> Optional[str]:
+def excluded_by_question(entry: Any, ctx: Any) -> str | None:
     """Why the question's own exclusions ("No FDA sweep, omics ... is needed") rule this tool out, or None."""
     excluded = getattr(ctx, "excluded_modules", None) or set()
     if not excluded:
@@ -436,7 +437,7 @@ def excluded_by_question(entry: Any, ctx: Any) -> Optional[str]:
     return None
 
 
-def policy_violation(entry: Any, ctx: Any) -> Optional[str]:
+def policy_violation(entry: Any, ctx: Any) -> str | None:
     """Why the turn's hard policy forbids this tool, or None."""
     name = str(getattr(entry, "name", entry) or "")
     if ctx is None:
@@ -467,7 +468,7 @@ def policy_violation(entry: Any, ctx: Any) -> Optional[str]:
 
 
 # Schema checks ------------------------------------------------------------------------------------------------
-def schema_problem(entry: Any, args: Dict[str, Any], ref_fields: Set[str]) -> Optional[str]:
+def schema_problem(entry: Any, args: dict[str, Any], ref_fields: set[str]) -> str | None:
     """A validation problem with args against the tool's input schema, ignoring fields that hold references."""
     schema = getattr(entry, "input_schema", None)
     if schema is None:
@@ -491,7 +492,7 @@ def schema_problem(entry: Any, args: Dict[str, Any], ref_fields: Set[str]) -> Op
     return None
 
 
-def validated_inputs(entry: Any, args: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def validated_inputs(entry: Any, args: dict[str, Any]) -> dict[str, Any] | None:
     """The tool's validated kwargs (as the registry records them), or None when they do not validate."""
     schema = getattr(entry, "input_schema", None)
     if schema is None:
@@ -512,19 +513,19 @@ def validated_inputs(entry: Any, args: Dict[str, Any]) -> Optional[Dict[str, Any
 
 
 # Cycles -------------------------------------------------------------------------------------------------------
-def topological_order(nodes: Sequence[PlanNode], external: Optional[Set[str]] = None) -> Tuple[List[str], Set[str]]:
+def topological_order(nodes: Sequence[PlanNode], external: set[str] | None = None) -> tuple[list[str], set[str]]:
     """(order, cyclic): Kahn's algorithm over in-plan dependencies; ids left over sit on or behind a cycle."""
     external = external or set()
     ids = {n.id for n in nodes}
     indeg = {n.id: 0 for n in nodes}
-    children: Dict[str, List[str]] = {n.id: [] for n in nodes}
+    children: dict[str, list[str]] = {n.id: [] for n in nodes}
     for n in nodes:
         for d in n.depends_on:
             if d in ids and d not in external:
                 indeg[n.id] += 1
                 children[d].append(n.id)
     queue = [n.id for n in nodes if indeg[n.id] == 0]
-    order: List[str] = []
+    order: list[str] = []
     while queue:
         cur = queue.pop(0)
         order.append(cur)
@@ -535,10 +536,10 @@ def topological_order(nodes: Sequence[PlanNode], external: Optional[Set[str]] = 
     return order, ids - set(order)
 
 
-def _cycle_members(nodes: Sequence[PlanNode], leftover: Set[str]) -> Set[str]:
+def _cycle_members(nodes: Sequence[PlanNode], leftover: set[str]) -> set[str]:
     """The leftover ids that lie on a cycle (the rest only depend on one)."""
     deps = {n.id: [d for d in n.depends_on if d in leftover] for n in nodes if n.id in leftover}
-    on_cycle: Set[str] = set()
+    on_cycle: set[str] = set()
     for start in leftover:
         stack, seen = list(deps.get(start, [])), set()
         while stack:
@@ -572,8 +573,8 @@ def validate_plan(
     ctx: Any = None,
     *,
     max_nodes: int = 12,
-    prior_calls: Optional[Iterable[Tuple[str, Dict[str, Any]]]] = None,
-    external_ids: Optional[Set[str]] = None,
+    prior_calls: Iterable[tuple[str, dict[str, Any]]] | None = None,
+    external_ids: set[str] | None = None,
 ) -> PlanGraph:
     """Drop every node that may not run (see the module docstring); keeps the rest in dependency order.
 
@@ -581,9 +582,9 @@ def validate_plan(
     external_ids: ids of finished nodes from earlier rounds that this plan may depend on and reference.
     """
     external = set(external_ids or ())
-    seen_calls: Set[Tuple[str, str]] = {(t, canonical(a)) for t, a in (prior_calls or [])}
+    seen_calls: set[tuple[str, str]] = {(t, canonical(a)) for t, a in (prior_calls or [])}
 
-    def all_known() -> Set[str]:
+    def all_known() -> set[str]:
         return set(graph.ids()) | external
 
     # 1. Per-node checks: tool, policy, arguments, references, duplicates.
@@ -668,9 +669,9 @@ def validate_plan(
     return graph
 
 
-def drop_nodes(graph: PlanGraph, ids: Iterable[str], reason: str) -> List[str]:
+def drop_nodes(graph: PlanGraph, ids: Iterable[str], reason: str) -> list[str]:
     """Remove nodes (and, transitively, every node depending on them); returns the removed ids."""
-    removed: List[str] = []
+    removed: list[str] = []
     targets = {i for i in ids if graph.get(i) is not None}
     for nid in sorted(targets):
         graph.reject(nid, reason)

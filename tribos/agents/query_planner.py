@@ -26,8 +26,9 @@ import math
 import os
 import re
 import time
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Set, Tuple, cast
+from typing import Any, cast
 
 from pydantic import BaseModel
 
@@ -38,7 +39,13 @@ from .entity_lexicon import (
     coordinated_disease_terms,
     defined_acronyms,
     family_members,
+    find_offline_concepts,
+    find_offline_constants,
     find_offline_diseases,
+    find_offline_equations,
+    find_offline_materials,
+    find_offline_quantities,
+    find_offline_systems,
     is_gene_mention,
     lookup_symbol,
 )
@@ -62,8 +69,17 @@ logger = logging.getLogger(__name__)
 RESOLVER_TOOL = "synapta_resolve_entities"
 
 INTENTS = (
-    "target_assessment",
+    "derive",
+    "solve",
+    "prove",
+    "compute",
+    "simulate",
+    "design",
+    "estimate",
+    "explain",
     "literature",
+    "data_analysis",
+    "target_assessment",
     "clinical_trials",
     "simulation",
     "steady_state",
@@ -80,15 +96,19 @@ SEARCH_PLAN_WAIT_S = 6.0
 MAX_TERMS, MAX_GENE_TOKENS, MAX_DRUG_CODES, MAX_RSIDS, MAX_HGVS = 120, 6, 4, 5, 3
 
 
-def extract_primary_target(query: str) -> Optional[str]:
-    """Primary gene of the question from the offline lexicon, as a display string ('KRAS', 'KRAS G12D', 'MAPK1')."""
+def extract_primary_target(query: str) -> str | None:
+    """Primary target/subject of the question from the offline lexicon, as a display string."""
     cands = extract_candidates(query)
     variants = parse_variants(query)
     attach_variant_genes(query, variants, cands.lexicon_genes)
     primary = choose_primary_gene(query, cands.lexicon_genes, variants)
-    if primary is None:
-        return None
-    return _primary_target_string(primary, variants)
+    if primary is not None:
+        return _primary_target_string(primary, variants)
+    stem = _offline_stem_entities(query, procedural_spans(query))
+    if stem:
+        lead = next((e for e in stem if e.type in ("equation", "system", "concept", "material", "constant")), stem[0])
+        return lead.label
+    return None
 
 
 # "papers only", "only the trials": the user restricts the turn to one kind of source (and so forbids simulation).
@@ -158,14 +178,14 @@ _SIMULATION_INTENT_RE = re.compile(
 )
 BIOMODEL_ID_RE = re.compile(r"^(?:BIOMD|MODEL)\d{10}$")
 
-BIOMODEL_TARGET_HINTS: Dict[str, str] = {
+BIOMODEL_TARGET_HINTS: dict[str, str] = {
     "BIOMD0000000010": "ERK2",
     "BIOMD0000000019": "HER2",
     "BIOMD0000000372": "INSULIN",
 }
 
 
-def _only_kind(query: str) -> Optional[str]:
+def _only_kind(query: str) -> str | None:
     """'papers' or 'trials' when the user restricted the turn to one kind of source."""
     for rx in _ONLY_RES:
         m = rx.search(query)
@@ -177,7 +197,7 @@ def _only_kind(query: str) -> Optional[str]:
 # Analyses a researcher can switch off in words ("No FDA sweep, simulation, omics, hypothesis generation or debate is
 # needed"). One detector serves every phase that would otherwise run them (hypothesis, debate escalation, the
 # openFDA candidate sweep, omics tools); the simulation ban above stays the authority on simulation itself.
-_EXCLUDABLE_MODULES: Dict[str, "re.Pattern[str]"] = {
+_EXCLUDABLE_MODULES: dict[str, re.Pattern[str]] = {
     "hypothesis": re.compile(r"\bhypothes(?:is|es|ize|ise)\b(?:[\s\-]+generation)?", re.I),
     "debate": re.compile(r"\b(?:multi[\s\-]?agent\s+)?(?:debates?|critics?)\b", re.I),
     "fda_sweep": re.compile(r"\b(?:open\s*fda|fda|regulatory)(?:\s+(?:sweeps?|searche?s?|lookups?|checks?|reviews?|candidates?))?\b", re.I),
@@ -203,17 +223,17 @@ _EXCLUSION_TRIGGERS = (
 )
 
 
-def _modules_in(text: str) -> Set[str]:
+def _modules_in(text: str) -> set[str]:
     return {name for name, rx in _EXCLUDABLE_MODULES.items() if rx.search(text)}
 
 
-def detect_excluded_modules(query: str) -> Set[str]:
+def detect_excluded_modules(query: str) -> set[str]:
     """Analyses the question explicitly excludes: hypothesis, debate, fda_sweep, omics, simulation, single_cell.
 
     "No ..." counts only as an exclusion list ("No X, Y or Z is needed", "No debate."): a sentence such as "there is
     no evidence that this hypothesis holds" or "no FDA approval for adagrasib" names no exclusion. Verbs of refusal
     ("do not generate hypotheses", "skip the debate", "without omics") exclude what immediately follows them."""
-    out: Set[str] = set()
+    out: set[str] = set()
     for rx, mode in _EXCLUSION_TRIGGERS:
         for m in rx.finditer(query or ""):
             span = m.group("span")
@@ -234,7 +254,7 @@ def detect_excluded_modules(query: str) -> Set[str]:
     return out
 
 
-def _simulation_ban(query: str) -> Optional[str]:
+def _simulation_ban(query: str) -> str | None:
     """The text of an operation ban ("do not run simulations"), ignoring bans on replacing results."""
     for rx in _BAN_RES:
         for m in rx.finditer(query):
@@ -274,7 +294,7 @@ def _suppression_reason(query: str) -> str:
     return "simulation excluded at your request"
 
 
-def extract_dataset_path(query: str) -> Optional[str]:
+def extract_dataset_path(query: str) -> str | None:
     """Extract a referenced single-cell dataset file (.h5ad / .zarr) the server is allowed to read."""
     m = re.search(r"[\w\-\./\\:]+\.(?:h5ad|zarr)\b", query, re.IGNORECASE)
     if not m:
@@ -352,7 +372,7 @@ class DurationParse(BaseModel):
     seconds: float = DEFAULT_SIM_DURATION_S
     explicit: bool = False
     text: str = ""
-    error_code: Optional[str] = None  # DURATION_INVALID|DURATION_UNIT_UNSUPPORTED|DURATION_CONFLICT
+    error_code: str | None = None  # DURATION_INVALID|DURATION_UNIT_UNSUPPORTED|DURATION_CONFLICT
     message: str = ""
 
 
@@ -364,7 +384,7 @@ def parse_duration(query: str) -> DurationParse:
             text=unsupported.group(0).strip(), error_code="DURATION_UNIT_UNSUPPORTED",
             message=f"'{unsupported.group(0).strip()}' uses an unsupported unit; use ms, s, min or h.",
         )
-    found: List[Tuple[float, str]] = []
+    found: list[tuple[float, str]] = []
     for m in _DURATION_RE.finditer(query):
         value, unit = (m.group("value"), m.group("unit")) if m.group("value") is not None else (m.group("value2"), m.group("unit2"))
         try:
@@ -403,7 +423,7 @@ def parse_duration_seconds(query: str) -> float:
     return parsed.seconds
 
 
-def extract_biomodel_id(query: str) -> Optional[str]:
+def extract_biomodel_id(query: str) -> str | None:
     bm_match = re.search(r"\b((?:BIOMD|MODEL)\d{10})\b", query, re.IGNORECASE)
     return bm_match.group(1).upper() if bm_match else None
 
@@ -436,15 +456,15 @@ _SPECIES_LIST_RE = re.compile(r"\bspecies\s*(?::|=)?\s*(?P<list>[A-Za-z][\w\-]*(
 _MAX_LITERAL_CHARS = 2000
 
 
-def _err(code: str, message: str) -> Dict[str, str]:
+def _err(code: str, message: str) -> dict[str, str]:
     return {"code": code, "message": message}
 
 
-def parse_parameter_overrides(query: str) -> Tuple[Dict[str, float], List[Dict[str, str]]]:
+def parse_parameter_overrides(query: str) -> tuple[dict[str, float], list[dict[str, str]]]:
     """Overrides from a dict literal ({'V1': 0.5}) or 'set V1 to 0.5'. Bounded ast.literal_eval, never eval;
     anything that is not a small {name: finite number} mapping is a validation error, never silently dropped."""
-    overrides: Dict[str, float] = {}
-    errors: List[Dict[str, str]] = []
+    overrides: dict[str, float] = {}
+    errors: list[dict[str, str]] = []
     for m in _DICT_LITERAL_RE.finditer(query):
         text = m.group(0)
         if len(text) > _MAX_LITERAL_CHARS:
@@ -483,7 +503,7 @@ def parse_parameter_overrides(query: str) -> Tuple[Dict[str, float], List[Dict[s
     return overrides, errors
 
 
-def _scan_parameter(query: str) -> Optional[str]:
+def _scan_parameter(query: str) -> str | None:
     for rx in _SCAN_PARAM_RES:
         m = rx.search(query)
         if m and m.group("name").lower() not in _RESERVED_PARAM_NAMES and not BIOMODEL_ID_RE.match(m.group("name").upper()):
@@ -491,10 +511,10 @@ def _scan_parameter(query: str) -> Optional[str]:
     return None
 
 
-def _target_species(query: str) -> List[str]:
+def _target_species(query: str) -> list[str]:
     if _ALL_SPECIES_RE.search(query):
         return ["*"]  # every species of the model
-    out: List[str] = []
+    out: list[str] = []
     for m in _SPECIES_LIST_RE.finditer(query):
         for tok in re.split(r"\s*(?:,|\band\b)\s*", m.group("list")):
             tok = tok.strip()
@@ -504,9 +524,9 @@ def _target_species(query: str) -> List[str]:
     return list(dict.fromkeys(out))[:16]
 
 
-def build_simulation_plan(query: str, *, biomodel_id: Optional[str], wants_steady_state: bool) -> SimulationPlan:
+def build_simulation_plan(query: str, *, biomodel_id: str | None, wants_steady_state: bool) -> SimulationPlan:
     """The exact simulation the user asked for. Problems become validation_errors; nothing is clamped."""
-    errors: List[Dict[str, str]] = []
+    errors: list[dict[str, str]] = []
     duration = parse_duration(query)
     if duration.error_code:
         errors.append(_err(duration.error_code, duration.message))
@@ -602,7 +622,7 @@ _PROCEDURAL_SPAN_RES = [
 ]
 
 
-def procedural_spans(query: str) -> List[Tuple[int, int]]:
+def procedural_spans(query: str) -> list[tuple[int, int]]:
     """Spans of simulation arguments (durations, override mappings, scan ranges, the scanned or overridden
     parameter's name), excluded from entity lookup."""
     spans = [m.span() for rx in _PROCEDURAL_SPAN_RES for m in rx.finditer(query)]
@@ -635,16 +655,16 @@ _INN_DRUG_RE = re.compile(
 
 @dataclass
 class Candidates:
-    terms: List[str] = field(default_factory=list)
-    gene_tokens: List[str] = field(default_factory=list)
-    drug_codes: List[str] = field(default_factory=list)
-    rsids: List[str] = field(default_factory=list)
-    transcripts_hgvs: List[str] = field(default_factory=list)
-    lexicon_genes: List[ResolvedEntity] = field(default_factory=list)
-    offline_drugs: List[ResolvedEntity] = field(default_factory=list)
+    terms: list[str] = field(default_factory=list)
+    gene_tokens: list[str] = field(default_factory=list)
+    drug_codes: list[str] = field(default_factory=list)
+    rsids: list[str] = field(default_factory=list)
+    transcripts_hgvs: list[str] = field(default_factory=list)
+    lexicon_genes: list[ResolvedEntity] = field(default_factory=list)
+    offline_drugs: list[ResolvedEntity] = field(default_factory=list)
 
 
-def _overlaps(a: Tuple[int, int], b: Tuple[int, int]) -> bool:
+def _overlaps(a: tuple[int, int], b: tuple[int, int]) -> bool:
     return a[0] < b[1] and b[0] < a[1]
 
 
@@ -652,7 +672,7 @@ def _is_variant_shaped(token: str) -> bool:
     return bool(_PROTEIN_CHANGE_RE.fullmatch(token))
 
 
-def _lexicon_entity(text: str, start: int, end: int, matched_on_override: Optional[str] = None) -> Optional[ResolvedEntity]:
+def _lexicon_entity(text: str, start: int, end: int, matched_on_override: str | None = None) -> ResolvedEntity | None:
     token = text[start:end]
     if not is_gene_mention(text, start, end):
         return None
@@ -672,7 +692,7 @@ def _lexicon_entity(text: str, start: int, end: int, matched_on_override: Option
     )
 
 
-def _ngrams(query: str) -> List[str]:
+def _ngrams(query: str) -> list[str]:
     # Typed identifiers (HGVS, rsIDs, accessions) are not names; blank them so their pieces ("NM") are not looked up.
     masked = query
     for s, e in sorted(procedural_spans(query), reverse=True):
@@ -680,11 +700,11 @@ def _ngrams(query: str) -> List[str]:
     masked = _RSID_RE.sub(" ", _HGVS_RE.sub(" ", masked))
     masked = re.sub(r"\b[A-Za-z]+_\w+|\b[A-Za-z]+:\d+\b", " ", masked)
     words = [w for w in _WORD_RE.findall(masked) if not _ACCESSION_RE.match(w.upper())]
-    out: List[str] = []
+    out: list[str] = []
     # Disease noun phrases go first so the MAX_TERMS cap never drops them on a long question: the expansions of
     # coordinated phrases ("ovarian and prostate cancers" -> "ovarian cancer", "prostate cancer"), then every
     # n-gram ending in a disease head word ("prostate cancers", "lung adenocarcinoma").
-    priority: List[str] = [term for term, _mention, _span in coordinated_disease_terms(masked)]
+    priority: list[str] = [term for term, _mention, _span in coordinated_disease_terms(masked)]
     for n in (1, 2, 3, 4):
         for i in range(len(words) - n + 1):
             gram = words[i:i + n]
@@ -708,7 +728,7 @@ def extract_candidates(query: str) -> Candidates:
     """Mentions worth resolving, plus the offline lexicon reading of the genes."""
     cands = Candidates()
     # Simulation arguments ("parameter scan of V1", "{'K1': 2}") are not gene or drug names.
-    variant_spans: List[Tuple[int, int]] = procedural_spans(query)
+    variant_spans: list[tuple[int, int]] = procedural_spans(query)
     for v in parse_variants(query):
         if v.variant_kind in ("protein_change", "hgvs", "rsid"):
             variant_spans.append(v.span)
@@ -716,10 +736,10 @@ def extract_candidates(query: str) -> Candidates:
             # The words after the gene ("exon 20 ins") are not names: "ins" is not INS.
             variant_spans.append((v.span[0] + v.mention.lower().find("exon"), v.span[1]))
 
-    lexicon: List[ResolvedEntity] = []
+    lexicon: list[ResolvedEntity] = []
     for m in _LEXICON_WORD_RE.finditer(query):
         token = m.group(1)
-        spans: List[Tuple[int, int]] = [(m.start(1), m.end(1))]
+        spans: list[tuple[int, int]] = [(m.start(1), m.end(1))]
         if "-" in token and lookup_symbol(token) is None and family_members(token) is None:
             head, tail = token.split("-", 1)
             spans = [(m.start(1), m.start(1) + len(head)), (m.end(1) - len(tail), m.end(1))]
@@ -731,7 +751,7 @@ def extract_candidates(query: str) -> Candidates:
                 lexicon.append(ent)
     cands.lexicon_genes = lexicon
 
-    gene_tokens: List[str] = [g.mention for g in lexicon]
+    gene_tokens: list[str] = [g.mention for g in lexicon]
     # "homologous recombination repair-deficient (HRD)": an acronym the question defines as a biomarker or
     # endpoint is not looked up as a gene (HGNC lists HRD as an alias of TBCE).
     concept_acronyms = {k for k, kind in defined_acronyms(query).items() if kind == "concept"}
@@ -803,6 +823,7 @@ _P3_RE = re.compile(r"\bp\.\(?([A-Z][a-z]{2})(\d{1,4})([A-Z][a-z]{2}|\*|fs|del|d
 _P1_RE = re.compile(rf"\bp\.\(?([{_AA1}])(\d{{1,4}})([{_AA1}*X]|fs|del|dup)\)?(?![A-Za-z0-9])")
 _RSID_RE = re.compile(r"\brs\d{3,12}\b", re.I)
 _HGVS_RE = re.compile(r"\bN[MCGRP]_\d+(?:\.\d+)?:[cgnpm]\.[A-Za-z0-9_>*+\-()]+[A-Za-z0-9)*>]")
+_CDNA_RE = re.compile(r"\b(?:N[MCGRP]_\d+(?:\.\d+)?(?:\([A-Za-z0-9\-]+\))?:)?(c\.[0-9_+\-*]{1,24}(?:[ACGT]>[ACGT]|del[ACGT]*|dup[ACGT]*|ins[ACGT]+|delins[ACGT]+))\b")
 _FUSION_PARTNERS = frozenset(
     "ALK ROS1 RET NTRK1 NTRK2 NTRK3 ABL1 ABL BRAF FGFR1 FGFR2 FGFR3 ERG ETV1 ETV4 ETV6 NRG1 MET PDGFRA PDGFRB JAK2 RARA "
     "KMT2A MLL RUNX1 RUNX1T1 BCR EWSR1 FLI1 PML NUTM1 MYB NFIB TFE3 PAX3 PAX7 PAX8 FOXO1 SS18 SSX1 SSX2 CIC DUX4 TMPRSS2".split()
@@ -815,9 +836,9 @@ _EXON_RE = re.compile(
 )
 
 
-def parse_variants(query: str) -> List[ResolvedEntity]:
+def parse_variants(query: str) -> list[ResolvedEntity]:
     """Variant mentions typed in the question. They are unvalidated until a resolver confirms them."""
-    found: List[ResolvedEntity] = []
+    found: list[ResolvedEntity] = []
 
     def add(ent: ResolvedEntity) -> None:
         if not any(_overlaps(ent.span, f.span) for f in found):
@@ -825,6 +846,8 @@ def parse_variants(query: str) -> List[ResolvedEntity]:
 
     for m in _HGVS_RE.finditer(query):
         add(ResolvedEntity(type="variant", mention=m.group(0), span=m.span(), label=m.group(0), variant_kind="hgvs"))
+    for m in _CDNA_RE.finditer(query):
+        add(ResolvedEntity(type="variant", mention=m.group(1), span=m.span(1), label=m.group(1), variant_kind="hgvs"))
     for m in _RSID_RE.finditer(query):
         rs = m.group(0).lower()
         add(ResolvedEntity(type="variant", mention=m.group(0), span=m.span(), label=rs, ids={"rsid": rs}, variant_kind="rsid"))
@@ -863,7 +886,7 @@ def parse_variants(query: str) -> List[ResolvedEntity]:
     return sorted(found, key=lambda v: v.span[0])
 
 
-def attach_variant_genes(query: str, variants: List[ResolvedEntity], genes: Sequence[ResolvedEntity]) -> None:
+def attach_variant_genes(query: str, variants: list[ResolvedEntity], genes: Sequence[ResolvedEntity]) -> None:
     """Attach the gene written right before each variant ('KRAS G12C', 'EGFR exon 19 deletion'), or the only gene."""
     usable = [g for g in genes if not g.ambiguous_with]
     for v in variants:
@@ -908,7 +931,7 @@ def _normalized_gene(e: ResolvedEntity) -> bool:
     return e.type == "gene" and not e.ambiguous_with and e.source in ("HGNC", "OpenTargets", "local_lexicon")
 
 
-def choose_primary_gene(query: str, genes: Sequence[ResolvedEntity], variants: Sequence[ResolvedEntity]) -> Optional[ResolvedEntity]:
+def choose_primary_gene(query: str, genes: Sequence[ResolvedEntity], variants: Sequence[ResolvedEntity]) -> ResolvedEntity | None:
     """A gene next to an intervention word first, then one carrying a variant, then the first mention."""
     usable = sorted((g for g in genes if _normalized_gene(g)), key=lambda g: (g.span == (0, 0), g.span[0]))
     if not usable:
@@ -936,7 +959,7 @@ def choose_primary_gene(query: str, genes: Sequence[ResolvedEntity], variants: S
     return usable[0]
 
 
-def _primary_variant(primary: ResolvedEntity, variants: Sequence[ResolvedEntity]) -> Optional[ResolvedEntity]:
+def _primary_variant(primary: ResolvedEntity, variants: Sequence[ResolvedEntity]) -> ResolvedEntity | None:
     return next((v for v in variants if v.gene == primary.label and v.protein_change), None)
 
 
@@ -949,8 +972,17 @@ def _primary_target_string(primary: ResolvedEntity, variants: Sequence[ResolvedE
 # Intents
 # =============================================================================
 
-_INTENT_PATTERNS: Dict[str, re.Pattern] = {
-    "literature": re.compile(r"\b(papers?|literature|articles?|publications?|reviews?|studies|study|evidence|pmids?|cite|citations?)\b", re.I),
+_INTENT_PATTERNS: dict[str, re.Pattern] = {
+    "derive": re.compile(r"\b(derive|derivation|show\s+that|from\s+first\s+principles|starting\s+from)\b", re.I),
+    "solve": re.compile(r"\b(solve|find\s+the\s+(?:roots?|solutions?|eigenvalues?|general\s+solution)|integrate|differentiate|evaluate)\b", re.I),
+    "prove": re.compile(r"\b(prove|proof|disprove|counterexample|is\s+it\s+true\s+that|lemma|theorem|corollary)\b", re.I),
+    "compute": re.compile(r"\b(calculate|compute|numerical\s+value|how\s+much|what\s+is\s+the\s+value|convert|in\s+si\s+units)\b", re.I),
+    "simulate": re.compile(r"\b(simulate|time[\s\-]*course|trajectory|phase\s+portrait|bifurcation|integrate\s+from|ivp|bvp|fem|fvm)\b", re.I),
+    "design": re.compile(r"\b(design|size|select\s+a|safety\s+factor|buckling|stress|deflection|transfer\s+function|bode|pid|heat\s+exchanger)\b", re.I),
+    "estimate": re.compile(r"\b(estimate|order\s+of\s+magnitude|fermi|back\s+of\s+the\s+envelope|approximate|scaling)\b", re.I),
+    "explain": re.compile(r"\b(explain|what\s+is|intuition|physical\s+meaning|why\s+does|compare)\b", re.I),
+    "literature": re.compile(r"\b(papers?|literature|articles?|publications?|reviews?|studies|study|evidence|pmids?|arxiv|doi|cite|citations?|survey|references?)\b", re.I),
+    "data_analysis": re.compile(r"\b(fit|regression|spectrum|fft|psd|dataset|csv|hdf5|parquet|uncertainty)\b", re.I),
     "clinical_trials": re.compile(r"\b(trials?|phase\s*(?:[1-4]|i{1,3}v?|iv)\b|nct\d{8}|enrol\w*|cohorts?|registry)", re.I),
     "drug_mechanism": re.compile(r"\b(mechanism\s+of\s+action|moa|inhibitors?|agonists?|antagonists?|drugs?|compounds?|binding|ic50|selectivity)\b", re.I),
     "variant_interpretation": re.compile(r"\b(variants?|mutations?|mutant|pathogenic\w*|vus|clinvar|germline|somatic|allele\s+frequency)\b", re.I),
@@ -990,7 +1022,7 @@ def _resolver_enabled(registry: Any) -> bool:
         return False
 
 
-async def _resolve_live(registry: Any, query: str, cands: Candidates, budget_s: float) -> Optional[Dict[str, Any]]:
+async def _resolve_live(registry: Any, query: str, cands: Candidates, budget_s: float) -> dict[str, Any] | None:
     try:
         res = await asyncio.wait_for(
             registry.execute(
@@ -1007,7 +1039,7 @@ async def _resolve_live(registry: Any, query: str, cands: Candidates, budget_s: 
             ),
             timeout=max(0.01, budget_s),
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.info("Entity resolution exceeded the %.2fs budget; using the offline lexicon", budget_s)
         return None
     except Exception as exc:  # noqa: BLE001
@@ -1018,8 +1050,8 @@ async def _resolve_live(registry: Any, query: str, cands: Candidates, budget_s: 
     return res.data
 
 
-def _entities_from(data: Dict[str, Any], query: str) -> List[ResolvedEntity]:
-    out: List[ResolvedEntity] = []
+def _entities_from(data: dict[str, Any], query: str) -> list[ResolvedEntity]:
+    out: list[ResolvedEntity] = []
     for raw in data.get("entities") or []:
         try:
             ent = ResolvedEntity.model_validate(raw)
@@ -1044,19 +1076,21 @@ def planner_mode() -> str:
 SCOPES = ("research", "conversational", "unclear")
 
 _PLANNER_SYSTEM = (
-    "You read one message sent to a biomedical research assistant and return a routing plan as JSON only, with no prose:\n"
-    '{"scope": "research|conversational|unclear", "intents": [...], "entities": [{"text": "...", "type": "gene|drug|disease"}], '
+    "You read one message sent to Tribos, a scientific research assistant for mathematics, physics, engineering, "
+    "and computational science, and return a routing plan as JSON only, with no prose:\n"
+    '{"scope": "research|conversational|unclear", "intents": [...], '
+    '"entities": [{"text": "...", "type": "concept|equation|quantity|constant|material|system|gene|drug|disease"}], '
     '"question_type": "...", "concepts": [["central topic", "synonym"], ["second concept", "synonym"]], "web_query": "..."}\n'
-    "scope: research when the message asks about any biomedical or scientific topic (a gene, drug, disease, pathway, "
-    "method, dataset or field), even a broad one; conversational for a greeting, thanks, farewell, small talk or a "
-    "question about the assistant itself; unclear for gibberish, a typo-only message, or words with no evident "
-    "biomedical meaning.\n"
+    "scope: research when the message asks about any mathematical, physical, engineering, computational, or scientific "
+    "topic (a theorem, equation, physical system, material, numerical method, dataset, or field), even a broad one; "
+    "conversational for a greeting, thanks, farewell, small talk, or a question about the assistant itself; "
+    "unclear for gibberish, a typo-only message, or words with no evident scientific meaning.\n"
     f"Allowed intents: {', '.join(INTENTS)}.\n"
     f"question_type: one of {', '.join(QUESTION_TYPES)}.\n"
-    "concepts: the 1-3 biomedical concepts the question is about, central topic first, for a literature search. Each "
-    'group lists the term as written plus up to 3 standard synonyms or abbreviations (["MRSA", "methicillin-resistant '
-    'Staphylococcus aureus"]). Take concepts only from the question: never add a candidate answer, drug or gene the '
-    "question does not name, and never include question words or the kind of evidence wanted (treatment, criteria).\n"
+    "concepts: the 1-3 technical concepts the question is about, central topic first, for a scholarly search. Each "
+    'group lists the term as written plus up to 3 standard synonyms or abbreviations (["Navier-Stokes equations", '
+    '"incompressible Navier-Stokes"]). Take concepts only from the question: never add a candidate answer the '
+    "question does not name.\n"
     "web_query: a concise search-engine query for the question.\n"
     "Copy each entity text exactly as it is written in the question. Never output identifiers, accessions or file paths."
 )
@@ -1064,18 +1098,31 @@ _PLANNER_SYSTEM = (
 # Messages that are clearly not research questions; used without a planner model and to accept its verdict
 # in a thread that already has history (where a vague message is usually a follow-up).
 _CONVERSATIONAL_RE = re.compile(
-    r"^(?:(?:and\s+)?(?:hi|hello|hey|who\s+are\s+you|what\s+can\s+you\s+do(?:[\s\w]*)|what\s+are\s+your\s+(?:official\s+)?(?:agent\s+)?tools|"
+    r"^(?:(?:and\s+)?(?:hi|hello|hey|who\s+are\s+you|what\s+can\s+you\s+(?:do|help(?:\s+me)?(?:\s+with)?)(?:[\s\w]*)|what\s+are\s+your\s+(?:official\s+)?(?:agent\s+)?tools|"
     r"ok(?:ay)?|cool|great|nice|perfect|awesome|got\s+it|thanks?(?:\s+you)?|thx|ty|cheers|"
     r"(?:good)?\s*bye|see\s+(?:you|ya)|good\s*night|lol|haha+|test(?:ing)?|how\s+are\s+you(?:\s+doing)?)"
     r"(?:\s+(?:so\s+much|a\s+lot|again|very\s+much|for\s+(?:the|your)\s+help|bro|man|mate|buddy|for\s+mee?))*[\s\.\?!,~:)]*)+$",
     re.I,
 )
 _BIOMED_VOCAB_RE = re.compile(
-    r"\b(?:dna|rna|mrna|sirna|crispr|pcr|genes?|genom\w*|protein\w*|cells?|cellular|tumou?r\w*|cancer\w*|oncolog\w*|"
+    r"\b(?:theorem\w*|lemma\w*|corollar\w*|proof\w*|prove|manifold\w*|hilbert|banach|sobolev|lie\s+group\w*|"
+    r"eigenval\w*|eigenvec\w*|spectrum|spectral|fourier|laplace|greens?\s+function|dirac|schr[oö]dinger|"
+    r"navier[\s\-]stokes|maxwell\w*|boltzmann|hamilton\w*|lagrang\w*|noether|poisson|helmholtz|wave\s+equation|"
+    r"heat\s+equation|odes?|pdes?|sdes?|integrals?|derivatives?|differenti\w*|converg\w*|diverg\w*|asymptot\w*|"
+    r"perturb\w*|bifurcat\w*|lyapunov|lorenz|van\s+der\s+pol|duffing|pendulum|oscillator\w*|quantum|relativ\w*|"
+    r"thermodynam\w*|entrop\w*|enthalp\w*|viscosit\w*|reynolds|mach|prandtl|nusselt|rayleigh|turbulen\w*|"
+    r"elastic\w*|plastic\w*|stress|strain|buckl\w*|cantilever|beam\w*|truss\w*|torsion|fatigue|fracture|"
+    r"kalman|nyquist|bode|pid|transfer\s+function|controllab\w*|observab\w*|convex|simplex|gradient\s+descent|"
+    r"runge[\s\-]kutta|finite\s+element\w*|finite\s+volume\w*|monte\s+carlo|markov|homolog\w*|cohomolog\w*|"
+    r"topolog\w*|homotop\w*|galois|riemann\w*|cauchy|gauss\w*|euler|bernoulli|bessel|legendre|hermite|chebyshev|"
+    r"laguerre|hypergeometric|zeta|prime\w*|diophantine|modular|elliptic|stochastic|ito|martingale|brownian|"
+    r"carnot|otto|rankine|brayton|stefan[\s\-]boltzmann|planck\w*|compton|de\s+broglie|bohr|rutherford|fermi|"
+    r"bose[\s\-]einstein|pauli|heisenberg|klein[\s\-]gordon|yukawa|feynman|casimir|lorentz|minkowski|schwarzschild|"
+    r"kerr|friedmann|christoffel|ricci|bianchi|geodesic\w*|curvatur\w*|tensor\w*|spinor\w*|symplectic|"
+    r"dna|rna|mrna|sirna|crispr|pcr|genes?|genom\w*|protein\w*|cells?|cellular|tumou?r\w*|cancer\w*|oncolog\w*|"
     r"diseases?|drugs?|therap\w*|pathways?|enzym\w*|receptors?|antibod\w*|vaccin\w*|vir(?:us|al)\w*|bacteri\w*|"
-    r"immun\w*|mutat\w*|clinical|patients?|dos(?:e|ing)\w*|syndrom\w*|infect\w*|metabol\w*|kinases?|inhibit\w*|"
-    r"biomarkers?|transcript\w*|express\w*|signal\w*|apoptos\w*|autophag\w*|neuro\w*|cardi\w*|hepat\w*|renal|"
-    r"diabet\w*|alzheimer\w*|parkinson\w*|covid\w*|sepsis|inflamm\w*)\b",
+    r"immun\w*|mutat\w*|clinical|patients?|dos(?:e|ing)\w*|syndrom\w*|infect\w*|metabol\w*|kinases?|inhibit\w*)\b"
+    r"|\\(?:frac|int|sum|prod|sqrt|partial|nabla|infty|alpha|beta|gamma|delta|epsilon|lambda|omega|sigma|theta|phi|psi)\b",
     re.I,
 )
 
@@ -1091,7 +1138,7 @@ def is_small_talk(query: str) -> bool:
     return bool(_CONVERSATIONAL_RE.match(query.strip()))
 
 
-def heuristic_scope(query: str, cands: Candidates, intents: Set[str]) -> str:
+def heuristic_scope(query: str, cands: Candidates, intents: set[str]) -> str:
     """Scope without a planner model. Conservative: anything that might be a research question is research."""
     if is_small_talk(query):
         return "conversational"
@@ -1114,7 +1161,7 @@ def _strip_think(text: str) -> str:
     return re.sub(r"<think>.*$", "", text, flags=re.S | re.I)
 
 
-def _first_json_object(text: str) -> Optional[Dict[str, Any]]:
+def _first_json_object(text: str) -> dict[str, Any] | None:
     decoder = json.JSONDecoder()
     for m in re.finditer(r"\{", text):
         try:
@@ -1136,12 +1183,12 @@ def _content_text(content: Any) -> str:
 
 async def plan_with_llm(
     query: str,
-    llm_factory: Optional[Callable[..., Any]],
+    llm_factory: Callable[..., Any] | None,
     *,
     model_name: str,
-    api_key: Optional[str],
+    api_key: str | None,
     timeout_s: float,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Ask the model for intents and mentions. Returns the sanitized plan, or None when the model is unavailable."""
     if llm_factory is None:
         return None
@@ -1158,7 +1205,7 @@ async def plan_with_llm(
 
         call_coro = cast(Awaitable[Any], ainvoke([SystemMessage(content=_PLANNER_SYSTEM), HumanMessage(content=query)]))
         reply = await asyncio.wait_for(call_coro, timeout=max(0.01, timeout_s))
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.info("Planner model exceeded %.2fs", timeout_s)
         return None
     except Exception as exc:  # noqa: BLE001
@@ -1168,12 +1215,17 @@ async def plan_with_llm(
     if obj is None:
         return None
     intents = [i for i in (obj.get("intents") or []) if isinstance(i, str) and i in INTENTS]
-    mentions: List[Tuple[str, str]] = []
+    mentions: list[tuple[str, str]] = []
     for item in (obj.get("entities") or [])[:8]:
         if not isinstance(item, dict):
             continue
         text, kind = item.get("text"), item.get("type")
-        if isinstance(text, str) and kind in ("gene", "drug", "disease") and text.strip() and text in query:
+        if (
+            isinstance(text, str)
+            and kind in ("concept", "equation", "quantity", "constant", "material", "system", "gene", "drug", "disease")
+            and text.strip()
+            and text in query
+        ):
             mentions.append((text, kind))
     scope = obj.get("scope")
     return {
@@ -1185,8 +1237,8 @@ async def plan_with_llm(
     }
 
 
-def _llm_entities(query: str, mentions: Sequence[Tuple[str, str]], existing: Sequence[ResolvedEntity]) -> List[ResolvedEntity]:
-    out: List[ResolvedEntity] = []
+def _llm_entities(query: str, mentions: Sequence[tuple[str, str]], existing: Sequence[ResolvedEntity]) -> list[ResolvedEntity]:
+    out: list[ResolvedEntity] = []
     procedural = procedural_spans(query)
     for text, kind in mentions:
         idx = query.find(text)
@@ -1212,7 +1264,7 @@ def _llm_entities(query: str, mentions: Sequence[Tuple[str, str]], existing: Seq
 def decide_builtin_sources(ctx: QueryContext) -> None:
     """Record run/skip decisions (with reasons) for the built-in agents."""
     if ctx.scope != "research":
-        for name in ("synapta", "lithoscribe", "websurfer", "vivarix", "lumicell"):
+        for name in ("synapta", "lithoscribe", "websurfer", "vivarix", "lumicell", "axiom", "archivon", "dynamis", "calcula", "physis"):
             ctx.decisions[name] = SourceDecision(run=False, reason="not a research question")
         return
     if not ctx.primary_target:
@@ -1223,21 +1275,50 @@ def decide_builtin_sources(ctx: QueryContext) -> None:
     else:
         ctx.decisions["synapta"] = SourceDecision(run=True, reason="")
     ctx.decisions["lithoscribe"] = SourceDecision(run=True, reason="")
+    ctx.decisions["archivon"] = SourceDecision(run=True, reason="")
     ctx.decisions["websurfer"] = SourceDecision(
         run=ctx.enable_web_search, reason="" if ctx.enable_web_search else "web search off"
+    )
+    wants_axiom = bool(
+        {"derive", "solve", "prove"} & set(ctx.intents)
+        or ctx.equations
+        or ctx.concepts
+        or re.search(r"\\(?:frac|int|sum|prod|sqrt|partial|nabla)|=", ctx.clean_query)
+    )
+    ctx.decisions["axiom"] = SourceDecision(
+        run=wants_axiom, reason="symbolic/formal reasoning requested" if wants_axiom else "no symbolic derivation requested"
+    )
+    wants_calcula = bool(
+        {"compute", "estimate", "data_analysis"} & set(ctx.intents)
+        or ctx.quantities
+        or ctx.constants
+        or ctx.dataset_attachment is not None
+    )
+    ctx.decisions["calcula"] = SourceDecision(
+        run=wants_calcula, reason="numerical computation requested" if wants_calcula else "no numerical computation requested"
+    )
+    wants_physis = bool(
+        {"design"} & set(ctx.intents)
+        or ctx.materials
+        or ctx.constants
+    )
+    ctx.decisions["physis"] = SourceDecision(
+        run=wants_physis, reason="physical/engineering domain analysis requested" if wants_physis else "no domain analysis requested"
     )
     plan = ctx.simulation_plan
     if ctx.is_simulation_intent and plan is not None and plan.validation_errors:
         # Rejected before any computation: the orchestrator reports plan.validation_errors, never a substitute run.
-        ctx.decisions["vivarix"] = SourceDecision(
-            run=False, reason="request rejected: " + "; ".join(e.get("message", "") for e in plan.validation_errors[:2])
-        )
+        reason = "request rejected: " + "; ".join(e.get("message", "") for e in plan.validation_errors[:2])
+        ctx.decisions["vivarix"] = SourceDecision(run=False, reason=reason)
+        ctx.decisions["dynamis"] = SourceDecision(run=False, reason=reason)
     elif ctx.is_simulation_intent:
-        ctx.decisions["vivarix"] = SourceDecision(run=True, reason=_simulation_reason(plan))
+        reason = _simulation_reason(plan)
+        ctx.decisions["vivarix"] = SourceDecision(run=True, reason=reason)
+        ctx.decisions["dynamis"] = SourceDecision(run=True, reason=reason)
     else:
-        ctx.decisions["vivarix"] = SourceDecision(
-            run=False, reason=_suppression_reason(ctx.clean_query) if ctx.suppress_simulation else "no simulation requested"
-        )
+        reason = _suppression_reason(ctx.clean_query) if ctx.suppress_simulation else "no simulation requested"
+        ctx.decisions["vivarix"] = SourceDecision(run=False, reason=reason)
+        ctx.decisions["dynamis"] = SourceDecision(run=False, reason=reason)
     if ctx.single_cell_dataset_path and not ctx.extras.get("single_cell_forbidden"):
         ctx.decisions["lumicell"] = SourceDecision(run=True, reason="")
     elif ctx.extras.get("single_cell_forbidden"):
@@ -1250,7 +1331,7 @@ def decide_builtin_sources(ctx: QueryContext) -> None:
         ctx.decisions[name] = ctx.gate_decision(name, ctx.decisions[name])
 
 
-def _simulation_reason(plan: Optional[SimulationPlan]) -> str:
+def _simulation_reason(plan: SimulationPlan | None) -> str:
     if plan is None:
         return ""
     if plan.action == "parameter_scan":
@@ -1259,7 +1340,7 @@ def _simulation_reason(plan: Optional[SimulationPlan]) -> str:
 
 
 # The sources a "papers only" or "trials only" turn may run.
-_ALLOWLISTS = {"papers": {"lithoscribe"}, "trials": {"clinical_trials", "lithoscribe"}}
+_ALLOWLISTS = {"papers": {"lithoscribe", "archivon"}, "trials": {"clinical_trials", "lithoscribe", "archivon"}}
 
 
 def apply_simulation_request(ctx: QueryContext, query: str, *, model_known: bool = False) -> None:
@@ -1290,7 +1371,7 @@ def apply_simulation_request(ctx: QueryContext, query: str, *, model_known: bool
         ctx.extras["single_cell_forbidden"] = True
 
 
-def apply_standing_instructions(ctx: QueryContext, query: str, instructions: Optional[List[str]]) -> None:
+def apply_standing_instructions(ctx: QueryContext, query: str, instructions: list[str] | None) -> None:
     """Apply the routing constraints of persisted, explicitly scoped instructions to this turn (ORC-011).
 
     "From now on, papers only." given in an earlier turn restricts the sources of later turns, as typed in the
@@ -1303,7 +1384,7 @@ def apply_standing_instructions(ctx: QueryContext, query: str, instructions: Opt
         return
     current = detect_simulation_constraints(query)
     current_only = _only_kind(query)
-    applied: List[Dict[str, str]] = []
+    applied: list[dict[str, str]] = []
     for text in texts:
         kind = _only_kind(text)
         if kind is not None and current_only is None and ctx.source_allowlist is None and not current.simulation_requested:
@@ -1330,7 +1411,7 @@ def apply_standing_instructions(ctx: QueryContext, query: str, instructions: Opt
         ctx.extras["standing_constraints"] = applied
 
 
-def _merge(primary: List[ResolvedEntity], fallback: List[ResolvedEntity]) -> List[ResolvedEntity]:
+def _merge(primary: list[ResolvedEntity], fallback: list[ResolvedEntity]) -> list[ResolvedEntity]:
     out = list(primary)
     for e in fallback:
         if not any(_overlaps(e.span, p.span) for p in out if p.span != (0, 0)):
@@ -1338,11 +1419,54 @@ def _merge(primary: List[ResolvedEntity], fallback: List[ResolvedEntity]) -> Lis
     return out
 
 
-def _offline_diseases(query: str) -> List[ResolvedEntity]:
+def _offline_diseases(query: str) -> list[ResolvedEntity]:
     return [
         ResolvedEntity(type="disease", mention=m, span=span, label=label, source="local_lexicon", matched_on="name", validated=False)
         for m, label, span in find_offline_diseases(query)
     ]
+
+
+def _offline_stem_entities(query: str, covered_spans: Sequence[tuple[int, int]]) -> list[ResolvedEntity]:
+    """Offline STEM entities (equations, systems, materials, constants, concepts, quantities) from entity_lexicon."""
+    out: list[ResolvedEntity] = []
+    taken: list[tuple[int, int]] = [s for s in covered_spans if s != (0, 0)]
+
+    def push(kind: EntityType, items: Sequence[Any], source: str) -> None:
+        for item in items:
+            if isinstance(item, dict):
+                mention = str(item.get("mention") or item.get("canonical") or item.get("key") or "")
+                label = str(item.get("canonical") or item.get("key") or mention)
+                span = item.get("span")
+                if span is None:
+                    idx = query.lower().find(mention.lower())
+                    span = (idx, idx + len(mention)) if idx >= 0 else (0, len(query))
+            elif isinstance(item, (list, tuple)) and len(item) == 3:
+                mention, label, span = item
+            else:
+                continue
+
+            if any(_overlaps(span, s) for s in taken):
+                continue
+            taken.append(span)
+            out.append(
+                ResolvedEntity(
+                    type=kind,
+                    mention=mention,
+                    span=span,
+                    label=label,
+                    source=source,
+                    matched_on="name",
+                    validated=True,
+                )
+            )
+
+    push("equation", find_offline_equations(query), "local_lexicon")
+    push("system", find_offline_systems(query), "local_lexicon")
+    push("material", find_offline_materials(query), "local_lexicon")
+    push("constant", find_offline_constants(query), "codata_2022")
+    push("concept", find_offline_concepts(query), "local_lexicon")
+    push("quantity", find_offline_quantities(query), "pint")
+    return sorted(out, key=lambda e: e.span[0])
 
 
 # A disease term that names a whole class ("cancer", "solid tumors") rather than a disease. Kept when it is the only
@@ -1362,12 +1486,12 @@ _ONCO_WORD_RE = re.compile(
 )
 
 
-def _disease_phrase(text: Optional[str]) -> str:
-    words: List[str] = re.findall(r"[a-z0-9]+", (text or "").lower())
+def _disease_phrase(text: str | None) -> str:
+    words: list[str] = re.findall(r"[a-z0-9]+", (text or "").lower())
     return " ".join(words)
 
 
-def _generic_family(e: ResolvedEntity) -> Optional[str]:
+def _generic_family(e: ResolvedEntity) -> str | None:
     """'onco' or 'any' when every name of the entity (mention and label) is a class term, else None."""
     names = [p for p in (_disease_phrase(e.mention), _disease_phrase(e.label)) if p]
     if not names:
@@ -1379,27 +1503,27 @@ def _generic_family(e: ResolvedEntity) -> Optional[str]:
     return None
 
 
-def drop_generic_diseases(diseases: List[ResolvedEntity]) -> List[ResolvedEntity]:
+def drop_generic_diseases(diseases: list[ResolvedEntity]) -> list[ResolvedEntity]:
     """The diseases without a class term ("cancer", "tumor", "disease") when a specific disease of its family is also
     named ("ovarian cancer" or "melanoma" for "cancer"; any specific disease for "disease"). A lone class term stays."""
     families = [_generic_family(e) for e in diseases]
-    specific = [e for e, fam in zip(diseases, families) if fam is None]
+    specific = [e for e, fam in zip(diseases, families, strict=False) if fam is None]
     if not specific:
         return list(diseases)
     onco_specific = any(_ONCO_WORD_RE.search(f"{e.mention} {e.label}") for e in specific)
-    return [e for e, fam in zip(diseases, families) if fam is None or (fam == "onco" and not onco_specific)]
+    return [e for e, fam in zip(diseases, families, strict=False) if fam is None or (fam == "onco" and not onco_specific)]
 
 
-def drop_generic_disease_names(names: List[str]) -> List[str]:
+def drop_generic_disease_names(names: list[str]) -> list[str]:
     """drop_generic_diseases for plain condition strings (['cancer', 'ovarian cancer'] -> ['ovarian cancer'])."""
     ents = [ResolvedEntity(type="disease", mention=n, label=n) for n in names]
     kept = {id(e) for e in drop_generic_diseases(ents)}
-    return [n for n, e in zip(names, ents) if id(e) in kept]
+    return [n for n, e in zip(names, ents, strict=False) if id(e) in kept]
 
 
 def _apply_resolution(
-    ctx: QueryContext, query: str, cands: Candidates, variants: List[ResolvedEntity], data: Optional[Dict[str, Any]]
-) -> Tuple[List[ResolvedEntity], List[ResolvedEntity], List[ResolvedEntity]]:
+    ctx: QueryContext, query: str, cands: Candidates, variants: list[ResolvedEntity], data: dict[str, Any] | None
+) -> tuple[list[ResolvedEntity], list[ResolvedEntity], list[ResolvedEntity]]:
     """Return (genes, drugs, diseases) and enrich variants in place."""
     if data is None:
         return list(cands.lexicon_genes), list(cands.offline_drugs), _offline_diseases(query)
@@ -1434,7 +1558,7 @@ def _apply_resolution(
     return genes, drugs, diseases
 
 
-def _fold_defined_acronyms(query: str, entities: List[ResolvedEntity]) -> List[ResolvedEntity]:
+def _fold_defined_acronyms(query: str, entities: list[ResolvedEntity]) -> list[ResolvedEntity]:
     """An acronym the question defines in parentheses right after a resolved name ("idiopathic pulmonary fibrosis
     (IPF)") is that entity's alias, not a separate entity looked up on its own (IPF -> "platelet quantity")."""
     out = list(entities)
@@ -1454,15 +1578,15 @@ def _fold_defined_acronyms(query: str, entities: List[ResolvedEntity]) -> List[R
     return out
 
 
-def _mention_span(query: str, mention: str) -> Tuple[int, int]:
+def _mention_span(query: str, mention: str) -> tuple[int, int]:
     start = query.lower().find(mention.lower())
     return (start, start + len(mention)) if start >= 0 else (0, 0)
 
 
-def _parser_variants(query: str) -> List[ResolvedEntity]:
+def _parser_variants(query: str) -> list[ResolvedEntity]:
     """Variants from the variant-intelligence parser (3-letter, cDNA and VCV forms), unvalidated."""
-    mentions: List[Any] = []
-    out: List[ResolvedEntity] = []
+    mentions: list[Any] = []
+    out: list[ResolvedEntity] = []
     for m in mentions:
         if m.protein_change:
             kind, label = "protein_change", m.protein_change
@@ -1487,9 +1611,22 @@ def _parser_variants(query: str) -> List[ResolvedEntity]:
     return out
 
 
-def _parser_drugs(query: str) -> List[ResolvedEntity]:
+_CURATED_DRUGS = frozenset({
+    "tagrisso", "keytruda", "opdivo", "herceptin", "avastin", "humira", "lumakras",
+    "krazati", "tarceva", "iressa", "xalkori", "gleevec", "glivec", "aspirin", "metformin",
+    "pembrolizumab", "osimertinib", "sotorasib", "adagrasib"
+})
+_CURATED_DRUG_RE = re.compile(r"\b(" + "|".join(sorted(_CURATED_DRUGS, key=len, reverse=True)) + r")\b", re.IGNORECASE)
+
+
+def _parser_drugs(query: str) -> list[ResolvedEntity]:
     """Drug names from INN stems and the curated list, unvalidated; ChEMBL resolves them exactly later."""
-    mentions: List[str] = []
+    mentions: list[str] = []
+    for m in _CURATED_DRUG_RE.finditer(query):
+        mentions.append(m.group(1).lower())
+    for m in _INN_DRUG_RE.finditer(query):
+        mentions.append(m.group(1).lower())
+    mentions = list(dict.fromkeys(mentions))
     return [
         ResolvedEntity(type="drug", mention=m, span=_mention_span(query, m), label=m, matched_on="drug_name_pattern")
         for m in mentions
@@ -1502,16 +1639,16 @@ async def build_query_context(
     clean_query: str,
     registry: Any,
     enable_web_search: bool,
-    attachments: List[DatasetRef],
-    attachment_errors: List[str],
+    attachments: list[DatasetRef],
+    attachment_errors: list[str],
     user_id: str,
     thread_id: str,
     model_name: str,
-    api_key: Optional[str],
-    llm_factory: Optional[Callable[..., Any]] = None,
+    api_key: str | None,
+    llm_factory: Callable[..., Any] | None = None,
     budget_s: float = 3.5,
-    prior_subject: Optional[Dict[str, str]] = None,
-    standing_instructions: Optional[List[str]] = None,
+    prior_subject: dict[str, str] | None = None,
+    standing_instructions: list[str] | None = None,
 ) -> QueryContext:
     """Parse and normalize the question into a QueryContext within budget_s (plus the planner model's own cap).
 
@@ -1519,7 +1656,7 @@ async def build_query_context(
     no subject of its own ("What about its safety?") is resolved to it before any retrieval.
     standing_instructions are the instructions the researcher scoped to the investigation or profile ("From now
     on, papers only."); their routing constraints apply to this turn unless the question overrides them (ORC-011)."""
-    holder: List[QueryContext] = []
+    holder: list[QueryContext] = []
     try:
         return await _build_query_context(
             query=query, clean_query=clean_query, registry=registry, enable_web_search=enable_web_search,
@@ -1539,17 +1676,17 @@ async def _build_query_context(
     clean_query: str,
     registry: Any,
     enable_web_search: bool,
-    attachments: List[DatasetRef],
-    attachment_errors: List[str],
+    attachments: list[DatasetRef],
+    attachment_errors: list[str],
     user_id: str,
     thread_id: str,
     model_name: str,
-    api_key: Optional[str],
-    llm_factory: Optional[Callable[..., Any]],
+    api_key: str | None,
+    llm_factory: Callable[..., Any] | None,
     budget_s: float,
-    prior_subject: Optional[Dict[str, str]],
-    holder: List[QueryContext],
-    standing_instructions: Optional[List[str]] = None,
+    prior_subject: dict[str, str] | None,
+    holder: list[QueryContext],
+    standing_instructions: list[str] | None = None,
 ) -> QueryContext:
     t0 = time.perf_counter()
     env_budget = os.getenv("TRIBOS_NORMALIZER_BUDGET_S")
@@ -1589,7 +1726,7 @@ async def _build_query_context(
             plan_with_llm(clean_query, llm_factory, model_name=model_name, api_key=api_key, timeout_s=search_plan_wait_s())
         )
 
-    data: Optional[Dict[str, Any]] = None
+    data: dict[str, Any] | None = None
     if _resolver_enabled(registry) and (cands.terms or cands.gene_tokens or cands.rsids or cands.transcripts_hgvs):
         t1 = time.perf_counter()
         data = await _resolve_live(registry, clean_query, cands, budget_s)
@@ -1598,10 +1735,16 @@ async def _build_query_context(
     genes, drugs, diseases = (_fold_defined_acronyms(clean_query, group) for group in (genes, drugs, diseases))
     if data is None:
         ctx.normalization = "offline_lexicon"
+    stem_entities = _offline_stem_entities(
+        clean_query,
+        [*(e.span for e in [*genes, *drugs, *diseases, *variants]), *procedural_spans(clean_query)],
+    )
 
-    nothing_found = not (genes or drugs or diseases or variants or ctx.biomodel_id or ctx.dataset_path or ctx.attachments)
-    planner_scope: Optional[str] = None
-    plan: Optional[Dict[str, Any]] = None
+    nothing_found = not (
+        genes or drugs or diseases or variants or stem_entities or ctx.biomodel_id or ctx.dataset_path or ctx.attachments
+    )
+    planner_scope: str | None = None
+    plan: dict[str, Any] | None = None
     if mode == "always" or (mode == "auto" and nothing_found):
         t2 = time.perf_counter()
         if ctx.planner_task is not None:
@@ -1610,7 +1753,7 @@ async def _build_query_context(
                 plan = await asyncio.wait_for(
                     asyncio.shield(ctx.planner_task), timeout=max(0.01, min(PLANNER_LLM_TIMEOUT_S, budget_s))
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.info("Planner model missed the routing budget; routing without it")
             except Exception as exc:  # noqa: BLE001
                 logger.info("Planner model call failed: %s", exc)
@@ -1621,8 +1764,11 @@ async def _build_query_context(
             ctx.planner = "llm"
             planner_scope = plan.get("scope")
             ctx.intents.update(plan["intents"])
-            for ent in _llm_entities(clean_query, plan["entities"], [*genes, *drugs, *diseases, *variants]):
-                {"gene": genes, "drug": drugs, "disease": diseases}[ent.type].append(ent)
+            for ent in _llm_entities(clean_query, plan["entities"], [*genes, *drugs, *diseases, *variants, *stem_entities]):
+                if ent.type in ("gene", "drug", "disease"):
+                    {"gene": genes, "drug": drugs, "disease": diseases}[ent.type].append(ent)
+                else:
+                    stem_entities.append(ent)
 
     if not variants:
         variants = _parser_variants(clean_query)
@@ -1631,13 +1777,13 @@ async def _build_query_context(
 
     attach_variant_genes(clean_query, variants, genes)
     # A variant typed twice ("BCR-ABL1 ... BCR::ABL1") is one entity; the first mention is kept.
-    unique: Dict[Tuple[Optional[str], str], ResolvedEntity] = {}
+    unique: dict[tuple[str | None, str], ResolvedEntity] = {}
     for v in variants:
         unique.setdefault((v.variant_kind, v.label), v)
     variants = list(unique.values())
-    followup_gene = _apply_followup(ctx, clean_query, prior_subject, genes, drugs, diseases, variants)
+    followup_gene = _apply_followup(ctx, clean_query, prior_subject, genes, drugs, diseases, variants, stem_entities)
     diseases = drop_generic_diseases(diseases)
-    primary =choose_primary_gene(clean_query, genes, variants) or followup_gene
+    primary = choose_primary_gene(clean_query, genes, variants) or followup_gene
     if primary is None and ctx.biomodel_id and ctx.biomodel_id in BIOMODEL_TARGET_HINTS:
         hint = BIOMODEL_TARGET_HINTS[ctx.biomodel_id]
         symbol = (lookup_symbol(hint) or (hint, "symbol"))[0]
@@ -1646,11 +1792,29 @@ async def _build_query_context(
         )
         genes.append(primary)
     ctx.primary_gene = primary
-    ctx.primary_target = _primary_target_string(primary, variants) if primary is not None else None
+    if primary is not None:
+        ctx.primary_target = _primary_target_string(primary, variants)
+    elif stem_entities:
+        lead_stem = next(
+            (e for e in stem_entities if e.type in ("equation", "system", "concept", "material", "constant")),
+            stem_entities[0],
+        )
+        ctx.primary_target = lead_stem.label
+    else:
+        ctx.primary_target = None
+    sys_ent = next((e for e in stem_entities if e.type == "system"), None)
+    if sys_ent is not None and not ctx.system_name:
+        ctx.system_name = sys_ent.label
     apply_standing_instructions(ctx, clean_query, standing_instructions)
 
     ordered = sorted(genes, key=lambda e: (e.span == (0, 0), e.span[0]))
-    ctx.entities = [*ordered, *sorted(drugs, key=lambda e: e.span[0]), *sorted(diseases, key=lambda e: e.span[0]), *variants]
+    ctx.entities = [
+        *ordered,
+        *sorted(drugs, key=lambda e: e.span[0]),
+        *sorted(diseases, key=lambda e: e.span[0]),
+        *variants,
+        *sorted(stem_entities, key=lambda e: (e.span == (0, 0), e.span[0])),
+    ]
     ctx.intents.update(_deterministic_intents(ctx, clean_query))
     ctx.scope = _decide_scope(ctx, clean_query, cands, planner_scope)
     decide_builtin_sources(ctx)
@@ -1662,9 +1826,9 @@ async def _build_query_context(
 
 # A follow-up that points back at the previous subject instead of naming one.
 _FOLLOWUP_RE = re.compile(
-    r"\b(?:it|its|it's|they|them|their|these|those|the\s+same(?:\s+(?:drug|gene|target|model|disease))?|"
+    r"\b(?:it|its|it's|they|them|their|these|those|the\s+same(?:\s+(?:drug|gene|target|model|disease|equation|system|material|concept|theorem))?|"
     r"(?:the|this|that)\s+(?:drug|gene|target|protein|model|compound|disease|agent|inhibitor|one|mutation|variant|"
-    r"alteration|condition|cancer|tumou?r))\b"
+    r"alteration|condition|cancer|tumou?r|equation|system|material|concept|theorem|oscillator|pendulum|alloy|fluid))\b"
     r"|^\s*(?:and|also|what\s+about|how\s+about)\b",
     re.I,
 )
@@ -1674,21 +1838,35 @@ _REFERENT_KIND_RES = {
     "gene": re.compile(r"\b(?:the|this|that)\s+(?:gene|target|protein|mutation|variant|alteration)\b|\bthe\s+same\s+(?:gene|target)\b", re.I),
     "disease": re.compile(r"\b(?:the|this|that)\s+(?:disease|condition|cancer|tumou?r)\b|\bthe\s+same\s+disease\b", re.I),
     "biomodel_id": re.compile(r"\b(?:the|this|that)\s+model\b|\bthe\s+same\s+model\b", re.I),
+    "equation": re.compile(r"\b(?:the|this|that)\s+(?:equation|formula|pde|ode)\b|\bthe\s+same\s+equation\b", re.I),
+    "system": re.compile(r"\b(?:the|this|that)\s+(?:system|oscillator|pendulum)\b|\bthe\s+same\s+system\b", re.I),
+    "material": re.compile(r"\b(?:the|this|that)\s+(?:material|alloy|fluid)\b|\bthe\s+same\s+material\b", re.I),
+    "concept": re.compile(r"\b(?:the|this|that)\s+(?:concept|theorem|lemma|identity)\b|\bthe\s+same\s+(?:concept|theorem)\b", re.I),
 }
 _GENERIC_REFERENT_RE = re.compile(
-    r"\b(?:it|its|it's|they|them|their|these|those|the\s+same|(?:the|this|that)\s+one)\b(?!\s+(?:drug|gene|target|model|disease))"
+    r"\b(?:it|its|it's|they|them|their|these|those|the\s+same|(?:the|this|that)\s+one)\b(?!\s+(?:drug|gene|target|model|disease|equation|system|material|concept|theorem))"
     r"|^\s*(?:and|also|what\s+about|how\s+about)\b",
     re.I,
 )
 # "Is it true that ...", "it is known that ...": an expletive "it", not a reference to anything.
 _EXPLETIVE_IT_RE = re.compile(r"\b(?:is|was|isn'?t|wasn'?t)\s+it\s+(?:true|possible|likely|known|the\s+case)\b|\bit\s+(?:is|was|seems|appears)\s+(?:true|possible|likely|known|reported|unclear)\b", re.I)
 _FOLLOWUP_RUN_RE = re.compile(r"\b(?:run|re-?run|simulat\w*|repeat|scan|sweep)\b", re.I)
-_SUBJECT_KEYS = ("gene", "drug", "disease", "biomodel_id")
+_SUBJECT_KEYS = ("concept", "equation", "material", "system", "gene", "drug", "disease", "biomodel_id")
 
 
-def active_subject(ctx: QueryContext) -> Dict[str, str]:
-    """This turn's subject ({gene, drug, disease, biomodel_id}), to store and pass as the next turn's prior_subject."""
-    out: Dict[str, str] = {}
+def active_subject(ctx: QueryContext) -> dict[str, str]:
+    """This turn's subject ({concept, equation, material, system, gene, drug, disease, biomodel_id}), to store and pass as the next turn's prior_subject."""
+    out: dict[str, str] = {}
+    if ctx.concepts:
+        out["concept"] = ctx.concepts[0].label or ctx.concepts[0].mention
+    if ctx.equations:
+        out["equation"] = ctx.equations[0].label or ctx.equations[0].mention
+    if ctx.materials:
+        out["material"] = ctx.materials[0].label or ctx.materials[0].mention
+    if ctx.systems:
+        out["system"] = ctx.systems[0].label or ctx.systems[0].mention
+    elif ctx.system_name:
+        out["system"] = ctx.system_name
     if ctx.primary_symbol:
         out["gene"] = ctx.primary_symbol
     if ctx.drugs:
@@ -1704,18 +1882,21 @@ def active_subject(ctx: QueryContext) -> Dict[str, str]:
 def _apply_followup(
     ctx: QueryContext,
     query: str,
-    prior: Optional[Dict[str, str]],
-    genes: List[ResolvedEntity],
-    drugs: List[ResolvedEntity],
-    diseases: List[ResolvedEntity],
-    variants: List[ResolvedEntity],
-) -> Optional[ResolvedEntity]:
-    """Resolve 'What about its safety?' to the previous subject. A question naming its own subject keeps it."""
+    prior: dict[str, str] | None,
+    genes: list[ResolvedEntity],
+    drugs: list[ResolvedEntity],
+    diseases: list[ResolvedEntity],
+    variants: list[ResolvedEntity],
+    stem_entities: list[ResolvedEntity] | None = None,
+) -> ResolvedEntity | None:
+    """Resolve 'What about its safety?' or 'Solve it for x=0' to the previous subject. A question naming its own subject keeps it."""
     if not prior or not isinstance(prior, dict):
         return None
     prior = {k: v.strip() for k, v in prior.items() if k in _SUBJECT_KEYS and isinstance(v, str) and v.strip()}
     # A disease in the question is context ("its safety in pancreatic cancer"), not a subject of its own (ORC-004).
-    own_subject = bool(genes) or bool(drugs) or bool(variants) or bool(ctx.biomodel_id) or bool(ctx.attachments)
+    own_subject = (
+        bool(genes) or bool(drugs) or bool(variants) or bool(stem_entities) or bool(ctx.biomodel_id) or bool(ctx.attachments)
+    )
     text = _EXPLETIVE_IT_RE.sub(" ", query)  # "Is it true that ..." refers to nothing
     specific_drug_referent = bool(_REFERENT_KIND_RES["drug"].search(text))
     specific_gene_referent = bool(_REFERENT_KIND_RES["gene"].search(text))
@@ -1728,8 +1909,8 @@ def _apply_followup(
     kinds = {k for k, rx in _REFERENT_KIND_RES.items() if rx.search(text)}
     if not kinds or _GENERIC_REFERENT_RE.search(text):
         kinds |= set(_SUBJECT_KEYS)
-    used: Dict[str, str] = {}
-    gene_entity: Optional[ResolvedEntity] = None
+    used: dict[str, str] = {}
+    gene_entity: ResolvedEntity | None = None
     if prior.get("gene") and "gene" in kinds:
         mention = prior["gene"].split()[0]  # older turns stored "KRAS G12C"; the symbol is the first token
         hit = lookup_symbol(mention)
@@ -1746,6 +1927,19 @@ def _apply_followup(
     if prior.get("disease") and "disease" in kinds and not diseases:
         diseases.append(ResolvedEntity(type="disease", mention=prior["disease"], label=prior["disease"], source="memory", matched_on="followup"))
         used["disease"] = prior["disease"]
+    if stem_entities is not None:
+        for stem_key in ("equation", "system", "material", "concept"):
+            if prior.get(stem_key) and stem_key in kinds:
+                stem_entities.append(
+                    ResolvedEntity(
+                        type=cast(EntityType, stem_key),
+                        mention=prior[stem_key],
+                        label=prior[stem_key],
+                        source="memory",
+                        matched_on="followup",
+                    )
+                )
+                used[stem_key] = prior[stem_key]
     if (
         prior.get("biomodel_id") and "biomodel_id" in kinds
         and BIOMODEL_ID_RE.match(prior["biomodel_id"].upper()) and _FOLLOWUP_RUN_RE.search(query)
@@ -1755,7 +1949,10 @@ def _apply_followup(
         used["biomodel_id"] = ctx.biomodel_id
     if not used:
         return None
-    subject = used.get("drug") or used.get("gene") or used.get("disease") or used.get("biomodel_id", "")
+    subject = (
+        used.get("drug") or used.get("gene") or used.get("equation") or used.get("system")
+        or used.get("material") or used.get("concept") or used.get("disease") or used.get("biomodel_id", "")
+    )
     if "gene" in kinds and "drug" not in kinds:
         subject = used.get("gene") or subject
     ctx.extras["resolved_followup"] = {
@@ -1783,7 +1980,7 @@ async def finalize_search_plan(ctx: QueryContext) -> SearchPlan:
     remaining = search_plan_wait_s() - (time.perf_counter() - ctx.planner_started)
     try:
         raw = task.result() if task.done() else await asyncio.wait_for(asyncio.shield(task), timeout=max(0.0, remaining))
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.info("Planner model missed the search-plan wait; searching with the deterministic plan")
         return plan
     except asyncio.CancelledError:
@@ -1807,7 +2004,7 @@ def cancel_planner(ctx: QueryContext) -> None:
         task.cancel()
 
 
-def _decide_scope(ctx: QueryContext, query: str, cands: Candidates, planner_scope: Optional[str]) -> str:
+def _decide_scope(ctx: QueryContext, query: str, cands: Candidates, planner_scope: str | None) -> str:
     """Anything concrete in the question makes it research; otherwise the planner's verdict, else the heuristic."""
     concrete = (
         ctx.entities or ctx.biomodel_id or ctx.dataset_path or ctx.attachments

@@ -11,14 +11,14 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, AsyncIterator, Dict
+from collections.abc import AsyncIterator
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import ValidationError
 
 from app.backend.auth import get_current_user
-from tribos.datasets.geo import GSE_RE, lookup_geo
 from tribos.datasets.models import DATASET_ID_RE, DatasetProvenanceIn
 from tribos.datasets.store import (
     CHUNK_BYTES,
@@ -96,7 +96,7 @@ async def upload_dataset(request: Request, user_id: str = Depends(get_current_us
             if ext not in EXTENSION_KINDS:
                 return _error(
                     status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                    "Unsupported file type. Upload .h5ad, .csv, .tsv, .xml or .sbml.",
+                    "Unsupported file type. Upload table (.csv, .tsv, .xlsx, .json, .parquet), HDF5 (.h5, .hdf5), or MAT (.mat).",
                     "unsupported_type",
                 )
             try:
@@ -121,7 +121,7 @@ async def upload_dataset(request: Request, user_id: str = Depends(get_current_us
 
 
 @router.get("")
-async def list_datasets(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+async def list_datasets(user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     records = await asyncio.to_thread(get_dataset_store().list, user_id)
     return {"datasets": [r.to_api() for r in records], "count": len(records)}
 
@@ -171,17 +171,7 @@ async def delete_dataset(ds_id: str, user_id: str = Depends(get_current_user)):
     return {"status": "deleted", "id": ds_id}
 
 
-class GeoLookupRequest(BaseModel):
-    accession: str = Field(..., max_length=32)
 
-
-@router.post("/geo-lookup")
-async def geo_lookup(req: GeoLookupRequest, user_id: str = Depends(get_current_user)):
-    accession = req.accession.strip().upper()
-    if not GSE_RE.match(accession):
-        return _error(status.HTTP_422_UNPROCESSABLE_CONTENT, "Enter a GEO series accession such as GSE132465.", "invalid_accession")
-    result = await lookup_geo(accession)
-    return result.model_dump(mode="json")
 
 
 __all__ = ["router"]

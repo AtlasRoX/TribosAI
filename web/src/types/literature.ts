@@ -1,35 +1,32 @@
 // Literature grading and integrity types (owned by GRADING, feature 5). Additive changes only.
 
 export type StudyType =
+  | "formal_proof"
+  | "established_theory"
+  | "peer_reviewed"
   | "meta_analysis"
-  | "network_meta_analysis"
   | "systematic_review"
-  | "rct"
-  | "clinical_trial"
-  | "indirect_comparison"
-  | "observational"
-  | "case_report"
-  | "preclinical_in_vivo"
-  | "in_vitro"
-  | "computational"
   | "review"
-  | "editorial"
+  | "monograph"
+  | "verified_computation"
+  | "computational"
+  | "preprint"
   | "conference_abstract"
-  | "trial_protocol"
-  | "unclassified";
+  | "editorial"
+  | "heuristic"
+  | "unclassified"
+  | (string & {});
 
 export interface EvidenceGrade {
   study_type: StudyType;
   label: string;
   tier: number;
   weight: number;
-  basis: "europepmc_pubtype" | "mesh_heading" | "text_heuristic" | "none";
+  basis: "source_metadata" | "msc_classification" | "text_heuristic" | "europepmc_pubtype" | "mesh_heading" | "none" | string;
   cues: string[];
   confidence: "high" | "medium" | "low";
   is_preprint: boolean;
-  /** Raw indexed publication types, kept apart from the design the article reports. */
   indexed_pub_types?: string[];
-  /** The design the indexed tags alone gave, when the reported analysis overrode it (e.g. "rct" for a MAIC). */
   indexed_design?: string | null;
   mixed_design?: boolean;
   design_note?: string;
@@ -37,7 +34,7 @@ export interface EvidenceGrade {
 
 export interface IntegrityNotice {
   kind: string;
-  source: "europepmc" | "crossref_publisher" | "crossref_retraction_watch";
+  source: "europepmc" | "crossref_publisher" | "crossref_retraction_watch" | string;
   notice_pmid?: string | null;
   notice_doi?: string | null;
   date?: string | null;
@@ -57,6 +54,11 @@ export interface GradedArticle {
   source: string;
   pmid?: string | null;
   doi?: string | null;
+  arxiv_id?: string | null;
+  zbl_id?: string | null;
+  mr_id?: string | null;
+  bibcode?: string | null;
+  openalex_id?: string | null;
   pmcid?: string | null;
   title: string;
   journal: string;
@@ -68,8 +70,12 @@ export interface GradedArticle {
 }
 
 export interface LiteratureArtifact {
-  graded_articles: GradedArticle[];
-  excluded_articles: GradedArticle[];
-  integrity_check: Record<string, string>;
-  grade_summary: Record<string, number>;
+  graded_articles?: GradedArticle[];
+  excluded_articles?: GradedArticle[];
+  papers?: Record<string, any>[];
+  articles?: Record<string, any>[];
+  results?: Record<string, any>[];
+  integrity_check?: Record<string, string>;
+  grade_summary?: Record<string, number>;
+  [k: string]: any;
 }

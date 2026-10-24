@@ -10,7 +10,6 @@ found again in the answer the orchestrator holds (claim removal).
 from __future__ import annotations
 
 import re
-from typing import List, Optional, Tuple
 
 # Unicode hyphens and minus signs the model writes ("Mos‑P", "on‑target", "−0.4") become "-"; the soft hyphen is
 # dropped; typographic spaces (no-break, narrow no-break, thin, figure, hair) become a plain space. The en dash
@@ -35,18 +34,18 @@ _DECIMAL_DOTS = "·∙"
 _DECIMAL_DOT_RE = re.compile(rf"(?<=\d)[{_DECIMAL_DOTS}](?=\d)")
 
 
-def fold_typography(text: Optional[str]) -> str:
+def fold_typography(text: str | None) -> str:
     """`text` with typographic hyphens and spaces folded to ASCII (see TYPOGRAPHY_FOLD) and middle-dot decimals
     ("10·2") read as "10.2". None or "" gives ""."""
     return _DECIMAL_DOT_RE.sub(".", text.translate(TYPOGRAPHY_FOLD)) if text else (text or "")
 
 
-def fold_typography_with_map(text: str) -> Tuple[str, List[int]]:
+def fold_typography_with_map(text: str) -> tuple[str, list[int]]:
     """(folded text, offsets): offsets[i] is the index in `text` of folded[i]; offsets[len(folded)] == len(text).
 
     The fold only replaces one character by one or drops a character, so every folded position maps back."""
-    out: List[str] = []
-    offsets: List[int] = []
+    out: list[str] = []
+    offsets: list[int] = []
     src = text or ""
     for i, ch in enumerate(src):
         rep = ch.translate(TYPOGRAPHY_FOLD)
@@ -60,7 +59,7 @@ def fold_typography_with_map(text: str) -> Tuple[str, List[int]]:
     return "".join(out), offsets
 
 
-def find_folded(haystack: str, needle: str, start: int = 0) -> Tuple[int, int]:
+def find_folded(haystack: str, needle: str, start: int = 0) -> tuple[int, int]:
     """(start, end) in `haystack` of the first match of `needle` at or after `start`, comparing both texts after
     fold_typography; (-1, -1) when absent. An exact match is tried first."""
     idx = haystack.find(needle, start)
@@ -105,11 +104,11 @@ def _is_abbreviation_break(text: str, pos: int, end: int) -> bool:
     return False
 
 
-def sentence_spans(text: str) -> List[Tuple[int, int]]:
+def sentence_spans(text: str) -> list[tuple[int, int]]:
     """(start, end) of each sentence: a break after . ! ? (not after an abbreviation such as "et al." or "e.g.")
     or at a newline. A markdown table row is always one span. TribosVerifier._split_sentences and the citation
     map both use this, so the sentences they compare line up. This is the project's one sentence splitter."""
-    spans: List[Tuple[int, int]] = []
+    spans: list[tuple[int, int]] = []
     start = 0
     line_start = 0
     for m in _SENTENCE_BREAK_RE.finditer(text):

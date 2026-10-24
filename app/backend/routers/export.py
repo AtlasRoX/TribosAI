@@ -7,9 +7,9 @@ import json
 import logging
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -18,10 +18,10 @@ from pydantic import BaseModel, Field, model_validator
 from app.backend.auth import get_current_user
 from app.backend.limits import UserSemaphores
 from tribos.agentic import config as agent_config
-from tribos.utils.llm.llm_factory import is_allowed_model
 from tribos.export import ExportRequest, build_report_model
 from tribos.provenance.run_manifest import RunManifest, client_view, utc_now
 from tribos.provenance.run_store import get_run_store, valid_run_id
+from tribos.utils.llm.llm_factory import is_allowed_model
 
 logger = logging.getLogger("tribos.backend.export")
 
@@ -57,11 +57,11 @@ _LIBRARIES = {ExportFormat.docx: "python-docx", ExportFormat.pdf: "fpdf2", Expor
 
 class RerunRequest(BaseModel):
     mode: Literal["tools", "full"] = "tools"
-    model: Optional[str] = Field(default=None, max_length=200)
-    api_key: Optional[str] = Field(default=None, max_length=500)
+    model: str | None = Field(default=None, max_length=200)
+    api_key: str | None = Field(default=None, max_length=500)
 
     @model_validator(mode="after")
-    def _check_model(self) -> "RerunRequest":
+    def _check_model(self) -> RerunRequest:
         if self.model and not self.api_key and not is_allowed_model(self.model):
             raise ValueError(
                 f"Unsupported model {self.model[:80]!r}: choose one listed by /api/models or supply your own API key."
@@ -104,7 +104,7 @@ def _slug(text: str) -> str:
 
 
 def _filename(question: str, fmt: ExportFormat) -> str:
-    return f"tribos-{_slug(question)}-{datetime.now(timezone.utc):%Y%m%d}.{_EXTENSIONS[fmt]}"
+    return f"tribos-{_slug(question)}-{datetime.now(UTC):%Y%m%d}.{_EXTENSIONS[fmt]}"
 
 
 def _render(fmt: ExportFormat, report: Any) -> bytes:
@@ -148,7 +148,7 @@ async def export_message(fmt: ExportFormat, req: ExportRequest, user_id: str = D
     return Response(content=body, media_type=_MEDIA_TYPES[fmt], headers=headers)
 
 
-async def _load_owned(user_id: str, run_id: str) -> Dict[str, Any]:
+async def _load_owned(user_id: str, run_id: str) -> dict[str, Any]:
     manifest = await asyncio.to_thread(get_run_store().load, user_id, run_id) if valid_run_id(run_id) else None
     if manifest is None:
         raise HTTPException(status_code=404, detail="Run not found.")
@@ -156,12 +156,12 @@ async def _load_owned(user_id: str, run_id: str) -> Dict[str, Any]:
 
 
 @router.get("/api/runs/{run_id}")
-async def get_run(run_id: str, user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+async def get_run(run_id: str, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     return client_view(await _load_owned(user_id, run_id))
 
 
 @router.post("/api/runs/rerun")
-async def rerun_client_manifest(req: ClientRerunRequest, user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+async def rerun_client_manifest(req: ClientRerunRequest, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     """Replay a manifest from a downloaded bundle (SEC-001).
 
     When the manifest's run id is one of the caller's stored runs, the stored manifest is replayed instead of the
@@ -170,7 +170,13 @@ async def rerun_client_manifest(req: ClientRerunRequest, user_id: str = Depends(
     inputs except a typed dataset path inside the configured dataset roots. A single refused call rejects the
     whole request (400); nothing is executed.
     """
-    from tribos.provenance.rerun import ReplayPolicyError, check_replayable, diff_runs, replay_tools, without_calls
+    from tribos.provenance.rerun import (
+        ReplayPolicyError,
+        check_replayable,
+        diff_runs,
+        replay_tools,
+        without_calls,
+    )
 
     posted = req.manifest.model_dump(mode="json")
     posted_calls = posted.get("tool_calls") or []
@@ -206,7 +212,7 @@ def _note_refused(report: Any, refused: list) -> None:
         report.notes.append(f"Not replayed: {item.get('tool_name')} (call {item.get('seq')}): {item.get('reason')}")
 
 
-def _rerun_framework(original: Dict[str, Any]) -> Optional[str]:
+def _rerun_framework(original: dict[str, Any]) -> str | None:
     """The framework the original run asked for: the recorded request first, else the framework it finished with."""
     request = original.get("request") if isinstance(original.get("request"), dict) else {}
     for value in (request.get("requested_framework"), request.get("framework"), original.get("framework")):
@@ -216,7 +222,7 @@ def _rerun_framework(original: Dict[str, Any]) -> Optional[str]:
 
 
 @router.post("/api/runs/{run_id}/rerun")
-async def rerun_stored(run_id: str, req: RerunRequest, user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+async def rerun_stored(run_id: str, req: RerunRequest, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     from tribos.provenance.rerun import check_replayable, diff_runs, replay_tools, without_calls
 
     original = await _load_owned(user_id, run_id)
@@ -281,7 +287,7 @@ async def rerun_stored(run_id: str, req: RerunRequest, user_id: str = Depends(ge
     return report.model_dump(mode="json")
 
 
-def _full_rerun_notes(original: Dict[str, Any], new: Dict[str, Any], framework: Optional[str], model_override: Optional[str]) -> list:
+def _full_rerun_notes(original: dict[str, Any], new: dict[str, Any], framework: str | None, model_override: str | None) -> list:
     """What a full re-run could not reproduce, so the diff is not blamed on model non-determinism alone."""
     notes = []
     request = original.get("request") if isinstance(original.get("request"), dict) else {}

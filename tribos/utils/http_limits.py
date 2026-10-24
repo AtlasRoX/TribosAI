@@ -16,7 +16,8 @@ import os
 import threading
 import time
 from collections import OrderedDict
-from typing import Any, Dict, Hashable, Optional
+from collections.abc import Hashable
+from typing import Any
 
 
 class MinIntervalLimiter:
@@ -34,7 +35,7 @@ class MinIntervalLimiter:
             self._next_at = start + self.min_interval_s
             return start - now
 
-    async def __aenter__(self) -> "MinIntervalLimiter":
+    async def __aenter__(self) -> MinIntervalLimiter:
         if self.min_interval_s > 0:
             delay = self._reserve()
             if delay > 0:
@@ -45,7 +46,7 @@ class MinIntervalLimiter:
         return None
 
 
-_LIMITERS: Dict[str, MinIntervalLimiter] = {}
+_LIMITERS: dict[str, MinIntervalLimiter] = {}
 _LIMITERS_LOCK = threading.Lock()
 
 
@@ -68,10 +69,10 @@ class TTLCache:
     def __init__(self, maxsize: int = 1024, ttl_s: float = 3600) -> None:
         self.maxsize = max(1, int(maxsize))
         self.ttl_s = float(ttl_s)
-        self._data: "OrderedDict[Hashable, tuple[float, Any]]" = OrderedDict()
+        self._data: OrderedDict[Hashable, tuple[float, Any]] = OrderedDict()
         self._lock = threading.Lock()
 
-    def get(self, key: Hashable) -> Optional[Any]:
+    def get(self, key: Hashable) -> Any | None:
         with self._lock:
             item = self._data.get(key)
             if item is None:

@@ -12,67 +12,69 @@ export interface EvidenceSourcesProps {
 
 type StudyTypeKey = StudyType;
 
-/** Group heading per study design. */
-const GROUP: Record<StudyTypeKey, string> = {
+/** Group heading per study design / evidence tier. */
+const GROUP: Record<string, string> = {
+  formal_proof: "Formal & symbolic proofs",
+  established_theory: "Established theory & standards",
+  peer_reviewed: "Peer-reviewed articles",
   meta_analysis: "Meta-analyses",
   network_meta_analysis: "Network meta-analyses",
   systematic_review: "Systematic reviews",
-  rct: "Randomised controlled trials",
-  clinical_trial: "Clinical trials",
-  indirect_comparison: "Indirect comparisons (MAIC, STC)",
-  observational: "Observational studies",
-  case_report: "Case reports",
-  preclinical_in_vivo: "Preclinical in vivo",
-  in_vitro: "In vitro",
-  computational: "Computational",
-  review: "Reviews",
-  editorial: "Editorials",
-  conference_abstract: "Conference abstracts",
-  trial_protocol: "Trial protocols",
-  unclassified: "Unclassified",
+  review: "Reviews & surveys",
+  monograph: "Monographs & textbooks",
+  verified_computation: "Verified computations",
+  computational: "Computational studies",
+  preprint: "Preprints",
+  conference_abstract: "Conference proceedings & abstracts",
+  editorial: "Editorials & notes",
+  heuristic: "Heuristic & approximate analyses",
+  unclassified: "Unclassified works",
 };
 
-/** Singular and plural for the header summary ("4 RCTs, 3 reviews"). */
-const COUNT_WORD: Record<StudyTypeKey, [string, string]> = {
+/** Singular and plural for the header summary ("4 peer-reviewed, 2 preprints"). */
+const COUNT_WORD: Record<string, [string, string]> = {
+  formal_proof: ["formal proof", "formal proofs"],
+  established_theory: ["reference", "references"],
+  peer_reviewed: ["peer-reviewed", "peer-reviewed"],
   meta_analysis: ["meta-analysis", "meta-analyses"],
   network_meta_analysis: ["network meta-analysis", "network meta-analyses"],
   systematic_review: ["systematic review", "systematic reviews"],
-  rct: ["RCT", "RCTs"],
-  clinical_trial: ["trial", "trials"],
-  indirect_comparison: ["indirect comparison", "indirect comparisons"],
-  observational: ["observational", "observational"],
-  case_report: ["case report", "case reports"],
-  preclinical_in_vivo: ["in vivo", "in vivo"],
-  in_vitro: ["in vitro", "in vitro"],
-  computational: ["in silico", "in silico"],
   review: ["review", "reviews"],
-  editorial: ["editorial", "editorials"],
-  conference_abstract: ["abstract", "abstracts"],
-  trial_protocol: ["protocol", "protocols"],
+  monograph: ["monograph", "monographs"],
+  verified_computation: ["verified computation", "verified computations"],
+  computational: ["computational", "computational"],
+  preprint: ["preprint", "preprints"],
+  conference_abstract: ["proceedings paper", "proceedings papers"],
+  editorial: ["note", "notes"],
+  heuristic: ["heuristic", "heuristics"],
   unclassified: ["unclassified", "unclassified"],
 };
 
-// Mirrors STUDY_TYPE_POLICY tiers in tribos/lithoscribe/evidence_grading.py.
-const TIER: Record<StudyTypeKey, number> = {
-  meta_analysis: 1,
-  systematic_review: 1,
-  network_meta_analysis: 2,
-  rct: 2,
-  clinical_trial: 3,
-  indirect_comparison: 3,
-  observational: 3,
-  case_report: 4,
-  review: 4,
-  preclinical_in_vivo: 5,
-  in_vitro: 5,
-  computational: 5,
+// Mirrors the 6-tier Tribos evidence hierarchy.
+const TIER: Record<string, number> = {
+  formal_proof: 1,
+  established_theory: 2,
+  meta_analysis: 2,
+  systematic_review: 2,
+  peer_reviewed: 3,
+  network_meta_analysis: 3,
+  review: 3,
+  monograph: 3,
+  verified_computation: 4,
+  computational: 4,
+  preprint: 5,
+  conference_abstract: 5,
   editorial: 6,
-  conference_abstract: 6,
-  trial_protocol: 6,
+  heuristic: 6,
   unclassified: 6,
 };
 
 const SOURCE_LABEL: Record<string, string> = {
+  arxiv: "arXiv",
+  s2: "Semantic Scholar",
+  openalex: "OpenAlex",
+  zbmath: "zbMATH Open",
+  ads: "NASA ADS",
   europepmc: "EuropePMC",
   crossref_retraction_watch: "Retraction Watch (via Crossref)",
   crossref_publisher: "Publisher (via Crossref)",
@@ -125,11 +127,11 @@ function journalName(value: string | null | undefined): string {
 
 /** Short names for the design a record was indexed as, when its reported analysis differs. */
 const INDEXED_AS: Record<string, string> = {
-  rct: "RCT",
-  clinical_trial: "clinical trial",
+  peer_reviewed: "peer-reviewed article",
   meta_analysis: "meta-analysis",
   systematic_review: "systematic review",
-  observational: "observational study",
+  review: "review",
+  preprint: "preprint",
 };
 
 function tierOf(grade?: EvidenceGrade): number {
@@ -137,9 +139,14 @@ function tierOf(grade?: EvidenceGrade): number {
 }
 
 function articleUrl(a: GradedArticle): string | null {
+  if (a.arxiv_id) return `https://arxiv.org/abs/${a.arxiv_id.replace(/^arxiv:\s*/i, "")}`;
   if (a.doi) return `https://doi.org/${a.doi}`;
-  if (a.pmid) return `https://europepmc.org/article/MED/${a.pmid}`;
+  if (a.zbl_id) return `https://zbmath.org/?q=an:${a.zbl_id.replace(/^zbl\s*:?\s*/i, "")}`;
+  if (a.bibcode) return `https://ui.adsabs.harvard.edu/abs/${a.bibcode}`;
+  if (a.openalex_id) return `https://openalex.org/${a.openalex_id}`;
+  if (a.pmid) return `https://pubmed.ncbi.nlm.nih.gov/${a.pmid}/`;
   const [source, id] = (a.article_key || "").split(":");
+  if (source?.toUpperCase() === "ARXIV" && id) return `https://arxiv.org/abs/${id}`;
   return source && id ? `https://europepmc.org/article/${source}/${id}` : null;
 }
 

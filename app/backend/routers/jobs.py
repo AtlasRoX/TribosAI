@@ -20,7 +20,8 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import Any, AsyncGenerator, Dict, Optional
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query
 from fastapi.responses import StreamingResponse
@@ -52,7 +53,7 @@ def _job_error(exc: JobError) -> HTTPException:
     return HTTPException(status_code=exc.status_code, detail=str(exc))
 
 
-def request_from_body(body: Dict[str, Any]) -> tuple[Dict[str, Any], Optional[str]]:
+def request_from_body(body: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
     """Validate a ChatRequest-shaped body; returns (stored request, runtime api key). Raises 422 on bad input."""
     from app.backend import main as backend_main
 
@@ -74,7 +75,7 @@ def request_from_body(body: Dict[str, Any]) -> tuple[Dict[str, Any], Optional[st
 
 
 @router.post("", status_code=201)
-async def create_job(body: Dict[str, Any] = Body(...), user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+async def create_job(body: dict[str, Any] = Body(...), user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     request, api_key = request_from_body(body)
     try:
         job = await get_job_manager().submit(user_id, request, api_key=api_key)
@@ -85,11 +86,11 @@ async def create_job(body: Dict[str, Any] = Body(...), user_id: str = Depends(ge
 
 @router.get("")
 async def list_jobs(
-    status: Optional[str] = Query(default=None, max_length=32),
-    thread_id: Optional[str] = Query(default=None, max_length=200),
+    status: str | None = Query(default=None, max_length=32),
+    thread_id: str | None = Query(default=None, max_length=200),
     limit: int = Query(default=50, ge=1, le=200),
     user_id: str = Depends(get_current_user),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     if status and status not in STATUSES:
         raise HTTPException(status_code=422, detail=f"status must be one of {', '.join(STATUSES)}")
     jobs = get_job_manager().list(user_id, limit=limit, status=status, thread_id=thread_id)
@@ -97,7 +98,7 @@ async def list_jobs(
 
 
 @router.get("/{job_id}")
-async def get_job(job_id: str = JobIdPath, user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+async def get_job(job_id: str = JobIdPath, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     _check_id(job_id)
     job = get_job_manager().get(job_id, user_id)
     if job is None:
@@ -111,7 +112,7 @@ async def job_events(
     after: int = Query(default=0, ge=0),
     stream: bool = Query(default=True),
     limit: int = Query(default=1000, ge=1, le=10_000),
-    last_event_id: Optional[str] = Header(default=None, alias="Last-Event-ID", max_length=20),
+    last_event_id: str | None = Header(default=None, alias="Last-Event-ID", max_length=20),
     user_id: str = Depends(get_current_user),
 ):
     _check_id(job_id)
@@ -145,7 +146,7 @@ async def job_events(
 
 
 @router.post("/{job_id}/cancel")
-async def cancel_job(job_id: str = JobIdPath, user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+async def cancel_job(job_id: str = JobIdPath, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     _check_id(job_id)
     job = await get_job_manager().cancel(job_id, user_id)
     if job is None:
@@ -154,7 +155,7 @@ async def cancel_job(job_id: str = JobIdPath, user_id: str = Depends(get_current
 
 
 @router.post("/{job_id}/resume")
-async def resume_job(job_id: str = JobIdPath, user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+async def resume_job(job_id: str = JobIdPath, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     _check_id(job_id)
     try:
         job = await get_job_manager().resume(job_id, user_id)
@@ -166,7 +167,7 @@ async def resume_job(job_id: str = JobIdPath, user_id: str = Depends(get_current
 
 
 @router.delete("/{job_id}")
-async def delete_job(job_id: str = JobIdPath, user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+async def delete_job(job_id: str = JobIdPath, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     _check_id(job_id)
     if not await get_job_manager().delete(job_id, user_id):
         raise HTTPException(status_code=404, detail="Job not found")

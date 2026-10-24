@@ -22,12 +22,13 @@ from __future__ import annotations
 import copy
 import math
 import re
-from typing import AbstractSet, Any, Dict, List, Optional, Sequence, Tuple, Type
+from collections.abc import Sequence, Set
+from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
 # Keys tried, in order, when an object stands where a string is expected.
-STRING_KEYS: Tuple[str, ...] = ("name", "label", "symbol", "id", "mention")
+STRING_KEYS: tuple[str, ...] = ("name", "label", "symbol", "id", "mention")
 MAX_PASSES = 4  # errors surface in stages (list length is checked after the items), so repair re-validates
 _BOUND_TYPES = {"less_than_equal": "le", "greater_than_equal": "ge", "less_than": "lt", "greater_than": "gt"}
 
@@ -41,10 +42,10 @@ def _loc_text(loc: Sequence[Any]) -> str:
     return ".".join(str(x) for x in loc) or "arguments"
 
 
-def _navigate(root: Any, loc: Sequence[Any]) -> Optional[Tuple[Any, Any, List[Any]]]:
+def _navigate(root: Any, loc: Sequence[Any]) -> tuple[Any, Any, list[Any]] | None:
     """(container, key, path walked) of the value at a pydantic error loc; union-member tags are skipped."""
     cur = root
-    walked: List[Any] = []
+    walked: list[Any] = []
     parent: Any = None
     last: Any = None
     for seg in loc:
@@ -63,7 +64,7 @@ def _navigate(root: Any, loc: Sequence[Any]) -> Optional[Tuple[Any, Any, List[An
     return parent, last, walked
 
 
-def _string_from_object(value: Dict[str, Any]) -> Optional[str]:
+def _string_from_object(value: dict[str, Any]) -> str | None:
     for key in STRING_KEYS:
         v = value.get(key)
         if isinstance(v, str) and v.strip():
@@ -71,7 +72,7 @@ def _string_from_object(value: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _clamp(value: Any, kind: str, bound: Any) -> Optional[Any]:
+def _clamp(value: Any, kind: str, bound: Any) -> Any | None:
     """The value moved to its violated bound, or None when that cannot be done exactly."""
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not isinstance(bound, (int, float)):
         return None
@@ -93,7 +94,7 @@ def _is_size_field(walked: Any) -> bool:
     return bool(_SIZE_FIELD.search(name))
 
 
-def _fix_one(args: Dict[str, Any], err: Any, notes: List[str]) -> bool:
+def _fix_one(args: dict[str, Any], err: Any, notes: list[str]) -> bool:
     etype = str(err.get("type") or "")
     loc = tuple(err.get("loc") or ())
     ctx = err.get("ctx") or {}
@@ -140,11 +141,11 @@ def _fix_one(args: Dict[str, Any], err: Any, notes: List[str]) -> bool:
     return False
 
 
-def _forbids_extra(schema: Type[BaseModel]) -> bool:
+def _forbids_extra(schema: type[BaseModel]) -> bool:
     return str((getattr(schema, "model_config", {}) or {}).get("extra", "")) == "forbid"
 
 
-def _errors(schema: Type[BaseModel], args: Dict[str, Any], ignore: AbstractSet[str]) -> Optional[List[Any]]:
+def _errors(schema: type[BaseModel], args: dict[str, Any], ignore: Set[str]) -> list[Any] | None:
     """The validation errors outside the ignored fields ([] when valid); None when validation itself broke."""
     try:
         schema.model_validate(args)
@@ -156,12 +157,12 @@ def _errors(schema: Type[BaseModel], args: Dict[str, Any], ignore: AbstractSet[s
 
 
 def repair_arguments(
-    schema: Optional[Type[BaseModel]],
-    args: Dict[str, Any],
+    schema: type[BaseModel] | None,
+    args: dict[str, Any],
     *,
     drop_unknown: bool = False,
-    ignore_fields: Optional[AbstractSet[str]] = None,
-) -> Optional[Tuple[Dict[str, Any], List[str]]]:
+    ignore_fields: Set[str] | None = None,
+) -> tuple[dict[str, Any], list[str]] | None:
     """(repaired arguments, notes) when args fail the schema only for a repairable reason and the repaired
     arguments validate; None otherwise (including when args already validate). args is never modified.
 
@@ -171,7 +172,7 @@ def repair_arguments(
         return None
     ignore = frozenset(ignore_fields or ())
     work = copy.deepcopy(args)
-    notes: List[str] = []
+    notes: list[str] = []
     fields = getattr(schema, "model_fields", {}) or {}
     extra_ok = str((getattr(schema, "model_config", {}) or {}).get("extra", "")) == "allow"
     if (drop_unknown or _forbids_extra(schema)) and not extra_ok:

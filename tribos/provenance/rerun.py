@@ -13,7 +13,8 @@ import json
 import math
 import re
 import time
-from typing import Any, Dict, Iterable, List, Literal, Optional
+from collections.abc import Iterable
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -52,7 +53,7 @@ class ReplayPolicyError(ValueError):
     """A recorded tool call that the replay policy refuses to execute."""
 
 
-def tool_replay_refusal(name: str, entry: Any) -> Optional[str]:
+def tool_replay_refusal(name: str, entry: Any) -> str | None:
     """Why a tool may not be replayed (None when it may): unregistered, unsafe name or unsafe registry tags."""
     if entry is None:
         return f"Tool {str(name)[:60]!r} is not a registered tool."
@@ -72,7 +73,7 @@ def _path_like(value: Any) -> bool:
     return False
 
 
-def input_refusal(values: Dict[str, Any], *, client_supplied: bool) -> Optional[str]:
+def input_refusal(values: dict[str, Any], *, client_supplied: bool) -> str | None:
     """Why a call's inputs may not be replayed. Server-stored inputs were produced by the server's own run and
     only uploaded-model paths are refused; client inputs may name no server file except a typed dataset path."""
     if values.get("sbml_path"):
@@ -93,12 +94,12 @@ def input_refusal(values: Dict[str, Any], *, client_supplied: bool) -> Optional[
     return None
 
 
-def check_replayable(manifest: Dict[str, Any], registry: Any, *, client_supplied: bool) -> List[Dict[str, Any]]:
+def check_replayable(manifest: dict[str, Any], registry: Any, *, client_supplied: bool) -> list[dict[str, Any]]:
     """The calls a replay would run; raises ReplayPolicyError for the first refused call (client manifests) or
     returns the refused ones as notes (stored manifests: the run is still compared on the replayable calls)."""
     get_entry = getattr(registry, "get_entry", None)
     listed = {getattr(e, "name", None): e for e in (registry.list_tools() if hasattr(registry, "list_tools") else [])}
-    refused: List[Dict[str, Any]] = []
+    refused: list[dict[str, Any]] = []
     for call in manifest.get("tool_calls") or []:
         if not isinstance(call, dict):
             raise ReplayPolicyError("Malformed tool call record.")
@@ -116,7 +117,7 @@ def check_replayable(manifest: Dict[str, Any], registry: Any, *, client_supplied
     return refused
 
 
-def without_calls(manifest: Dict[str, Any], refused: List[Dict[str, Any]]) -> Dict[str, Any]:
+def without_calls(manifest: dict[str, Any], refused: list[dict[str, Any]]) -> dict[str, Any]:
     """A copy of the manifest without the refused calls (matched by seq)."""
     if not refused:
         return manifest
@@ -132,18 +133,18 @@ class FieldChange(BaseModel):
     path: str
     before: Any = None
     after: Any = None
-    rel_change: Optional[float] = None
+    rel_change: float | None = None
     tier: Tier
 
 
 class ToolDiff(BaseModel):
     key: str
     tool_name: str
-    inputs: Dict[str, Any] = Field(default_factory=dict)
+    inputs: dict[str, Any] = Field(default_factory=dict)
     status_before: str
     status_after: str
     output_hash_equal: bool
-    changes: List[FieldChange] = Field(default_factory=list)
+    changes: list[FieldChange] = Field(default_factory=list)
 
 
 class RerunReport(BaseModel):
@@ -154,28 +155,28 @@ class RerunReport(BaseModel):
     started_at: str
     finished_at: str
     overall: Literal["identical", "drifted", "changed"]
-    tool_diffs: List[ToolDiff] = Field(default_factory=list)
-    missing_in_new: List[str] = Field(default_factory=list)
-    new_only: List[str] = Field(default_factory=list)
-    environment_changes: List[FieldChange] = Field(default_factory=list)
-    source_version_changes: List[FieldChange] = Field(default_factory=list)
-    biomodel_changes: List[FieldChange] = Field(default_factory=list)
-    verification_delta: Optional[Dict[str, Any]] = None
-    answer_unified_diff: Optional[str] = None
-    notes: List[str] = Field(default_factory=list)
+    tool_diffs: list[ToolDiff] = Field(default_factory=list)
+    missing_in_new: list[str] = Field(default_factory=list)
+    new_only: list[str] = Field(default_factory=list)
+    environment_changes: list[FieldChange] = Field(default_factory=list)
+    source_version_changes: list[FieldChange] = Field(default_factory=list)
+    biomodel_changes: list[FieldChange] = Field(default_factory=list)
+    verification_delta: dict[str, Any] | None = None
+    answer_unified_diff: str | None = None
+    notes: list[str] = Field(default_factory=list)
 
 
 # -----------------------------------------------------------------------------
 # Replay
 # -----------------------------------------------------------------------------
 
-def call_kwargs(call: Dict[str, Any]) -> Dict[str, Any]:
+def call_kwargs(call: dict[str, Any]) -> dict[str, Any]:
     """Validated inputs, or the raw inputs of a call that failed validation (replayed to reproduce it)."""
     inputs = call.get("inputs") or {}
     return dict(inputs if inputs else (call.get("raw_inputs") or {}))
 
 
-async def replay_tools(manifest: Dict[str, Any], registry: Any, *, user_id: str = "rerun") -> Dict[str, Any]:
+async def replay_tools(manifest: dict[str, Any], registry: Any, *, user_id: str = "rerun") -> dict[str, Any]:
     """Re-execute the recorded tool calls in seq order under a fresh recorder; returns the new full manifest."""
     rec = RunRecorder(
         query=str(manifest.get("query", "")),
@@ -237,10 +238,10 @@ def numeric_change(path: str, before: float, after: float) -> FieldChange:
     return FieldChange(path=path, before=before, after=after, rel_change=None if rel is None else round(rel, 6), tier=tier)
 
 
-def diff_values(path: str, before: Any, after: Any) -> List[FieldChange]:
+def diff_values(path: str, before: Any, after: Any) -> list[FieldChange]:
     """Non-identical leaf changes between two digests: numbers by tolerance tier, scalar lists as sets."""
     if isinstance(before, dict) and isinstance(after, dict):
-        out: List[FieldChange] = []
+        out: list[FieldChange] = []
         for key in sorted(set(before) | set(after), key=str):
             sub = f"{path}.{key}" if path else str(key)
             if key not in after:
@@ -265,24 +266,24 @@ def diff_values(path: str, before: Any, after: Any) -> List[FieldChange]:
     return []
 
 
-def _status(call: Optional[Dict[str, Any]]) -> str:
+def _status(call: dict[str, Any] | None) -> str:
     if call is None:
         return "missing"
     return "success" if call.get("success") else str(call.get("error_type") or "error")
 
 
-def _call_key(call: Dict[str, Any]) -> str:
+def _call_key(call: dict[str, Any]) -> str:
     return f"{call.get('tool_name')}:{canonical_json_sha256(call_kwargs(call))[:12]}"
 
 
-def _group(calls: Iterable[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
-    groups: Dict[str, List[Dict[str, Any]]] = {}
+def _group(calls: Iterable[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    groups: dict[str, list[dict[str, Any]]] = {}
     for call in sorted(calls, key=lambda c: int(c.get("seq", 0))):
         groups.setdefault(_call_key(call), []).append(call)
     return groups
 
 
-def _source_version_changes(before: Dict[str, Any], after: Dict[str, Any]) -> List[FieldChange]:
+def _source_version_changes(before: dict[str, Any], after: dict[str, Any]) -> list[FieldChange]:
     out = []
     for key in sorted(set(before or {}) | set(after or {})):
         b = (before or {}).get(key) or {}
@@ -292,10 +293,10 @@ def _source_version_changes(before: Dict[str, Any], after: Dict[str, Any]) -> Li
     return out
 
 
-def _biomodel_changes(before: List[Dict[str, Any]], after: List[Dict[str, Any]]) -> List[FieldChange]:
+def _biomodel_changes(before: list[dict[str, Any]], after: list[dict[str, Any]]) -> list[FieldChange]:
     b_map = {p.get("accession"): p for p in before or [] if isinstance(p, dict)}
     a_map = {p.get("accession"): p for p in after or [] if isinstance(p, dict)}
-    out: List[FieldChange] = []
+    out: list[FieldChange] = []
     for acc in sorted(set(b_map) & set(a_map), key=str):
         for field in ("latest_revision", "main_file_sha256", "local_cache_sha256"):
             b, a = b_map[acc].get(field), a_map[acc].get(field)
@@ -304,11 +305,11 @@ def _biomodel_changes(before: List[Dict[str, Any]], after: List[Dict[str, Any]])
     return out
 
 
-def _verification_delta(before: Dict[str, Any], after: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _verification_delta(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any] | None:
     b, a = (before or {}).get("final") or {}, (after or {}).get("final") or {}
     if not b or not a:
         return None
-    delta: Dict[str, Any] = {"before": b, "after": a}
+    delta: dict[str, Any] = {"before": b, "after": a}
     if _is_number(b.get("score")) and _is_number(a.get("score")):
         delta["score_delta"] = round(float(a["score"]) - float(b["score"]), 6)
     delta["passed_changed"] = bool(b.get("passed")) != bool(a.get("passed"))
@@ -323,22 +324,22 @@ def answer_diff(before: str, after: str) -> str:
 
 
 def diff_runs(
-    original: Dict[str, Any],
-    new: Dict[str, Any],
+    original: dict[str, Any],
+    new: dict[str, Any],
     *,
     mode: Literal["tools", "full"] = "tools",
     provenance: Literal["server_store", "client_supplied"] = "server_store",
-    original_response: Optional[str] = None,
-    new_response: Optional[str] = None,
-    started_at: Optional[str] = None,
+    original_response: str | None = None,
+    new_response: str | None = None,
+    started_at: str | None = None,
 ) -> RerunReport:
     """Structured comparison of two run manifests (both reduced to their client view first)."""
     orig, cur = client_view(original or {}), client_view(new or {})
     b_groups, a_groups = _group(orig.get("tool_calls") or []), _group(cur.get("tool_calls") or [])
 
-    tool_diffs: List[ToolDiff] = []
-    missing: List[str] = []
-    new_only: List[str] = []
+    tool_diffs: list[ToolDiff] = []
+    missing: list[str] = []
+    new_only: list[str] = []
     severity = 0  # 0 identical, 1 drifted, 2 changed
 
     for key in list(b_groups) + [k for k in a_groups if k not in b_groups]:
@@ -384,7 +385,7 @@ def diff_runs(
 
     verification = None
     unified = None
-    notes: List[str] = []
+    notes: list[str] = []
     if mode == "full":
         verification = _verification_delta(orig.get("verification") or {}, cur.get("verification") or {})
         if verification and verification.get("passed_changed"):

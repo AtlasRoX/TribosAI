@@ -25,7 +25,7 @@ import json
 import logging
 import re
 from html import escape
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -33,7 +33,14 @@ from .budget import BudgetExhausted
 from .guardrails import SPOTLIGHT_RULE, neutralise, spotlight
 from .llm import AgentLLMUnavailable
 from .runtime import AgentPhase, PhaseOutcome, register_phase
-from .sandbox import ANALYSABLE_KINDS, bound_scope, current_scope, resolve_inputs, sandbox_enabled, sandbox_timeout_s
+from .sandbox import (
+    ANALYSABLE_KINDS,
+    bound_scope,
+    current_scope,
+    resolve_inputs,
+    sandbox_enabled,
+    sandbox_timeout_s,
+)
 from .sandbox.policy import ALLOWED_MODULES, check_code
 from .state import AgentState
 
@@ -58,7 +65,7 @@ GROUP_COLUMN_NAMES = (
 
 
 class AnalystStep(BaseModel):
-    plan: List[str] = Field(default_factory=list)
+    plan: list[str] = Field(default_factory=list)
     code: str = ""
     done: bool = False
     answer_summary: str = ""
@@ -68,13 +75,13 @@ def has_analysis_intent(text: str) -> bool:
     return bool(ANALYSIS_INTENT_RE.search(text or ""))
 
 
-def analysable_attachment(ctx: Any) -> Optional[Any]:
+def analysable_attachment(ctx: Any) -> Any | None:
     return next((a for a in (getattr(ctx, "attachments", None) or []) if getattr(a, "kind", "") in ANALYSABLE_KINDS), None)
 
 
 # Dataset preview (in-process, bounded) -------------------------------------------------------------------------
 
-def _preview(inp: Any) -> Dict[str, Any]:
+def _preview(inp: Any) -> dict[str, Any]:
     """Columns, dtypes and the first rows: pandas reads at most 20 rows; h5ad is opened backed (no X load)."""
     import pandas as pd
 
@@ -102,7 +109,7 @@ def _preview(inp: Any) -> Dict[str, Any]:
             pass
 
 
-def _preview_text(inp: Any, preview: Dict[str, Any]) -> str:
+def _preview_text(inp: Any, preview: dict[str, Any]) -> str:
     lines = [f"file name in the working directory: {inp.name}", f"kind: {preview.get('kind')}"]
     if preview.get("kind") == "table":
         lines.append(f"separator: {'tab' if inp.sep == chr(9) else 'comma'}; {preview.get('note', '')}")
@@ -213,7 +220,7 @@ def deterministic_script(inp: Any, query: str) -> str:
 
 # Prompting -------------------------------------------------------------------------------------------------------
 
-def _system_prompt(inputs: List[Any]) -> str:
+def _system_prompt(inputs: list[Any]) -> str:
     names = ", ".join(i.name for i in inputs)
     return (
         "[phase:analyst] You are a computational biologist working in a Python notebook sandbox (CodeAct): you write "
@@ -235,8 +242,8 @@ def _system_prompt(inputs: List[Any]) -> str:
     )
 
 
-def _observation(report: Dict[str, Any]) -> str:
-    parts: List[str] = [f"status: {report.get('status')}"]
+def _observation(report: dict[str, Any]) -> str:
+    parts: list[str] = [f"status: {report.get('status')}"]
     if report.get("violations"):
         parts.append("policy violations: " + "; ".join(report["violations"][:8]))
     if report.get("error"):
@@ -252,7 +259,7 @@ def _observation(report: Dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
-def _user_prompt(query: str, inp: Any, preview_text: str, attempts: List[Dict[str, Any]]) -> str:
+def _user_prompt(query: str, inp: Any, preview_text: str, attempts: list[dict[str, Any]]) -> str:
     out = [
         "<question>",
         spotlight(query, "researcher_question", 2000),
@@ -280,7 +287,7 @@ def _text(value: Any, limit: int) -> str:
     return text[:limit] + (" ...(truncated)" if len(text) > limit else "")
 
 
-def _evidence_xml(art: Dict[str, Any]) -> str:
+def _evidence_xml(art: dict[str, Any]) -> str:
     ds = art.get("dataset") or {}
     head = (
         f'<sandbox_analysis key="{RESULT_KEY}" dataset="{escape(str(ds.get("name") or ""), quote=True)}" '
@@ -289,7 +296,7 @@ def _evidence_xml(art: Dict[str, Any]) -> str:
         'note="computed by sandboxed Python over the uploaded dataset; quote values exactly as given and name the '
         'dataset; exploratory analysis of user-provided data, not peer-reviewed evidence">'
     )
-    body: List[str] = [head]
+    body: list[str] = [head]
     if art.get("plan"):
         body.append("<plan>" + escape(_text(" | ".join(art["plan"]), 800), quote=False) + "</plan>")
     if art.get("code"):
@@ -316,7 +323,7 @@ def _evidence_xml(art: Dict[str, Any]) -> str:
     return "\n".join(body)
 
 
-def _policy_block() -> Dict[str, Any]:
+def _policy_block() -> dict[str, Any]:
     return {
         "timeout_s": sandbox_timeout_s(),
         "network": "blocked",
@@ -345,7 +352,7 @@ class AnalystPhase(AgentPhase):
             return False
         return has_analysis_intent(state.clean_query or state.query)
 
-    async def _execute(self, state: AgentState, code: str, inp: Any, purpose: str) -> Dict[str, Any]:
+    async def _execute(self, state: AgentState, code: str, inp: Any, purpose: str) -> dict[str, Any]:
         with bound_scope(state.user_id, [a.id for a in state.ctx.attachments]):
             res = await state.call_tool(
                 TOOL_NAME,
@@ -361,7 +368,7 @@ class AnalystPhase(AgentPhase):
             report = {"status": "error", "error": str(getattr(res, "error", "") or "the sandbox tool failed")[:400]}
         return report
 
-    async def run(self, state: AgentState) -> Optional[PhaseOutcome]:
+    async def run(self, state: AgentState) -> PhaseOutcome | None:
         att = analysable_attachment(state.ctx)
         with bound_scope(state.user_id, [a.id for a in state.ctx.attachments]):
             inputs, errors = resolve_inputs(current_scope(), [att.id])
@@ -381,8 +388,8 @@ class AnalystPhase(AgentPhase):
             logger.info("Dataset preview failed: %s", exc)
             preview_text = f"file name in the working directory: {inp.name}\nkind: {inp.kind}\n(preview unavailable)"
 
-        attempts: List[Dict[str, Any]] = []
-        plan: List[str] = []
+        attempts: list[dict[str, Any]] = []
+        plan: list[str] = []
         summary = ""
         author = "deterministic"
         steps_taken = 0
@@ -408,7 +415,7 @@ class AnalystPhase(AgentPhase):
                     continue
                 violations = check_code(code, [x.name for x in inputs])
                 if violations:
-                    report: Dict[str, Any] = {"status": "policy_violation", "error": "rejected by the sandbox policy", "violations": violations}
+                    report: dict[str, Any] = {"status": "policy_violation", "error": "rejected by the sandbox policy", "violations": violations}
                 else:
                     report = await self._execute(state, code, inp, f"analysis cell {i}: " + (plan[0] if plan else query)[:150])
                 attempts.append({"iteration": i, "code": code, "report": report})
@@ -435,7 +442,7 @@ class AnalystPhase(AgentPhase):
         rep = final["report"] if final else {}
         insufficient = bool(_INSUFFICIENT_RE.search(summary)) and not any(a["report"].get("status") == "ok" for a in attempts)
         status = "ok" if rep.get("status") == "ok" else "error"
-        art: Dict[str, Any] = {
+        art: dict[str, Any] = {
             "status": status,
             "iterations": steps_taken,
             "author": author,

@@ -14,12 +14,26 @@ import io
 import logging
 import os
 import re
-from typing import Any, List, Optional, Tuple
+from typing import Any
 
-from .markdown_blocks import dejavu_font_dir, render_html, report_cmap, report_font_path, strip_unsupported_glyphs
+from .equation_renderer import replace_equations_in_html
+from .markdown_blocks import (
+    dejavu_font_dir,
+    render_html,
+    report_cmap,
+    report_font_path,
+    strip_unsupported_glyphs,
+)
 from .report_model import (
-    ReportCitation, ReportModel, citation_parts, fmt_number, question_is_title, report_headline, report_kind,
-    task_lines, verification_lines,
+    ReportCitation,
+    ReportModel,
+    citation_parts,
+    fmt_number,
+    question_is_title,
+    report_headline,
+    report_kind,
+    task_lines,
+    verification_lines,
 )
 
 _ASSETS = os.path.join(os.path.dirname(__file__), "assets")
@@ -57,7 +71,7 @@ def _esc(value: Any) -> str:
 
 
 def _table_html(
-    header: List[str], rows: List[List[str]], widths: Optional[List[int]] = None, mono: Tuple[int, ...] = ()
+    header: list[str], rows: list[list[str]], widths: list[int] | None = None, mono: tuple[int, ...] = ()
 ) -> str:
     """mono: columns of identifiers and JSON, set in Google Sans Code so they stay compact and break cleanly.
     Text is left-aligned (fpdf2 justifies cells by default); columns of numbers are right-aligned."""
@@ -85,7 +99,7 @@ _TABLE_OPEN = '<table border="0" cellpadding="1.2" width="100%">'
 _NUMBER = re.compile(r"^[<>≤≥~]?\s*[-+]?(\d+(\.\d+)?|\.\d+)([eE][-+]?\d+)?\s*%?$")
 
 
-def _numeric_column(values: List[str]) -> bool:
+def _numeric_column(values: list[str]) -> bool:
     """Every filled cell is a number (an all-empty column aligns with the numbers beside it)."""
     filled = [v.strip() for v in values if v and v.strip() and v.strip() != "—"]
     return all(_NUMBER.match(v) for v in filled)
@@ -103,7 +117,7 @@ def _spaced(markup: str) -> str:
     return re.sub(r"<th(?=[\s>])(?![^>]*\balign=)", '<th align="left"', markup)
 
 
-def _items(lines: List[str]) -> str:
+def _items(lines: list[str]) -> str:
     """A bullet list; lines indented by two spaces nest under the line before them."""
     out, nested = [f'<ul line-height="{_LINE}">'], False
     for raw in lines:
@@ -125,11 +139,11 @@ def _items(lines: List[str]) -> str:
 
 
 # A part is ("heading", title), ("html", markup), ("table", markup) or ("plot", None).
-Part = Tuple[str, Any]
+Part = tuple[str, Any]
 
 
-def _parts(report: ReportModel, *, question_in_title: bool) -> List[Part]:
-    parts: List[Part] = []
+def _parts(report: ReportModel, *, question_in_title: bool) -> list[Part]:
+    parts: list[Part] = []
     for notice in report.notices:
         parts.append(("html", f"<blockquote><b>Notice.</b> {_esc(notice)}</blockquote>"))
     if not question_in_title:
@@ -380,8 +394,9 @@ def render_pdf(report: ReportModel) -> bytes:
     def write(markup: str, size: float = _BODY_PT) -> None:
         pdf.set_font(_SANS, "", size)
         pdf.set_text_color(*_INK)
+        processed = replace_equations_in_html(markup)
         pdf.write_html(
-            clean(markup),
+            clean(processed),
             font_family=_SANS,
             tag_styles=tag_styles,
             table_line_separators=True,

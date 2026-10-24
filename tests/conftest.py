@@ -33,7 +33,7 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
-from typing import Any, List, Tuple
+from typing import Any
 
 import pytest
 
@@ -65,7 +65,7 @@ _KEEP = {"PYTEST_CURRENT_TEST", "TRIBOS_LIVE_TESTS"}
 SECRET_NAME_RE = re.compile(r"(API_KEY|_KEY$|_TOKEN$|_TOKENS$|SECRET|PASSWORD|PASSWD|CREDENTIAL)", re.IGNORECASE)
 
 
-def _registered_setting_names() -> List[str]:
+def _registered_setting_names() -> list[str]:
     """Names in the settings registry, loaded from settings.py alone (stdlib only, no package import)."""
     import importlib.util
 
@@ -83,7 +83,7 @@ def _registered_setting_names() -> List[str]:
         return []
 
 
-def scrubbed_variable_names(environ: Any = None) -> List[str]:
+def scrubbed_variable_names(environ: Any = None) -> list[str]:
     """The variables an offline run removes: every registered setting and every secret-looking name."""
     environ = os.environ if environ is None else environ
     names = set(_registered_setting_names()) | {n for n in environ if SECRET_NAME_RE.search(n)}
@@ -191,9 +191,9 @@ def _is_local_host(host: Any) -> bool:
 class _NetworkGuard:
     def __init__(self) -> None:
         self.allowed = False
-        self.attempts: List[Tuple[str, str, str]] = []
+        self.attempts: list[tuple[str, str, str]] = []
         self._lock = threading.Lock()
-        self._restore: List[Tuple[Any, str, Any]] = []
+        self._restore: list[tuple[Any, str, Any]] = []
 
     def _refuse(self, kind: str, target: Any, dns: bool) -> OSError:
         test = os.environ.get("PYTEST_CURRENT_TEST", "<collection>")
@@ -281,7 +281,7 @@ class _NetworkGuard:
             owner, name, value = self._restore.pop()
             setattr(owner, name, value)
 
-    def take_attempts(self) -> List[Tuple[str, str, str]]:
+    def take_attempts(self) -> list[tuple[str, str, str]]:
         with self._lock:
             out, self.attempts = self.attempts, []
         return out
@@ -330,10 +330,13 @@ def pytest_collection_modifyitems(config, items):
 @pytest.fixture
 def offline_biomd10(monkeypatch, tmp_path):
     """Serve BIOMD0000000010 from the bundled SBML fixture through a private model cache: no network."""
-    from tribos.vivarix.engine import VivarixSimulationEngine
-
     cache = tmp_path / "biomodels_cache"
-    cache.mkdir()
+    cache.mkdir(exist_ok=True)
+    try:
+        from tribos.vivarix.engine import VivarixSimulationEngine
+    except ImportError:
+        return cache
+
     shutil.copy(Path(__file__).parent / "fixtures" / "datasets" / "BIOMD0000000010_url.xml", cache / "BIOMD0000000010.xml")
     monkeypatch.setattr(VivarixSimulationEngine, "_cache_dir", staticmethod(lambda: cache))
     return cache

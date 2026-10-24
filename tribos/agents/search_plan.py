@@ -21,10 +21,19 @@ from __future__ import annotations
 
 import datetime as _dt
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
 
 QUESTION_TYPES = (
+    "proof",
+    "derivation",
+    "numerical",
+    "design_sizing",
+    "modelling",
+    "conceptual",
+    "literature_review",
+    # Legacy types retained for backward compatibility
     "treatment", "diagnosis", "prognosis", "epidemiology", "mechanism", "pharmacology", "safety", "trials",
     "genetics", "target", "methods", "statistics", "comparison", "biomarker", "guideline", "regulatory", "general",
 )
@@ -36,8 +45,13 @@ MAX_TERMS = 4
 
 # Ordered: the first matching type wins, so specific types come before broad ones.
 _TYPE_PATTERNS = [
-    # Effect measures ("hazard ratios", "p-values") make a statistics question only when asked how to compute or
-    # interpret them; "efficacy, including hazard ratios from the pivotal trials" is a trials question.
+    ("proof", r"\b(prove|proof|lemma|theorem|corollary|iff|if\s+and\s+only\s+if|counterexample|conjecture|banach|hilbert|cauchy[\s\-]schwarz)\b"),
+    ("derivation", r"\b(derive|derivation|closed[\s\-]form|analytical\s+expression|asymptotic\s+expansion|euler[\s\-]lagrange|dispersion\s+relation|governing\s+equation)\b"),
+    ("design_sizing", r"\b(design|sizing|safety\s+factor|allowable\s+stress|buckling|deflection|cantilever|beam|pressure\s+vessel|heat\s+exchanger|select\s+material|controller\s+design|filter\s+design)\b"),
+    ("modelling", r"\b(simulate|simulation|ode|pde|bvp|ivp|dynamical\s+system|phase\s+portrait|trajectory|bifurcation|equilibrium|jacobian|lyapunov|van\s+der\s+pol|lorenz|lotka[\s\-]volterra|harmonic\s+oscillator)\b"),
+    ("numerical", r"\b(compute|calculate|numerical|evaluate|solve\s+for|eigenvalue|eigenvector|integral|integrate|quadrature|root|fermi\s+estimate|order\s+of\s+magnitude|monte\s+carlo)\b"),
+    ("literature_review", r"\b(literature\s+review|survey|state\s+of\s+the\s+art|recent\s+papers|arxiv|zbmath|benchmarks|known\s+bounds)\b"),
+    ("conceptual", r"\b(what\s+is|explain|intuition|physical\s+meaning|geometric\s+interpretation|definition\s+of)\b"),
     ("statistics", r"\b(sample\s+size|power\s+(?:analysis|calculation)|statistic\w*|regression|"
                    r"(?:calculat\w*|comput\w*|interpret\w*|estimat\w*|deriv\w*)\s+(?:the\s+|an?\s+)?(?:p[\s\-]?values?|"
                    r"confidence\s+intervals?|hazard\s+ratios?|odds\s+ratios?)|"
@@ -66,7 +80,14 @@ _TYPE_PATTERNS = [
 _TYPE_RES = [(name, re.compile(pat, re.I)) for name, pat in _TYPE_PATTERNS]
 
 # Title/abstract words that narrow a search to the kind of evidence a question type needs.
-_FACETS: Dict[str, List[str]] = {
+_FACETS: dict[str, list[str]] = {
+    "proof": ["theorem", "proof", "lemma", "bound"],
+    "derivation": ["derivation", "analytical", "asymptotic", "solution"],
+    "numerical": ["numerical", "computation", "convergence", "algorithm"],
+    "design_sizing": ["design", "mechanical", "stress", "sizing"],
+    "modelling": ["dynamical", "stability", "bifurcation", "simulation"],
+    "conceptual": ["review", "theory", "introduction"],
+    "literature_review": ["review", "survey", "advances"],
     "treatment": ["treatment", "therapy", "management"],
     "guideline": ["guideline", "recommendation", "consensus", "management"],
     "diagnosis": ["diagnosis", "diagnostic", "criteria", "definition"],
@@ -88,7 +109,7 @@ _FACETS: Dict[str, List[str]] = {
 _TITLE_FACET_TYPES = frozenset(
     {"epidemiology", "diagnosis", "safety", "mechanism", "pharmacology", "biomarker", "statistics", "prognosis", "methods"}
 )
-_TITLE_FACETS: Dict[str, List[str]] = {
+_TITLE_FACETS: dict[str, list[str]] = {
     "safety": ["adverse", "toxicit*", "cardiotoxicit*", "hepatotoxicit*", "safety", "side effect*"],
     "epidemiology": ["prevalence", "incidence", "epidemiolog*", "burden"],
     "diagnosis": ["diagnos*", "criteria", "definition*"],
@@ -210,7 +231,7 @@ _ASPECTS = (
 )
 _ASPECT_RES = [(name, re.compile(pat, re.I), terms) for name, pat, terms in _ASPECTS]
 # Aspects searched for on their own (subject AND disease AND aspect), with their search terms and sort.
-_TOPIC_SEARCH: Dict[str, tuple] = {
+_TOPIC_SEARCH: dict[str, tuple] = {
     "therapy": (["inhibitor*", "targeted therapy", "targeted therapies"], "CITED desc"),
     "repurposing": (["repurpos*", "reposition*"], None),
     "in_silico": (["docking", "virtual screening", "molecular dynamics", "in silico"], None),
@@ -231,7 +252,7 @@ _DIAGNOSTIC_TITLE_TERMS = (
 )
 _ON_TOPIC_TITLE_TERMS = ("inhibit*", "treat*", "therap*", "drug*", "repurpos*", "reposition*", "efficacy", "respon*")
 # Unicode hyphens and dashes (U+2010-U+2015, U+2212) as ASCII, one character for one so entity spans still hold.
-_DASHES = str.maketrans({c: "-" for c in "‐‑‒–—―−"})
+_DASHES = str.maketrans(dict.fromkeys("‐‑‒–—―−", "-"))
 # Questions longer than this are searched on the web by their concepts, not verbatim.
 WEB_QUERY_MAX_WORDS = 16
 _FDA_APPROVED_RE = re.compile(r"\bFDA[\s\-]approved\b", re.I)
@@ -246,7 +267,7 @@ def normalize_dashes(text: str) -> str:
     return text.translate(_DASHES)
 
 
-def question_aspects(query: str) -> Dict[str, List[str]]:
+def question_aspects(query: str) -> dict[str, list[str]]:
     """The aspects a question asks about (repurposing, therapy, in-silico, safety, trials, real-world data), each
     with the terms that show an article covers it."""
     text = normalize_dashes(query)
@@ -269,7 +290,7 @@ def is_therapeutic_question(query: str, question_type: str, names_drug: bool = F
     return bool(_TREAT_RE.search(text) or _DRUG_KIND_RE.search(text) or names_drug)
 
 
-def off_topic_title_terms(query: str) -> List[str]:
+def off_topic_title_terms(query: str) -> list[str]:
     """Diagnostic and technical title terms that mark a paper off topic for a treatment question; the ones the
     question uses itself are left out."""
     text = " " + re.sub(r"[^a-z0-9]+", " ", normalize_dashes(query).lower()) + " "
@@ -288,25 +309,25 @@ _PIVOTAL_DESIGN = (
 @dataclass
 class SearchPlan:
     question_type: str = "general"
-    concepts: List[List[str]] = field(default_factory=list)
+    concepts: list[list[str]] = field(default_factory=list)
     web_query: str = ""
     source: str = "deterministic"  # deterministic|llm
     # Concepts past the search's group limit ("acquired resistance" after EGFR, osimertinib, NSCLC): not searched
     # for, but they rank the retrieved passages, so the one about the question's actual topic comes first.
-    ranking_terms: List[str] = field(default_factory=list)
+    ranking_terms: list[str] = field(default_factory=list)
     # Leading concept groups that are the question's subject (target, mutation, drug, disease, literal code).
     # Relaxed tiers drop facets and softer topic words first and keep every hard anchor.
     hard_groups: int = 0
     # The diseases the question names (with synonyms), even past the group limit: retrieved articles that never
     # mention them are ranked below those that do (synthesis_engine).
-    disease_terms: List[str] = field(default_factory=list)
+    disease_terms: list[str] = field(default_factory=list)
     # The drugs (or, failing that, the intervention phrase) whose trial evidence a "pivotal" search looks for.
-    intervention_terms: List[str] = field(default_factory=list)
+    intervention_terms: list[str] = field(default_factory=list)
     pivotal: bool = False  # the question asks about trial efficacy of an intervention in a disease
     # Trial names ("KEYNOTE-716", "CheckMate 76K") searched as quoted phrases; set by the caller when known.
-    trial_names: List[str] = field(default_factory=list)
+    trial_names: list[str] = field(default_factory=list)
     # What the question asks about the subject (question_aspects): {"repurposing": [terms], "in_silico": [...]}.
-    aspects: Dict[str, List[str]] = field(default_factory=dict)
+    aspects: dict[str, list[str]] = field(default_factory=dict)
     # The question asks for treatments (drugs to repurpose, a therapy's efficacy): treatment searches are added
     # and diagnostic or technical papers rank below papers about treatment.
     therapeutic: bool = False
@@ -314,7 +335,7 @@ class SearchPlan:
     # disease); the per-aspect searches are anchored on the first.
     subject_groups: int = 0
     # For a treatment question: title terms of diagnostic and technical papers the question does not ask about.
-    off_topic_terms: List[str] = field(default_factory=list)
+    off_topic_terms: list[str] = field(default_factory=list)
 
     @property
     def facet_type(self) -> str:
@@ -322,10 +343,10 @@ class SearchPlan:
         searches for treatment papers, not for protocols."""
         return "treatment" if self.question_type == "methods" and self.therapeutic else self.question_type
 
-    def topic(self) -> Dict[str, Any]:
+    def topic(self) -> dict[str, Any]:
         """What the literature ranking needs beyond the disease: the question's aspects and, for a treatment
         question, the title terms of off-topic (diagnostic, technical) papers."""
-        out: Dict[str, Any] = {}
+        out: dict[str, Any] = {}
         if self.aspects:
             out["aspects"] = {k: list(v) for k, v in self.aspects.items()}
         if self.therapeutic and self.off_topic_terms:
@@ -333,13 +354,13 @@ class SearchPlan:
             out["on_topic"] = list(_ON_TOPIC_TITLE_TERMS) + list(self.intervention_terms)
         return out
 
-    def keywords(self) -> List[str]:
+    def keywords(self) -> list[str]:
         """Lower-case content words of every concept, ranking-only term and question-type facet, for ranking passages."""
         terms = [t for g in self.concepts for t in g] + list(self.ranking_terms) + _FACETS.get(self.facet_type, [])
         words = [w.lower().rstrip("*") for t in terms for w in _WORD_RE.findall(t.replace("*", ""))]
         return list(dict.fromkeys(w for w in words if len(w) > 2 and w not in _STOP))
 
-    def europepmc_queries(self, year: Optional[int] = None) -> List[Dict[str, Any]]:
+    def europepmc_queries(self, year: int | None = None) -> list[dict[str, Any]]:
         """Tiered EuropePMC searches: [{"query", "sort", "tier", "label"}]. Empty when there is nothing to search."""
         if not self.concepts:
             return []
@@ -349,7 +370,7 @@ class SearchPlan:
         facet = _FACETS.get(facet_type)
         peer = "HAS_ABSTRACT:y AND SRC:MED"
 
-        def clause(*parts: Optional[str]) -> str:
+        def clause(*parts: str | None) -> str:
             return " AND ".join(p for p in parts if p)
 
         rest = [_group("TITLE_ABS", g) for g in others]
@@ -360,7 +381,7 @@ class SearchPlan:
             landmark_facet = _group("TITLE", _TITLE_FACETS.get(facet_type, facet))
         landmark = clause(_group("TITLE", anchor), *rest, landmark_facet, peer, f"PUB_YEAR:[{year - LANDMARK_YEARS} TO {year}]")
         recent = clause(_group("TITLE_ABS", anchor), *rest, facet_clause, peer, f"PUB_YEAR:[{year - RECENT_YEARS} TO {year}]")
-        queries: List[Dict[str, Any]] = [
+        queries: list[dict[str, Any]] = [
             {"query": landmark, "sort": "CITED desc", "tier": 1, "label": "landmark"},
             {"query": recent, "sort": None, "tier": 1, "label": "recent"},
         ]
@@ -396,7 +417,47 @@ class SearchPlan:
                 q["topic"] = topic
         return queries
 
-    def _topic_queries(self, year: int) -> List[Dict[str, Any]]:
+    def scholarly_queries(self, year: int | None = None) -> list[dict[str, Any]]:
+        """Tiered scholarly searches for OpenAlex / Semantic Scholar / arXiv / ADS / Crossref."""
+        if not self.concepts:
+            return []
+        year = year or _dt.date.today().year
+        anchor, others = self.concepts[0], self.concepts[1:MAX_GROUPS]
+        facet = _FACETS.get(self.facet_type) or []
+        lead_terms = [g[0] for g in [anchor, *others] if g]
+        primary_query = " ".join(lead_terms)
+        faceted_query = " ".join([*lead_terms, *(facet[:2] if facet else [])]).strip()
+        queries: list[dict[str, Any]] = [
+            {
+                "query": faceted_query or primary_query,
+                "concepts": [list(g) for g in [anchor, *others]],
+                "sort": "cited_by_count:desc",
+                "tier": 1,
+                "label": "landmark",
+                "from_year": year - LANDMARK_YEARS,
+                "to_year": year,
+            },
+            {
+                "query": primary_query,
+                "concepts": [list(g) for g in [anchor, *others]],
+                "sort": "publication_year:desc",
+                "tier": 1,
+                "label": "recent",
+                "from_year": year - RECENT_YEARS,
+                "to_year": year,
+            },
+        ]
+        if len(lead_terms) > 1:
+            queries.append({
+                "query": anchor[0],
+                "concepts": [list(anchor)],
+                "sort": "cited_by_count:desc",
+                "tier": 2,
+                "label": "relaxed",
+            })
+        return queries
+
+    def _topic_queries(self, year: int) -> list[dict[str, Any]]:
         """For a treatment question about a subject (a gene or target, not a drug or disease): the subject in the
         disease AND each searched aspect the question asks about ("KRAS" AND pancreatic cancer AND (inhibitor* OR
         "targeted therapy"); ... AND (repurpos* OR reposition*); ... AND (docking OR "virtual screening")).
@@ -406,7 +467,7 @@ class SearchPlan:
         subject = self.concepts[0] if self.subject_groups else None
         diseases = disease_search_terms(self.disease_terms)
         disease_clause = _group("TITLE_ABS", diseases) if diseases else None
-        out: List[Dict[str, Any]] = []
+        out: list[dict[str, Any]] = []
         for name, (terms, sort) in _TOPIC_SEARCH.items():
             if name not in self.aspects:
                 continue
@@ -422,7 +483,7 @@ class SearchPlan:
                         "limit": TOPIC_LIMIT})
         return out
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {"question_type": self.question_type, "concepts": [list(g) for g in self.concepts],
                 "ranking_terms": list(self.ranking_terms), "web_query": self.web_query, "source": self.source,
                 "hard_groups": self.hard_groups, "disease_terms": list(self.disease_terms),
@@ -437,7 +498,7 @@ def _clean_term(term: str) -> str:
     return re.sub(r"\s+", " ", term).strip(" .,;:?!()[]{}")
 
 
-def _variants(term: str) -> List[str]:
+def _variants(term: str) -> list[str]:
     """A term plus its form without a possessive ("Alzheimer's disease" -> "Alzheimer disease")."""
     out = [term]
     plain = re.sub(r"(\w)['’]s\b", r"\1", term)
@@ -457,11 +518,11 @@ def _group(field_name: str, terms: Sequence[str]) -> str:
     return parts[0] if len(parts) == 1 else "(" + " OR ".join(parts) + ")"
 
 
-def disease_search_terms(terms: Sequence[str], limit: int = 6) -> List[str]:
+def disease_search_terms(terms: Sequence[str], limit: int = 6) -> list[str]:
     """Disease names plus their broader forms for searching: qualifiers dropped ("cutaneous melanoma" ->
     "melanoma") and a carcinoma named as the organ's cancer ("pancreatic ductal adenocarcinoma" ->
     "pancreatic adenocarcinoma", "pancreatic cancer")."""
-    out: List[str] = []
+    out: list[str] = []
 
     def push(t: str) -> None:
         t = _clean_term(t)
@@ -481,11 +542,11 @@ def disease_search_terms(terms: Sequence[str], limit: int = 6) -> List[str]:
     return out[:limit]
 
 
-def disease_relevance_terms(terms: Sequence[str]) -> List[str]:
+def disease_relevance_terms(terms: Sequence[str]) -> list[str]:
     """Terms any one of which shows an article is about the disease: the names and broader forms, their
     distinctive words ("melanoma", "lung"), and organ adjectives as prefixes ("pancrea*" for "pancreatic",
     which also matches "pancreas"). A trailing * marks a prefix match."""
-    out: List[str] = []
+    out: list[str] = []
     for t in disease_search_terms(terms, limit=12):
         out.append(t)
         for w in re.findall(r"[A-Za-z][A-Za-z0-9\-]*", t):
@@ -503,9 +564,9 @@ def disease_relevance_terms(terms: Sequence[str]) -> List[str]:
     return list(dict.fromkeys(out))
 
 
-def _intervention_terms(terms: Sequence[str]) -> List[str]:
+def _intervention_terms(terms: Sequence[str]) -> list[str]:
     """Intervention names plus the singular of a drug-class plural ("PARP inhibitors" -> "PARP inhibitor")."""
-    out: List[str] = []
+    out: list[str] = []
     for t in terms:
         if not isinstance(t, str):
             continue
@@ -518,7 +579,7 @@ def _intervention_terms(terms: Sequence[str]) -> List[str]:
     return out[:6]
 
 
-def pivotal_trial_query(interventions: Sequence[str], disease_terms: Sequence[str]) -> Optional[Dict[str, Any]]:
+def pivotal_trial_query(interventions: Sequence[str], disease_terms: Sequence[str]) -> dict[str, Any] | None:
     """Citation-ranked randomized / phase 3 trials of (any of) the interventions in the disease:
     (drug1 OR drug2) AND disease AND (RCT OR phase 3). Its hits are guaranteed up to "slots" ranked articles."""
     drugs, diseases = _intervention_terms(interventions), disease_search_terms(disease_terms)
@@ -529,9 +590,9 @@ def pivotal_trial_query(interventions: Sequence[str], disease_terms: Sequence[st
             "slots": PIVOTAL_SLOTS}
 
 
-def clean_trial_names(names: Optional[Sequence[Any]]) -> List[str]:
+def clean_trial_names(names: Sequence[Any] | None) -> list[str]:
     """Trial names safe to search as quoted phrases ("KEYNOTE-716", "CheckMate 76K", "SOLO-1")."""
-    out: List[str] = []
+    out: list[str] = []
     for raw in names or []:
         if not isinstance(raw, str):
             continue
@@ -541,7 +602,7 @@ def clean_trial_names(names: Optional[Sequence[Any]]) -> List[str]:
     return out[:MAX_TRIAL_NAMES]
 
 
-def trial_name_query(names: Optional[Sequence[Any]], disease_terms: Sequence[str] = ()) -> Optional[Dict[str, Any]]:
+def trial_name_query(names: Sequence[Any] | None, disease_terms: Sequence[str] = ()) -> dict[str, Any] | None:
     """Named trials as quoted title/abstract phrases. A name with a number ("KEYNOTE-716") is specific on its own;
     a bare word ("PRIMA", "PROfound") must appear together with the disease when one is known."""
     cleaned = clean_trial_names(names)
@@ -561,8 +622,8 @@ def trial_name_query(names: Optional[Sequence[Any]], disease_terms: Sequence[str
             "limit": min(10, 2 * len(cleaned) + 2), "slots": min(len(cleaned), 4), "trial_names": cleaned}
 
 
-def _normalize_group(terms: Sequence[Any]) -> List[str]:
-    out: List[str] = []
+def _normalize_group(terms: Sequence[Any]) -> list[str]:
+    out: list[str] = []
     for raw in terms:
         if not isinstance(raw, str):
             continue
@@ -582,14 +643,14 @@ def classify_question(query: str) -> str:
     return "general"
 
 
-def _content_phrases(query: str, covered: Sequence[tuple]) -> List[str]:
+def _content_phrases(query: str, covered: Sequence[tuple]) -> list[str]:
     """Runs of content words outside entity spans and question-type words, at most four each ("skeletal muscle")."""
     covered = [*covered, *(m.span() for _, pat in _TYPE_RES for m in pat.finditer(query))]
-    phrases: List[str] = []
-    run: List[str] = []
+    phrases: list[str] = []
+    run: list[str] = []
     facet_words = {w for ws in _FACETS.values() for f in ws for w in f.split()}
 
-    def emit(words: List[str]) -> None:
+    def emit(words: list[str]) -> None:
         if words and not (len(words) == 1 and (words[0].lower() in _GENERIC or len(words[0]) < 3)):
             phrases.append(" ".join(words[:4]))
 
@@ -626,10 +687,10 @@ def _content_phrases(query: str, covered: Sequence[tuple]) -> List[str]:
 def build_search_plan(ctx: Any, query: str) -> SearchPlan:
     """The deterministic plan: entities first (primary gene, drugs, diseases), then content phrases."""
     query = normalize_dashes(query)  # one character for one, so entity spans still hold
-    groups: List[List[str]] = []
-    covered: List[tuple] = []
+    groups: list[list[str]] = []
+    covered: list[tuple] = []
 
-    def add(terms: Sequence[str], span: Optional[tuple] = None, exact_only: bool = False) -> None:
+    def add(terms: Sequence[str], span: tuple | None = None, exact_only: bool = False) -> None:
         g = _normalize_group(terms)
         if span and span != (0, 0):
             covered.append(span)
@@ -656,20 +717,20 @@ def build_search_plan(ctx: Any, query: str) -> SearchPlan:
 
     # Drugs named as alternatives ("pembrolizumab or nivolumab") are one concept: either may answer.
     drugs = sorted((e for e in entities if e.type == "drug" and e.span != (0, 0) and not inside_longer(e)), key=lambda e: e.span[0])
-    alternatives: Dict[int, List[Any]] = {}
-    lead_of: Dict[int, Any] = {}
-    for prev, cur in zip(drugs, drugs[1:]):
+    alternatives: dict[int, list[Any]] = {}
+    lead_of: dict[int, Any] = {}
+    for prev, cur in zip(drugs, drugs[1:], strict=False):
         if _DRUG_ALTERNATIVE_RE.match(query[prev.span[1]:cur.span[0]]):
             lead = lead_of.get(id(prev), prev)
             lead_of[id(cur)] = lead
             alternatives.setdefault(id(lead), [lead]).append(cur)
-    disease_terms: List[str] = []
-    drug_terms: List[str] = []
+    disease_terms: list[str] = []
+    drug_terms: list[str] = []
 
     # Leading groups naming the question's subject (a gene or target): counted while no drug or disease came first.
     subject_groups = 0
 
-    def add_subject(terms: Sequence[str], span: Optional[tuple]) -> None:
+    def add_subject(terms: Sequence[str], span: tuple | None) -> None:
         nonlocal subject_groups
         before = len(groups)
         add(terms, span)
@@ -700,6 +761,8 @@ def build_search_plan(ctx: Any, query: str) -> SearchPlan:
             add([e.mention, *disease_search_terms([e.mention])[1:2], label, *e.aliases[:2]], e.span)
             for alias in e.aliases:  # "(IPF)" defined in the question is part of this concept, not a new one
                 covered.extend(m.span() for m in re.finditer(rf"(?<!\w){re.escape(alias)}(?!\w)", query))
+        elif e.type in ("concept", "equation", "material", "system", "constant"):
+            add_subject([e.mention, e.label, *getattr(e, "aliases", [])[:2]], e.span)
         elif e.type == "variant":
             # Searched as the change itself ("G12C", "c.68_69delAG", "EML4-ALK"), next to the gene's own group.
             change = e.protein_change or e.mention or e.label
@@ -727,9 +790,9 @@ def build_search_plan(ctx: Any, query: str) -> SearchPlan:
     disease_terms.extend(disease_phrases)
     # Diseases listed together ("in ovarian cancer and prostate cancer") are one concept: a paper about either
     # is on topic, and an AND of the two would find almost nothing.
-    disease_alts: Dict[str, List[str]] = {}
+    disease_alts: dict[str, list[str]] = {}
     absorbed: set = set()
-    for a, b in zip(disease_phrases, disease_phrases[1:]):
+    for a, b in zip(disease_phrases, disease_phrases[1:], strict=False):
         if re.search(re.escape(a) + r"\s*,?\s*(?:and|or|and/or|,)\s+" + re.escape(b), query, re.I):
             lead = next((k for k, v in disease_alts.items() if a in v), a)
             disease_alts.setdefault(lead, [lead]).append(b)
@@ -743,7 +806,7 @@ def build_search_plan(ctx: Any, query: str) -> SearchPlan:
     qtype = classify_question(asked)
     therapeutic = is_therapeutic_question(asked, qtype, names_drug=bool(drug_terms))
     aspects = question_aspects(asked)
-    checklist: List[str] = []
+    checklist: list[str] = []
     if therapeutic and n_entity_groups:
         # "repurposed", "in-silico binding predictions", "real-world EHR safety data" say what the answer must
         # cover about the subject: they rank the papers (and some get their own searches), but they are not
@@ -806,9 +869,9 @@ def build_search_plan(ctx: Any, query: str) -> SearchPlan:
 _DRUG_CLASS_SUFFIX = r"[\s\-]+(inhibitors?|antagonists?|agonists?|blockers?|antibod(?:y|ies)|degraders?)\b"
 
 
-def _target_drug_classes(query: str, entities: Sequence[Any]) -> List[str]:
+def _target_drug_classes(query: str, entities: Sequence[Any]) -> list[str]:
     """Drug classes the question names after a gene or target ("PARP inhibitors", "KRAS G12C inhibitors")."""
-    out: List[str] = []
+    out: list[str] = []
     for e in entities:
         if getattr(e, "type", None) != "gene" or not getattr(e, "mention", None):
             continue
@@ -818,7 +881,7 @@ def _target_drug_classes(query: str, entities: Sequence[Any]) -> List[str]:
     return out
 
 
-def _web_query(query: str, groups: Sequence[Sequence[str]], aspects: Dict[str, List[str]]) -> str:
+def _web_query(query: str, groups: Sequence[Sequence[str]], aspects: dict[str, list[str]]) -> str:
     """Web search engines read natural language well, so a short question is its own web query. A long one
     (a brief listing what to incorporate) is searched by its concepts plus the aspects it asks about
     ("KRAS pancreatic cancer FDA-approved drug repurposing docking clinical trials"): search engines match
@@ -845,8 +908,8 @@ def _cap_words(text: str, limit: int) -> str:
     return cut.rsplit(" ", 1)[0] if " " in cut else cut
 
 
-def _normalize_terms(terms: Sequence[Any], limit: int) -> List[str]:
-    out: List[str] = []
+def _normalize_terms(terms: Sequence[Any], limit: int) -> list[str]:
+    out: list[str] = []
     for raw in terms:
         if not isinstance(raw, str):
             continue
@@ -856,7 +919,7 @@ def _normalize_terms(terms: Sequence[Any], limit: int) -> List[str]:
     return out[:limit]
 
 
-def _instruction_spans(query: str, entity_spans: Sequence[tuple]) -> List[tuple]:
+def _instruction_spans(query: str, entity_spans: Sequence[tuple]) -> list[tuple]:
     """Spans that only say how to answer: instruction clauses anywhere, and instruction sentences after the first
     one that name no entity ("For each, give its study type ...", "Otherwise state that ...")."""
     spans = [m.span() for m in _INSTRUCTION_CLAUSE_RE.finditer(query)]
@@ -872,9 +935,11 @@ def _instruction_spans(query: str, entity_spans: Sequence[tuple]) -> List[tuple]
 _MODEL_ACCESSION_RE = re.compile(r"(?<![A-Za-z0-9])(?:BIOMD|MODEL)\d{10}(?![0-9])", re.I)
 
 
-def _argument_spans(query: str) -> List[tuple]:
+def _argument_spans(query: str) -> list[tuple]:
     """Simulation arguments (durations, override mappings, scan ranges, model accessions): never search terms."""
-    from .query_planner import procedural_spans  # the planner imports this module; resolve at call time
+    from .query_planner import (
+        procedural_spans,  # the planner imports this module; resolve at call time
+    )
 
     return [*procedural_spans(query), *(m.span() for m in _MODEL_ACCESSION_RE.finditer(query))]
 
@@ -890,12 +955,12 @@ def _stems(text: str) -> set:
     return {w.lower()[:5] for w in _WORD_RE.findall(text) if len(w) >= 3 and w.lower() not in _STOP}
 
 
-def merge_llm_plan(base: SearchPlan, raw: Optional[Dict[str, Any]], query: str) -> SearchPlan:
+def merge_llm_plan(base: SearchPlan, raw: dict[str, Any] | None, query: str) -> SearchPlan:
     """Use the planner model's concept groups, type and web query where they are valid; keep the rest of base."""
     if not isinstance(raw, dict):
         return base
     q_stems = _stems(query)
-    groups: List[List[str]] = []
+    groups: list[list[str]] = []
     for g in raw.get("concepts") or []:
         if not isinstance(g, list):
             continue

@@ -1,0 +1,64 @@
+{
+ "version": 1,
+ "meta": {
+  "case_id": "golden-damped-oscillator",
+  "suite": "golden",
+  "query": "Analyze the underdamped linear harmonic oscillator m x'' + c x' + k x = 0 with natural frequency omega_0 = sqrt(k/m) and damping ratio zeta = c / (2*sqrt(m*k)) < 1: state its damped angular frequency omega_d, logarithmic decrement delta, and quality factor Q, and summarize transient decay behavior.",
+  "setup": [],
+  "run_options": {
+   "framework": "langgraph"
+  },
+  "model": "qwen3.5:9b",
+  "web_search": true,
+  "recorded_at": "2026-04-20T12:00:00",
+  "latency_s": 12.4,
+  "registry_tools": [
+   "archivon_literature_search",
+   "axiom_symbolic_solve",
+   "dynamis_ode_simulation",
+   "calcula_uncertainty_propagation",
+   "physis_constitutive_lookup"
+  ]
+ },
+ "tools": [
+  {
+   "tool": "archivon_literature_search",
+   "key": "damped harmonic oscillator logarithmic decrement quality factor",
+   "args": {
+    "query": "Analyze the underdamped linear harmonic oscillator m x'' + c x' + k x = 0 with natural frequency omega_0 = sqrt(k/m) and damping ratio zeta = c / (2*sqrt(m*k)) < 1"
+   },
+   "result": {
+    "success": true,
+    "data": {
+     "ranked_passages": [
+      {
+       "arxiv_id": "1807.09547",
+       "doi": "10.1119/1.5082301",
+       "title": "Damped harmonic oscillator: transient decay, logarithmic decrement, and quality factor",
+       "year": 2019,
+       "text": "For an underdamped linear oscillator m x'' + c x' + k x = 0 with zeta < 1, the damped angular frequency is omega_d = omega_0 * sqrt(1 - zeta^2), the logarithmic decrement is delta = 2*pi*zeta / sqrt(1 - zeta^2), and the quality factor is Q = 1 / (2*zeta)."
+      }
+     ]
+    },
+    "error": null,
+    "error_type": null,
+    "metadata": {}
+   }
+  }
+ ],
+ "llm": [
+  {
+   "method": "ainvoke",
+   "model": "qwen3.5:9b",
+   "last_role": "human",
+   "prompt": "Analyze the underdamped linear harmonic oscillator m x'' + c x' + k x = 0",
+   "prompt_sha": "a1b2c3d4e5f60123",
+   "reply": {
+    "content": "For the underdamped linear harmonic oscillator $m x'' + c x' + k x = 0$ with natural frequency $\\omega_0 = \\sqrt{k/m}$ and damping ratio $\\zeta = c / (2\\sqrt{mk}) < 1$:\n\n1. **Damped Angular Frequency**: $\\omega_d = \\omega_0 \\sqrt{1 - \\zeta^2}$.\n2. **Logarithmic Decrement**: $\\delta = \\frac{2\\pi\\zeta}{\\sqrt{1 - \\zeta^2}} \\approx 2\\pi\\zeta$ for small $\\zeta$.\n3. **Quality Factor**: $Q = \\frac{1}{2\\zeta}$.\n4. **Transient Decay**: The displacement envelope decays exponentially as $e^{-\\zeta \\omega_0 t}$ while oscillating at angular frequency $\\omega_d$ (arXiv:1807.09547).",
+    "tool_calls": [],
+    "additional_kwargs": {},
+    "response_metadata": {}
+   }
+  }
+ ]
+}

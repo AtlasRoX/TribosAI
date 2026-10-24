@@ -55,23 +55,24 @@ import math
 import os
 import re
 import threading
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from collections.abc import Callable, Iterable, Sequence
+from typing import Any
 
 import numpy as np
 
+from ..utils.text import sentence_spans
 from .budget import BudgetExhausted
 from .config import env_float, env_int
 from .guardrails import SPOTLIGHT_RULE, neutralise, spotlight
 from .llm import AgentLLMUnavailable
 from .runtime import AgentPhase, PhaseOutcome, register_phase
 from .state import AgentState
-from ..utils.text import sentence_spans
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL_ID = "cross-encoder/nli-deberta-v3-base"
 # Label order of cross-encoder/nli-deberta-v3-base (model card); other NLI models order labels differently.
-DEFAULT_LABELS: Dict[int, str] = {0: "contradiction", 1: "entailment", 2: "neutral"}
+DEFAULT_LABELS: dict[int, str] = {0: "contradiction", 1: "entailment", 2: "neutral"}
 NLI_LABELS = ("contradiction", "entailment", "neutral")
 
 BACKEND_CROSS_ENCODER = "cross-encoder"
@@ -86,8 +87,8 @@ PASSAGE_KEY_CHARS = 1500  # the verifier passes d.text[:1500] to the judge
 LLM_PASSAGE_CHARS = 1200
 LLM_BUDGET_RESERVE = 2  # model calls left for a rewrite round and the confidence phase
 
-Judge = Callable[[str, List[Dict[str, str]]], Optional[Dict[str, Any]]]
-Scores = Dict[str, Any]
+Judge = Callable[[str, list[dict[str, str]]], dict[str, Any] | None]
+Scores = dict[str, Any]
 
 
 # Settings ---------------------------------------------------------------------------------------------------
@@ -102,7 +103,7 @@ def model_id() -> str:
     return (os.getenv("TRIBOS_NLI_MODEL", "") or DEFAULT_MODEL_ID).strip()
 
 
-def thresholds() -> Tuple[float, float, float]:
+def thresholds() -> tuple[float, float, float]:
     """(entailment for supported, contradiction for contradicted, entailment below which a claim is unsupported).
     Between the first and the last the judge abstains. MiniCheck gives no recommended threshold, so these are
     conservative defaults to calibrate (TRIBOS_NLI_ENTAIL / _CONTRADICT / _UNSUPPORTED)."""
@@ -132,7 +133,7 @@ def passage_sha1(text: str) -> str:
     return hashlib.sha1(_norm(str(text or "")[:PASSAGE_KEY_CHARS]).lower().encode("utf-8")).hexdigest()
 
 
-def find_scores(nli_scores: Optional[Dict[str, Scores]], text: str) -> Optional[Scores]:
+def find_scores(nli_scores: dict[str, Scores] | None, text: str) -> Scores | None:
     """nli_scores entry for a claim, matched exactly, then case-insensitively, then by prefix."""
     if not nli_scores or not text:
         return None
@@ -147,13 +148,13 @@ def find_scores(nli_scores: Optional[Dict[str, Scores]], text: str) -> Optional[
     return None
 
 
-def split_sentences(text: str) -> List[str]:
+def split_sentences(text: str) -> list[str]:
     """Sentences and lines of `text` (utils.text.sentence_spans: abbreviations such as "e.g." do not end one)."""
     text = text or ""
     return [text[s:e].strip() for s, e in sentence_spans(text)]
 
 
-def chunk_passage(text: str, max_words: Optional[int] = None, overlap: int = 1) -> List[str]:
+def chunk_passage(text: str, max_words: int | None = None, overlap: int = 1) -> list[str]:
     """
     Sentence windows of at most max_words words (TRIBOS_NLI_CHUNK_WORDS, default 120), each starting with the
     last `overlap` sentence(s) of the previous window (SummaC-ZS / MiniCheck chunking). A sentence longer than
@@ -165,15 +166,15 @@ def chunk_passage(text: str, max_words: Optional[int] = None, overlap: int = 1) 
         return []
     if words_total <= limit:
         return [_norm(text)]
-    units: List[str] = []
+    units: list[str] = []
     for s in split_sentences(text):
         w = s.split()
         if len(w) <= limit:
             units.append(s)
         else:
             units.extend(" ".join(w[i : i + limit]) for i in range(0, len(w), limit))
-    chunks: List[str] = []
-    cur: List[str] = []
+    chunks: list[str] = []
+    cur: list[str] = []
     cur_words = 0
     for u in units:
         n = len(u.split())
@@ -190,7 +191,7 @@ def chunk_passage(text: str, max_words: Optional[int] = None, overlap: int = 1) 
     return chunks
 
 
-def label_mapping(id2label: Optional[Dict[Any, Any]]) -> Dict[int, str]:
+def label_mapping(id2label: dict[Any, Any] | None) -> dict[int, str]:
     """
     Index -> NLI label. Uses the model config's id2label when it names contradiction, entailment and neutral
     unambiguously; otherwise (missing, or generic LABEL_0 names) the hard-coded order of
@@ -198,7 +199,7 @@ def label_mapping(id2label: Optional[Dict[Any, Any]]) -> Dict[int, str]:
     """
     if not id2label:
         return dict(DEFAULT_LABELS)
-    found: Dict[int, str] = {}
+    found: dict[int, str] = {}
     for k, v in id2label.items():
         try:
             idx = int(k)
@@ -224,7 +225,7 @@ def _scores_label(s: Scores) -> str:
     return max(NLI_LABELS, key=lambda lab: float(s.get(lab, 0.0)))
 
 
-def status_from_scores(entailment: float, contradiction: float, neutral: float = 0.0) -> Optional[str]:
+def status_from_scores(entailment: float, contradiction: float, neutral: float = 0.0) -> str | None:
     """The verifier status for aggregated NLI probabilities, or None (abstain) in the uncertain band."""
     t_entail, t_contra, t_unsup = thresholds()
     if entailment >= t_entail:
@@ -237,7 +238,7 @@ def status_from_scores(entailment: float, contradiction: float, neutral: float =
 
 
 # Cross-encoder backend --------------------------------------------------------------------------------------
-Predictor = Callable[[List[Tuple[str, str]]], Any]
+Predictor = Callable[[list[tuple[str, str]]], Any]
 
 
 class CrossEncoderNLI:
@@ -246,9 +247,9 @@ class CrossEncoderNLI:
     def __init__(
         self,
         predict: Predictor,
-        id2label: Optional[Dict[Any, Any]] = None,
+        id2label: dict[Any, Any] | None = None,
         batch_size: int = 16,
-        max_words: Optional[int] = None,
+        max_words: int | None = None,
         name: str = DEFAULT_MODEL_ID,
     ) -> None:
         self._predict = predict
@@ -259,9 +260,9 @@ class CrossEncoderNLI:
         self.name = name
         self._lock = threading.Lock()
 
-    def probabilities(self, pairs: List[Tuple[str, str]]) -> np.ndarray:
+    def probabilities(self, pairs: list[tuple[str, str]]) -> np.ndarray:
         """(n, 3) softmax probabilities in the model's index order."""
-        out: List[np.ndarray] = []
+        out: list[np.ndarray] = []
         with self._lock:
             for i in range(0, len(pairs), self.batch_size):
                 logits = np.asarray(self._predict(pairs[i : i + self.batch_size]), dtype=float)
@@ -270,19 +271,19 @@ class CrossEncoderNLI:
                 out.append(_softmax(logits))
         return np.concatenate(out, axis=0) if out else np.zeros((0, 3))
 
-    def score(self, claim: str, passages: Sequence[str]) -> List[Scores]:
+    def score(self, claim: str, passages: Sequence[str]) -> list[Scores]:
         """Per passage: max entailment and max contradiction over its chunks (neutral of the best chunk)."""
-        pairs: List[Tuple[str, str]] = []
-        owner: List[int] = []
+        pairs: list[tuple[str, str]] = []
+        owner: list[int] = []
         for pi, passage in enumerate(passages):
             for chunk in chunk_passage(passage, self.max_words) or [""]:
                 pairs.append((chunk, claim))
                 owner.append(pi)
         probs = self.probabilities(pairs) if pairs else np.zeros((0, 3))
         ie, ic, inn = self._index["entailment"], self._index["contradiction"], self._index["neutral"]
-        results: List[Scores] = []
+        results: list[Scores] = []
         for pi in range(len(passages)):
-            rows = [r for r, o in zip(probs, owner) if o == pi]
+            rows = [r for r, o in zip(probs, owner, strict=False) if o == pi]
             if not rows:
                 results.append({"entailment": 0.0, "contradiction": 0.0, "neutral": 1.0, "chunks": 0})
                 continue
@@ -300,8 +301,8 @@ class CrossEncoderNLI:
 
 
 _ENCODER_LOCK = threading.Lock()
-_ENCODERS: Dict[str, CrossEncoderNLI] = {}
-_LOAD_ERRORS: Dict[str, str] = {}
+_ENCODERS: dict[str, CrossEncoderNLI] = {}
+_LOAD_ERRORS: dict[str, str] = {}
 
 
 def reset_cache() -> None:
@@ -323,7 +324,7 @@ def _model_available(mid: str) -> bool:
         return False
 
 
-def _load_predictor(mid: str) -> Tuple[Predictor, Dict[Any, Any]]:
+def _load_predictor(mid: str) -> tuple[Predictor, dict[Any, Any]]:
     """Load tokenizer + sequence-classification model from local files only; never downloads. CPU."""
     import torch
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
@@ -333,7 +334,7 @@ def _load_predictor(mid: str) -> Tuple[Predictor, Dict[Any, Any]]:
     model.to("cpu")
     model.eval()
 
-    def predict(pairs: List[Tuple[str, str]]) -> np.ndarray:
+    def predict(pairs: list[tuple[str, str]]) -> np.ndarray:
         with torch.no_grad():
             enc = tokenizer(
                 [p[0] for p in pairs],
@@ -348,7 +349,7 @@ def _load_predictor(mid: str) -> Tuple[Predictor, Dict[Any, Any]]:
     return predict, dict(getattr(model.config, "id2label", None) or {})
 
 
-def get_cross_encoder(mid: Optional[str] = None, require_cached: bool = True) -> Optional[CrossEncoderNLI]:
+def get_cross_encoder(mid: str | None = None, require_cached: bool = True) -> CrossEncoderNLI | None:
     """The process-wide cross-encoder for this model id, loaded once; None when unavailable (remembered)."""
     mid = mid or model_id()
     with _ENCODER_LOCK:
@@ -373,17 +374,17 @@ def get_cross_encoder(mid: Optional[str] = None, require_cached: bool = True) ->
 class NLIStore:
     """Per-run NLI results: (claim, passage sha1) and (claim, source key) caches plus claim-level scores."""
 
-    def __init__(self, backend: str, encoder: Optional[CrossEncoderNLI] = None) -> None:
+    def __init__(self, backend: str, encoder: CrossEncoderNLI | None = None) -> None:
         self.backend = backend
         self.encoder = encoder
-        self.pairs: Dict[Tuple[str, str], Scores] = {}
-        self.by_source: Dict[Tuple[str, str], Scores] = {}
-        self.claims: Dict[str, Scores] = {}  # == state.bag["nli_scores"]
+        self.pairs: dict[tuple[str, str], Scores] = {}
+        self.by_source: dict[tuple[str, str], Scores] = {}
+        self.claims: dict[str, Scores] = {}  # == state.bag["nli_scores"]
         self.llm_calls = 0
         self.judge_calls = 0
         self._lock = threading.Lock()
 
-    def lookup(self, claim: str, source_key: str, passage: str) -> Optional[Scores]:
+    def lookup(self, claim: str, source_key: str, passage: str) -> Scores | None:
         ck = claim_key(claim).lower()
         hit = self.pairs.get((ck, passage_sha1(passage)))
         if hit is None and source_key:
@@ -425,7 +426,7 @@ class NLIStore:
                 entry["contradicting_sources"].append(source_key)
             entry["label"] = _scores_label(entry)
 
-    def compute(self, claim: str, passages: Sequence[Tuple[str, str]]) -> None:
+    def compute(self, claim: str, passages: Sequence[tuple[str, str]]) -> None:
         """Cross-encoder scores for (source_key, passage) pairs not cached yet (synchronous)."""
         if self.encoder is None:
             return
@@ -437,10 +438,10 @@ class NLIStore:
         except Exception as exc:  # noqa: BLE001
             logger.warning("NLI cross-encoder scoring failed: %s", exc)
             return
-        for (sk, p), s in zip(todo, results):
+        for (sk, p), s in zip(todo, results, strict=False):
             self.record(claim, sk, p, s)
 
-    def aggregate(self, claim: str, passages: Sequence[Dict[str, str]], compute: bool = True) -> Optional[Scores]:
+    def aggregate(self, claim: str, passages: Sequence[dict[str, str]], compute: bool = True) -> Scores | None:
         """Max entailment / max contradiction over the given passages (scored on the fly by the cross-encoder)."""
         items = [(str(p.get("source_key") or ""), str(p.get("passage") or "")) for p in passages[:MAX_PASSAGES_PER_CLAIM] if p]
         items = [(sk, t) for sk, t in items if t.strip()]
@@ -461,7 +462,7 @@ class NLIStore:
             "label": _scores_label(best),
         }
 
-    def judge(self, claim: str, passages: List[Dict[str, str]]) -> Optional[Dict[str, Any]]:
+    def judge(self, claim: str, passages: list[dict[str, str]]) -> dict[str, Any] | None:
         """The verifier's entailment_judge contract; None to abstain."""
         self.judge_calls += 1
         agg = self.aggregate(claim, passages or [], compute=True)
@@ -483,7 +484,7 @@ class NLIStore:
         }
 
 
-def build_judge(backend: str, *, encoder: Optional[CrossEncoderNLI] = None, store: Optional[NLIStore] = None) -> Optional[Judge]:
+def build_judge(backend: str, *, encoder: CrossEncoderNLI | None = None, store: NLIStore | None = None) -> Judge | None:
     """
     A judge with the verifier's exact contract: judge(claim_text, [{"source_key", "passage"}]) ->
     {"status": "supported"|"contradicted"|"unsupported", "reason", ...} or None (abstain). Returns None (no
@@ -496,7 +497,7 @@ def build_judge(backend: str, *, encoder: Optional[CrossEncoderNLI] = None, stor
     if encoder is not None and st.encoder is None:
         st.encoder = encoder
 
-    def judge(claim_text: str, passages: List[Dict[str, str]]) -> Optional[Dict[str, Any]]:
+    def judge(claim_text: str, passages: list[dict[str, str]]) -> dict[str, Any] | None:
         try:
             return st.judge(claim_text, passages)
         except Exception as exc:  # noqa: BLE001 - never break verification
@@ -525,7 +526,7 @@ _LABEL_ALIASES = {
 }
 
 
-def scifact_to_scores(label: str, confidence: Optional[float] = None) -> Optional[Scores]:
+def scifact_to_scores(label: str, confidence: float | None = None) -> Scores | None:
     lab = _LABEL_ALIASES.get(str(label or "").strip().upper().replace(" ", "_"))
     if lab is None:
         return None
@@ -547,7 +548,7 @@ def _llm_allowance(state: AgentState, store: NLIStore) -> int:
     return max(0, min(llm_call_cap() - store.llm_calls, left_budget))
 
 
-async def llm_label(state: AgentState, store: NLIStore, items: List[Tuple[str, List[Tuple[str, str]]]]) -> int:
+async def llm_label(state: AgentState, store: NLIStore, items: list[tuple[str, list[tuple[str, str]]]]) -> int:
     """
     Label (claim, [(source_key, passage)]) items with the model judge, in batches of TRIBOS_NLI_LLM_BATCH
     (default 4) claims per call, and record the results. Returns the number of model calls made.
@@ -558,7 +559,7 @@ async def llm_label(state: AgentState, store: NLIStore, items: List[Tuple[str, L
         if _llm_allowance(state, store) <= 0 or state.budget.exhausted():
             break
         group = items[i : i + batch]
-        blocks: List[str] = []
+        blocks: list[str] = []
         for n, (claim, passages) in enumerate(group, 1):
             lines = [f'<item id="{n}">', f"<claim>{neutralise(claim)[:600]}</claim>"]
             for m, (sk, text) in enumerate(passages[:MAX_PASSAGES_PER_CLAIM], 1):
@@ -605,11 +606,11 @@ _BM25_STOP = {
 _CITED_RE = re.compile(r"\bPMID:?\s*(\d{1,9})\b|\b(10\.\d{4,9}/[-._;()/:A-Za-z0-9]+)", re.IGNORECASE)
 
 
-def _bm25_tokens(text: str) -> List[str]:
+def _bm25_tokens(text: str) -> list[str]:
     return [w for w in _TOKEN_RE.findall(str(text or "").lower()) if w not in _BM25_STOP]
 
 
-def collect_documents(tool_results: Dict[str, Any]) -> List[Dict[str, Any]]:
+def collect_documents(tool_results: dict[str, Any]) -> list[dict[str, Any]]:
     """
     Literature passages (and web results) from every successful tool result, keyed exactly like the verifier
     ('PMID:<id>', 'DOI:<doi>', 'passage:<id>', 'tool:<name>') with the verifier's document text (lowercased
@@ -619,7 +620,7 @@ def collect_documents(tool_results: Dict[str, Any]) -> List[Dict[str, Any]]:
         from ..extensions.hooks import apply_serialization_filters
     except Exception:  # noqa: BLE001
         apply_serialization_filters = None  # type: ignore[assignment]
-    docs: List[Dict[str, Any]] = []
+    docs: list[dict[str, Any]] = []
     for name, res in (tool_results or {}).items():
         if not res or not getattr(res, "success", False):
             continue
@@ -670,7 +671,7 @@ def collect_documents(tool_results: Dict[str, Any]) -> List[Dict[str, Any]]:
     return docs
 
 
-def bm25_rank(query: str, docs: Sequence[Dict[str, Any]], k: int = MAX_PASSAGES_PER_CLAIM, k1: float = 1.5, b: float = 0.75) -> List[Tuple[float, int]]:
+def bm25_rank(query: str, docs: Sequence[dict[str, Any]], k: int = MAX_PASSAGES_PER_CLAIM, k1: float = 1.5, b: float = 0.75) -> list[tuple[float, int]]:
     """(score, index) of the top-k documents by Okapi BM25 over their text; only positive scores."""
     q = set(_bm25_tokens(query))
     if not q or not docs:
@@ -678,16 +679,16 @@ def bm25_rank(query: str, docs: Sequence[Dict[str, Any]], k: int = MAX_PASSAGES_
     toks = [_bm25_tokens(d.get("text", "")) for d in docs]
     n = len(toks)
     avg = (sum(len(t) for t in toks) / n) or 1.0
-    df: Dict[str, int] = {}
+    df: dict[str, int] = {}
     for t in toks:
         for w in set(t):
             if w in q:
                 df[w] = df.get(w, 0) + 1
-    scored: List[Tuple[float, int]] = []
+    scored: list[tuple[float, int]] = []
     for i, t in enumerate(toks):
         if not t:
             continue
-        tf: Dict[str, int] = {}
+        tf: dict[str, int] = {}
         for w in t:
             if w in q:
                 tf[w] = tf.get(w, 0) + 1
@@ -701,12 +702,12 @@ def bm25_rank(query: str, docs: Sequence[Dict[str, Any]], k: int = MAX_PASSAGES_
     return scored[:k]
 
 
-def candidate_passages(claim: str, docs: Sequence[Dict[str, Any]], k: int = MAX_PASSAGES_PER_CLAIM) -> List[Tuple[str, str]]:
+def candidate_passages(claim: str, docs: Sequence[dict[str, Any]], k: int = MAX_PASSAGES_PER_CLAIM) -> list[tuple[str, str]]:
     """Passages the claim cites first, then the best BM25 matches; (source_key, text), at most k."""
     cited: set = set()
     for pmid, doi in _CITED_RE.findall(claim or ""):
         cited.add(f"PMID:{pmid}" if pmid else f"DOI:{doi.rstrip('.,;)').lower()}")
-    out: List[Tuple[str, str]] = []
+    out: list[tuple[str, str]] = []
     seen: set = set()
     for d in docs:
         if d["source_key"] in cited and d["source_key"] not in seen:
@@ -731,7 +732,7 @@ def _verifier():
     return TribosVerifier
 
 
-def answer_sentences(text: str, limit: int = MAX_PRECOMPUTE_CLAIMS) -> List[str]:
+def answer_sentences(text: str, limit: int = MAX_PRECOMPUTE_CLAIMS) -> list[str]:
     """Checkable answer sentences: the verifier's sentence split, minus headings, table rows and short or
     uncertainty-only fragments (FActScore-style sentence-level atomic claims)."""
     try:
@@ -744,7 +745,7 @@ def answer_sentences(text: str, limit: int = MAX_PRECOMPUTE_CLAIMS) -> List[str]
         assertive = V._assertive_text
     except Exception:  # noqa: BLE001
         sentences, assertive = split_sentences(text or ""), (lambda s: s)
-    out: List[str] = []
+    out: list[str] = []
     for s in sentences:
         if _HEADING_RE.match(s):
             continue
@@ -761,14 +762,14 @@ def answer_sentences(text: str, limit: int = MAX_PRECOMPUTE_CLAIMS) -> List[str]
     return out
 
 
-def judge_requests(state: AgentState, text: str) -> Tuple[List[Tuple[str, List[Tuple[str, str]]]], Any]:
+def judge_requests(state: AgentState, text: str) -> tuple[list[tuple[str, list[tuple[str, str]]]], Any]:
     """
     Dry-run the deterministic verifier on a draft with a recording judge: the exact (claim, passages) pairs the
     real verification will ask the judge about, plus the deterministic report.
     """
-    requests: List[Tuple[str, List[Tuple[str, str]]]] = []
+    requests: list[tuple[str, list[tuple[str, str]]]] = []
 
-    def recorder(claim: str, passages: List[Dict[str, str]]) -> None:
+    def recorder(claim: str, passages: list[dict[str, str]]) -> None:
         requests.append((claim, [(str(p.get("source_key") or ""), str(p.get("passage") or "")) for p in passages]))
         return None
 
@@ -782,20 +783,20 @@ def judge_requests(state: AgentState, text: str) -> Tuple[List[Tuple[str, List[T
     return requests, report
 
 
-async def precompute(state: AgentState, text: Optional[str] = None, extra: bool = True) -> Dict[str, int]:
+async def precompute(state: AgentState, text: str | None = None, extra: bool = True) -> dict[str, int]:
     """
     Score a draft's claims into the run's NLI store: first the verifier's own judge requests (dry run), then,
     for confidence, other answer sentences against cited + BM25 candidate passages (cross-encoder only; the
     model judge spends its capped calls on the verifier's requests).
     """
-    store: Optional[NLIStore] = state.bag.get("_nli_store")
+    store: NLIStore | None = state.bag.get("_nli_store")
     text = text if text is not None else state.draft
     stats = {"requests": 0, "scored": 0, "llm_calls": 0}
     if store is None or store.backend == BACKEND_NONE or not (text or "").strip():
         return stats
     requests, _report = await asyncio.to_thread(judge_requests, state, text)
     stats["requests"] = len(requests)
-    items: List[Tuple[str, List[Tuple[str, str]]]] = []
+    items: list[tuple[str, list[tuple[str, str]]]] = []
     seen: set = set()
     for claim, passages in requests:
         todo = [(sk, p) for sk, p in passages[:MAX_PASSAGES_PER_CLAIM] if p and store.pairs.get((claim_key(claim).lower(), passage_sha1(p))) is None]
@@ -827,11 +828,11 @@ async def precompute(state: AgentState, text: Optional[str] = None, extra: bool 
     return stats
 
 
-async def score_texts(state: AgentState, texts: Iterable[str]) -> Dict[str, Scores]:
+async def score_texts(state: AgentState, texts: Iterable[str]) -> dict[str, Scores]:
     """nli_scores for these claim texts, computing missing ones with the cross-encoder (the model judge is not
     called here). Returns only the texts that have scores."""
-    store: Optional[NLIStore] = state.bag.get("_nli_store")
-    out: Dict[str, Scores] = {}
+    store: NLIStore | None = state.bag.get("_nli_store")
+    out: dict[str, Scores] = {}
     if store is None or store.backend == BACKEND_NONE:
         return out
     texts = [t for t in texts if t and t.strip()]
@@ -855,7 +856,7 @@ async def score_texts(state: AgentState, texts: Iterable[str]) -> Dict[str, Scor
 
 
 # Installation and phases ------------------------------------------------------------------------------------
-def resolve_backend(state: AgentState) -> Tuple[str, Optional[CrossEncoderNLI]]:
+def resolve_backend(state: AgentState) -> tuple[str, CrossEncoderNLI | None]:
     mode = nli_mode()
     if mode == "off":
         return BACKEND_NONE, None
@@ -876,7 +877,7 @@ def resolve_backend(state: AgentState) -> Tuple[str, Optional[CrossEncoderNLI]]:
 
 def install(state: AgentState) -> NLIStore:
     """Create the run's NLI store and publish the judge in state.bag (idempotent)."""
-    store: Optional[NLIStore] = state.bag.get("_nli_store")
+    store: NLIStore | None = state.bag.get("_nli_store")
     if store is not None:
         return store
     backend, encoder = resolve_backend(state)
@@ -887,14 +888,14 @@ def install(state: AgentState) -> NLIStore:
     if judge is None:
         return store
 
-    def score_fn(claim: str, passages: List[Dict[str, str]]) -> Optional[Scores]:
+    def score_fn(claim: str, passages: list[dict[str, str]]) -> Scores | None:
         try:
             return store.aggregate(claim, passages or [], compute=True)
         except Exception as exc:  # noqa: BLE001
             logger.warning("NLI scoring failed: %s", exc)
             return None
 
-    async def judge_async(claim: str, passages: List[Dict[str, str]]) -> Optional[Dict[str, Any]]:
+    async def judge_async(claim: str, passages: list[dict[str, str]]) -> dict[str, Any] | None:
         items = [(str(p.get("source_key") or ""), str(p.get("passage") or "")) for p in (passages or [])[:MAX_PASSAGES_PER_CLAIM]]
         if store.backend == BACKEND_CROSS_ENCODER:
             await asyncio.to_thread(store.compute, claim, items)
@@ -922,7 +923,7 @@ class NLISetupPhase(AgentPhase):
     def applies(self, state: AgentState) -> bool:
         return nli_mode() != "off"
 
-    async def run(self, state: AgentState) -> Optional[PhaseOutcome]:
+    async def run(self, state: AgentState) -> PhaseOutcome | None:
         install(state)
         return None
 
@@ -937,7 +938,7 @@ class NLIPhase(AgentPhase):
     def applies(self, state: AgentState) -> bool:
         return nli_mode() != "off"
 
-    async def run(self, state: AgentState) -> Optional[PhaseOutcome]:
+    async def run(self, state: AgentState) -> PhaseOutcome | None:
         store = install(state)
         if store.backend == BACKEND_NONE:
             await state.step(
@@ -961,7 +962,7 @@ class NLIPrecomputePhase(AgentPhase):
         store = state.bag.get("_nli_store")
         return store is not None and store.backend != BACKEND_NONE and bool((state.draft or "").strip())
 
-    async def run(self, state: AgentState) -> Optional[PhaseOutcome]:
+    async def run(self, state: AgentState) -> PhaseOutcome | None:
         # Only the verifier's own requests: the confidence phase scores the final answer's other sentences once.
         stats = await precompute(state, extra=False)
         store: NLIStore = state.bag["_nli_store"]

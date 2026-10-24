@@ -4,7 +4,6 @@ Verifies effort profiles, budget ceilings, literature retrieval depth,
 decomposition scaling, and API endpoint metadata.
 """
 
-import pytest
 from fastapi.testclient import TestClient
 
 from app.backend.main import app

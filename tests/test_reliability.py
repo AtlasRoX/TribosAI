@@ -12,15 +12,21 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 import pytest
 from pydantic import BaseModel, Field
 
+from tests.fakes import build_recording_registry
 from tribos.provenance import run_manifest as rm
 from tribos.tools import reliability as rel
-from tribos.tools.registry import AdapterType, ToolRegistry, ErrorType, ToolResult, ToolUniverseEntry
-from tests.fakes import build_recording_registry
+from tribos.tools.registry import (
+    AdapterType,
+    ErrorType,
+    ToolRegistry,
+    ToolResult,
+    ToolUniverseEntry,
+)
 
 
 class QueryInput(BaseModel):
@@ -47,8 +53,8 @@ def policies(monkeypatch, tmp_path):
     monkeypatch.setenv("TRIBOS_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("TRIBOS_RELIABILITY", "on")
     monkeypatch.setenv("TRIBOS_TOOL_CACHE", "on")
-    sleeps: List[float] = []
-    jitter: List[tuple] = []
+    sleeps: list[float] = []
+    jitter: list[tuple] = []
 
     async def fake_sleep(seconds: float) -> None:
         sleeps.append(seconds)
@@ -70,14 +76,14 @@ def policies(monkeypatch, tmp_path):
 def scripted_tool(
     reg: ToolRegistry,
     name: str,
-    outcomes: List[Any],
+    outcomes: list[Any],
     *,
     adapter: AdapterType = AdapterType.DIRECT_REST,
-    tags: Optional[List[str]] = None,
+    tags: list[str] | None = None,
     timeout: float = 10.0,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Register a tool whose successive calls return the scripted outcomes (the last one repeats)."""
-    calls: List[Dict[str, Any]] = []
+    calls: list[dict[str, Any]] = []
 
     async def executor(**kwargs: Any) -> Any:
         calls.append(kwargs)
@@ -289,7 +295,7 @@ async def test_breaker_opens_fails_fast_half_opens_and_closes(monkeypatch, polic
     monkeypatch.setenv("TRIBOS_BREAKER_THRESHOLD", "3")
     monkeypatch.setenv("TRIBOS_BREAKER_COOLDOWN_S", "60")
     reg = ToolRegistry()
-    outcomes: List[Any] = [upstream_error(), timeout_error(), upstream_error()]
+    outcomes: list[Any] = [upstream_error(), timeout_error(), upstream_error()]
     calls = scripted_tool(reg, "rest_tool", [lambda kw: outcomes.pop(0) if outcomes else OK])
     for q in ("a", "b", "c"):
         assert not (await reg.execute("rest_tool", query=q)).success
@@ -442,9 +448,9 @@ async def test_recorder_sees_one_call_per_execute(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_concurrent_sync_tools_share_state_safely(monkeypatch):
     reg = ToolRegistry()
-    seen: List[str] = []
+    seen: list[str] = []
 
-    def sync_exec(query: str, size: int = 5) -> Dict[str, Any]:
+    def sync_exec(query: str, size: int = 5) -> dict[str, Any]:
         seen.append(query)
         return {"q": query}
 

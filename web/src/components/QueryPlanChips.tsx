@@ -8,31 +8,43 @@ export interface QueryPlanChipsProps {
 }
 
 const SOURCE_NAMES: Record<string, string> = {
-  synapta: "Synapta",
-  lithoscribe: "Lithoscribe",
+  archivon: "Archivon",
+  axiom: "Axiom",
+  dynamis: "Dynamis",
+  calcula: "Calcula",
+  physis: "Physis",
   websurfer: "WebSurfer",
-  vivarix: "Vivarix",
-  lumicell: "Lumicell",
-  clinical_trials: "Clinical trials",
-  chembl: "ChEMBL",
-  openfda: "openFDA",
-  variant_intel: "Variants",
+  arxiv: "arXiv",
+  s2: "Semantic Scholar",
+  semantic_scholar: "Semantic Scholar",
+  openalex: "OpenAlex",
+  zbmath: "zbMATH",
+  crossref: "Crossref",
+  ads: "NASA ADS",
+  oeis: "OEIS",
+  codata: "CODATA",
+  materials_project: "Materials Project",
+  wolfram: "Wolfram|Alpha",
+  wikipedia: "Wikipedia",
 };
 
 // Decisions that only say a plugin is not installed or not relevant are routing noise, not a choice.
 const HIDDEN_REASONS = new Set(["tool not available", "not applicable", "not a research question"]);
 
-const ID_ORDER = ["hgnc_id", "ensembl_id", "uniprot_id", "chembl_id", "ontology_id", "rsid"];
+const ID_ORDER = ["wikidata_id", "arxiv_id", "doi", "oeis_id", "mp_id", "codata_key", "msc_code", "zbl_id", "mr_id"];
 
 const MATCH_LABELS: Record<string, string> = {
   symbol: "symbol",
   alias_symbol: "alias",
-  prev_symbol: "previous symbol",
-  mane_select: "MANE transcript",
+  alias: "alias",
   name: "name",
   synonym: "synonym",
-  family: "gene family",
-  biomodel_hint: "BioModel",
+  formula: "formula",
+  constant: "CODATA constant",
+  unit: "SI unit",
+  msc: "MSC class",
+  oeis_hint: "OEIS sequence",
+  dynamis_hint: "dynamical system",
 };
 
 function sourceName(key: string): string {
@@ -51,10 +63,11 @@ function entityText(e: QueryEntity): string {
 function entityDescription(e: QueryEntity): string {
   const ids = ID_ORDER.map((k) => e.ids?.[k]).filter((v): v is string => Boolean(v));
   const parts: string[] = [`${e.type}: ${entityText(e)}`];
-  if (e.gene && e.type === "variant") parts.push(`gene ${e.gene}`);
+  if (e.unit) parts.push(`unit ${e.unit}`);
+  if (e.formula) parts.push(e.formula);
   parts.push(...ids);
   const via = e.matched_on ? MATCH_LABELS[e.matched_on] ?? e.matched_on.replace(/_/g, " ") : "";
-  if (e.source === "local_lexicon") parts.push("offline name list, not verified");
+  if (e.source === "local_lexicon") parts.push("offline lexicon, not verified");
   else if (e.source === "query_text") parts.push("as written, not verified");
   else parts.push(`via ${e.source}${via ? ` ${via}` : ""}`);
   if (!e.validated && e.source !== "local_lexicon" && e.source !== "query_text") parts.push("not verified");
@@ -86,7 +99,7 @@ export function QueryPlanChips({ plan }: QueryPlanChipsProps) {
   return (
     <div className={styles.plan}>
       {entities.length > 0 && (
-        <ul className={styles.chips} aria-label="Recognized names">
+        <ul className={styles.chips} aria-label="Recognized entities">
           {entities.map((e, i) => {
             const description = entityDescription(e);
             return (

@@ -22,7 +22,7 @@ import socket
 import time
 import urllib.parse
 import urllib.request
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 from bs4 import BeautifulSoup
@@ -41,7 +41,7 @@ MAX_REDIRECTS = 3
 DEFAULT_BUDGET_SECONDS = 17.0
 # Longer queries are cut at a word boundary: a pasted research brief matches nothing on a search engine.
 MAX_QUERY_CHARS = 250
-_DASHES = str.maketrans({c: "-" for c in "\u2010\u2011\u2012\u2013\u2014\u2015\u2212"})
+_DASHES = str.maketrans(dict.fromkeys("‐‑‒–—―−", "-"))
 # DuckDuckGo's anti-bot interstitial ("Unfortunately, bots use DuckDuckGo too").
 _DDG_CHALLENGE_RE = re.compile(r"anomaly-modal|challenge-form|bots use DuckDuckGo", re.I)
 
@@ -210,7 +210,7 @@ class FreeWebSearchClient:
     Does not require any external paid API keys.
     """
 
-    def __init__(self, timeout: float = 6.0, *, transport: Optional[httpx.AsyncBaseTransport] = None) -> None:
+    def __init__(self, timeout: float = 6.0, *, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self.timeout = timeout
         self._transport = transport  # tests inject an httpx.MockTransport for surf_url
         self.headers = {
@@ -219,10 +219,10 @@ class FreeWebSearchClient:
             "Accept-Language": "en-US,en;q=0.9",
         }
 
-    def _timeout(self, remaining: Optional[float]) -> float:
+    def _timeout(self, remaining: float | None) -> float:
         return max(0.5, min(self.timeout, remaining)) if remaining is not None else self.timeout
 
-    async def search(self, query: str, max_results: int = 5, *, deadline: Optional[float] = None) -> list[dict[str, str]]:
+    async def search(self, query: str, max_results: int = 5, *, deadline: float | None = None) -> list[dict[str, str]]:
         """
         Search the web (configured Tavily / SearXNG first, then DuckDuckGo HTML, then DuckDuckGo Lite).
         Returns top titles, URLs, and text snippets; search_with_status also says what each provider did.
@@ -231,7 +231,7 @@ class FreeWebSearchClient:
         return results
 
     async def search_with_status(
-        self, query: str, max_results: int = 5, *, deadline: Optional[float] = None
+        self, query: str, max_results: int = 5, *, deadline: float | None = None
     ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
         """(results, attempts): the first provider's results, and each tried provider's outcome
         (_attempt: ok / empty / blocked / error). Providers are tried in order while time is left."""
@@ -239,7 +239,7 @@ class FreeWebSearchClient:
         if not clean_query:
             return [], []
 
-        def remaining() -> Optional[float]:
+        def remaining() -> float | None:
             return None if deadline is None else deadline - time.monotonic()
 
         providers: list[tuple[str, Any]] = []
@@ -311,7 +311,7 @@ class FreeWebSearchClient:
         ][:max_results]
         return results, _attempt("", "ok" if results else "empty")
 
-    async def surf_url(self, url: str, max_chars: int = 3500, *, timeout: Optional[float] = None) -> dict[str, Any]:
+    async def surf_url(self, url: str, max_chars: int = 3500, *, timeout: float | None = None) -> dict[str, Any]:
         """
         Surfs to a public URL, extracts clean main article text, strips ads and navigation.
         """
@@ -370,7 +370,7 @@ class FreeWebSearchClient:
         search_results, attempts = await self.search_with_status(query, max_results=max_results, deadline=deadline)
         if not search_results and attempts and all(a["status"] in ("blocked", "error") for a in attempts):
             return _unavailable(query, attempts)
-        surfed_page: Optional[dict[str, Any]] = None
+        surfed_page: dict[str, Any] | None = None
 
         left = deadline - time.monotonic()
         if surf_top and search_results and left > 1.5:
@@ -380,7 +380,7 @@ class FreeWebSearchClient:
                     surfed_page = await asyncio.wait_for(
                         self.surf_url(top_url, max_chars=2500, timeout=self._timeout(left - 0.5)), timeout=left - 0.5
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     surfed_page = {"url": top_url, "error": "Page fetch skipped: search budget exhausted"}
 
         return {
@@ -410,7 +410,10 @@ def _plain(text: Any) -> str:
 
 def _unavailable(query: str, attempts: list[dict[str, str]]) -> Any:
     """The failed ToolResult of a search no provider answered."""
-    from .registry import ErrorType, ToolResult  # the registry imports this module lazily; keep it that way
+    from .registry import (  # the registry imports this module lazily; keep it that way
+        ErrorType,
+        ToolResult,
+    )
 
     reasons = "; ".join(f"{a['provider']}: {a['status']}" + (f" ({a['detail']})" if a.get("detail") else "") for a in attempts)
     return ToolResult(

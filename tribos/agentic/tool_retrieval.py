@@ -28,7 +28,8 @@ import math
 import os
 import re
 from collections import Counter
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from collections.abc import Iterable, Sequence
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -39,137 +40,149 @@ _STOP = frozenset(
 )
 
 # Domain intent phrases used to expand tool documents (synthetic queries per domain).
-DOMAIN_INTENTS: Dict[str, str] = {
-    "synapta": "target disease association gene drug target pathway knowledge graph opentargets kegg network",
-    "vivarix": "simulate kinetic ode model biomodels sbml time course steady state parameter scan dynamics concentration",
-    "lumicell": "single cell rna seq clustering marker genes expression cell type atlas h5ad scanpy",
-    "lithoscribe": "literature papers publications evidence pubmed europepmc abstract clinical trials review",
-    "websurfer": "web search news recent online sources",
-    "structure": "protein structure alphafold pdb plddt docking ligand binding pose molecule generation",
-    "omics": "gwas variant association trait expression tissue gtex protein interaction string reactome pathway "
-    "compound chemistry pubchem preprint biorxiv",
-    "analysis": "analyse data statistics code python dataframe plot differential expression survival regression",
+DOMAIN_INTENTS: dict[str, str] = {
+    "archivon": "literature papers preprints publications arxiv zbmath crossref openalex semantic scholar ads citations bibliography review",
+    "axiom": "symbolic mathematics algebra calculus simplify solve equation differential equation ode dsolve linear algebra matrix eigenvalues determinant proof identity latex sympy",
+    "dynamis": "numerical simulation ode system initial value problem trajectory equilibrium steady state jacobian stability eigenvalues parameter scan sensitivity sweep bifurcation optimize minimize root find fit parameters",
+    "calcula": "scientific computing sandbox python numpy scipy sympy mpmath pandas dataset csv tsv hdf5 mat table statistics regression plot",
+    "analysis": "scientific computing sandbox python numpy scipy sympy mpmath pandas dataset csv tsv hdf5 mat table statistics regression plot",
+    "physis": "reference data fundamental physical constants codata unit conversion dimensional analysis pint oeis integer sequences materials project crystal band gap formation energy wolfram alpha mathematical encyclopedia wikipedia",
+    "websurfer": "web search online documentation recent pages websites",
+    "lithoscribe": "literature papers publications evidence arxiv abstract citations review",
+    "vivarix": "simulate ode model time course steady state parameter scan dynamics",
     "general": "",
 }
 
 # Synthetic queries per known tool (Re-Invoke: written once at index time, not per request). Tools not listed
 # here are still indexed from their own description, tags and argument names.
-TOOL_INTENTS: Dict[str, str] = {
-    "synapta_opentargets_search": "find the ensembl id of a gene look up a target by name search opentargets entity",
-    "synapta_opentargets_associations": "which diseases is this gene associated with target disease association "
-    "scores genetic evidence for a target",
-    "synapta_kegg_pathways": "which pathways is this gene in kegg pathway membership signaling pathway of a gene",
-    "synapta_resolve_entities": "normalize gene drug disease variant names resolve synonyms aliases to identifiers hgnc",
-    "synapta_variant_intelligence": "is this mutation pathogenic clinvar classification oncogenic variant civic "
-    "cbioportal frequency gnomad biomarker mutation",
-    "vivarix_simulate_time_course": "simulate the model over time kinetic ode time course trajectory concentration "
-    "dynamics biomodels sbml",
-    "vivarix_compute_steady_state": "steady state concentrations equilibrium fluxes of the model",
-    "vivarix_parameter_scan": "vary a parameter sensitivity analysis dose response sweep parameter scan knockdown "
-    "overexpression perturbation",
-    "vivarix_calibrate_parameters": "fit model parameters to data calibrate estimate parameters identifiability "
-    "profile likelihood experimental time series",
-    "lumicell_analyze_single_cell": "analyse single cell rna seq dataset clusters marker genes cell types h5ad",
-    "lithoscribe_literature_synthesis": "find papers publications literature evidence studies pubmed abstracts "
-    "citations review what is known",
-    "lithoscribe_clinical_trials_search": "clinical trials registry recruiting trials nct phase enrollment results "
-    "clinicaltrials gov studies of a drug in a condition",
-    "websurfer_search": "search the web news recent online pages websites",
-    "chembl_resolve_drugs": "resolve a drug name trade name to chembl id parent molecule compound identity",
-    "chembl_drug_profile": "drug mechanism of action potency ic50 ki bioactivity against a target approved "
-    "indications inhibitor",
-    "openfda_drug_safety": "drug side effects adverse events safety toxicity boxed warning contraindications faers label "
-    "fda approval approved indications regulatory status drugs@fda nda bla prescribing information",
-    "opentargets_disease_targets": "which targets are associated with a disease druggable targets tractability "
-    "drugs in development for a disease",
-    "primekg_investigate": "knowledge graph analysis drug repurposing mechanism paths between drug and disease "
-    "phenotypes indications contraindications",
-    "primekg_query": "knowledge graph lookup neighbors profile of a drug disease gene in primekg",
-    "analysis_run_python": "analyse the attached data with code statistics regression plot differential "
-    "expression python table csv",
+TOOL_INTENTS: dict[str, str] = {
+    "archivon_literature_search": "find papers preprints publications literature evidence studies arxiv zbmath crossref openalex semantic scholar abstracts citations review what is known",
+    "archivon_paper_details": "look up paper metadata abstract authors citations references by arxiv id doi zbmath id semantic scholar id",
+    "archivon_recommend": "recommend related papers similar publications citation graph recommendations for a paper",
+    "axiom_simplify": "simplify algebraic trigonometric logarithmic exponential expression factor expand collect cancel rationalise",
+    "axiom_solve": "solve algebraic equation system of equations polynomial roots symbolic solution exact closed form",
+    "axiom_calculus": "compute derivative differentiate integral integrate definite indefinite limit taylor series laurent series expansion residue",
+    "axiom_dsolve": "solve ordinary differential equation ode symbolic closed form general solution initial value problem boundary conditions",
+    "axiom_linalg": "symbolic linear algebra matrix determinant inverse rank nullspace columnspace eigenvalues eigenvectors characteristic polynomial jordan form",
+    "axiom_verify_identity": "verify mathematical identity prove algebraic trigonometric equivalence symbolic simplification zero test",
+    "axiom_latex": "convert expression to latex parse latex into symbolic math canonical form",
+    "dynamis_simulate_ode": "simulate ordinary differential equation ode system initial value problem ivp time course trajectory dynamics phase portrait rk45 bdf radau",
+    "dynamis_equilibrium": "find equilibrium points fixed points steady state jacobian eigenvalues linear stability analysis hyperbolic saddle node",
+    "dynamis_parameter_scan": "vary a parameter sensitivity analysis parameter sweep bifurcation continuation response curve",
+    "dynamis_optimize": "numerical optimization minimize maximize objective function constrained unconstrained bounds nonlinear programming",
+    "dynamis_fit_parameters": "fit model parameters to experimental data curve fitting nonlinear least squares parameter estimation calibration residuals",
+    "dynamis_root_find": "find numerical roots zeros of nonlinear equation or system of equations brentq newton fsolve",
+    "calcula_run_python": "execute python code in scientific sandbox numpy scipy sympy mpmath networkx pint pandas stats plot table verification",
+    "calcula_describe_dataset": "inspect attached dataset csv tsv hdf5 mat parquet columns shape summary statistics missing values preview",
+    "analysis_run_python": "execute python code in scientific sandbox analyse attached data statistics regression plot table csv",
+    "physis_constants": "look up fundamental physical constants codata value uncertainty units planck boltzmann speed of light gravitational avogadro electron mass",
+    "physis_units": "convert physical units check dimensional consistency si base units pint dimensional analysis",
+    "physis_oeis": "search oeis online encyclopedia of integer sequences sequence terms formula recurrence generating function",
+    "physis_materials": "query materials project crystal structure band gap formation energy hull stability density symmetry space group",
+    "physis_wolfram": "query wolfram alpha computational knowledge engine formula evaluation special functions reference data",
+    "physis_encyclopedia": "search mathematical and scientific encyclopedia definitions theorems proof sketches wikipedia reference",
+    "websurfer_search": "search the web online pages documentation websites",
+    "lithoscribe_literature_synthesis": "find papers publications literature evidence studies abstracts citations review",
 }
 
 # Query expansion lexicon (Toolshed's query rewriting): a query word -> tool-vocabulary terms. Keys are prefixes
 # of the raw query word; values are added to the query at a lower weight.
-QUERY_EXPANSIONS: Dict[str, str] = {
-    "paper": "literature europepmc publications",
-    "publication": "literature europepmc",
-    "article": "literature europepmc",
-    "study": "literature publications",
-    "evidence": "literature",
-    "review": "literature",
-    "pubmed": "literature europepmc",
-    "trial": "clinical_trials clinicaltrials nct",
-    "nct": "clinical_trials",
-    "recruit": "clinical_trials",
-    "side": "safety adverse",
-    "adverse": "safety faers",
-    "safety": "faers adverse",
-    "toxic": "safety adverse",
-    "warning": "safety label",
-    "contraindication": "safety label",
-    "fda": "fda approval label regulatory",
-    "approv": "fda approval label",
-    "regulator": "fda approval regulatory",
-    "indication": "label approval indications",
-    "drug": "drugs chembl",
-    "compound": "drugs chembl",
-    "inhibitor": "drugs chembl mechanism",
-    "potency": "bioactivity ic50 chembl",
-    "ic50": "bioactivity potency chembl",
-    "mutation": "variant clinvar",
-    "variant": "clinvar mutation",
-    "snp": "variant",
-    "pathogenic": "variant clinvar",
-    "simulat": "simulation ode kinetics time course",
-    "dynamic": "simulation kinetics",
-    "kinetic": "simulation ode",
-    "steady": "steady_state",
-    "scan": "parameter_scan sensitivity",
-    "sensitivity": "parameter_scan",
-    "sweep": "parameter_scan",
-    "perturb": "parameter_scan",
-    "knockdown": "parameter_scan perturbation",
-    "calibrat": "calibration parameter estimation fit",
-    "fit": "calibration",
-    "single": "single_cell",
-    "scrna": "single_cell",
-    "cluster": "single_cell clustering",
-    "marker": "single_cell markers",
-    "pathway": "pathways kegg",
-    "signal": "pathways",
-    "web": "web search",
-    "news": "web",
-    "online": "web",
-    "repurpos": "primekg knowledge_graph repurposing",
-    "graph": "knowledge_graph primekg",
-    "phenotype": "primekg phenotypes",
-    "associat": "associations",
-    "disease": "diseases",
-    "druggab": "tractability targets",
-    "tractab": "targets",
-    "synonym": "normalization resolve",
-    "alias": "normalization resolve",
-    "identifier": "resolve",
-    "structur": "structure alphafold pdb",
-    "fold": "alphafold structure",
-    "dock": "docking ligand",
-    "ligand": "docking",
-    "gwas": "gwas trait",
-    "tissue": "gtex expression",
-    "interact": "string interaction network",
-    "partner": "interaction",
-    "preprint": "biorxiv",
-    "analys": "analysis",
-    "statistic": "analysis",
-    "regression": "analysis",
-    "csv": "analysis",
+QUERY_EXPANSIONS: dict[str, str] = {
+    "paper": "archivon_literature_search literature arxiv publications",
+    "publication": "archivon_literature_search literature arxiv",
+    "article": "archivon_literature_search literature",
+    "preprint": "archivon_literature_search arxiv literature",
+    "arxiv": "archivon_literature_search archivon_paper_details arxiv literature",
+    "zbmath": "archivon_literature_search zbmath literature",
+    "doi": "archivon_paper_details archivon_literature_search doi",
+    "cite": "archivon_paper_details archivon_recommend citations",
+    "citation": "archivon_paper_details archivon_recommend citations",
+    "recommend": "archivon_recommend related papers",
+    "related": "archivon_recommend related papers",
+    "literature": "archivon_literature_search papers",
+    "study": "archivon_literature_search literature",
+    "review": "archivon_literature_search literature",
+    "simplif": "axiom_simplify symbolic algebraic",
+    "factor": "axiom_simplify algebraic",
+    "expand": "axiom_simplify axiom_calculus series",
+    "solv": "axiom_solve dynamis_root_find equation roots",
+    "root": "axiom_solve dynamis_root_find zeros polynomial",
+    "zero": "dynamis_root_find axiom_solve roots",
+    "polynom": "axiom_solve roots algebraic",
+    "integr": "axiom_calculus integrate integral calculus",
+    "deriv": "axiom_calculus differentiate derivative calculus",
+    "differenti": "axiom_calculus axiom_dsolve derivative differential",
+    "limit": "axiom_calculus limit calculus",
+    "series": "axiom_calculus taylor series expansion",
+    "taylor": "axiom_calculus taylor series",
+    "laurent": "axiom_calculus laurent series",
+    "residu": "axiom_calculus residue complex",
+    "ode": "dynamis_simulate_ode axiom_dsolve differential equation",
+    "ivp": "dynamis_simulate_ode initial value problem",
+    "dsolve": "axiom_dsolve differential equation",
+    "eigen": "axiom_linalg dynamis_equilibrium eigenvalues eigenvectors matrix",
+    "matrix": "axiom_linalg linear algebra determinant inverse",
+    "matrices": "axiom_linalg linear algebra",
+    "determin": "axiom_linalg determinant matrix",
+    "nullspac": "axiom_linalg nullspace rank matrix",
+    "rank": "axiom_linalg rank matrix",
+    "jordan": "axiom_linalg jordan matrix",
+    "identit": "axiom_verify_identityequivalence proof",
+    "prove": "axiom_verify_identity proof theorem",
+    "proof": "axiom_verify_identity theorem",
+    "equiv": "axiom_verify_identity simplify",
+    "latex": "axiom_latex tex",
+    "simulat": "dynamis_simulate_ode simulation ode trajectory dynamics",
+    "trajector": "dynamis_simulate_ode simulation ode",
+    "dynamic": "dynamis_simulate_ode dynamis_equilibrium dynamics",
+    "equilibr": "dynamis_equilibrium fixed point steady state stability",
+    "steady": "dynamis_equilibrium steady_state equilibrium",
+    "stabil": "dynamis_equilibrium jacobian eigenvalues stability",
+    "jacobian": "dynamis_equilibrium stability eigenvalues",
+    "bifurcat": "dynamis_parameter_scan dynamis_equilibrium bifurcation",
+    "scan": "dynamis_parameter_scan parameter sweep sensitivity",
+    "sweep": "dynamis_parameter_scan parameter scan",
+    "sensitiv": "dynamis_parameter_scan sensitivity parameter",
+    "optim": "dynamis_optimize minimize maximize objective",
+    "minim": "dynamis_optimize minimize optimization",
+    "maxim": "dynamis_optimize maximize optimization",
+    "fit": "dynamis_fit_parameters curve fitting parameter estimation",
+    "calibrat": "dynamis_fit_parameters parameter estimation fit",
+    "regress": "dynamis_fit_parameters calcula_run_python regression",
+    "constant": "physis_constants codata physical constant",
+    "codata": "physis_constants physical constant",
+    "planck": "physis_constants codata",
+    "boltzmann": "physis_constants codata",
+    "avogadro": "physis_constants codata",
+    "unit": "physis_units unit conversion pint dimensional",
+    "convert": "physis_units unit conversion",
+    "dimension": "physis_units dimensional analysis units",
+    "sequenc": "physis_oeis oeis integer sequence",
+    "oeis": "physis_oeis integer sequence",
+    "integer": "physis_oeis oeis sequence",
+    "fibonacc": "physis_oeis oeis sequence",
+    "material": "physis_materials crystal bandgap formation energy",
+    "crystal": "physis_materials crystal structure lattice",
+    "bandgap": "physis_materials band gap electronic",
+    "lattic": "physis_materials crystal lattice",
+    "wolfram": "physis_wolfram computational knowledge",
+    "encyclop": "physis_encyclopedia definition theorem wikipedia",
+    "wiki": "physis_encyclopedia encyclopedia definition",
+    "definit": "physis_encyclopedia definition",
+    "dataset": "calcula_describe_dataset calcula_run_python dataset",
+    "csv": "calcula_describe_dataset calcula_run_python table",
+    "hdf5": "calcula_describe_dataset calcula_run_python hdf5",
+    "table": "calcula_describe_dataset calcula_run_python dataframe",
+    "python": "calcula_run_python sandbox script",
+    "statistic": "calcula_run_python statistics analysis",
+    "web": "websurfer_search web search",
+    "online": "websurfer_search web",
 }
 
 _EXPANSION_WEIGHT = 0.5
 
 
-def tokenize(text: str) -> List[str]:
+def tokenize(text: str) -> list[str]:
     return [t for t in _TOKEN_RE.findall((text or "").lower()) if t not in _STOP and len(t) > 1]
 
 
@@ -188,13 +201,13 @@ def _stem(token: str) -> str:
     return token[:_STEM_LEN]
 
 
-def _terms(text: str) -> List[str]:
+def _terms(text: str) -> list[str]:
     return [_stem(t) for t in tokenize((text or "").replace("_", " "))]
 
 
-def _schema_fields(entry: Any) -> List[Tuple[str, str, bool, Any, str]]:
+def _schema_fields(entry: Any) -> list[tuple[str, str, bool, Any, str]]:
     """(name, type, required, default, description) for the tool's input schema."""
-    out: List[Tuple[str, str, bool, Any, str]] = []
+    out: list[tuple[str, str, bool, Any, str]] = []
     schema = getattr(entry, "input_schema", None)
     fields = getattr(schema, "model_fields", {}) or {}
     for name, f in fields.items():
@@ -221,14 +234,14 @@ def _model_of(ann: Any) -> Any:
     return None
 
 
-def output_fields(entry: Any, max_fields: int = 10, max_nested: int = 6) -> List[str]:
+def output_fields(entry: Any, max_fields: int = 10, max_nested: int = 6) -> list[str]:
     """Reference paths a plan can use into this tool's result data: ["drugs[*].chembl_id", "drugs[*].pref_name", ...].
 
     Without them the planner guesses ("$n1.results") and the reference fails at run time.
     """
     schema = getattr(entry, "output_schema", None)
     fields = getattr(schema, "model_fields", {}) or {}
-    out: List[str] = []
+    out: list[str] = []
     for name, f in list(fields.items())[:max_fields]:
         ann = getattr(f, "annotation", None)
         is_list = "List" in str(ann) or "list[" in str(ann)
@@ -241,7 +254,7 @@ def output_fields(entry: Any, max_fields: int = 10, max_nested: int = 6) -> List
     return out
 
 
-def tool_card(entry: Any) -> Dict[str, Any]:
+def tool_card(entry: Any) -> dict[str, Any]:
     """Compact planner-facing description: name, purpose, domain, exact argument schema and output fields."""
     args = {
         name: {"type": t, "required": req, **({"default": d} if not req and d is not None else {}), **({"description": desc[:160]} if desc else {})}
@@ -287,7 +300,7 @@ def _intent_view(entry: Any) -> str:
 
 
 class _BM25:
-    def __init__(self, docs: Sequence[List[str]], k1: float = 1.5, b: float = 0.75) -> None:
+    def __init__(self, docs: Sequence[list[str]], k1: float = 1.5, b: float = 0.75) -> None:
         self.docs = docs
         self.k1, self.b = k1, b
         self.avgdl = sum(len(d) for d in docs) / max(1, len(docs))
@@ -298,7 +311,7 @@ class _BM25:
         self.idf = {t: math.log(1 + (n - c + 0.5) / (c + 0.5)) for t, c in df.items()}
         self.tf = [Counter(d) for d in docs]
 
-    def score(self, query: List[str], i: int, weights: Optional[Dict[str, float]] = None) -> float:
+    def score(self, query: list[str], i: int, weights: dict[str, float] | None = None) -> float:
         tf, dl = self.tf[i], len(self.docs[i])
         s = 0.0
         for t in query:
@@ -310,10 +323,10 @@ class _BM25:
         return s
 
 
-def expand_query(query: str) -> Tuple[List[str], Dict[str, float]]:
+def expand_query(query: str) -> tuple[list[str], dict[str, float]]:
     """Stemmed query terms plus lexicon expansions, and the weight of each term (expansions weigh less)."""
     raw = tokenize((query or "").replace("_", " "))
-    weights: Dict[str, float] = {_stem(t): 1.0 for t in raw}
+    weights: dict[str, float] = {_stem(t): 1.0 for t in raw}
     for t in raw:
         for key, extra in QUERY_EXPANSIONS.items():
             if t.startswith(key):
@@ -343,7 +356,7 @@ def _embedder() -> Any:
     return _EMBEDDER
 
 
-def _dense_ranking(query: str, docs: List[str]) -> Optional[List[int]]:
+def _dense_ranking(query: str, docs: list[str]) -> list[int] | None:
     model = _embedder()
     if model is None:
         return None
@@ -358,7 +371,7 @@ def _dense_ranking(query: str, docs: List[str]) -> Optional[List[int]]:
         return None
 
 
-def rank_tools(registry: Any, query: str, entries: Optional[List[Any]] = None) -> List[Tuple[Any, float]]:
+def rank_tools(registry: Any, query: str, entries: list[Any] | None = None) -> list[tuple[Any, float]]:
     """Every candidate entry with its fused score, best first (used by retrieve_tools)."""
     entries = list(entries if entries is not None else registry.list_tools())
     if not entries:
@@ -376,7 +389,7 @@ def rank_tools(registry: Any, query: str, entries: Optional[List[Any]] = None) -
     dense = _dense_ranking(query, docs)
     if dense is not None:
         rankings.append(dense)
-    fused: Dict[int, float] = {}
+    fused: dict[int, float] = {}
     for ranking in rankings:
         for rank, i in enumerate(ranking):
             fused[i] = fused.get(i, 0.0) + 1.0 / (60 + rank + 1)
@@ -396,10 +409,10 @@ def retrieve_tools(
     registry: Any,
     query: str,
     k: int = 8,
-    domains: Optional[Iterable[str]] = None,
-    exclude: Optional[Iterable[str]] = None,
-    always: Optional[Iterable[str]] = None,
-) -> List[Any]:
+    domains: Iterable[str] | None = None,
+    exclude: Iterable[str] | None = None,
+    always: Iterable[str] | None = None,
+) -> list[Any]:
     """Top-k registry entries for query (multi-view BM25 with query expansion, RRF-fused with a dense ranking
     when configured).
 
@@ -414,7 +427,7 @@ def retrieve_tools(
     if not entries:
         return []
     ranked = rank_tools(registry, query, entries)
-    picked: List[Any] = []
+    picked: list[Any] = []
     by_name = {e.name: e for e in entries}
     for name in always or []:
         if name in by_name and by_name[name] not in picked:
@@ -427,7 +440,7 @@ def retrieve_tools(
     return picked[:k] if k > 0 else picked
 
 
-def recall_at_k(registry: Any, cases: Sequence[Tuple[str, str]], k: int = 5) -> float:
+def recall_at_k(registry: Any, cases: Sequence[tuple[str, str]], k: int = 5) -> float:
     """Fraction of (query, expected_tool) cases whose tool is in the top k (ToolRet's recall@k)."""
     if not cases:
         return 0.0

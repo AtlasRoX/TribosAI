@@ -26,10 +26,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from collections.abc import Iterable
+from typing import Any
 
-from ..utils.memory.research_memory import classify_instructions, turn_fully_verified
 from ..utils.memory.project_store import FactInput, ProjectStore, get_project_store
+from ..utils.memory.research_memory import classify_instructions, turn_fully_verified
 from .guardrails import neutralise
 from .runtime import AgentPhase, PhaseOutcome, register_phase
 from .state import AgentState
@@ -44,10 +45,10 @@ def _store() -> ProjectStore:
     return get_project_store()
 
 
-def query_entities(state: AgentState) -> List[str]:
+def query_entities(state: AgentState) -> list[str]:
     """Entity strings for the PPR seeds: resolved genes, drugs, diseases, variants, the BioModel id."""
     ctx = state.ctx
-    out: List[str] = []
+    out: list[str] = []
     for e in list(getattr(ctx, "entities", None) or []):
         for value in (getattr(e, "label", None), getattr(e, "mention", None)):
             if value:
@@ -58,7 +59,7 @@ def query_entities(state: AgentState) -> List[str]:
     return list(dict.fromkeys(out))
 
 
-def _fmt_fact(f: Dict[str, Any]) -> str:
+def _fmt_fact(f: dict[str, Any]) -> str:
     rel = str(f["relation"]).replace("_", " ")
     value = f" ({f['value']})" if f.get("value") else ""
     flags = "verified" if f.get("verified") else "unverified"
@@ -68,7 +69,7 @@ def _fmt_fact(f: Dict[str, Any]) -> str:
     return neutralise(f"- {f['subject']} {rel} {f['object']}{value} [{flags}, {when}{', ' + str(origin) if origin else ''}]")
 
 
-def format_memory_block(project: Dict[str, Any], facts: List[Dict[str, Any]]) -> str:
+def format_memory_block(project: dict[str, Any], facts: list[dict[str, Any]]) -> str:
     if not facts:
         return ""
     name = neutralise(str(project.get("name", "")))[:120]
@@ -83,7 +84,7 @@ def format_memory_block(project: Dict[str, Any], facts: List[Dict[str, Any]]) ->
     return "\n".join(lines)
 
 
-def _public(f: Dict[str, Any]) -> Dict[str, Any]:
+def _public(f: dict[str, Any]) -> dict[str, Any]:
     return {k: f.get(k) for k in ("id", "subject", "relation", "object", "value", "valid_from", "source", "confidence", "verified")}
 
 
@@ -91,7 +92,7 @@ def _public(f: Dict[str, Any]) -> Dict[str, Any]:
 # Deterministic extraction
 # ---------------------------------------------------------------------------------------------------------
 
-def _data(result: Any) -> Tuple[bool, Any, str]:
+def _data(result: Any) -> tuple[bool, Any, str]:
     if result is None:
         return False, None, ""
     if isinstance(result, dict) and "success" not in result:
@@ -102,14 +103,14 @@ def _data(result: Any) -> Tuple[bool, Any, str]:
     return success, data, tool
 
 
-def _num(value: Any) -> Optional[float]:
+def _num(value: Any) -> float | None:
     try:
         return float(value)
     except (TypeError, ValueError):
         return None
 
 
-def _iter_dicts(data: Any, key: str, depth: int = 0) -> Iterable[Dict[str, Any]]:
+def _iter_dicts(data: Any, key: str, depth: int = 0) -> Iterable[dict[str, Any]]:
     """Dicts that carry `key`, found in data, its lists, or one level of nested dicts."""
     if depth > 2:
         return
@@ -124,8 +125,8 @@ def _iter_dicts(data: Any, key: str, depth: int = 0) -> Iterable[Dict[str, Any]]
             yield from _iter_dicts(item, key, depth + 1)
 
 
-def _associations(subject: str, data: Dict[str, Any]) -> List[FactInput]:
-    out: List[FactInput] = []
+def _associations(subject: str, data: dict[str, Any]) -> list[FactInput]:
+    out: list[FactInput] = []
     for a in (data.get("associations") or [])[:10]:
         if not isinstance(a, dict):
             continue
@@ -145,8 +146,8 @@ def _associations(subject: str, data: Dict[str, Any]) -> List[FactInput]:
     return out
 
 
-def _drugs(data: Dict[str, Any]) -> List[FactInput]:
-    out: List[FactInput] = []
+def _drugs(data: dict[str, Any]) -> list[FactInput]:
+    out: list[FactInput] = []
     for d in (data.get("drugs") or [])[:10]:
         if not isinstance(d, dict):
             continue
@@ -170,8 +171,8 @@ def _drugs(data: Dict[str, Any]) -> List[FactInput]:
     return out
 
 
-def _trials(data: Dict[str, Any]) -> List[FactInput]:
-    out: List[FactInput] = []
+def _trials(data: dict[str, Any]) -> list[FactInput]:
+    out: list[FactInput] = []
     for t in (data.get("trials") or [])[:15]:
         if not isinstance(t, dict) or not t.get("nct_id"):
             continue
@@ -180,8 +181,8 @@ def _trials(data: Dict[str, Any]) -> List[FactInput]:
     return out
 
 
-def _variants(data: Any) -> List[FactInput]:
-    out: List[FactInput] = []
+def _variants(data: Any) -> list[FactInput]:
+    out: list[FactInput] = []
     for v in _iter_dicts(data, "clinvar"):
         gene = v.get("gene") or ""
         change = v.get("protein_change") or v.get("hgvs_c") or v.get("rsid") or ""
@@ -192,7 +193,7 @@ def _variants(data: Any) -> List[FactInput]:
     return out
 
 
-def _model(data: Dict[str, Any], topic: Optional[str]) -> List[FactInput]:
+def _model(data: dict[str, Any], topic: str | None) -> list[FactInput]:
     model_id = data.get("model_id")
     obj = topic or data.get("model_name")
     if model_id and obj:
@@ -200,11 +201,11 @@ def _model(data: Dict[str, Any], topic: Optional[str]) -> List[FactInput]:
     return []
 
 
-def _hypotheses(artifact: Any) -> List[FactInput]:
+def _hypotheses(artifact: Any) -> list[FactInput]:
     if not isinstance(artifact, dict):
         return []
     subject = str(artifact.get("target") or artifact.get("model_id") or "").strip()
-    out: List[FactInput] = []
+    out: list[FactInput] = []
     for h in (artifact.get("hypotheses") or [])[:5]:
         if not isinstance(h, dict) or not h.get("statement"):
             continue
@@ -220,19 +221,19 @@ def _hypotheses(artifact: Any) -> List[FactInput]:
     return out
 
 
-def extract_facts(state: AgentState) -> List[FactInput]:
+def extract_facts(state: AgentState) -> list[FactInput]:
     """Facts from this turn's tool results, artifacts and lasting instructions (deterministic)."""
     ctx = state.ctx
     symbol = getattr(ctx, "primary_symbol", None)
     topic = symbol  # a Vivarix model is recorded against the target it was simulated for, else its own name
-    facts: List[FactInput] = []
+    facts: list[FactInput] = []
     for key, result in list(state.tool_results.items()):
         ok, data, tool = _data(result)
         if not ok or data is None:
             continue
         name = f"{key} {tool}".lower()
         src = {"tool": key}
-        found: List[FactInput] = []
+        found: list[FactInput] = []
         if isinstance(data, dict) and data.get("associations") and ("synapta" in name or "association" in name):
             subject = symbol or str(getattr(result, "canonical_ids", {}).get("target_symbol", "") or "")
             found = _associations(subject, data)
@@ -244,6 +245,46 @@ def extract_facts(state: AgentState) -> List[FactInput]:
             found = _model(data, topic)
         elif "variant" in name:
             found = _variants(data)
+        elif isinstance(data, dict) and ("lithoscribe" in name or "archivon" in name or "literature" in name) and data.get("ranked_passages"):
+            for p in (data.get("ranked_passages") or [])[:5]:
+                text = p.get("passage_text") or p.get("text") or ""
+                if text:
+                    found.append(FactInput(
+                        subject=symbol or "literature",
+                        relation="literature_finding",
+                        object=text[:120],
+                        confidence=0.75,
+                        tags=["literature"],
+                    ))
+        elif isinstance(data, dict) and ("axiom" in name or "symbolic" in name) and data.get("result"):
+            found.append(FactInput(
+                subject=symbol or str(data.get("equation", "expression")),
+                relation="symbolic_solution",
+                object=str(data["result"]),
+                value=str(data.get("latex", "")),
+                confidence=0.95,
+                tags=["symbolic"],
+            ))
+        elif isinstance(data, dict) and ("dynamis" in name or "simulation" in name):
+            summary = data.get("summary") or {}
+            found.append(FactInput(
+                subject=symbol or str(data.get("canonical_id", "simulation")),
+                relation="simulation_trajectory",
+                object=str(list(summary.keys()) if summary else "trajectory"),
+                confidence=0.90,
+                tags=["numerical"],
+            ))
+        elif isinstance(data, dict) and ("physis" in name or "constant" in name) and data.get("constants"):
+            for c in (data.get("constants") or [])[:5]:
+                if isinstance(c, dict) and c.get("name"):
+                    found.append(FactInput(
+                        subject=str(c.get("symbol") or c["name"]),
+                        relation="physical_constant",
+                        object=str(c["name"]),
+                        value=str(c.get("value")),
+                        confidence=1.0,
+                        tags=["constant"],
+                    ))
         for f in found:
             f.source = {**src, **(f.source or {})}
         facts.extend(found)
@@ -280,7 +321,7 @@ class ProjectRecallPhase(AgentPhase):
     def applies(self, state: AgentState) -> bool:
         return bool(state.project_id)
 
-    async def run(self, state: AgentState) -> Optional[PhaseOutcome]:
+    async def run(self, state: AgentState) -> PhaseOutcome | None:
         store = _store()
         project = await asyncio.to_thread(store.get_project, state.project_id or "", state.user_id)
         if project is None:
@@ -309,7 +350,7 @@ class ProjectConsolidatePhase(AgentPhase):
     def applies(self, state: AgentState) -> bool:
         return bool(state.project_id) and state.bag.get("project_owned") is not False
 
-    async def run(self, state: AgentState) -> Optional[PhaseOutcome]:
+    async def run(self, state: AgentState) -> PhaseOutcome | None:
         store = _store()
         if not await asyncio.to_thread(store.owns, state.project_id, state.user_id):
             return None

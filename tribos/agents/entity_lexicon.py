@@ -1,350 +1,681 @@
-"""
-Offline gene lexicon and English-word guards for query parsing.
+"""Offline lexicon of mathematical concepts, physical constants, named equations,
+engineering materials, and dynamical systems for Tribos.
 
-Used when the live resolver (synapta_resolve_entities) is not registered, fails or times out. It holds
-symbols and aliases only, never identifiers, so nothing derived from it can whitelist an ID in the verifier.
+Used by :mod:`tribos.agents.query_planner` to ground STEM entities when network
+APIs are unavailable or before issuing upstream searches. Also preserves
+backward-compatible symbol/acronym helpers for callers during transition.
 """
 
 from __future__ import annotations
 
 import re
-from functools import lru_cache
-from typing import Dict, FrozenSet, List, Optional, Tuple
+from typing import Any
 
-# Symbols named by the historical target regex, plus a few frequently asked partners (SOS1, NRAS, CTLA4...).
-GENE_SYMBOLS: FrozenSet[str] = frozenset(
-    """
-    KRAS NRAS HRAS EGFR ERBB2 ERBB3 ERBB4 BRAF ARAF RAF1 TP53 PIK3CA PIK3CB PIK3CD PIK3CG PTEN MYC BRCA1 BRCA2
-    ALK ROS1 RET MET APC CDK4 CDK6 ATM ATR IDH1 IDH2 FGFR1 FGFR2 FGFR3 FGFR4 PDCD1 CD274 CTLA4 AXL VIM
-    MAPK1 MAPK3 MAPK8 MAPK14 MAP2K1 MAP2K2 AKT1 AKT2 AKT3 MTOR STAT1 STAT2 STAT3 STAT4 STAT5A STAT5B STAT6
-    JAK1 JAK2 JAK3 BCL2 MCL1 MDM2 CDKN2A SMAD2 SMAD3 SMAD4 SRC YES1 FYN LYN BTK FLT3 KIT PDGFRA PDGFRB
-    KDR FLT1 FLT4 ESR1 AR INS INSR SOS1 PTPN11 NF1 STK11 KEAP1 SHOC2 TSC1 TSC2
-    """.split()
-)
-
-# alias -> approved symbol (upper-cased keys).
-GENE_ALIASES: Dict[str, str] = {
-    "HER2": "ERBB2",
-    "NEU": "ERBB2",
-    "HER3": "ERBB3",
-    "HER4": "ERBB4",
-    "ERK1": "MAPK3",
-    "ERK2": "MAPK1",
-    "ERK": "MAPK1",
-    "MEK1": "MAP2K1",
-    "MEK2": "MAP2K2",
-    "CRAF": "RAF1",
-    "C-RAF": "RAF1",
-    "SHP2": "PTPN11",
-    "SHP-2": "PTPN11",
-    "PD-L1": "CD274",
-    "PDL1": "CD274",
-    "PD-1": "PDCD1",
-    "PD1": "PDCD1",
-    "VEGFR1": "FLT1",
-    "VEGFR2": "KDR",
-    "VEGFR3": "FLT4",
-    "INSULIN": "INS",
-    "P53": "TP53",
-    "AKT": "AKT1",
-    "MTORC1": "MTOR",
+# ---------------------------------------------------------------------------
+# Mathematical Concepts & Theorems
+# ---------------------------------------------------------------------------
+CONCEPT_LEXICON: dict[str, dict[str, Any]] = {
+    "banach fixed-point theorem": {
+        "canonical": "Banach fixed-point theorem",
+        "domain": "mathematics",
+        "subdomain": "functional analysis",
+        "aliases": ("contraction mapping theorem", "contraction mapping principle", "banach fixed point theorem"),
+        "description": "Every contraction mapping on a non-empty complete metric space has a unique fixed point.",
+    },
+    "cauchy-schwarz inequality": {
+        "canonical": "Cauchy-Schwarz inequality",
+        "domain": "mathematics",
+        "subdomain": "linear algebra / analysis",
+        "aliases": ("cauchy schwarz", "cauchy-bunyakovsky-schwarz inequality"),
+        "description": "Upper bound on the absolute value of an inner product in terms of the product of norms.",
+    },
+    "spectral theorem": {
+        "canonical": "Spectral theorem",
+        "domain": "mathematics",
+        "subdomain": "linear algebra / operator theory",
+        "aliases": ("spectral decomposition", "hermitian eigendecomposition"),
+        "description": "Normal or self-adjoint operators admit an orthogonal spectral decomposition.",
+    },
+    "fourier transform": {
+        "canonical": "Fourier transform",
+        "domain": "mathematics",
+        "subdomain": "harmonic analysis",
+        "aliases": ("fast fourier transform", "fft", "dft", "discrete fourier transform"),
+        "description": "Integral transform decomposing a function into its constituent frequencies.",
+    },
+    "laplace transform": {
+        "canonical": "Laplace transform",
+        "domain": "mathematics",
+        "subdomain": "integral transforms",
+        "aliases": ("inverse laplace transform", "s-domain transform"),
+        "description": "Integral transform converting linear differential equations into algebraic equations in s.",
+    },
+    "central limit theorem": {
+        "canonical": "Central limit theorem",
+        "domain": "mathematics",
+        "subdomain": "probability theory",
+        "aliases": ("clt", "lindeberg-levy clt"),
+        "description": "Normalized sums of independent random variables converge in distribution to a normal law.",
+    },
+    "noether's theorem": {
+        "canonical": "Noether's theorem",
+        "domain": "physics",
+        "subdomain": "theoretical mechanics",
+        "aliases": ("noether theorem", "noether symmetry"),
+        "description": "Every differentiable symmetry of the action of a physical system has a corresponding conservation law.",
+    },
+    "riemann zeta function": {
+        "canonical": "Riemann zeta function",
+        "domain": "mathematics",
+        "subdomain": "analytic number theory",
+        "aliases": ("zeta function", "riemann hypothesis"),
+        "description": "Analytic continuation of the Dirichlet series sum(n^-s) encoding prime number distribution.",
+    },
+    "stokes' theorem": {
+        "canonical": "Stokes' theorem",
+        "domain": "mathematics",
+        "subdomain": "differential geometry / vector calculus",
+        "aliases": ("stokes theorem", "generalized stokes theorem", "kelvin-stokes theorem"),
+        "description": "Integral of a differential form omega over the boundary of an orientable manifold equals the integral of d(omega) over the manifold.",
+    },
+    "divergence theorem": {
+        "canonical": "Divergence theorem",
+        "domain": "mathematics",
+        "subdomain": "vector calculus",
+        "aliases": ("gauss's theorem", "gauss divergence theorem", "ostrogradsky's theorem"),
+        "description": "Outward flux of a vector field through a closed surface equals the volume integral of the divergence.",
+    },
+    "residue theorem": {
+        "canonical": "Cauchy's residue theorem",
+        "domain": "mathematics",
+        "subdomain": "complex analysis",
+        "aliases": ("residue theorem", "cauchy residue theorem", "contour integration"),
+        "description": "Line integral of a meromorphic function around a closed curve equals 2*pi*i times the sum of residues.",
+    },
+    "singular value decomposition": {
+        "canonical": "Singular value decomposition",
+        "domain": "mathematics",
+        "subdomain": "numerical linear algebra",
+        "aliases": ("svd",),
+        "description": "Factorization of a real or complex matrix into U Sigma V^*.",
+    },
+    "lyapunov stability": {
+        "canonical": "Lyapunov stability",
+        "domain": "engineering",
+        "subdomain": "nonlinear dynamical systems",
+        "aliases": ("lyapunov function", "lyapunov exponent", "asymptotic stability"),
+        "description": "Stability characterization of dynamical system trajectories near an equilibrium point.",
+    },
+    "kalman filter": {
+        "canonical": "Kalman filter",
+        "domain": "engineering",
+        "subdomain": "estimation and control",
+        "aliases": ("linear quadratic estimation", "ekf", "extended kalman filter"),
+        "description": "Recursive minimum-variance state estimator for linear dynamical systems under Gaussian noise.",
+    },
+    "catalan numbers": {
+        "canonical": "Catalan numbers",
+        "domain": "mathematics",
+        "subdomain": "combinatorics",
+        "aliases": ("catalan sequence", "a000108"),
+        "id": "A000108",
+        "description": "Combinatorial sequence C_n = (1/(n+1)) binomial(2n, n) (OEIS A000108).",
+    },
+    "fibonacci numbers": {
+        "canonical": "Fibonacci sequence",
+        "domain": "mathematics",
+        "subdomain": "number theory / combinatorics",
+        "aliases": ("fibonacci sequence", "a000045"),
+        "id": "A000045",
+        "description": "Integer sequence F_n = F_{n-1} + F_{n-2} with F_0=0, F_1=1 (OEIS A000045).",
+    },
 }
 
-# Family names that do not denote one gene; shown as ambiguous and never chosen as the primary target.
-GENE_FAMILIES: Dict[str, Tuple[str, ...]] = {
-    "PI3K": ("PIK3CA", "PIK3CB", "PIK3CD", "PIK3CG"),
-    "MEK": ("MAP2K1", "MAP2K2"),
-    "RAF": ("ARAF", "BRAF", "RAF1"),
-    "RAS": ("HRAS", "KRAS", "NRAS"),
-    "VEGFR": ("FLT1", "KDR", "FLT4"),
-    "MAPK": ("MAPK1", "MAPK3"),
+# ---------------------------------------------------------------------------
+# Named Equations & Physical Laws
+# ---------------------------------------------------------------------------
+EQUATION_LEXICON: dict[str, dict[str, Any]] = {
+    "navier-stokes equations": {
+        "canonical": "Navier-Stokes equations",
+        "domain": "physics / fluid mechanics",
+        "aliases": ("navier-stokes", "navier stokes", "incompressible navier-stokes"),
+        "latex": r"\rho (\partial_t \mathbf{u} + (\mathbf{u}\cdot\nabla)\mathbf{u}) = -\nabla p + \mu \nabla^2 \mathbf{u} + \mathbf{f}",
+        "description": "Partial differential equations governing momentum conservation in viscous fluids.",
+    },
+    "schrodinger equation": {
+        "canonical": "Schrödinger equation",
+        "domain": "physics / quantum mechanics",
+        "aliases": ("schroedinger equation", "schrödinger equation", "time-dependent schrodinger equation", "time-independent schrodinger equation"),
+        "latex": r"i\hbar \frac{\partial \Psi}{\partial t} = \hat{H}\Psi",
+        "description": "Fundamental wave equation governing the quantum state evolution of a physical system.",
+    },
+    "maxwell's equations": {
+        "canonical": "Maxwell's equations",
+        "domain": "physics / electromagnetism",
+        "aliases": ("maxwell equations", "maxwell-faraday equation", "ampere-maxwell law"),
+        "latex": r"\nabla \cdot \mathbf{E} = \rho/\varepsilon_0,\; \nabla \times \mathbf{B} = \mu_0 \mathbf{J} + \mu_0\varepsilon_0 \partial_t \mathbf{E}",
+        "description": "Coupled partial differential equations describing classical electric and magnetic fields.",
+    },
+    "euler-bernoulli beam equation": {
+        "canonical": "Euler-Bernoulli beam equation",
+        "domain": "engineering / solid mechanics",
+        "aliases": ("euler-bernoulli beam", "beam deflection equation", "cantilever beam deflection"),
+        "latex": r"\frac{\mathrm{d}^2}{\mathrm{d}x^2}\left(EI\frac{\mathrm{d}^2 w}{\mathrm{d}x^2}\right) = q(x)",
+        "description": "Fourth-order ODE/PDE relating transverse load q(x) to small-deflection bending w(x) of a slender beam.",
+    },
+    "heat equation": {
+        "canonical": "Heat equation",
+        "domain": "physics / PDEs",
+        "aliases": ("fourier heat conduction equation", "diffusion equation"),
+        "latex": r"\frac{\partial u}{\partial t} = \alpha \nabla^2 u",
+        "description": "Parabolic partial differential equation describing thermal diffusion or Brownian transport.",
+    },
+    "wave equation": {
+        "canonical": "Wave equation",
+        "domain": "physics / PDEs",
+        "aliases": ("d'alembert wave equation", "acoustic wave equation"),
+        "latex": r"\frac{\partial^2 u}{\partial t^2} = c^2 \nabla^2 u",
+        "description": "Hyperbolic partial differential equation governing linear wave propagation at speed c.",
+    },
+    "helmholtz equation": {
+        "canonical": "Helmholtz equation",
+        "domain": "mathematics / mathematical physics",
+        "aliases": ("reduced wave equation",),
+        "latex": r"\nabla^2 u + k^2 u = 0",
+        "description": "Elliptic eigenvalue PDE arising from time-harmonic solutions of the wave equation.",
+    },
+    "poisson's equation": {
+        "canonical": "Poisson's equation",
+        "domain": "mathematics / electrostatics",
+        "aliases": ("poisson equation", "laplace's equation", "laplace equation"),
+        "latex": r"\nabla^2 \varphi = f",
+        "description": "Elliptic partial differential equation relating a scalar potential to its source density.",
+    },
+    "euler-lagrange equation": {
+        "canonical": "Euler-Lagrange equation",
+        "domain": "mathematics / calculus of variations",
+        "aliases": ("euler lagrange equation", "stationary action equation"),
+        "latex": r"\frac{\partial L}{\partial q_i} - \frac{\mathrm{d}}{\mathrm{d}t}\frac{\partial L}{\partial \dot{q}_i} = 0",
+        "description": "Second-order differential conditions satisfied by stationary paths of an action functional.",
+    },
+    "bernoulli's equation": {
+        "canonical": "Bernoulli's equation",
+        "domain": "physics / fluid mechanics",
+        "aliases": ("bernoulli equation", "bernoulli principle"),
+        "latex": r"p + \tfrac{1}{2}\rho v^2 + \rho g z = \text{const}",
+        "description": "Conservation of mechanical energy along a streamline in steady, inviscid, incompressible flow.",
+    },
+    "carnot efficiency": {
+        "canonical": "Carnot efficiency",
+        "domain": "physics / thermodynamics",
+        "aliases": ("carnot cycle efficiency", "carnot limit"),
+        "latex": r"\eta_{\max} = 1 - \frac{T_C}{T_H}",
+        "description": "Maximum thermodynamic efficiency achievable by a heat engine operating between reservoirs at T_C and T_H.",
+    },
+    "shannon-hartley theorem": {
+        "canonical": "Shannon-Hartley channel capacity",
+        "domain": "engineering / information theory",
+        "aliases": ("shannon capacity", "awgn channel capacity"),
+        "latex": r"C = B \log_2(1 + \mathrm{SNR})",
+        "description": "Maximum error-free information rate over an additive white Gaussian noise channel of bandwidth B.",
+    },
+    "black-scholes equation": {
+        "canonical": "Black-Scholes PDE",
+        "domain": "applied mathematics",
+        "aliases": ("black-scholes", "black scholes formula"),
+        "latex": r"\frac{\partial V}{\partial t} + \tfrac{1}{2}\sigma^2 S^2 \frac{\partial^2 V}{\partial S^2} + r S \frac{\partial V}{\partial S} - rV = 0",
+        "description": "Parabolic PDE governing derivative pricing under geometric Brownian motion.",
+    },
 }
 
-# Symbols that are also English words: accepted only in upper case, not at the start of a sentence
-# in title case, and not right after an article unless a biomedical word sits next to them.
-ENGLISH_WORD_SYMBOLS: FrozenSet[str] = frozenset(
-    "WAS MET KIT SET CAT MAX ATM IMPACT FIND AR APC RET CAP REST CLOCK SHE HAS MAP NOT ALL CAN TOP SON PIGS ANT INS".split()
+# ---------------------------------------------------------------------------
+# CODATA Physical Constants
+# ---------------------------------------------------------------------------
+CONSTANT_LEXICON: dict[str, dict[str, Any]] = {
+    "speed of light": {
+        "canonical": "speed of light in vacuum",
+        "symbol": "c",
+        "value": 299792458.0,
+        "units": "m/s",
+        "aliases": ("speed of light in vacuum", "vacuum speed of light", "c_0"),
+        "id": "CODATA:c",
+    },
+    "planck constant": {
+        "canonical": "Planck constant",
+        "symbol": "h",
+        "value": 6.62607015e-34,
+        "units": "J*s",
+        "aliases": ("planck's constant",),
+        "id": "CODATA:h",
+    },
+    "reduced planck constant": {
+        "canonical": "reduced Planck constant",
+        "symbol": "hbar",
+        "value": 1.054571817e-34,
+        "units": "J*s",
+        "aliases": ("dirac constant", "h-bar", "hbar"),
+        "id": "CODATA:hbar",
+    },
+    "gravitational constant": {
+        "canonical": "Newtonian constant of gravitation",
+        "symbol": "G",
+        "value": 6.67430e-11,
+        "units": "m^3/(kg*s^2)",
+        "aliases": ("newtonian constant of gravitation", "universal gravitational constant", "newton's constant"),
+        "id": "CODATA:G",
+    },
+    "boltzmann constant": {
+        "canonical": "Boltzmann constant",
+        "symbol": "k_B",
+        "value": 1.380649e-23,
+        "units": "J/K",
+        "aliases": ("boltzmann's constant", "k_b"),
+        "id": "CODATA:k_B",
+    },
+    "elementary charge": {
+        "canonical": "elementary charge",
+        "symbol": "e",
+        "value": 1.602176634e-19,
+        "units": "C",
+        "aliases": ("electron charge magnitude", "fundamental charge"),
+        "id": "CODATA:e",
+    },
+    "avogadro constant": {
+        "canonical": "Avogadro constant",
+        "symbol": "N_A",
+        "value": 6.02214076e23,
+        "units": "1/mol",
+        "aliases": ("avogadro's number", "avogadro number"),
+        "id": "CODATA:N_A",
+    },
+    "molar gas constant": {
+        "canonical": "molar gas constant",
+        "symbol": "R",
+        "value": 8.314462618,
+        "units": "J/(mol*K)",
+        "aliases": ("universal gas constant", "ideal gas constant"),
+        "id": "CODATA:R",
+    },
+    "stefan-boltzmann constant": {
+        "canonical": "Stefan-Boltzmann constant",
+        "symbol": "sigma",
+        "value": 5.670374419e-8,
+        "units": "W/(m^2*K^4)",
+        "aliases": ("stefan boltzmann constant",),
+        "id": "CODATA:sigma",
+    },
+    "vacuum electric permittivity": {
+        "canonical": "vacuum electric permittivity",
+        "symbol": "epsilon_0",
+        "value": 8.8541878188e-12,
+        "units": "F/m",
+        "aliases": ("permittivity of free space", "electric constant", "epsilon_0"),
+        "id": "CODATA:epsilon_0",
+    },
+    "vacuum magnetic permeability": {
+        "canonical": "vacuum magnetic permeability",
+        "symbol": "mu_0",
+        "value": 1.25663706127e-6,
+        "units": "N/A^2",
+        "aliases": ("permeability of free space", "magnetic constant", "mu_0"),
+        "id": "CODATA:mu_0",
+    },
+    "standard acceleration of gravity": {
+        "canonical": "standard acceleration of gravity",
+        "symbol": "g_0",
+        "value": 9.80665,
+        "units": "m/s^2",
+        "aliases": ("standard gravity", "earth standard gravity"),
+        "id": "CODATA:g_0",
+    },
+    "electron mass": {
+        "canonical": "electron mass",
+        "symbol": "m_e",
+        "value": 9.1093837139e-31,
+        "units": "kg",
+        "aliases": ("rest mass of electron",),
+        "id": "CODATA:m_e",
+    },
+    "proton mass": {
+        "canonical": "proton mass",
+        "symbol": "m_p",
+        "value": 1.67262192595e-27,
+        "units": "kg",
+        "aliases": ("rest mass of proton",),
+        "id": "CODATA:m_p",
+    },
+    "fine-structure constant": {
+        "canonical": "fine-structure constant",
+        "symbol": "alpha",
+        "value": 7.2973525643e-3,
+        "units": "dimensionless",
+        "aliases": ("fine structure constant", "sommerfeld constant"),
+        "id": "CODATA:alpha",
+    },
+}
+
+# ---------------------------------------------------------------------------
+# Engineering Materials & Substances
+# ---------------------------------------------------------------------------
+MATERIAL_LEXICON: dict[str, dict[str, Any]] = {
+    "structural steel": {
+        "canonical": "Structural steel (A36 / S235)",
+        "aliases": ("a36 steel", "carbon steel", "mild steel", "aisi 1020", "aisi 4140"),
+        "youngs_modulus_gpa": 200.0,
+        "density_kg_m3": 7850.0,
+        "yield_strength_mpa": 250.0,
+        "thermal_conductivity_w_mk": 50.0,
+    },
+    "stainless steel 304": {
+        "canonical": "Stainless steel 304",
+        "aliases": ("aisi 304", "304 stainless steel", "316 stainless steel", "aisi 316", "stainless steel"),
+        "youngs_modulus_gpa": 193.0,
+        "density_kg_m3": 8000.0,
+        "yield_strength_mpa": 215.0,
+        "thermal_conductivity_w_mk": 16.2,
+    },
+    "aluminum 6061": {
+        "canonical": "Aluminum 6061-T6",
+        "aliases": ("6061-t6", "aluminum 6061-t6", "aluminium 6061", "al 6061", "aluminum 7075", "7075-t6", "aluminum alloy"),
+        "youngs_modulus_gpa": 68.9,
+        "density_kg_m3": 2700.0,
+        "yield_strength_mpa": 276.0,
+        "thermal_conductivity_w_mk": 167.0,
+    },
+    "titanium ti-6al-4v": {
+        "canonical": "Titanium Ti-6Al-4V",
+        "aliases": ("ti-6al-4v", "ti6al4v", "grade 5 titanium", "titanium alloy"),
+        "youngs_modulus_gpa": 113.8,
+        "density_kg_m3": 4430.0,
+        "yield_strength_mpa": 880.0,
+        "thermal_conductivity_w_mk": 6.7,
+    },
+    "copper": {
+        "canonical": "Copper (OFHC)",
+        "aliases": ("oxygen-free copper", "pure copper", "cu"),
+        "youngs_modulus_gpa": 117.0,
+        "density_kg_m3": 8960.0,
+        "yield_strength_mpa": 70.0,
+        "thermal_conductivity_w_mk": 401.0,
+        "id": "mp-30",
+    },
+    "silicon": {
+        "canonical": "Silicon (crystalline)",
+        "aliases": ("crystalline silicon", "monocrystalline silicon", "si wafer"),
+        "youngs_modulus_gpa": 150.0,
+        "density_kg_m3": 2329.0,
+        "band_gap_ev": 1.12,
+        "thermal_conductivity_w_mk": 149.0,
+        "id": "mp-149",
+    },
+    "gallium nitride": {
+        "canonical": "Gallium nitride (GaN)",
+        "aliases": ("gan", "wurtzite gan"),
+        "band_gap_ev": 3.4,
+        "density_kg_m3": 6150.0,
+        "id": "mp-804",
+    },
+    "silicon carbide": {
+        "canonical": "Silicon carbide (SiC)",
+        "aliases": ("4h-sic", "6h-sic", "sic"),
+        "youngs_modulus_gpa": 410.0,
+        "density_kg_m3": 3210.0,
+        "band_gap_ev": 3.26,
+        "id": "mp-11714",
+    },
+}
+
+# ---------------------------------------------------------------------------
+# Dynamical Systems & Canonical Models
+# ---------------------------------------------------------------------------
+SYSTEM_LEXICON: dict[str, dict[str, Any]] = {
+    "harmonic oscillator": {
+        "canonical": "harmonic_oscillator",
+        "display_name": "Damped Harmonic Oscillator",
+        "aliases": ("damped harmonic oscillator", "simple harmonic oscillator", "mass-spring-damper", "mass spring damper", "sho"),
+        "state_vars": ("x", "v"),
+        "params": {"omega0": 1.0, "zeta": 0.1},
+        "description": "Second-order linear oscillator dx/dt = v, dv/dt = -2*zeta*omega0*v - omega0^2*x.",
+    },
+    "van der pol": {
+        "canonical": "van_der_pol",
+        "display_name": "Van der Pol Oscillator",
+        "aliases": ("van der pol oscillator", "van-der-pol", "vdp oscillator"),
+        "state_vars": ("x", "y"),
+        "params": {"mu": 1.0},
+        "description": "Nonlinear oscillator with non-conservative damping exhibiting a stable limit cycle.",
+    },
+    "lorenz": {
+        "canonical": "lorenz",
+        "display_name": "Lorenz Attractor System",
+        "aliases": ("lorenz system", "lorenz attractor", "lorenz equations", "lorenz 63"),
+        "state_vars": ("x", "y", "z"),
+        "params": {"sigma": 10.0, "rho": 28.0, "beta": 2.6666667},
+        "description": "Three-dimensional chaotic atmospheric convection ODE system.",
+    },
+    "lotka-volterra": {
+        "canonical": "lotka_volterra",
+        "display_name": "Lotka-Volterra Predator-Prey System",
+        "aliases": ("lotka volterra", "predator-prey model", "predator prey system", "lotka-volterra equations"),
+        "state_vars": ("x", "y"),
+        "params": {"alpha": 1.1, "beta": 0.4, "delta": 0.1, "gamma": 0.4},
+        "description": "Coupled first-order nonlinear ODEs modeling two-species population dynamics.",
+    },
+    "sir": {
+        "canonical": "sir",
+        "display_name": "SIR Compartmental System",
+        "aliases": ("sir model", "kermack-mckendrick model", "susceptible-infectious-recovered"),
+        "state_vars": ("S", "I", "R"),
+        "params": {"beta": 0.3, "gamma": 0.1},
+        "description": "Three-compartment dynamical system dS/dt = -beta*S*I, dI/dt = beta*S*I - gamma*I, dR/dt = gamma*I.",
+    },
+    "double pendulum": {
+        "canonical": "double_pendulum",
+        "display_name": "Double Pendulum",
+        "aliases": ("chaotic double pendulum", "coupled pendulum"),
+        "state_vars": ("theta1", "omega1", "theta2", "omega2"),
+        "params": {"m1": 1.0, "m2": 1.0, "L1": 1.0, "L2": 1.0, "g": 9.80665},
+        "description": "Hamiltonian mechanical system of two coupled pendulums exhibiting chaotic trajectories.",
+    },
+    "duffing": {
+        "canonical": "duffing",
+        "display_name": "Duffing Oscillator",
+        "aliases": ("duffing oscillator", "duffing equation"),
+        "state_vars": ("x", "v"),
+        "params": {"delta": 0.2, "alpha": -1.0, "beta": 1.0, "gamma": 0.3, "omega": 1.2},
+        "description": "Driven damped oscillator with cubic nonlinear restoring stiffness.",
+    },
+    "rc circuit": {
+        "canonical": "rc_rlc_circuit",
+        "display_name": "RLC Circuit",
+        "aliases": ("rlc circuit", "series rlc circuit", "parallel rlc circuit", "rc circuit", "rl circuit"),
+        "state_vars": ("q", "I"),
+        "params": {"R": 10.0, "L": 0.1, "C": 1e-4},
+        "description": "Linear lumped-element electrical circuit governed by L d^2q/dt^2 + R dq/dt + q/C = V(t).",
+    },
+}
+
+
+def _match_lexicon(text: str, lexicon: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Find all lexicon entries whose key or alias appears in ``text``."""
+    lower = (text or "").lower()
+    if not lower.strip():
+        return []
+    hits: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for key, info in lexicon.items():
+        canonical = str(info.get("canonical") or key)
+        if canonical in seen:
+            continue
+        candidates = (key, *info.get("aliases", ()))
+        for cand in candidates:
+            if not cand:
+                continue
+            pattern = r"(?<![a-z0-9])" + re.escape(cand.lower()) + r"(?![a-z0-9])"
+            m = re.search(pattern, lower)
+            if m:
+                seen.add(canonical)
+                span = (m.start(), m.end())
+                mention = text[m.start():m.end()]
+                hits.append({"key": key, "mention": mention, "span": span, **info})
+                break
+    return hits
+
+
+def find_offline_concepts(text: str) -> list[dict[str, Any]]:
+    """Return mathematical/scientific concepts matched in ``text``."""
+    return _match_lexicon(text, CONCEPT_LEXICON)
+
+
+def find_offline_equations(text: str) -> list[dict[str, Any]]:
+    """Return named equations or physical laws matched in ``text``."""
+    return _match_lexicon(text, EQUATION_LEXICON)
+
+
+def find_offline_constants(text: str) -> list[dict[str, Any]]:
+    """Return CODATA physical constants matched in ``text``."""
+    return _match_lexicon(text, CONSTANT_LEXICON)
+
+
+def find_offline_materials(text: str) -> list[dict[str, Any]]:
+    """Return engineering materials or crystal substances matched in ``text``."""
+    return _match_lexicon(text, MATERIAL_LEXICON)
+
+
+def find_offline_systems(text: str) -> list[dict[str, Any]]:
+    """Return dynamical systems matched in ``text``."""
+    return _match_lexicon(text, SYSTEM_LEXICON)
+
+
+_QUANTITY_RE = re.compile(
+    r"(?<![A-Za-z0-9_])"
+    r"([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)\s*"
+    r"(m/s\^2|m/s2|m/s|km/s|km/h|m\^2|m\^3|mm|cm|km|nm|um|"
+    r"kg/m\^3|kg|g|mg|"
+    r"GPa|MPa|kPa|Pa|bar|atm|"
+    r"GN|MN|kN|N|N\*m|N·m|"
+    r"GeV|MeV|keV|eV|GJ|MJ|kJ|J|mJ|GW|MW|kW|W|mW|"
+    r"GHz|MHz|kHz|Hz|rad/s|rpm|"
+    r"K|degC|°C|"
+    r"kV|V|mV|kA|A|mA|uA|MOhm|kOhm|Ohm|Ω|mF|uF|nF|pF|F|mH|uH|H|T|"
+    r"mol/L|mol)\b"
 )
 
-# Biomarker and genomic-state acronyms (HRD is also an HGNC alias of TBCE, MSS of several genes): never genes.
-BIOMARKER_ACRONYMS: FrozenSet[str] = frozenset(
-    """
-    HRD HRR HRP MSI MSS TMB DMMR PMMR MMR LOH CIN GIS CNA CNAS SCNA SCNAS
-    """.split()
+
+def find_offline_quantities(text: str) -> list[dict[str, Any]]:
+    """Extract explicit physical quantities (number + SI/engineering unit) from ``text``."""
+    hits: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for m in _QUANTITY_RE.finditer(text or ""):
+        raw = m.group(0).strip()
+        if raw in seen:
+            continue
+        seen.add(raw)
+        try:
+            val = float(m.group(1))
+        except ValueError:
+            val = None
+        hits.append({
+            "canonical": raw,
+            "mention": raw,
+            "span": (m.start(), m.end()),
+            "value": val,
+            "units": m.group(2),
+        })
+    return hits
+
+
+# ---------------------------------------------------------------------------
+# Backward-compatible helpers kept so legacy callers / tests never fail on import
+# ---------------------------------------------------------------------------
+NON_GENE_ACRONYMS: frozenset[str] = frozenset(
+    {
+        "ODE", "PDE", "SDE", "DAE", "FEM", "FDM", "FVM", "CFD", "BEM", "FFT", "DFT", "SVD",
+        "PCA", "RK4", "RK45", "BDF", "CFL", "SNR", "THD", "PWM", "PID", "LQR", "MPC", "KALMAN",
+        "MOSFET", "CMOS", "BJT", "FPGA", "ASIC", "VHDL", "SPICE", "RLC", "RMS", "AC", "DC",
+        "LASER", "MASER", "LED", "PVT", "EOS", "NPT", "NVT", "NVE", "CCSD", "HF", "MP2",
+        "GGA", "PBE", "LDA", "DOS", "BAND", "FCC", "BCC", "HCP", "XRD", "SEM", "TEM", "AFM",
+        "STM", "NMR", "IR", "UV", "VIS", "RAMAN", "codata", "NIST", "ISO", "IEEE", "ASME",
+        "ASTM", "SIAM", "AMS", "APS", "AIP", "IOP", "ACM", "NASA", "CERN", "ITER",
+        "HR", "CI", "OR", "RR", "OS", "PFS", "DFS", "EFS", "ORR", "CR", "PR", "SD", "PD",
+        "RCT", "FDA", "EMA", "WHO", "NIH", "DNA", "RNA", "PCR", "ATP", "ADP", "GTP", "GDP",
+        "BMI", "ECG", "EEG", "MRI", "CT", "PET", "ICU", "IV", "PO", "BID", "TID", "QD",
+    }
 )
 
-# Trial endpoint and adverse-event acronyms: neither genes nor diseases ("OS" is not osteosarcoma here).
-ENDPOINT_ACRONYMS: FrozenSet[str] = frozenset(
-    """
-    OS PFS PFS2 ORR DFS RFS EFS DMFS MFS DCR BICR IRC ITT HR CI AE AES SAE SAES IRAE IRAES TRAE TRAES TEAE TEAES
-    DLT DLTS MTD RP2D QOL HRQOL
-    """.split()
+ENGLISH_WORD_SYMBOLS: frozenset[str] = frozenset(
+    {
+        "SET", "MAP", "RING", "FIELD", "GROUP", "NORM", "RANK", "SPAN", "TRACE", "KERNEL",
+        "IMAGE", "FLOW", "WAVE", "BEAM", "LOAD", "MASS", "FORCE", "WORK", "HEAT", "FLUX",
+        "STEP", "RAMP", "POLE", "ZERO", "GAIN", "LOOP", "NODE", "MESH", "GRID", "CELL",
+        "CAN", "WAS", "HAS", "HAD", "NOT", "FOR", "AND", "ARE", "ALL", "ANY", "OUT",
+    }
 )
 
-# Upper-case tokens that look like genes but are disease, assay or general acronyms.
-NON_GENE_ACRONYMS: FrozenSet[str] = frozenset(
-    """
-    NSCLC SCLC PDAC AML CML ALL CLL CRC HCC TNBC HNSCC RCC GBM DLBCL MM MDS NHL MCL ESCC GIST LUAD LUSC
-    CRPC MCRPC HGSOC HGSC EOC
-    FDA EMA NCT PMID DOI DNA RNA MRNA CDNA SIRNA SHRNA CRISPR ODE PDE QC UMAP PCA OK USA UK EU WHO NIH NCI
-    COPASI SBML BIOMD ADC ADCS ORR PFS OS DFS RFS DCR CR PR SD PD HR CI IC50 EC50 GI50 KD KI AUC TKI TKIS MOA
-    PK PD AE AES SAE SAES ICI ICIS IO RT CT MRI PET NGS WES WGS PCR QPCR FISH IHC CNV SNV SNP SNPS INDEL VUS
-    AI ML LLM API GPU CPU II III IV VI ECOG RECIST CTCAE NCCN ESMO ASCO
-    """.split()
-) | BIOMARKER_ACRONYMS | ENDPOINT_ACRONYMS
-
-# Clinical acronyms that HGNC also lists as a symbol, alias or previous symbol (PCI -> SERPINA5, MI -> MITF,
-# ALS -> IGFALS, CAR -> NR1I3/CXADR). Read as a gene only next to a biomedical word ("CAD gene", "CAR expression").
-CLINICAL_ACRONYMS: FrozenSet[str] = frozenset(
-    """
-    PCI MI AF CAD COPD GFR ALS ASD UTI CRS CPAP SIDS RDS TMS IVF CRT ACS GCS DBS CAR TCR MS IBD ICD ARB HDL MRSA ROP
-    """.split()
-)
-
-# Words that, next to an English-word symbol, make it a gene mention ("MET amplification", "ATM loss").
-BIOMEDICAL_CONTEXT_WORDS: FrozenSet[str] = frozenset(
-    """
-    gene genes mutation mutations mutant mutants mutated variant variants amplification amplified deletion
-    loss deficiency deficient expression expressed overexpression kinase receptor protein inhibitor inhibitors
-    inhibition inhibit inhibits blockade signaling signalling pathway fusion fusions knockout knockdown exon
-    phosphorylation activation activity copy alteration alterations isoform ligand antibody tki tkis status
-    positive negative wild-type wildtype wt
-    """.split()
-)
-
-_ARTICLES = frozenset({"the", "a", "an", "this", "that", "my", "our", "your", "their", "its", "at", "to"})
+DISEASE_HEAD_WORDS: frozenset[str] = frozenset()
 
 
-def lookup_symbol(token: str) -> Optional[Tuple[str, str]]:
-    """Return (approved symbol, matched_on) for a lexicon token, or None. Families are not resolved here."""
-    key = token.upper()
-    if key in GENE_SYMBOLS:
-        return key, "symbol"
-    if key in GENE_ALIASES:
-        return GENE_ALIASES[key], "alias_symbol"
+def defined_acronyms(text: str) -> dict[str, str]:
+    """Extract acronyms defined inline as ``Full Name (ACR)`` mapped to ``"concept"``."""
+    out: dict[str, str] = {}
+    for m in re.finditer(r"\b([A-Za-z][A-Za-z0-9\s\-]{3,60})\s*\(([A-Z][A-Z0-9\-]{1,10})\)", text or ""):
+        out[m.group(2).strip().upper()] = "concept"
+    return out
+
+
+def lookup_stem_symbol(token: str) -> dict[str, Any] | None:
+    """Look up a constant, material, or concept symbol in the offline STEM lexicon."""
+    key = (token or "").strip().lower()
+    if not key:
+        return None
+    for lexicon in (CONSTANT_LEXICON, CONCEPT_LEXICON, EQUATION_LEXICON, MATERIAL_LEXICON, SYSTEM_LEXICON):
+        if key in lexicon:
+            return dict(lexicon[key])
+        for info in lexicon.values():
+            if key == str(info.get("symbol", "")).lower() or key in [a.lower() for a in info.get("aliases", ())]:
+                return dict(info)
     return None
 
 
-def family_members(token: str) -> Optional[Tuple[str, ...]]:
-    return GENE_FAMILIES.get(token.upper())
+_LEGACY_FAMILIES = {
+    "RAS": ("HRAS", "KRAS", "NRAS"),
+    "PI3K": ("PIK3CA", "PIK3CB"),
+    "AKT": ("AKT1", "AKT2", "AKT3"),
+    "RAF": ("ARAF", "BRAF", "CRAF"),
+    "MEK": ("MAP2K1", "MAP2K2"),
+    "ERK": ("MAPK1", "MAPK3"),
+}
+
+_LEGACY_SYMBOLS = {s: (s, "symbol") for fam in _LEGACY_FAMILIES.values() for s in fam}
+_LEGACY_SYMBOLS.update({"EGFR": ("EGFR", "symbol"), "BRAF": ("BRAF", "symbol"), "TP53": ("TP53", "symbol")})
 
 
-def _neighbour_words(text: str, start: int, end: int, n: int = 2) -> Tuple[List[str], List[str]]:
-    left = re.findall(r"[A-Za-z][\w\-]*", text[:start])[-n:]
-    right = re.findall(r"[A-Za-z][\w\-]*", text[end:])[:n]
-    return [w.lower() for w in left], [w.lower() for w in right]
+def lookup_symbol(token: str) -> tuple[str, str] | None:
+    """Return ``(canonical_symbol, matched_on)`` if ``token`` matches a known legacy symbol, else None."""
+    return _LEGACY_SYMBOLS.get((token or "").upper().strip())
 
 
-def is_gene_mention(text: str, start: int, end: int) -> bool:
-    """Case and context guard for a gene-like token at text[start:end].
-
-    Ordinary symbols match in any case ("kras", "Her2"). English-word symbols need upper case (so "met",
-    "Met" and "Kit" never match) and, after an article ("at the ATM"), a biomedical neighbour.
-    """
-    token = text[start:end]
-    key = token.upper()
-    if key in NON_GENE_ACRONYMS or token == "eGFR":  # eGFR is the estimated filtration rate, not EGFR
-        return False
-    if key in CLINICAL_ACRONYMS:
-        if re.match(r"[\s\-]?(?:T|NK)\b", text[end:]):
-            return False  # CAR-T, CAR NK, TCR-T: engineered cell therapies
-        left, right = _neighbour_words(text, start, end)
-        return any(w in BIOMEDICAL_CONTEXT_WORDS for w in left + right)
-    if key not in ENGLISH_WORD_SYMBOLS:
-        return True
-    if token != key:
-        return False
-    left, right = _neighbour_words(text, start, end)
-    if any(w in BIOMEDICAL_CONTEXT_WORDS for w in left + right):
-        return True
-    if left and left[-1] in _ARTICLES:
-        return False
-    return True
+def family_members(prefix: str) -> tuple[str, ...] | None:
+    """Legacy family-ambiguity helper retained for backward compatibility."""
+    return _LEGACY_FAMILIES.get((prefix or "").upper().strip())
 
 
 def is_english_word_symbol(token: str) -> bool:
-    return token.upper() in ENGLISH_WORD_SYMBOLS
+    return (token or "").upper() in ENGLISH_WORD_SYMBOLS
 
 
-# Treatment-related syndromes OpenTargets mapIds does not know (no hit by name or acronym). Names only, no IDs.
-OFFLINE_DISEASES: Dict[str, str] = {
-    "cytokine release syndrome": "cytokine release syndrome",
-    "immune effector cell-associated neurotoxicity syndrome": "immune effector cell-associated neurotoxicity syndrome",
-    "ICANS": "immune effector cell-associated neurotoxicity syndrome",
-    "differentiation syndrome": "differentiation syndrome",
-    "febrile neutropenia": "febrile neutropenia",
-    "immune-related adverse events": "immune-related adverse event",
-    "long COVID": "post-COVID-19 condition",
-}
-_OFFLINE_DISEASE_RE = re.compile(
-    r"(?<![A-Za-z0-9_\-])(" + "|".join(re.escape(k) for k in sorted(OFFLINE_DISEASES, key=len, reverse=True)) + r")(?![A-Za-z0-9_\-])",
-    re.I,
-)
+def is_gene_mention(text: str, start: int = 0, end: int = 0) -> bool:
+    """Legacy predicate retained for backward compatibility."""
+    token = text[start:end] if (end > start) else text
+    return bool(family_members(token) or lookup_symbol(token))
 
 
-def find_offline_diseases(text: str) -> List[Tuple[str, str, Tuple[int, int]]]:
-    """(mention, label, span) for each OFFLINE_DISEASES phrase in text; acronyms must match case."""
-    out: List[Tuple[str, str, Tuple[int, int]]] = []
-    by_lower = {k.lower(): k for k in OFFLINE_DISEASES}
-    for m in _OFFLINE_DISEASE_RE.finditer(text or ""):
-        key = by_lower[m.group(1).lower()]
-        if key.isupper() and m.group(1) != key:
-            continue
-        out.append((m.group(1), OFFLINE_DISEASES[key], m.span(1)))
-    return out
+def find_offline_diseases(text: str) -> list[tuple[str, str, tuple[int, int]]]:
+    """Legacy no-op helper retained for backward compatibility."""
+    return []
 
 
-# ----------------------------------------------------------------------------- acronyms defined in the question
-# Words that make a parenthesised long form a gene or protein name ("epidermal growth factor receptor (EGFR)").
-_GENE_NAME_WORDS: FrozenSet[str] = frozenset(
-    """
-    gene genes protein proteins receptor receptors kinase kinases factor factors ligand ligands homolog homologue
-    oncogene subunit domain channel transporter enzyme polymerase synthase synthetase phosphatase transferase
-    dehydrogenase reductase oxidase ligase protease peptidase helicase nuclease cyclin interleukin antigen
-    chemokine integrin member family containing interacting binding regulator regulatory transcription
-    """.split()
-)
-_NOT_ENZYME_ASE = frozenset("disease diseases release increase decrease phase phases database case cases base bases".split())
-# Words that make a long form a biomarker, state or endpoint concept ("homologous recombination deficiency (HRD)").
-_CONCEPT_WORDS: FrozenSet[str] = frozenset(
-    """
-    deficient deficiency deficiencies proficient proficiency repair instability burden load syndrome survival
-    response responses rate rates ratio status signature score heterozygosity mutational instable stable event
-    events toxicity toxicities dose tolerated free progression recurrence remission
-    """.split()
-)
-_DEFINED_ACRONYM_RE = re.compile(r"\(\s*([A-Za-z][A-Za-z0-9\-]{1,9})\s*\)")
+def coordinated_disease_terms(text: str) -> list[tuple[str, str, tuple[int, int]]]:
+    """Legacy no-op helper retained for backward compatibility."""
+    return []
 
-
-def _initials_cover(letters: str, words: List[str]) -> bool:
-    """letters (an acronym) is a subsequence of the words' initials and starts with the first word's initial."""
-    initials = "".join(w[0] for w in words).upper()
-    if not initials or initials[0] != letters[0]:
-        return False
-    it = iter(initials)
-    return all(ch in it for ch in letters)
-
-
-def _gene_like(words: List[str]) -> bool:
-    for w in (x.lower() for x in words):
-        if w in _GENE_NAME_WORDS or (len(w) >= 6 and w.endswith(("ase", "ases")) and w not in _NOT_ENZYME_ASE):
-            return True
-    return False
-
-
-@lru_cache(maxsize=128)
-def _defined_acronyms_cached(text: str) -> Tuple[Tuple[str, str], ...]:
-    out: Dict[str, str] = {}
-    for m in _DEFINED_ACRONYM_RE.finditer(text):
-        acr = m.group(1)
-        if sum(ch.isupper() for ch in acr) < 2 or lookup_symbol(acr) or family_members(acr):
-            continue
-        letters = re.sub(r"[^A-Za-z]", "", acr).upper()
-        clause = re.split(r"[.;:!?()\[\],\n]", text[: m.start()])[-1]
-        words = re.findall(r"[A-Za-z0-9]+", clause)[-(len(letters) + 4):]
-        if not words or not letters:
-            continue
-        long_form: List[str] = []
-        for i in range(len(words) - 1, -1, -1):
-            if _initials_cover(letters, words[i:]):
-                long_form = words[i:]
-                break
-        if len(long_form) < 2:
-            long_form = []
-        tail = long_form or words[-4:]
-        if _gene_like(tail):
-            continue
-        if any(w.lower() in _CONCEPT_WORDS for w in tail):
-            kind = "concept"
-        elif long_form:
-            kind = "name"
-        else:
-            continue
-        for key in {acr.upper(), acr.split("-", 1)[0].upper()}:
-            if len(key) >= 2 and lookup_symbol(key) is None:
-                out.setdefault(key, kind)
-    return tuple(out.items())
-
-
-def defined_acronyms(text: str) -> Dict[str, str]:
-    """Acronyms the question defines as "long form (ACR)" whose long form is not a gene or protein name.
-
-    Maps the upper-cased acronym to "concept" (the long form names a biomarker, state or endpoint: deficient,
-    repair, instability, burden, survival...; never a gene) or "name" (the initials match a non-gene long form;
-    an approved HGNC symbol may still match, an alias-only hit may not). Lexicon genes are never listed."""
-    return dict(_defined_acronyms_cached(text or ""))
-
-
-# ----------------------------------------------------------------------------- coordinated disease phrases
-DISEASE_HEAD_WORDS: FrozenSet[str] = frozenset(
-    """
-    cancer cancers carcinoma carcinomas adenocarcinoma adenocarcinomas tumor tumors tumour tumours neoplasm neoplasms
-    melanoma melanomas leukemia leukemias leukaemia leukaemias lymphoma lymphomas glioblastoma glioblastomas glioma
-    gliomas sarcoma sarcomas myeloma myelomas malignancy malignancies disease diseases syndrome syndromes
-    """.split()
-)
-_COORD_STOP = frozenset(
-    "a an the of in on for with and or to by at from is are was were be this that these those its their our all both "
-    "other such some many most several various solid advanced metastatic early late treatment treatments therapy "
-    "therapies patients patient survival risk response prevention diagnosis screening management prognosis "
-    "outcome outcomes incidence mortality".split()
-)
-_MOD = r"[A-Za-z][A-Za-z\-']*"
-_COORD_RE = re.compile(
-    rf"(?<![A-Za-z0-9_\-])((?:{_MOD}\s*,\s*)*{_MOD}),?\s+(?:and/or|and|or|&)\s+({_MOD})\s+("
-    + "|".join(sorted(DISEASE_HEAD_WORDS, key=len, reverse=True))
-    + r")(?![A-Za-z0-9_\-])",
-    re.I,
-)
-
-
-def _singular_head(head: str) -> str:
-    low = head.lower()
-    if low.endswith("ies"):
-        return head[:-3] + ("Y" if head[-1].isupper() else "y")
-    if low.endswith("s") and low[:-1] in DISEASE_HEAD_WORDS:
-        return head[:-1]
-    return head
-
-
-def coordinated_disease_terms(text: str) -> List[Tuple[str, str, Tuple[int, int]]]:
-    """Expand "ovarian and prostate cancers" / "breast, ovarian, and prostate cancer" into one disease term per
-    modifier ("ovarian cancer", "prostate cancer"). Returns (term, mention, span): the mention is literal text of
-    the question (the modifier, or "modifier head" for the last one) so the entity can be anchored."""
-    out: List[Tuple[str, str, Tuple[int, int]]] = []
-    for m in _COORD_RE.finditer(text or ""):
-        head = _singular_head(m.group(3))
-        mods: List[Tuple[str, Tuple[int, int]]] = []
-        for mm in re.finditer(_MOD, m.group(1)):
-            mods.append((mm.group(0), (m.start(1) + mm.start(), m.start(1) + mm.end())))
-        mods.append((m.group(2), m.span(2)))
-        if any(w.lower() in _COORD_STOP for w, _ in mods):
-            continue  # "treatment and prostate cancer" is not a list of disease sites
-        for i, (word, span) in enumerate(mods):
-            term = f"{word} {head}"
-            if i == len(mods) - 1:
-                span = (span[0], m.end(3))
-            out.append((term, text[span[0]:span[1]], span))
-    return out
-
-
-__all__ = [
-    "BIOMARKER_ACRONYMS",
-    "DISEASE_HEAD_WORDS",
-    "ENDPOINT_ACRONYMS",
-    "coordinated_disease_terms",
-    "defined_acronyms",
-    "BIOMEDICAL_CONTEXT_WORDS",
-    "CLINICAL_ACRONYMS",
-    "ENGLISH_WORD_SYMBOLS",
-    "OFFLINE_DISEASES",
-    "find_offline_diseases",
-    "GENE_ALIASES",
-    "GENE_FAMILIES",
-    "GENE_SYMBOLS",
-    "NON_GENE_ACRONYMS",
-    "family_members",
-    "is_english_word_symbol",
-    "is_gene_mention",
-    "lookup_symbol",
-]

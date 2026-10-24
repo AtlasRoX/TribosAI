@@ -10,7 +10,20 @@ from .models import (
     ResolvedAttachment,
     ValidationSummary,
 )
-from .store import DatasetNotFound, DatasetStore, DatasetStoreError, get_dataset_store, reset_dataset_store
+from .store import (
+    DatasetNotFound,
+    DatasetStore,
+    DatasetStoreError,
+    get_dataset_store,
+    reset_dataset_store,
+)
+from .validators import (
+    ValidationFailure,
+    validate_dataset_upload,
+    validate_hdf5,
+    validate_mat,
+    validate_table,
+)
 
 DatasetProvenance = DatasetProvenanceIn
 
@@ -26,7 +39,12 @@ __all__ = [
     "DatasetStoreError",
     "GeoVerification",
     "ResolvedAttachment",
+    "ValidationFailure",
     "ValidationSummary",
     "get_dataset_store",
     "reset_dataset_store",
+    "validate_dataset_upload",
+    "validate_hdf5",
+    "validate_mat",
+    "validate_table",
 ]

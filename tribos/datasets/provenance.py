@@ -1,4 +1,4 @@
-"""Post-process Lumicell/Vivarix results for attached datasets (owned by UPLOADS, feature 8).
+"""Post-process Calcula/Dynamis/dataset results for attached datasets (owned by UPLOADS, feature 8).
 
 Absolute server paths never leave the server: attachment paths become 'upload://<id>/<name>' and typed
 paths their basename. The uploader's public provenance is merged into the result so the evidence block,
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Dict, Optional
+from typing import Any
 
 from tribos.agents.query_context import QueryContext
 from tribos.tools.registry import ToolResult
@@ -19,10 +19,9 @@ def _basename(path: Any) -> str:
     return re.split(r"[\\/]", str(path))[-1]
 
 
-def _redact_text(text: Optional[str], path: Optional[str], replacement: str) -> Optional[str]:
+def _redact_text(text: str | None, path: str | None, replacement: str) -> str | None:
     if not text or not path:
         return text
-    # Library errors may quote the file, its directory or the upload root, with either separator.
     candidates = [path, os.path.dirname(path) if os.path.isabs(path) else ""]
     try:
         from .store import default_upload_root
@@ -39,11 +38,10 @@ def _redact_text(text: Optional[str], path: Optional[str], replacement: str) -> 
     return text
 
 
-# Values Lumicell reads from the file itself (adata.uns); a differing declared value must not overwrite them.
 _FILE_DERIVED_KEYS = ("organism", "tissue", "disease", "technology", "donor_id")
 
 
-def _merge_declared(out: Dict[str, Any], declared: Dict[str, Any]) -> None:
+def _merge_declared(out: dict[str, Any], declared: dict[str, Any]) -> None:
     for key, value in declared.items():
         if key in _FILE_DERIVED_KEYS and key in out:
             if value is None or str(value) == str(out[key]):
@@ -60,7 +58,7 @@ def _merge_canonical(res: ToolResult, key: str, values: list) -> None:
     res.canonical_ids[key] = ",".join(dict.fromkeys(existing + values))
 
 
-def postprocess_lumicell_result(res: ToolResult, ctx: QueryContext) -> ToolResult:
+def postprocess_dataset_result(res: ToolResult, ctx: QueryContext) -> ToolResult:
     att = getattr(ctx, "dataset_attachment", None) if ctx is not None else None
     source_path = att.analysis_path if att is not None else getattr(ctx, "dataset_path", None)
     public_ref = f"upload://{att.id}/{att.display_name}" if att is not None else None
@@ -68,7 +66,7 @@ def postprocess_lumicell_result(res: ToolResult, ctx: QueryContext) -> ToolResul
     def redact_path(value: Any) -> str:
         return public_ref if public_ref else _basename(value)
 
-    def redact_provenance(prov: Any) -> Dict[str, Any]:
+    def redact_provenance(prov: Any) -> dict[str, Any]:
         out = dict(prov) if isinstance(prov, dict) else {}
         if "file_path" in out:
             out["file_path"] = att.display_name if att is not None else _basename(out["file_path"])
@@ -97,14 +95,12 @@ def postprocess_lumicell_result(res: ToolResult, ctx: QueryContext) -> ToolResul
     if att is not None:
         _merge_canonical(res, "dataset_ids", [att.id])
         if att.geo_verified:
-            # The accession exists in GEO, but only the uploader links it to this file (SCI-014): its PubMed ids are
-            # a declared source, not citations for the result, so they are kept apart from the canonical "pmids".
             _merge_canonical(res, "geo_accessions", [att.geo_accession])
             _merge_canonical(res, "declared_source_pmids", list(att.pmids))
     return res
 
 
-def postprocess_vivarix_result(res: ToolResult, ctx: QueryContext) -> ToolResult:
+def postprocess_dynamis_result(res: ToolResult, ctx: QueryContext) -> ToolResult:
     att = getattr(ctx, "model_attachment", None) if ctx is not None else None
     if att is None:
         return res
@@ -122,3 +118,14 @@ def postprocess_vivarix_result(res: ToolResult, ctx: QueryContext) -> ToolResult
         res.error = _redact_text(res.error, att.model_path, f"upload://{att.id}/{att.display_name}")
     _merge_canonical(res, "dataset_ids", [att.id])
     return res
+
+
+postprocess_lumicell_result = postprocess_dataset_result
+postprocess_vivarix_result = postprocess_dynamis_result
+
+__all__ = [
+    "postprocess_dataset_result",
+    "postprocess_dynamis_result",
+    "postprocess_lumicell_result",
+    "postprocess_vivarix_result",
+]

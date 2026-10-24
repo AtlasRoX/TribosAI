@@ -5,9 +5,34 @@ themselves through tribos.extensions.agentic.
 """
 
 from .budget import BudgetExhausted, RunBudget
-from .config import AGENTIC, AGENTIC_FRAMEWORKS, ALL_FRAMEWORKS, AUTO, CLASSIC, DEBATE, SUPERVISOR, SWARM, is_agentic, resolve_framework
-from .control import ApprovalDecision, RunCancelled, RunControl, create_control, get_control, release_control
-from .runtime import AgenticRuntime, AgentPhase, PhaseOutcome, get_phases, register_phase, unregister_phase
+from .config import (
+    AGENTIC,
+    AGENTIC_FRAMEWORKS,
+    ALL_FRAMEWORKS,
+    AUTO,
+    CLASSIC,
+    DEBATE,
+    SUPERVISOR,
+    SWARM,
+    is_agentic,
+    resolve_framework,
+)
+from .control import (
+    ApprovalDecision,
+    RunCancelled,
+    RunControl,
+    create_control,
+    get_control,
+    release_control,
+)
+from .runtime import (
+    AgenticRuntime,
+    AgentPhase,
+    PhaseOutcome,
+    get_phases,
+    register_phase,
+    unregister_phase,
+)
 from .state import AgentState, SubQuestion
 
 __all__ = [

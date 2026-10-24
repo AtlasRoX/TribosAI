@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from html import escape
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from tribos.extensions import hooks
 
@@ -31,14 +31,14 @@ _CONSENT_LABELS = {
 }
 
 
-def _upload_provenance(lum: Any) -> Optional[Dict[str, Any]]:
+def _upload_provenance(lum: Any) -> dict[str, Any] | None:
     prov = (lum or {}).get("dataset_provenance") if isinstance(lum, dict) else None
     if isinstance(prov, dict) and _DATASET_ID_RE.match(str(prov.get("id") or "")):
         return prov
     return None
 
 
-def _model_provenance(viv: Any) -> Optional[Dict[str, Any]]:
+def _model_provenance(viv: Any) -> dict[str, Any] | None:
     prov = (viv or {}).get("provenance") if isinstance(viv, dict) else None
     if isinstance(prov, dict) and prov.get("source") == "user_upload":
         return prov
@@ -53,7 +53,7 @@ def _bool(value: Any) -> str:
 # Evidence block
 # -----------------------------------------------------------------------------
 
-def lumicell_provenance_xml(lum: Dict[str, Any]) -> str:
+def lumicell_provenance_xml(lum: dict[str, Any]) -> str:
     prov = _upload_provenance(lum)
     if prov is None:
         return ""
@@ -78,7 +78,7 @@ def lumicell_provenance_xml(lum: Dict[str, Any]) -> str:
     return f"<dataset_provenance{rendered}/>"
 
 
-def vivarix_upload_attrs(viv: Dict[str, Any]) -> Dict[str, str]:
+def vivarix_upload_attrs(viv: dict[str, Any]) -> dict[str, str]:
     prov = _model_provenance(viv)
     if prov is None:
         return {}
@@ -101,7 +101,7 @@ def _strip_declared_ids(prov: Any, *, model: bool) -> None:
         prov.pop("sbml_model_id", None)
 
 
-def declared_ids_filter(_tool_key: str, data: Dict[str, Any]) -> Dict[str, Any]:
+def declared_ids_filter(_tool_key: str, data: dict[str, Any]) -> dict[str, Any]:
     """Drop unverified GEO accessions and uploaded SBML model ids before identifier harvest and memory."""
     if _upload_provenance(data) is not None:
         _strip_declared_ids(data["dataset_provenance"], model=False)
@@ -114,7 +114,7 @@ def declared_ids_filter(_tool_key: str, data: Dict[str, Any]) -> Dict[str, Any]:
 # Activity steps, artifacts, scope notes
 # -----------------------------------------------------------------------------
 
-def lumicell_step(res: Any, _title_ctx: Dict[str, Any]) -> Tuple[Optional[str], List[str]]:
+def lumicell_step(res: Any, _title_ctx: dict[str, Any]) -> tuple[str | None, list[str]]:
     if not getattr(res, "success", False):
         return None, []
     prov = _upload_provenance(res.data)
@@ -125,7 +125,7 @@ def lumicell_step(res: Any, _title_ctx: Dict[str, Any]) -> Tuple[Optional[str], 
     return None, ["provenance declared by uploader"]
 
 
-def vivarix_step(res: Any, _title_ctx: Dict[str, Any]) -> Tuple[Optional[str], List[str]]:
+def vivarix_step(res: Any, _title_ctx: dict[str, Any]) -> tuple[str | None, list[str]]:
     if not getattr(res, "success", False):
         return None, []
     data = res.data if isinstance(res.data, dict) else {}
@@ -137,15 +137,15 @@ def vivarix_step(res: Any, _title_ctx: Dict[str, Any]) -> Tuple[Optional[str], L
     ]
 
 
-def datasets_artifact(_tool_results: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
+def datasets_artifact(_tool_results: dict[str, Any], ctx: Any) -> dict[str, Any]:
     attachments = list(getattr(ctx, "attachments", None) or [])
     if not attachments:
         return {}
     return {"datasets": [a.to_public() for a in attachments]}
 
 
-def upload_scope_notes(ctx: Any, _tool_results: Dict[str, Any]) -> List[str]:
-    notes: List[str] = []
+def upload_scope_notes(ctx: Any, _tool_results: dict[str, Any]) -> list[str]:
+    notes: list[str] = []
     attachments = list(getattr(ctx, "attachments", None) or [])
     if attachments:
         notes.append(SCOPE_NOTE)
@@ -177,7 +177,7 @@ _NEGATION = re.compile(
 )
 
 
-def consent_claims_check(vctx: Any) -> List[Dict[str, Any]]:
+def consent_claims_check(vctx: Any) -> list[dict[str, Any]]:
     ctx = getattr(vctx, "query_context", None)
     attachments = list(getattr(ctx, "attachments", None) or [])
     if not attachments:
@@ -185,7 +185,7 @@ def consent_claims_check(vctx: Any) -> List[Dict[str, Any]]:
     statuses = {str((a.public_provenance or {}).get("consent_status") or "unknown") for a in attachments}
     names = [a.display_name.lower() for a in attachments if a.display_name]
     hedge = getattr(vctx, "hedge_pattern", None)
-    defects: List[Dict[str, Any]] = []
+    defects: list[dict[str, Any]] = []
     for sentence in vctx.sentences:
         lowered = sentence.lower()
         if not (_DATA_SUBJECT.search(sentence) or any(n in lowered for n in names)):

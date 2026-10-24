@@ -7,7 +7,9 @@ and OpenAI cloud models with unified configuration.
 import asyncio
 import logging
 import os
-from typing import Any, Awaitable, Callable, Optional, Sequence
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Any
+
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
@@ -81,7 +83,7 @@ def allowed_model_ids() -> set[str]:
     return ids
 
 
-def is_allowed_model(model_id: Optional[str]) -> bool:
+def is_allowed_model(model_id: str | None) -> bool:
     return not model_id or model_id in allowed_model_ids()
 
 
@@ -104,7 +106,7 @@ DEFAULT_LLM_TIMEOUT_S = float(os.getenv("LLM_TIMEOUT", "60.0"))
 FALLBACK_MODEL = "gpt-4o"
 
 
-def _usable_key(key: Optional[str]) -> Optional[str]:
+def _usable_key(key: str | None) -> str | None:
     """The key, or None when it is empty or an obvious template value such as 'sk-placeholder'."""
     if not key or not key.strip():
         return None
@@ -114,7 +116,7 @@ def _usable_key(key: Optional[str]) -> Optional[str]:
     return key.strip()
 
 
-def usable_key(key: Optional[str]) -> Optional[str]:
+def usable_key(key: str | None) -> str | None:
     """Public form of the placeholder check (request validation uses it to refuse template keys with 422)."""
     return _usable_key(key)
 
@@ -126,8 +128,8 @@ def fallback_enabled() -> bool:
 
 
 def _record_client(
-    *, requested: str, served: str, provider: str, base_url: Optional[str], key_source: str, temperature: float,
-    kwargs: dict[str, Any], fallback: bool = False, reason: Optional[str] = None,
+    *, requested: str, served: str, provider: str, base_url: str | None, key_source: str, temperature: float,
+    kwargs: dict[str, Any], fallback: bool = False, reason: str | None = None,
 ) -> None:
     """Tell the active run recorder which model actually serves this client (PRV-002). Never raises."""
     try:
@@ -143,8 +145,8 @@ def _record_client(
 
 
 def get_llm(
-    model_name: Optional[str] = None,
-    api_key: Optional[str] = None,
+    model_name: str | None = None,
+    api_key: str | None = None,
     temperature: float = 0.0,
     **kwargs: Any,
 ) -> BaseChatModel:
@@ -294,7 +296,7 @@ class LLMStreamTimeoutError(TimeoutError):
     """A streamed completion exceeded its total timeout (STREAM_TOTAL_TIMEOUT, or the run's remaining time)."""
 
 
-def stream_timeout(remaining_s: Optional[float]) -> float:
+def stream_timeout(remaining_s: float | None) -> float:
     """Total wall-clock limit for one stream: STREAM_TOTAL_TIMEOUT, bounded by the run's remaining time when the run
     has an absolute deadline (audit F4); `None` means the run has no deadline."""
     if remaining_s is None:
@@ -347,9 +349,9 @@ def _to_openai_messages(messages: Sequence[BaseMessage]) -> list[dict[str, str]]
 async def astream_with_reasoning(
     llm: Any,
     messages: Sequence[BaseMessage],
-    on_reasoning: Optional[DeltaCallback] = None,
-    on_text: Optional[DeltaCallback] = None,
-    total_timeout: Optional[float] = None,
+    on_reasoning: DeltaCallback | None = None,
+    on_text: DeltaCallback | None = None,
+    total_timeout: float | None = None,
 ) -> tuple[str, str]:
     """
     Stream a completion, forwarding the model's real reasoning and answer text as they arrive.

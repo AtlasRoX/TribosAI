@@ -7,7 +7,7 @@ import difflib
 import os
 import re
 import time
-from typing import Any, List, Optional, Tuple
+from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -31,13 +31,13 @@ def _configured_rewrite_cap() -> int:
 def rewrite_output_cap(budget: object, prompt_chars: int) -> int:
     """Most output tokens one rewrite may produce: TRIBOS_REWRITE_MAX_OUTPUT_TOKENS (default 8192), never more than
     the run budget has left after the prompt (0 when nothing is left; there is no floor above what fits, audit F3)."""
-    left = int(getattr(budget, "remaining_tokens")()) - max(1, estimate_tokens(prompt_chars))
+    left = int(budget.remaining_tokens()) - max(1, estimate_tokens(prompt_chars))
     return max(0, min(_configured_rewrite_cap(), left))
 
 
 def generation_allocation(
     budget: Any, phase: str, prompt_chars: int, draft_chars: int
-) -> Tuple[Optional[Allocation], str]:
+) -> tuple[Allocation | None, str]:
     """Admit one whole-answer generation (a rewrite or the verifier's revision) or say why not.
 
     The model is sent exactly the admitted output allocation. A rewrite reproduces the whole draft, so an allocation
@@ -73,7 +73,7 @@ def _place_terms(text: str) -> set:
     return {w for w in re.findall(r"[a-z][a-z0-9\-]{3,}", (text or "").lower()) if w not in _PLACE_STOP}
 
 
-def _section_for(item_text: str, sections: List[Any]) -> Optional[Any]:
+def _section_for(item_text: str, sections: list[Any]) -> Any | None:
     """The one section a sub-question's new evidence belongs in: the best match on heading and body terms, with at
     least one heading term and two terms in all; None when no section, or more than one, fits that well."""
     want = _place_terms(item_text)
@@ -91,7 +91,7 @@ def _section_for(item_text: str, sections: List[Any]) -> Optional[Any]:
     return scored[0][2]
 
 
-def _repair_targets(agent_state: Any, feedback: List[str], sections: List[Any]) -> Tuple[List[str], List[str], List[str]]:
+def _repair_targets(agent_state: Any, feedback: list[str], sections: list[Any]) -> tuple[list[str], list[str], list[str]]:
     """(feedback the section matcher can place, draft sentences to repair, new evidence keys) for this round.
 
     A gap round's feedback names no section, but the gaps it filled do: a hedged draft sentence is itself the text
@@ -103,7 +103,7 @@ def _repair_targets(agent_state: Any, feedback: List[str], sections: List[Any]) 
     new_keys = list(report.get("new_evidence_keys") or [])
     items = {it.get("id"): it for it in report.get("items") or []}
     filled = [items[i] for i, o in (report.get("outcomes") or {}).items() if o == "filled" and i in items]
-    sentences: List[str] = []
+    sentences: list[str] = []
     placeable = bool(filled)
     for it in filled:
         if it.get("hedged"):
@@ -119,7 +119,7 @@ def _repair_targets(agent_state: Any, feedback: List[str], sections: List[Any]) 
     return kept, sentences, new_keys
 
 
-async def _try_section_repair(run: RunContext, feedback: List[str], draft: str, round_id: str) -> Optional[Tuple[str, Any]]:
+async def _try_section_repair(run: RunContext, feedback: list[str], draft: str, round_id: str) -> tuple[str, Any] | None:
     """Repair only the sections this round's evidence or critique touches. None: fall back to a whole rewrite."""
     ao = orchestrator_module()
     agent_state = run.agent_state
@@ -150,7 +150,7 @@ async def _try_section_repair(run: RunContext, feedback: List[str], draft: str, 
         # run's cancel and deadline.
         chars = len(system) + len(user)
         alloc = budget.admit("synthesis", chars, max_tokens, min_output=min(max_tokens, 256))
-        parts: List[str] = []
+        parts: list[str] = []
         try:
             llm = ao.get_llm(model_name=run.synthesis_model, api_key=run.api_key, max_tokens=alloc.output_cap,
                              **ao._edit_llm_kwargs(run.synthesis_model))
@@ -256,7 +256,7 @@ async def draft_rounds(run: RunContext) -> None:
             synthesis_prompt = round_prompt
             await emit(round_id, "Rewriting the answer with the new evidence", status="running", extra={"model": synthesis_model})
             unchanged = False
-            round_parts: List[str] = []
+            round_parts: list[str] = []
             holder = {"alloc": alloc}
             cap = alloc.output_cap
             try:
@@ -270,15 +270,22 @@ async def draft_rounds(run: RunContext) -> None:
                     **ao._edit_llm_kwargs(synthesis_model),
                 )
 
-                def before_retry(_attempt: int) -> None:
+                def before_retry(
+                    _attempt: int,
+                    _h=holder,
+                    _rp=round_parts,
+                    _pc=prompt_chars,
+                    _cr=candidate_response,
+                    _c=cap,
+                ) -> None:
                     # A retried stream is a second provider call: settle the dropped one, admit the retry.
-                    budget.settle(holder["alloc"], output_chars=len("".join(round_parts)), failed=True)
-                    retry, why = generation_allocation(budget, "synthesis", prompt_chars, len(candidate_response))
-                    if retry is None or retry.output_cap < cap:
+                    budget.settle(_h["alloc"], output_chars=len("".join(_rp)), failed=True)
+                    retry, why = generation_allocation(budget, "synthesis", _pc, len(_cr))
+                    if retry is None or retry.output_cap < _c:
                         if retry is not None:
                             budget.settle(retry, failed=True)
                         raise BudgetExhausted(why or "no budget left to retry the rewrite")
-                    holder["alloc"] = retry
+                    _h["alloc"] = retry
 
                 round_text, round_reasoning = await run.watched(
                     round_id,

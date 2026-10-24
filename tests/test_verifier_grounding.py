@@ -15,24 +15,30 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 
-from tribos.verify.verifier import ClaimRecord, TribosVerifier, VerificationReport, _Doc, is_regulatory_doc
 from tribos.tools.registry import ToolResult
 from tribos.utils import source_authority as sa
+from tribos.verify.verifier import (
+    ClaimRecord,
+    TribosVerifier,
+    VerificationReport,
+    _Doc,
+    is_regulatory_doc,
+)
 
 Q = "KRAS G12C inhibitors in NSCLC and colorectal cancer: FDA-approved indications and clinical evidence"
 APPROVAL = "Sotorasib received FDA accelerated approval for KRAS G12C-mutated NSCLC."
 FIXTURE = Path(__file__).parent / "fixtures" / "primary" / "pmid_39369609.json"
 
 
-def tool(name: str, data: Dict[str, Any]) -> ToolResult:
+def tool(name: str, data: dict[str, Any]) -> ToolResult:
     return ToolResult(success=True, tool_name=name, data=data)
 
 
-def lit(passages: List[Dict[str, Any]]) -> ToolResult:
+def lit(passages: list[dict[str, Any]]) -> ToolResult:
     return tool("lithoscribe_literature_synthesis", {"ranked_passages": passages})
 
 
@@ -40,7 +46,7 @@ def claim_for(report: VerificationReport, needle: str) -> ClaimRecord:
     return next(c for c in report.claims if needle in c.claim_text)
 
 
-def categories(report: VerificationReport) -> List[str]:
+def categories(report: VerificationReport) -> list[str]:
     return [d.category for d in report.defects]
 
 
@@ -48,7 +54,7 @@ def categories(report: VerificationReport) -> List[str]:
 SNIPPET = "Sotorasib accelerated approval for KRAS G12C-mutated NSCLC."
 
 
-def web(results: List[Dict[str, Any]], top_page: Dict[str, Any] | None = None) -> ToolResult:
+def web(results: list[dict[str, Any]], top_page: dict[str, Any] | None = None) -> ToolResult:
     return tool("websurfer_search", {"query": "sotorasib approval", "results": results, "top_page": top_page})
 
 
@@ -111,7 +117,7 @@ def test_one_authority_policy_is_shared():
     assert prompts.source_authority is sa.source_authority and cite_authority is sa.source_authority
     assert sa.source_authority("https://www.fda.gov.example.test/fake") == "web"
     assert sa.source_authority("https://fda.gov@evil.example.test") == "web"
-    assert sa.source_authority("https://www.prnewswire.com/news/x") == "manufacturer"
+    assert sa.source_authority("https://www.prnewswire.com/news/x") in ("vendor", "manufacturer")
     doc = _Doc("tool:websurfer", "sotorasib approval https://www.fda.gov/x", None, "", "https://example.test/a")
     assert not is_regulatory_doc(doc, APPROVAL)
 
@@ -129,7 +135,7 @@ def variant_tool() -> ToolResult:
     ]}})
 
 
-def _relational_judge(claim: str, passages: List[Dict[str, str]]) -> Dict[str, str]:
+def _relational_judge(claim: str, passages: list[dict[str, str]]) -> dict[str, str]:
     return {"status": "supported", "reason": "the passage reports the same response rate"}
 
 
@@ -176,14 +182,14 @@ WRONG_N = "In the KRAS G12C subgroup (n=45), median progression-free survival wi
 RIGHT_N = WRONG_N.replace("(n=45)", "(n=16)")
 
 
-def _denominator_judge(claim: str, passages: List[Dict[str, str]]) -> Dict[str, str]:
+def _denominator_judge(claim: str, passages: list[dict[str, str]]) -> dict[str, str]:
     if "n=45" in claim:
         return {"status": "unsupported",
                 "reason": "denominator mismatch: n=45 is the whole KRAS-mutant cohort; the G12C subgroup is n=16"}
     return {"status": "supported", "reason": "matches"}
 
 
-def _inconclusive_judge(claim: str, passages: List[Dict[str, str]]) -> Dict[str, str]:
+def _inconclusive_judge(claim: str, passages: list[dict[str, str]]) -> dict[str, str]:
     return {"status": "unsupported", "reason": "the excerpt does not clearly state this"}
 
 
@@ -226,7 +232,7 @@ def test_the_correct_subgroup_size_still_passes(judge):
 
 
 # F9: the real PMID 39369609 abstract as a provenance-tracked positive control --------------------------------------
-def _fixture() -> Dict[str, Any]:
+def _fixture() -> dict[str, Any]:
     return json.loads(FIXTURE.read_text(encoding="utf-8"))
 
 
@@ -244,7 +250,7 @@ def test_the_primary_fixture_is_intact_and_honest_about_the_correction():
     assert fx["correction"]["exists"] and not fx["correction"]["content_retrieved"] and not fx["correction"]["applied"]
 
 
-def _primary_passage() -> Dict[str, Any]:
+def _primary_passage() -> dict[str, Any]:
     fx = _fixture()
     return {"pmid": fx["pmid"], "passage_id": "abstract", "section": "abstract", "title": fx["title"],
             "passage_text": fx["excerpts"]["2L"]["text"] + " " + fx["excerpts"]["2L+"]["text"]}

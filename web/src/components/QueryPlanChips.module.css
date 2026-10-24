@@ -29,20 +29,28 @@
   cursor: default;
 }
 
-.chip[data-type="gene"] {
-  --chip-hue: var(--domain-t2kg);
+.chip[data-type="concept"] {
+  --chip-hue: #60a5fa;
 }
 
-.chip[data-type="drug"] {
-  --chip-hue: var(--biocontext-accent);
+.chip[data-type="equation"] {
+  --chip-hue: #a78bfa;
 }
 
-.chip[data-type="disease"] {
-  --chip-hue: var(--domain-s2);
+.chip[data-type="quantity"] {
+  --chip-hue: #f59e0b;
 }
 
-.chip[data-type="variant"] {
-  --chip-hue: var(--domain-scp);
+.chip[data-type="constant"] {
+  --chip-hue: #2dd4bf;
+}
+
+.chip[data-type="material"] {
+  --chip-hue: #34d399;
+}
+
+.chip[data-type="system"] {
+  --chip-hue: #f472b6;
 }
 
 .chip[data-validated="false"] {

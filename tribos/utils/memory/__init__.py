@@ -5,11 +5,11 @@ Exposes the multi-tier Clinical Memory Engine.
 
 from .research_memory import (
     DEFAULT_USER_ID,
-    ResearchMemoryEngine,
     MemoryContextPackage,
-    MemoryRecallResult,
     MemoryNode,
+    MemoryRecallResult,
     MemoryType,
+    ResearchMemoryEngine,
     VerificationStatus,
     get_research_memory_engine,
 )

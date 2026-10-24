@@ -37,6 +37,7 @@ sweep (`tribos.utils.maintenance`). Interrupted jobs are kept, since they can st
 from __future__ import annotations
 
 import asyncio
+import builtins
 import contextlib
 import json
 import logging
@@ -47,10 +48,11 @@ import tempfile
 import threading
 import time
 import uuid
-from typing import Any, AsyncIterator, Awaitable, Callable, Dict, Iterator, List, Optional
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from typing import Any
 
 from .config import AGENTIC, env_float, env_int, is_agentic
-from .control import ApprovalDecision, RunControl, create_control, release_control
+from .control import RunControl, create_control, release_control
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +64,7 @@ _STREAM_ONLY = ("content_delta", "reasoning_delta")
 
 _BUSY_TIMEOUT_S = 5.0
 
-Runner = Callable[..., Awaitable[Dict[str, Any]]]
+Runner = Callable[..., Awaitable[dict[str, Any]]]
 
 
 class JobError(RuntimeError):
@@ -79,7 +81,7 @@ def new_run_id() -> str:
     return f"run_{uuid.uuid4().hex[:16]}"
 
 
-def _iso(ts: Optional[float]) -> Optional[str]:
+def _iso(ts: float | None) -> str | None:
     return None if ts is None else time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(float(ts)))
 
 
@@ -106,7 +108,7 @@ def job_ttl_days() -> float:
     return env_float("TRIBOS_JOB_TTL_DAYS", 30.0, 0.0, 36500.0)
 
 
-def purge_finished_jobs(storage_dir: Optional[str] = None, ttl_days: Optional[float] = None) -> int:
+def purge_finished_jobs(storage_dir: str | None = None, ttl_days: float | None = None) -> int:
     """Apply the finished-job TTL to an existing store without creating one (used by the maintenance sweep)."""
     path = os.path.join(os.path.abspath(storage_dir or default_jobs_dir()), "jobs.db")
     if not os.path.isfile(path):
@@ -123,7 +125,7 @@ def purge_finished_jobs(storage_dir: Optional[str] = None, ttl_days: Optional[fl
 class JobStore:
     """SQLite job rows and their ordered event log. One connection per operation (thread-safe)."""
 
-    def __init__(self, storage_dir: Optional[str] = None) -> None:
+    def __init__(self, storage_dir: str | None = None) -> None:
         self.storage_dir = os.path.abspath(storage_dir or default_jobs_dir())
         os.makedirs(self.storage_dir, exist_ok=True)
         self.db_path = os.path.join(self.storage_dir, "jobs.db")
@@ -187,12 +189,12 @@ class JobStore:
             )
 
     @staticmethod
-    def _row(row: sqlite3.Row, with_result: bool = True) -> Dict[str, Any]:
+    def _row(row: sqlite3.Row, with_result: bool = True) -> dict[str, Any]:
         try:
             request = json.loads(row["request_json"] or "{}")
         except ValueError:
             request = {}
-        out: Dict[str, Any] = {
+        out: dict[str, Any] = {
             "job_id": row["id"],
             "user_id": row["user_id"],
             "status": row["status"],
@@ -216,7 +218,7 @@ class JobStore:
                 out["result"] = None
         return out
 
-    def create(self, user_id: str, request: Dict[str, Any], *, origin: str = "api", job_id: Optional[str] = None, run_id: Optional[str] = None) -> Dict[str, Any]:
+    def create(self, user_id: str, request: dict[str, Any], *, origin: str = "api", job_id: str | None = None, run_id: str | None = None) -> dict[str, Any]:
         now = time.time()
         jid = job_id or new_job_id()
         message = str(request.get("message", ""))
@@ -231,7 +233,7 @@ class JobStore:
             )
         return self.get(jid) or {}
 
-    def get(self, job_id: str, user_id: Optional[str] = None, with_result: bool = True) -> Optional[Dict[str, Any]]:
+    def get(self, job_id: str, user_id: str | None = None, with_result: bool = True) -> dict[str, Any] | None:
         if not JOB_ID_RE.match(job_id or ""):
             return None
         with self._connect() as conn:
@@ -241,7 +243,7 @@ class JobStore:
                 row = conn.execute("SELECT * FROM jobs WHERE id = ? AND user_id = ?", (job_id, user_id)).fetchone()
         return self._row(row, with_result) if row is not None else None
 
-    def list(self, user_id: str, limit: int = 50, status: Optional[str] = None, thread_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list(self, user_id: str, limit: int = 50, status: str | None = None, thread_id: str | None = None) -> builtins.list[dict[str, Any]]:
         sql, args = "SELECT * FROM jobs WHERE user_id = ?", [user_id]
         if status:
             sql += " AND status = ?"
@@ -255,7 +257,7 @@ class JobStore:
             rows = conn.execute(sql, args).fetchall()
         return [self._row(r, with_result=False) for r in rows]
 
-    def ids_with_status(self, statuses: List[str]) -> List[str]:
+    def ids_with_status(self, statuses: builtins.list[str]) -> builtins.list[str]:
         marks = ",".join("?" for _ in statuses)
         with self._connect() as conn:
             rows = conn.execute(f"SELECT id FROM jobs WHERE status IN ({marks}) ORDER BY created_at ASC", statuses).fetchall()
@@ -267,7 +269,7 @@ class JobStore:
             row = conn.execute(f"SELECT COUNT(*) AS n FROM jobs WHERE user_id = ? AND status IN ({marks})", (user_id, *ACTIVE)).fetchone()
         return int(row["n"] or 0)
 
-    def update(self, job_id: str, *, expect: Optional[List[str]] = None, **fields: Any) -> bool:
+    def update(self, job_id: str, *, expect: builtins.list[str] | None = None, **fields: Any) -> bool:
         """Set fields (status, result, error, run_id, started_at, finished_at, attempts_inc); expect guards the old status."""
         sets, args = ["updated_at = ?"], [time.time()]
         for key, value in fields.items():
@@ -295,7 +297,7 @@ class JobStore:
                 conn.execute("DELETE FROM job_events WHERE job_id = ?", (job_id,))
         return n > 0
 
-    def purge_finished(self, ttl_days: Optional[float] = None, now: Optional[float] = None) -> int:
+    def purge_finished(self, ttl_days: float | None = None, now: float | None = None) -> int:
         """Delete finished jobs (and their events) older than ttl_days (default TRIBOS_JOB_TTL_DAYS, 30)."""
         days = job_ttl_days() if ttl_days is None else max(0.0, float(ttl_days))
         if days <= 0:
@@ -342,14 +344,14 @@ class JobStore:
             ).fetchone()
         return int(row["s"] or 0)
 
-    def append_event(self, job_id: str, seq: int, event: Dict[str, Any]) -> None:
+    def append_event(self, job_id: str, seq: int, event: dict[str, Any]) -> None:
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO job_events (job_id, seq, type, event_json, created_at) VALUES (?, ?, ?, ?, ?)",
                 (job_id, seq, str(event.get("type", ""))[:40], json.dumps(event, default=str), time.time()),
             )
 
-    def events(self, job_id: str, after: int = 0, limit: int = 1000) -> List[Dict[str, Any]]:
+    def events(self, job_id: str, after: int = 0, limit: int = 1000) -> builtins.list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT seq, event_json FROM job_events WHERE job_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?",
@@ -371,13 +373,13 @@ class JobStore:
 # ---------------------------------------------------------------------------------------------------------
 
 async def orchestrator_runner(
-    request: Dict[str, Any],
+    request: dict[str, Any],
     *,
     user_id: str,
-    event_callback: Callable[[Dict[str, Any]], Awaitable[None]],
+    event_callback: Callable[[dict[str, Any]], Awaitable[None]],
     run_control: RunControl,
-    api_key: Optional[str] = None,
-) -> Dict[str, Any]:
+    api_key: str | None = None,
+) -> dict[str, Any]:
     """Run one stored ChatRequest-shaped request through the authoritative orchestrator."""
     from ..agents.authoritative_orchestrator import get_authoritative_orchestrator
     from ..utils.llm.llm_factory import DEFAULT_ORCHESTRATOR_MODEL
@@ -406,7 +408,7 @@ async def orchestrator_runner(
 # ---------------------------------------------------------------------------------------------------------
 
 class JobManager:
-    def __init__(self, store: Optional[JobStore] = None, runner: Optional[Runner] = None, workers: Optional[int] = None) -> None:
+    def __init__(self, store: JobStore | None = None, runner: Runner | None = None, workers: int | None = None) -> None:
         self.store = store or JobStore()
         self.runner: Runner = runner or orchestrator_runner
         self.n_workers = workers or env_int("TRIBOS_JOB_WORKERS", 2, 1, 16)
@@ -414,15 +416,15 @@ class JobManager:
         self.max_events = env_int("TRIBOS_JOB_MAX_EVENTS", 20_000, 100, 1_000_000)
         self.cancel_grace = env_float("TRIBOS_JOB_CANCEL_GRACE_S", 20.0, 0.0, 600.0)
         self._lock = threading.Lock()
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
-        self._queue: Optional["asyncio.Queue[str]"] = None
-        self._workers: List["asyncio.Task[None]"] = []
-        self._tasks: Dict[str, "asyncio.Task[None]"] = {}
-        self._controls: Dict[str, RunControl] = {}
-        self._watchers: Dict[str, int] = {}
-        self._signals: Dict[str, asyncio.Event] = {}
-        self._seq: Dict[str, int] = {}
-        self._secrets: Dict[str, Dict[str, Any]] = {}
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._queue: asyncio.Queue[str] | None = None
+        self._workers: list[asyncio.Task[None]] = []
+        self._tasks: dict[str, asyncio.Task[None]] = {}
+        self._controls: dict[str, RunControl] = {}
+        self._watchers: dict[str, int] = {}
+        self._signals: dict[str, asyncio.Event] = {}
+        self._seq: dict[str, int] = {}
+        self._secrets: dict[str, dict[str, Any]] = {}
         self._deleted: set = set()
         self.recovered = self.store.mark_interrupted()
         if self.recovered:
@@ -482,7 +484,7 @@ class JobManager:
         if ev is not None:
             ev.set()
 
-    def _append(self, job_id: str, event: Dict[str, Any]) -> int:
+    def _append(self, job_id: str, event: dict[str, Any]) -> int:
         if job_id in self._deleted:
             return 0
         with self._lock:
@@ -501,7 +503,7 @@ class JobManager:
         self._append(job_id, {"type": "job", "job_id": job_id, "status": status, **extra})
 
     # Lifecycle ----------------------------------------------------------------------------------------------
-    async def submit(self, user_id: str, request: Dict[str, Any], *, api_key: Optional[str] = None, origin: str = "api") -> Dict[str, Any]:
+    async def submit(self, user_id: str, request: dict[str, Any], *, api_key: str | None = None, origin: str = "api") -> dict[str, Any]:
         if not str(request.get("message") or "").strip():
             raise JobError("A job needs a message", 422)
         self._ensure_started()
@@ -527,7 +529,7 @@ class JobManager:
         self._status_event(job_id, "running", run_id=control.run_id)
         status, error, result = "failed", None, None
 
-        async def on_event(event: Dict[str, Any]) -> None:
+        async def on_event(event: dict[str, Any]) -> None:
             try:
                 kind = event.get("type")
                 self._append(job_id, dict(event))
@@ -540,7 +542,7 @@ class JobManager:
             except Exception as exc:  # noqa: BLE001 - logging must never break the run
                 logger.warning("Job %s event logging failed: %s", job_id, exc)
 
-        final_event: Dict[str, Any]
+        final_event: dict[str, Any]
         try:
             secrets = self._secrets.get(job_id) or {}
             result = await self.runner(job["request"], user_id=user_id, event_callback=on_event, run_control=control, api_key=secrets.get("api_key"))
@@ -569,7 +571,7 @@ class JobManager:
         self._status_event(job_id, status, run_id=control.run_id)
         self._append(job_id, final_event)
 
-    def get(self, job_id: str, user_id: str, with_result: bool = True) -> Optional[Dict[str, Any]]:
+    def get(self, job_id: str, user_id: str, with_result: bool = True) -> dict[str, Any] | None:
         job = self.store.get(job_id, user_id, with_result=with_result)
         if job is not None:
             job["watchers"] = self._watchers.get(job_id, 0)
@@ -578,10 +580,10 @@ class JobManager:
             job["pending_approvals"] = control.pending() if control is not None else []
         return job
 
-    def list(self, user_id: str, limit: int = 50, status: Optional[str] = None, thread_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list(self, user_id: str, limit: int = 50, status: str | None = None, thread_id: str | None = None) -> builtins.list[dict[str, Any]]:
         return self.store.list(user_id, limit=limit, status=status, thread_id=thread_id)
 
-    async def cancel(self, job_id: str, user_id: str, reason: str = "cancelled by the user") -> Optional[Dict[str, Any]]:
+    async def cancel(self, job_id: str, user_id: str, reason: str = "cancelled by the user") -> dict[str, Any] | None:
         job = self.store.get(job_id, user_id, with_result=False)
         if job is None:
             return None
@@ -602,7 +604,7 @@ class JobManager:
                     self._loop.call_later(self.cancel_grace, lambda t=task: t.done() or t.cancel())
         return self.get(job_id, user_id, with_result=False)
 
-    async def resume(self, job_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+    async def resume(self, job_id: str, user_id: str) -> dict[str, Any] | None:
         job = self.store.get(job_id, user_id, with_result=False)
         if job is None:
             return None
@@ -651,10 +653,10 @@ class JobManager:
             # Nobody is left to answer: pending approvals are refused and the guarded work is withheld (AGT-005).
             control.set_interactive(False, "the watcher left; the guarded work was not run")
 
-    def events(self, job_id: str, after: int = 0, limit: int = 1000) -> List[Dict[str, Any]]:
+    def events(self, job_id: str, after: int = 0, limit: int = 1000) -> builtins.list[dict[str, Any]]:
         return self.store.events(job_id, after=after, limit=limit)
 
-    async def follow(self, job_id: str, after: int = 0, heartbeat_s: float = 15.0) -> AsyncIterator[Optional[Dict[str, Any]]]:
+    async def follow(self, job_id: str, after: int = 0, heartbeat_s: float = 15.0) -> AsyncIterator[dict[str, Any] | None]:
         """Replay events after `after`, then follow live ones; yields None as a heartbeat while idle.
 
         Ends after the current attempt's done/error event (a resumed job's earlier attempts are replayed, not
@@ -679,10 +681,10 @@ class JobManager:
                 continue
             try:
                 await asyncio.wait_for(signal.wait(), timeout=heartbeat_s)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 yield None
 
-    async def wait(self, job_id: str, timeout: float) -> Optional[Dict[str, Any]]:
+    async def wait(self, job_id: str, timeout: float) -> dict[str, Any] | None:
         """The job row once it leaves the active statuses, or the current row after `timeout` seconds."""
         deadline = time.monotonic() + max(0.0, timeout)
         while True:
@@ -697,7 +699,7 @@ class JobManager:
                 await asyncio.wait_for(signal.wait(), timeout=min(remaining, 1.0))
 
 
-_MANAGER: Optional[JobManager] = None
+_MANAGER: JobManager | None = None
 _PINNED = False
 _MANAGER_LOCK = threading.Lock()
 
@@ -715,7 +717,7 @@ def get_job_manager() -> JobManager:
         return _MANAGER
 
 
-def set_job_manager(manager: Optional[JobManager]) -> None:
+def set_job_manager(manager: JobManager | None) -> None:
     """Install a manager (tests: injected runner and store); None restores the default."""
     global _MANAGER, _PINNED
     with _MANAGER_LOCK:
@@ -723,7 +725,7 @@ def set_job_manager(manager: Optional[JobManager]) -> None:
         _PINNED = manager is not None
 
 
-def public_job(job: Dict[str, Any], *, include_result: bool = True) -> Dict[str, Any]:
+def public_job(job: dict[str, Any], *, include_result: bool = True) -> dict[str, Any]:
     """The client view: no user id; the stored request never holds an API key."""
     out = {k: v for k, v in job.items() if k != "user_id"}
     if not include_result:

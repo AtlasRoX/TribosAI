@@ -2,27 +2,23 @@
 Command line for the Tribos evaluation harness.
 
   python -m tribos.evals list
-  python -m tribos.evals run --suite clinical,behavior --level plan            # offline, seconds, no keys
-  python -m tribos.evals run --suite clinical --level retrieval                # live EuropePMC + planner model
-  python -m tribos.evals run --suite clinical --level answer --judge            # full answers, rubric judge
-  python -m tribos.evals run --suite pubmedqa --level answer --limit 50 --seed 7
-  python -m tribos.evals run --suite bioasq --bioasq-file BioASQ-training12b.json --level retrieval
+  python -m tribos.evals run --suite math,physics,engineering,behavior --level plan     # offline, seconds, no keys
+  python -m tribos.evals run --suite physics --level retrieval                          # live arXiv/Semantic Scholar + planner model
+  python -m tribos.evals run --suite engineering --level answer --judge                 # full answers, rubric judge
+  python -m tribos.evals run --suite math500 --level answer --limit 50 --seed 7
+  python -m tribos.evals run --suite ugphysics --allow-noncommercial --level answer
   python -m tribos.evals run ... --fail-under "answer.pass_rate=0.8,retrieval.hit_rate=0.7"
   python -m tribos.evals run --suite golden --level answer --framework multi-agent-supervisor   # override every case
   python -m tribos.evals run --suite golden --level answer --via http://127.0.0.1:8000          # through POST /api/chat
-  python -m tribos.evals run --suite golden --level answer --ids golden-kras --repeat 3          # mean/SD, flaky flag
-  python -m tribos.evals run --suite golden --level answer --ids golden-kras --record            # live; writes a cassette
+  python -m tribos.evals run --suite golden --level answer --ids golden-damped-oscillator --repeat 3
+  python -m tribos.evals run --suite golden --level answer --ids golden-damped-oscillator --record
   python -m tribos.evals run --suite golden --level answer --replay                              # offline, from cassettes
   python -m tribos.evals baseline save eval_runs/<run> --name golden     # eval_runs/baselines/golden.json
   python -m tribos.evals baseline check eval_runs/<run> --name golden --delta 0.03
   python -m tribos.evals report eval_runs/<run>          # rebuild report.md / report.html
   python -m tribos.evals rescore eval_runs/<run>         # re-score stored answers after editing cases/scorers
   python -m tribos.evals compare eval_runs/<base> eval_runs/<new>
-  python -m tribos.evals fetch pubmedqa litqa2
-
-Every run writes eval_runs/<timestamp>_<suites>_<levels>/ with meta.json, results.jsonl, summary.json, report.md
-and report.html. Exit code: 0 ok, 1 below a --fail-under threshold (or a baseline regression), 2 usage error
-(or no baseline to check against).
+  python -m tribos.evals fetch math500 gsm8k theoremqa scibench phybench engdesign
 """
 
 from __future__ import annotations
@@ -34,7 +30,6 @@ import logging
 import sys
 import time
 from pathlib import Path
-from typing import List, Optional
 
 from . import baseline, datasets, report
 from .runner import Evaluator, RunConfig, load_results
@@ -50,7 +45,7 @@ def _load_env() -> None:
         pass
 
 
-def _split(value: Optional[str]) -> List[str]:
+def _split(value: str | None) -> list[str]:
     return [v.strip() for v in (value or "").split(",") if v.strip()]
 
 
@@ -72,18 +67,23 @@ def cmd_list(_: argparse.Namespace) -> int:
         live = " (live only)" if datasets.is_live_suite(cases) else ""
         frameworks = sorted({c.framework for c in cases if c.framework})
         fw = f"  frameworks: {', '.join(frameworks)}" if frameworks else ""
-        print(f"  {name:<10} {len(cases):>3} cases{live}  levels {per_level}  categories: {', '.join(cats)}{fw}")
+        print(f"  {name:<12} {len(cases):>3} cases{live}  levels {per_level}  categories: {', '.join(cats)}{fw}")
     print("External benchmarks (downloaded on first use):")
-    print("  pubmedqa   1,000 expert-labelled yes/no/maybe questions (PQA-L)")
-    print("  litqa2     199 multiple-choice literature questions (LAB-Bench)")
-    print("  bioasq     BioASQ task B; pass --bioasq-file (registration required)")
+    print("  math500      500 competition mathematics problems (HuggingFaceH4/MATH-500, MIT)")
+    print("  gsm8k        Grade-school mathematical reasoning problems (openai/gsm8k, MIT)")
+    print("  theoremqa    350+ STEM theorem questions across math, physics, EE & CS (TIGER-Lab/TheoremQA, MIT)")
+    print("  scibench     Collegiate physics, chemistry & math numerical problems (xw27/scibench, MIT)")
+    print("  phybench     Symbolic physics reasoning olympiad problems (Eureka-Lab/PHYBench, MIT)")
+    print("  engdesign    Engineering analysis and design synthesis benchmark (MIT / Apache-2.0)")
+    print("  ugphysics    Undergraduate physics benchmark (CC-BY-NC-4.0; requires --allow-noncommercial)")
+    print("  gpqa         GPQA Diamond PhD-level science multiple-choice (gated; requires HF_TOKEN)")
     print("Any .jsonl file of cases can be passed as a suite.")
     return 0
 
 
 def cmd_fetch(args: argparse.Namespace) -> int:
     for name in args.names:
-        cases = datasets.load_suite(name, refresh=True, bioasq_file=args.bioasq_file)
+        cases = datasets.load_suite(name, refresh=True, allow_noncommercial=args.allow_noncommercial)
         print(f"{name}: {len(cases)} cases cached in {datasets.cache_dir()}")
     return 0
 
@@ -95,10 +95,10 @@ def cmd_run(args: argparse.Namespace) -> int:
     if bad:
         print(f"Unknown level(s) {bad}; choose from {LEVELS}", file=sys.stderr)
         return 2
-    suites = _split(args.suite) or ["clinical", "behavior"]
+    suites = _split(args.suite) or ["math", "physics", "engineering", "behavior"]
     cases = []
     for name in suites:
-        cases += datasets.load_suite(name, bioasq_file=args.bioasq_file, refresh=args.refresh)
+        cases += datasets.load_suite(name, refresh=args.refresh, allow_noncommercial=args.allow_noncommercial)
     cases = datasets.select(cases, ids=_split(args.ids), categories=_split(args.category), tags=_split(args.tags),
                             limit=args.limit, seed=args.seed)
     if not cases:
@@ -151,7 +151,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         run_dir.mkdir(parents=True, exist_ok=True)
         done = set()
         meta = evaluator.meta(suites, len(cases))
-        meta["bioasq_file"] = args.bioasq_file
+        meta["allow_noncommercial"] = bool(args.allow_noncommercial)
         (run_dir / "meta.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
 
     print(f"Running {len(cases)} cases at {', '.join(levels)} -> {run_dir}", file=sys.stderr)
@@ -200,7 +200,7 @@ def cmd_rescore(args: argparse.Namespace) -> int:
     meta = json.loads((run_dir / "meta.json").read_text(encoding="utf-8"))
     cases = {}
     for name in meta.get("suites", []):
-        for c in datasets.load_suite(name, bioasq_file=args.bioasq_file or meta.get("bioasq_file")):
+        for c in datasets.load_suite(name, allow_noncommercial=bool(args.allow_noncommercial or meta.get("allow_noncommercial"))):
             cases[c.id] = c
     old = load_results(run_dir / "results.jsonl")
     config = RunConfig(levels=list(meta.get("config", {}).get("levels", LEVELS)), judge_min=args.judge_min,
@@ -220,7 +220,7 @@ def cmd_rescore(args: argparse.Namespace) -> int:
     meta["rescored_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     (run_dir / "meta.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
     summary = report.write_reports(run_dir, meta, new)
-    changed = sum(1 for a, b in zip(old, new) if a.passed != b.passed)
+    changed = sum(1 for a, b in zip(old, new, strict=False) if a.passed != b.passed)
     for level, e in summary["levels"].items():
         print(f"{level:<9} pass {e['pass_rate']:.0%} ({e['passed']}/{e['scored']})" if e["pass_rate"] is not None else f"{level:<9} nothing scored")
     print(f"{changed} case(s) changed outcome; previous results kept in results.prev.jsonl. Report: {run_dir / 'report.html'}")
@@ -273,11 +273,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     f = sub.add_parser("fetch", help="download external benchmarks into the cache")
     f.add_argument("names", nargs="+", choices=list(datasets.EXTERNAL))
-    f.add_argument("--bioasq-file")
+    f.add_argument("--allow-noncommercial", action="store_true", help="opt in to non-commercial benchmarks (e.g. ugphysics)")
     f.set_defaults(fn=cmd_fetch)
 
     r = sub.add_parser("run", help="run cases")
-    r.add_argument("--suite", help="comma list: built-in names, pubmedqa, litqa2, bioasq, or .jsonl paths (default clinical,behavior)")
+    r.add_argument("--suite", help="comma list: built-in names, math500, gsm8k, theoremqa, scibench, phybench, engdesign, ugphysics, gpqa, or .jsonl paths (default math,physics,engineering,behavior)")
     r.add_argument("--level", help="comma list of plan, retrieval, answer (default plan)")
     r.add_argument("--ids", help="comma list of case ids or id prefixes")
     r.add_argument("--category", help="comma list of categories")
@@ -308,7 +308,7 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--replay-lenient", action="store_true", help="with --replay: answer a missed call with the nearest "
                                                                   "recording and report it instead of failing")
     r.add_argument("--cassette-dir", help="cassette directory (default tribos/evals/cassettes)")
-    r.add_argument("--bioasq-file", help="BioASQ task B JSON")
+    r.add_argument("--allow-noncommercial", action="store_true", help="opt in to non-commercial benchmarks (e.g. ugphysics)")
     r.add_argument("--refresh", action="store_true", help="re-download external benchmarks")
     r.add_argument("--out", default="eval_runs", help="directory for runs (default eval_runs)")
     r.add_argument("--resume", help="continue an interrupted run directory")
@@ -321,7 +321,7 @@ def build_parser() -> argparse.ArgumentParser:
     rs.add_argument("--judge-model")
     rs.add_argument("--judge-min", type=float)
     rs.add_argument("--no-model-grading", action="store_true")
-    rs.add_argument("--bioasq-file")
+    rs.add_argument("--allow-noncommercial", action="store_true")
     rs.set_defaults(fn=cmd_rescore)
 
     rep = sub.add_parser("report", help="rebuild a run's reports")
@@ -348,7 +348,7 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     args = build_parser().parse_args(argv)
     try:

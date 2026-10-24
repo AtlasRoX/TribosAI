@@ -3,6 +3,8 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown, { type Components, type Options as MarkdownOptions } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import { Check, Copy, ExternalLink, Terminal } from "lucide-react";
 import { CitationRef } from "@/components/CitationRef";
 import { rehypeCitations, rehypeIdentifierLinkGuard } from "@/lib/citations";
@@ -135,18 +137,20 @@ function preprocessMarkdown(raw: string): string {
 
   // 0. Normalize legacy agent and project names to official Tribos designations
   processed = processed
-    .replace(/\bTalk2KnowledgeGraphs?\b/gi, "Synapta")
-    .replace(/\bTalk2BioModels?\b/gi, "Vivarix")
-    .replace(/\bTalk2Cells?\b/gi, "Lumicell")
-    .replace(/\bTalk2Scholars?\b/gi, "Lithoscribe")
+    .replace(/\bTalk2KnowledgeGraphs?\b/gi, "Physis")
+    .replace(/\bTalk2BioModels?\b/gi, "Dynamis")
+    .replace(/\bTalk2Cells?\b/gi, "Calcula")
+    .replace(/\bTalk2Scholars?\b/gi, "Archivon")
+    .replace(/\bSynapta\b/gi, "Physis")
+    .replace(/\bVivarix\b/gi, "Dynamis")
+    .replace(/\bLumicell\b/gi, "Calcula")
+    .replace(/\bLithoscribe\b/gi, "Archivon")
     .replace(/\bTalk2AI[-_ ]?Agents[-_ ]?4[-_ ]?Pharma\b/gi, "Tribos")
     .replace(/\bAI[-_ ]?Agents[-_ ]?4[-_ ]?Pharma\b/gi, "Tribos");
 
-
-
   // 1. Strip unselected placeholder sections like "No domain-specific findings were collected..."
   processed = processed.replace(
-    /(?:^|\n)#{1,4}\s*[^#\n]*(?:Synapta|Vivarix|Lumicell|Lithoscribe)[^\n]*\n+No domain-specific findings were collected[^\n]*\n*/gi,
+    /(?:^|\n)#{1,4}\s*[^#\n]*(?:Archivon|Axiom|Dynamis|Calcula|Physis|Synapta|Vivarix|Lumicell|Lithoscribe)[^\n]*\n+No domain-specific findings were collected[^\n]*\n*/gi,
     "\n"
   );
 
@@ -171,7 +175,11 @@ function preprocessMarkdown(raw: string): string {
   return processed;
 }
 
-const REMARK_PLUGINS: NonNullable<MarkdownOptions["remarkPlugins"]> = [remarkGfm, remarkHtmlBreaks];
+const REMARK_PLUGINS: NonNullable<MarkdownOptions["remarkPlugins"]> = [remarkGfm, remarkMath, remarkHtmlBreaks];
+const REHYPE_KATEX_PLUGIN: [typeof rehypeKatex, { throwOnError: boolean; strict: boolean }] = [
+  rehypeKatex,
+  { throwOnError: false, strict: false },
+];
 
 function useMarkdownComponents(citations?: CitationMap): Components {
   return useMemo<Components>(
@@ -230,6 +238,7 @@ function useMarkdownComponents(citations?: CitationMap): Components {
 }
 
 const STREAMING_REHYPE_PLUGINS: NonNullable<MarkdownOptions["rehypePlugins"]> = [
+  REHYPE_KATEX_PLUGIN,
   rehypeStripUnsafe,
   rehypeIdentifierLinkGuard,
   rehypeReadableTables,
@@ -283,6 +292,7 @@ function MarkdownRendererImpl({ content, citations, streaming = false }: Markdow
   // Raw HTML is never rendered (skipHtml + rehypeStripUnsafe); trusted transforms run after the strip.
   const rehypePlugins = useMemo<NonNullable<MarkdownOptions["rehypePlugins"]>>(
     () => [
+      REHYPE_KATEX_PLUGIN,
       rehypeStripUnsafe,
       // Links whose text names an identifier but point elsewhere show their real destination (UI-018).
       [rehypeIdentifierLinkGuard, { map: citations }] as [typeof rehypeIdentifierLinkGuard, { map?: CitationMap }],

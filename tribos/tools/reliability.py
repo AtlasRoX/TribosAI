@@ -73,9 +73,10 @@ import sqlite3
 import threading
 import time
 from collections import OrderedDict
+from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, Iterator, Optional, Tuple
+from typing import Any
 
 from tribos.config.settings import SWITCH, get_float, get_int, get_str
 
@@ -151,7 +152,7 @@ def _ttl_s(adapter: str) -> float:
     return _TTL_DEFAULTS_S.get(adapter, 0.0)
 
 
-def _cache_dir() -> Optional[Path]:
+def _cache_dir() -> Path | None:
     explicit = os.getenv("TRIBOS_TOOL_CACHE_DIR", "").strip()
     if explicit:
         return Path(explicit)
@@ -164,11 +165,11 @@ def _cache_dir() -> Optional[Path]:
 
 
 # Optional deadline for the current run (monotonic seconds); retries never sleep past it.
-_DEADLINE: contextvars.ContextVar[Optional[float]] = contextvars.ContextVar("tribos_tool_deadline", default=None)
+_DEADLINE: contextvars.ContextVar[float | None] = contextvars.ContextVar("tribos_tool_deadline", default=None)
 
 
 @contextlib.contextmanager
-def run_deadline(seconds: Optional[float]) -> Iterator[None]:
+def run_deadline(seconds: float | None) -> Iterator[None]:
     """Within this block no retry is attempted that could end after `seconds` from now (None = no deadline)."""
     token = _DEADLINE.set(None if seconds is None else _monotonic() + max(0.0, float(seconds)))
     try:
@@ -199,8 +200,8 @@ class _Breaker:
     callers: set = field(default_factory=set)
     hard_failure: bool = False
 
-    def to_dict(self, now: float) -> Dict[str, Any]:
-        out: Dict[str, Any] = {"state": self.state, "consecutive_failures": self.failures, "trips": self.trips}
+    def to_dict(self, now: float) -> dict[str, Any]:
+        out: dict[str, Any] = {"state": self.state, "consecutive_failures": self.failures, "trips": self.trips}
         if self.failures:
             out["distinct_callers"] = len(self.callers)
         if self.state == "open":
@@ -220,14 +221,14 @@ class _Stats:
     retries: int = 0
     fail_fast: int = 0
     fallbacks: int = 0
-    retries_by_tool: Dict[str, int] = field(default_factory=dict)
-    failures_by_class: Dict[str, int] = field(default_factory=dict)
+    retries_by_tool: dict[str, int] = field(default_factory=dict)
+    failures_by_class: dict[str, int] = field(default_factory=dict)
 
 
-_BREAKERS: Dict[str, _Breaker] = {}
-_MEMORY: "OrderedDict[str, Tuple[float, float, Any]]" = OrderedDict()  # key -> (expires, stored_at, ToolResult)
+_BREAKERS: dict[str, _Breaker] = {}
+_MEMORY: OrderedDict[str, tuple[float, float, Any]] = OrderedDict()  # key -> (expires, stored_at, ToolResult)
 _STATS = _Stats()
-_FALLBACKS: Dict[str, Tuple[str, Optional[Callable[[Dict[str, Any]], Dict[str, Any]]]]] = {}
+_FALLBACKS: dict[str, tuple[str, Callable[[dict[str, Any]], dict[str, Any]] | None]] = {}
 
 
 def reset_reliability(*, fallbacks: bool = True) -> None:
@@ -244,7 +245,7 @@ def reset_reliability(*, fallbacks: bool = True) -> None:
 def register_fallback(
     tool_name: str,
     fallback_tool: str,
-    arg_mapper: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+    arg_mapper: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
 ) -> None:
     """While tool_name's breaker is open, run fallback_tool with arg_mapper(kwargs) (identity when None)."""
     if not tool_name or not fallback_tool or tool_name == fallback_tool:
@@ -258,7 +259,7 @@ def unregister_fallback(tool_name: str) -> None:
         _FALLBACKS.pop(tool_name, None)
 
 
-def reliability_snapshot() -> Dict[str, Any]:
+def reliability_snapshot() -> dict[str, Any]:
     """JSON-safe view of breakers, cache and retry statistics (for a health or agent route)."""
     now = _monotonic()
     with _LOCK:
@@ -346,7 +347,7 @@ def _is_upstream_failure(result: Any) -> bool:
     return et == "INTERNAL_ERROR" and bool(_TRANSPORT_ERROR_RE.search(str(getattr(result, "error", "") or "")))
 
 
-def failure_class(result: Any, networked: bool = True) -> Optional[str]:
+def failure_class(result: Any, networked: bool = True) -> str | None:
     """API-Bank-style label for a failed result (None for a success)."""
     if result is None:
         return "upstream" if networked else "internal"
@@ -424,7 +425,7 @@ def upstream_key(tool_name: str, entry: Any) -> str:
     return tool_name
 
 
-def _claim(key: str) -> Tuple[bool, bool, float]:
+def _claim(key: str) -> tuple[bool, bool, float]:
     """(allowed, is_trial, retry_after_s) for one call through the breaker at key."""
     now = _monotonic()
     with _LOCK:
@@ -444,7 +445,7 @@ def _claim(key: str) -> Tuple[bool, bool, float]:
 
 
 def _settle(
-    key: str, outcome: str, is_trial: bool, error: str = "", *, hard: bool = True, caller: Optional[str] = None
+    key: str, outcome: str, is_trial: bool, error: str = "", *, hard: bool = True, caller: str | None = None
 ) -> None:
     """outcome: 'success' (the upstream answered), 'failure' (counted), 'neutral' (never reached it).
 
@@ -487,15 +488,15 @@ def _outcome(result: Any) -> str:
 # Cache
 # -----------------------------------------------------------------------------
 
-def canonical_kwargs(kwargs: Dict[str, Any]) -> str:
+def canonical_kwargs(kwargs: dict[str, Any]) -> str:
     return json.dumps(kwargs, sort_keys=True, default=str, ensure_ascii=False, separators=(",", ":"))
 
 
-def cache_key(tool_name: str, kwargs: Dict[str, Any]) -> str:
+def cache_key(tool_name: str, kwargs: dict[str, Any]) -> str:
     return f"{tool_name}:{hashlib.sha256(canonical_kwargs(kwargs).encode('utf-8')).hexdigest()}"
 
 
-def _validated(entry: Any, kwargs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _validated(entry: Any, kwargs: dict[str, Any]) -> dict[str, Any] | None:
     try:
         return entry.input_schema(**kwargs).model_dump()
     except Exception:  # noqa: BLE001
@@ -507,7 +508,7 @@ def _cacheable(entry: Any) -> bool:
     return not (tags & _NO_CACHE_TAGS) and _ttl_s(_adapter(entry)) > 0
 
 
-def _db_path() -> Optional[Path]:
+def _db_path() -> Path | None:
     d = _cache_dir()
     if d is None:
         return None
@@ -553,9 +554,9 @@ def _sqlite(op: Callable[[sqlite3.Connection], Any]) -> Any:
     return out
 
 
-def purge_expired_cache(*, vacuum: bool = False, now: Optional[float] = None) -> Dict[str, Any]:
+def purge_expired_cache(*, vacuum: bool = False, now: float | None = None) -> dict[str, Any]:
     """Delete expired SQLite cache rows; with vacuum, VACUUM when >= 25% of the file is free pages."""
-    out: Dict[str, Any] = {"deleted": 0, "vacuumed": False}
+    out: dict[str, Any] = {"deleted": 0, "vacuumed": False}
     d = _cache_dir()
     path = d / "tool_cache.sqlite3" if d is not None else None
     if path is None or not path.is_file():
@@ -582,7 +583,7 @@ def purge_expired_cache(*, vacuum: bool = False, now: Optional[float] = None) ->
     return out
 
 
-def _cache_get(key: str) -> Optional[Tuple[Any, float]]:
+def _cache_get(key: str) -> tuple[Any, float] | None:
     """(a deep copy of the cached ToolResult, its age in seconds) or None."""
     now = _now()
     with _LOCK:
@@ -661,10 +662,10 @@ def _adapter(entry: Any) -> str:
 
 def _fill_trace(
     call: Callable[..., Any],
-    kwargs: Dict[str, Any],
+    kwargs: dict[str, Any],
     entry: Any,
-    validated: Optional[Dict[str, Any]],
-    trace: Optional[Dict[str, Any]] = None,
+    validated: dict[str, Any] | None,
+    trace: dict[str, Any] | None = None,
 ) -> None:
     """When call() never ran (cache hit, fail-fast), give the run recorder the entry and validated inputs.
 
@@ -704,7 +705,7 @@ def _fail_fast(tool_name: str, entry: Any, key: str, retry_after: float) -> Any:
     )
 
 
-async def _run_fallback(registry: Any, tool_name: str, kwargs: Dict[str, Any]) -> Optional[Any]:
+async def _run_fallback(registry: Any, tool_name: str, kwargs: dict[str, Any]) -> Any | None:
     with _LOCK:
         fb = _FALLBACKS.get(tool_name)
     if fb is None:
@@ -718,7 +719,7 @@ async def _run_fallback(registry: Any, tool_name: str, kwargs: Dict[str, Any]) -
     except Exception as exc:  # noqa: BLE001
         logger.info("Fallback argument mapping %s -> %s failed: %s", tool_name, fallback_tool, exc)
         return None
-    trace: Dict[str, Any] = {}
+    trace: dict[str, Any] = {}
     res = await execute_with_policies(
         registry, fallback_tool, mapped, lambda: registry._execute_inner(fallback_tool, mapped, trace), _allow_fallback=False
     )
@@ -742,10 +743,10 @@ def _may_retry(attempt: int, delay: float, entry: Any) -> bool:
 async def execute_with_policies(
     registry: Any,
     tool_name: str,
-    kwargs: Dict[str, Any],
+    kwargs: dict[str, Any],
     call: Callable[[], Awaitable[Any]],
     *,
-    trace: Optional[Dict[str, Any]] = None,
+    trace: dict[str, Any] | None = None,
     _allow_fallback: bool = True,
 ) -> Any:
     """Run call() (one validated registry execution) under the cache, breaker, retry and fallback policies.
@@ -764,7 +765,7 @@ async def execute_with_policies(
         return await call()  # LOCAL_COMPUTE: no cache, no retry, no breaker
 
     validated = _validated(entry, kwargs)
-    key: Optional[str] = None
+    key: str | None = None
     if validated is not None and cache_enabled() and _cacheable(entry):
         key = cache_key(tool_name, validated)
         # Re-runs re-fetch from the upstream (PRV-003): a replay that read the cache would certify nothing.

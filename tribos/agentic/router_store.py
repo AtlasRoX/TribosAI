@@ -28,8 +28,9 @@ import sqlite3
 import tempfile
 import threading
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any, Dict, Iterator, Optional
+from typing import Any
 
 from tribos.config.settings import SWITCH, get_str
 
@@ -83,8 +84,8 @@ def operational_quality(task_status: str, core_status: str) -> float:
 
 
 def outcome_quality(
-    verification_score: Optional[float],
-    answer_confidence: Optional[float],
+    verification_score: float | None,
+    answer_confidence: float | None,
     task_status: str,
     core_status: str,
 ) -> float:
@@ -104,7 +105,7 @@ class BucketStats:
 
 
 class RouterStore:
-    def __init__(self, storage_dir: Optional[str] = None) -> None:
+    def __init__(self, storage_dir: str | None = None) -> None:
         self.db_path = os.path.join(os.path.abspath(storage_dir or default_router_dir()), "outcomes.db")
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._lock = threading.Lock()
@@ -152,17 +153,17 @@ class RouterStore:
         routed: bool,
         quality: float,
         cost: float,
-        features: Dict[str, Any],
+        features: dict[str, Any],
         *,
-        self_verification: Optional[float] = None,
-        self_confidence: Optional[float] = None,
+        self_verification: float | None = None,
+        self_confidence: float | None = None,
     ) -> None:
         """Store one run. `quality` must be an independent (operational) label; the self-scored values are kept for
         diagnostics only and never read by stats()."""
         if framework not in AGENTIC_FRAMEWORKS:
             return
 
-        def _num(v: Any) -> Optional[float]:
+        def _num(v: Any) -> float | None:
             return float(v) if isinstance(v, (int, float)) else None
 
         with self._lock, self._connect() as conn:
@@ -176,9 +177,9 @@ class RouterStore:
                 "DELETE FROM outcomes WHERE id NOT IN (SELECT id FROM outcomes ORDER BY id DESC LIMIT ?)", (MAX_ROWS,)
             )
 
-    def stats(self, bucket: str) -> Dict[str, Dict[str, BucketStats]]:
+    def stats(self, bucket: str) -> dict[str, dict[str, BucketStats]]:
         """{"bucket": {framework: stats}, "global": {framework: stats}}."""
-        out: Dict[str, Dict[str, BucketStats]] = {"bucket": {}, "global": {}}
+        out: dict[str, dict[str, BucketStats]] = {"bucket": {}, "global": {}}
         with self._connect() as conn:
             for fw, n, mean in conn.execute(
                 "SELECT framework, COUNT(*), AVG(quality) FROM outcomes WHERE bucket = ? AND quality_version = ? GROUP BY framework",
@@ -193,7 +194,7 @@ class RouterStore:
         return out
 
 
-def adjustments(stats: Dict[str, Dict[str, BucketStats]]) -> Dict[str, Dict[str, float]]:
+def adjustments(stats: dict[str, dict[str, BucketStats]]) -> dict[str, dict[str, float]]:
     """Per-architecture score nudges from past outcomes in this bucket: {framework: {"delta", "runs", "quality"}}.
 
     Each architecture's bucket mean is shrunk toward its own global mean (PRIOR_RUNS pseudo-runs); the nudge is the
@@ -204,7 +205,7 @@ def adjustments(stats: Dict[str, Dict[str, BucketStats]]) -> Dict[str, Dict[str,
     if not total:
         return {}
     overall = sum(s.runs * s.mean_quality for s in glob.values()) / total
-    out: Dict[str, Dict[str, float]] = {}
+    out: dict[str, dict[str, float]] = {}
     for fw, b in (stats.get("bucket") or {}).items():
         if b.runs < MIN_RUNS:
             continue
@@ -215,11 +216,11 @@ def adjustments(stats: Dict[str, Dict[str, BucketStats]]) -> Dict[str, Dict[str,
     return out
 
 
-_STORE: Optional[RouterStore] = None
+_STORE: RouterStore | None = None
 _STORE_LOCK = threading.Lock()
 
 
-def get_store() -> Optional[RouterStore]:
+def get_store() -> RouterStore | None:
     """The shared store, or None when learning is off or the store cannot open (routing then uses the rules only)."""
     global _STORE
     if not learning_enabled():

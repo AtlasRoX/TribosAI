@@ -6,7 +6,7 @@ import asyncio
 import gc
 import json
 import os
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 
@@ -23,7 +23,7 @@ def mem(tmp_path) -> ResearchMemoryEngine:
     return ResearchMemoryEngine(storage_dir=str(tmp_path / "mem"))
 
 
-def _turn(mem: ResearchMemoryEngine, thread: str, query: str, tools: Dict[str, Any] | None = None, **kw: Any) -> Dict[str, Any]:
+def _turn(mem: ResearchMemoryEngine, thread: str, query: str, tools: dict[str, Any] | None = None, **kw: Any) -> dict[str, Any]:
     return mem.consolidate_turn_sync(thread, query, "resp", tools or {}, **kw)
 
 
@@ -100,9 +100,11 @@ def test_scoped_instructions_persist_only_within_their_scope(mem):
 
 
 def test_classify_instructions_scopes():
-    scopes = dict((s, scope) for s, scope in classify_instructions(
-        "Find KRAS papers only. From now on, exclude preprints. Always use SI units. Does KRAS always drive resistance?"
-    ))
+    scopes = dict(
+        classify_instructions(
+            "Find KRAS papers only. From now on, exclude preprints. Always use SI units. Does KRAS always drive resistance?"
+        )
+    )
     assert scopes["Find KRAS papers only."] == "current_turn"
     assert scopes["From now on, exclude preprints."] == "investigation"
     assert scopes["Always use SI units."] == "profile"
@@ -192,18 +194,18 @@ ALICE = {"Authorization": "Bearer alice-token"}
 
 
 class _FakeResult:
-    def __init__(self, payload: Dict[str, Any]) -> None:
+    def __init__(self, payload: dict[str, Any]) -> None:
         self.payload = payload
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return dict(self.payload)
 
 
 class _FakeOrchestrator:
-    def __init__(self, payload: Dict[str, Any] | None = None, error: Exception | None = None) -> None:
+    def __init__(self, payload: dict[str, Any] | None = None, error: Exception | None = None) -> None:
         self.payload = payload or {}
         self.error = error
-        self.calls: List[Dict[str, Any]] = []
+        self.calls: list[dict[str, Any]] = []
 
     async def execute_inquiry(self, **kwargs: Any) -> _FakeResult:
         self.calls.append(kwargs)
@@ -226,7 +228,7 @@ def api(monkeypatch, tmp_path):
     return TestClient(backend_main.app), backend_main, engine
 
 
-def _stream_events(client, body: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _stream_events(client, body: dict[str, Any]) -> list[dict[str, Any]]:
     with client.stream("POST", "/api/chat/stream", json=body, headers=ALICE) as resp:
         assert resp.status_code == 200
         return [json.loads(line[6:]) for line in resp.iter_lines() if line.startswith("data: ")]
@@ -300,10 +302,10 @@ def test_api_reset_matches_exact_thread(api):
 
 def test_health_probe_is_cached(api, monkeypatch):
     client, backend_main, _ = api
-    calls: List[int] = []
+    calls: list[int] = []
 
     class _Probe:
-        async def async_check_service_readiness(self) -> Dict[str, Any]:
+        async def async_check_service_readiness(self) -> dict[str, Any]:
             calls.append(1)
             return {"mcp_remote_active": False, "direct_adapters": {}}
 
@@ -319,9 +321,9 @@ def test_health_probe_is_cached(api, monkeypatch):
 def test_sse_heartbeat_then_terminal_event():
     from app.backend.main import sse_frames
 
-    async def run() -> List[str]:
+    async def run() -> list[str]:
         queue: asyncio.Queue = asyncio.Queue()
-        frames: List[str] = []
+        frames: list[str] = []
         gen = sse_frames(queue, heartbeat_s=0.01)
         frames.append(await gen.__anext__())
         await queue.put({"type": "thought", "data": {}})

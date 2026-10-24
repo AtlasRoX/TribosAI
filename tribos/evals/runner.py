@@ -30,48 +30,50 @@ import statistics
 import sys
 import time
 import uuid
+from collections.abc import Callable, Sequence
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 from . import grading, scoring
 from .schema import CaseResult, Check, EvalCase, RetrievalExpect
 
 logger = logging.getLogger(__name__)
 
-LITERATURE_TOOL = "lithoscribe_literature_synthesis"
+LITERATURE_TOOL = "archivon_literature_search"
+LITERATURE_TOOLS = ("archivon_literature_search", "lithoscribe_literature_synthesis")
 EVAL_USER = "tribos-eval"
 
 
 class CassetteRunError(RuntimeError):
     """A replayed answer run that raised; carries the cassette's counts (misses explain most replay crashes)."""
 
-    def __init__(self, message: str, summary: Dict[str, Any]) -> None:
+    def __init__(self, message: str, summary: dict[str, Any]) -> None:
         super().__init__(message)
         self.summary = summary
 
 
 @dataclass
 class RunConfig:
-    levels: List[str] = field(default_factory=lambda: ["plan"])
-    model_name: Optional[str] = None  # orchestrator / planner model (default: the configured one)
+    levels: list[str] = field(default_factory=lambda: ["plan"])
+    model_name: str | None = None  # orchestrator / planner model (default: the configured one)
     live: bool = False  # plan level: use the live entity resolver and planner model
     concurrency: int = 2  # answer-level cases at once (plan/retrieval run up to 4x this)
     timeout_s: float = 420.0  # per case and level
     judge: bool = False
-    judge_model: Optional[str] = None
-    judge_min: Optional[float] = None  # when set, a judge overall score below this fails the case
+    judge_model: str | None = None
+    judge_min: float | None = None  # when set, a judge overall score below this fails the case
     grade_with_model: bool = True  # benchmark labels: ask a model when the rule cannot decide
-    web_search: Optional[bool] = None  # override every case's enable_web_search
+    web_search: bool | None = None  # override every case's enable_web_search
     retries: int = 1  # re-run a failed live plan/retrieval case; a pass on retry is reported as flaky
     answer_retries: int = 0  # the same for answers (each retry is a full, slow run)
-    framework: Optional[str] = None  # override every case's framework
-    via: Optional[str] = None  # base URL of a running API (http://127.0.0.1:8000): answers go through POST /api/chat
+    framework: str | None = None  # override every case's framework
+    via: str | None = None  # base URL of a running API (http://127.0.0.1:8000): answers go through POST /api/chat
     repeat: int = 1  # runs per case; > 1 reports mean/SD per metric and flags flaky cases
     flaky_sd: float = 0.15  # a repeated case is flaky when fact_recall or faithfulness varies more than this (SD)
-    cassette: Optional[str] = None  # "record" | "replay": answer-level calls are recorded to / replayed from cassettes
-    cassette_dir: Optional[str] = None  # default tribos/evals/cassettes
+    cassette: str | None = None  # "record" | "replay": answer-level calls are recorded to / replayed from cassettes
+    cassette_dir: str | None = None  # default tribos/evals/cassettes
     replay_lenient: bool = False  # replay: a missed call gets the nearest recorded reply instead of failing the case
 
 
@@ -79,8 +81,14 @@ def source_fingerprint() -> str:
     """Hash of the code and data that decide behaviour, so two runs can be compared knowingly."""
     root = Path(__file__).resolve().parents[1]
     h = hashlib.sha256()
-    paths = sorted([*(root / "agents").glob("*.py"), root / "lithoscribe" / "synthesis_engine.py",
-                    root / "utils" / "biocontext" / "entity_resolver.py", *(Path(__file__).parent / "data").glob("*.jsonl")])
+    paths = sorted([
+        *(root / "agents").glob("*.py"),
+        root / "archivon" / "synthesis_engine.py",
+        root / "lithoscribe" / "synthesis_engine.py",
+        root / "utils" / "stemcontext" / "entity_resolver.py",
+        root / "utils" / "biocontext" / "entity_resolver.py",
+        *(Path(__file__).parent / "data").glob("*.jsonl"),
+    ])
     for p in paths:
         if p.exists():
             h.update(p.name.encode())
@@ -88,7 +96,7 @@ def source_fingerprint() -> str:
     return h.hexdigest()[:16]
 
 
-def _safe_env() -> Dict[str, str]:
+def _safe_env() -> dict[str, str]:
     return {k: v for k, v in sorted(os.environ.items())
             if (k.startswith("TRIBOS_") or k == "TRIBOS_LLM_MODEL")
             and not any(s in k for s in ("KEY", "TOKEN", "SECRET", "PASSWORD"))}
@@ -103,10 +111,10 @@ class Evaluator:
         *,
         registry: Any = None,
         orchestrator: Any = None,
-        llm_factory: Optional[Callable[..., Any]] = None,
-        run_id: Optional[str] = None,
+        llm_factory: Callable[..., Any] | None = None,
+        run_id: str | None = None,
         http_client: Any = None,
-        http_token: Optional[str] = None,
+        http_token: str | None = None,
     ) -> None:
         self.cfg = config
         self._registry = registry
@@ -138,7 +146,7 @@ class Evaluator:
         return self._orchestrator
 
     @property
-    def llm_factory(self) -> Optional[Callable[..., Any]]:
+    def llm_factory(self) -> Callable[..., Any] | None:
         if self._llm_factory is None:
             from ..utils.llm.llm_factory import get_llm
 
@@ -154,7 +162,7 @@ class Evaluator:
         return case.enable_web_search if self.cfg.web_search is None else self.cfg.web_search
 
     # -- plan ----------------------------------------------------------------------------------------------------
-    async def _context(self, case: EvalCase, *, live: bool) -> Tuple[Dict[str, Any], Any]:
+    async def _context(self, case: EvalCase, *, live: bool) -> tuple[dict[str, Any], Any]:
         """(observed plan, QueryContext or None for the greeting fast path), routed as the orchestrator routes."""
         from ..agents import query_planner
         from ..agents.authoritative_orchestrator import _CASUAL_RES
@@ -171,7 +179,7 @@ class Evaluator:
         ran = [k for k, d in ctx.decisions.items() if d.run]
         if ctx.scope == "research":
             ran.extend(self._evidence_sources(ctx))
-        names: List[str] = []
+        names: list[str] = []
         for e in ctx.entities:
             names.extend([e.label, e.mention])
         observed = {
@@ -189,9 +197,9 @@ class Evaluator:
         }
         return observed, ctx
 
-    def _evidence_sources(self, ctx: Any) -> List[str]:
-        from ..sources import get_sources
+    def _evidence_sources(self, ctx: Any) -> list[str]:
         from ..agents.query_context import SourceDecision
+        from ..sources import get_sources
 
         out = []
         for src in get_sources():
@@ -228,7 +236,7 @@ class Evaluator:
         expect = case.retrieval
         plan_obs, ctx = await self._context(case, live=True)
         result.observed = {"plan": plan_obs}
-        if ctx is None or not ctx.should_run("lithoscribe"):
+        if ctx is None or not (ctx.should_run("archivon") or ctx.should_run("lithoscribe")):
             if ctx is not None:
                 query_planner.cancel_planner(ctx)
             result.checks = [Check(name="retrieval.ran", passed=False, required=bool(expect and expect.required),
@@ -237,16 +245,24 @@ class Evaluator:
         plan = await query_planner.finalize_search_plan(ctx)
         query_planner.cancel_planner(ctx)
         request = literature_request(ctx, ctx.clean_query, plan)
-        res = await self.registry.execute(LITERATURE_TOOL, **request)
+        tool_name = LITERATURE_TOOL
+        get_entry = getattr(self.registry, "get_entry", None)
+        if callable(get_entry) and get_entry(tool_name) is None:
+            for alt in LITERATURE_TOOLS:
+                if get_entry(alt) is not None:
+                    tool_name = alt
+                    break
+        res = await self.registry.execute(tool_name, **request)
         data = res.data if getattr(res, "success", False) and isinstance(res.data, dict) else {}
         # One entry per article, in the order its first passage ranks: the scoring lists stay parallel.
-        articles: Dict[str, Dict[str, Any]] = {}
+        articles: dict[str, dict[str, Any]] = {}
         for p in data.get("ranked_passages") or []:
             if isinstance(p, dict):
-                articles.setdefault(str(p.get("pmid") or p.get("doi") or p.get("title")), p)
+                articles.setdefault(str(p.get("arxiv_id") or p.get("pmid") or p.get("doi") or p.get("title")), p)
         passages = list(articles.values())
         pmids = [p.get("pmid") for p in passages]
         dois = [p.get("doi") for p in passages]
+        arxiv_ids = [p.get("arxiv_id") for p in passages]
         titles = [str(p.get("title") or "") for p in passages]
         result.observed.update({
             "search_plan": plan.to_dict(),
@@ -254,21 +270,22 @@ class Evaluator:
             # Parallel, rank-ordered, one per article: enough to rescore without searching again.
             "pmids": [str(p or "") for p in pmids],
             "dois": [str(d or "") for d in dois],
+            "arxiv_ids": [str(a or "") for a in arxiv_ids],
             "titles": titles,
             "error": None if getattr(res, "success", False) else getattr(res, "error", "failed"),
         })
         if expect is not None:
-            result.checks, result.metrics = scoring.retrieval_scores(expect, pmids, dois, titles)
+            result.checks, result.metrics = scoring.retrieval_scores(expect, pmids, dois, titles, arxiv_ids)
         else:
-            result.metrics = {"retrieved": len(result.observed["pmids"])}
+            result.metrics = {"retrieved": len(passages)}
             result.skipped = "no gold papers for this case"
         result.metrics["plan_source"] = plan.source
         return result
 
     # -- answer --------------------------------------------------------------------------------------------------
-    def _run_options(self, case: EvalCase) -> Dict[str, Any]:
+    def _run_options(self, case: EvalCase) -> dict[str, Any]:
         """framework / agent_options / dataset_ids / project_id for execute_inquiry, only those that are set."""
-        opts: Dict[str, Any] = {}
+        opts: dict[str, Any] = {}
         framework = self.cfg.framework or case.framework
         if framework:
             opts["framework"] = framework
@@ -284,7 +301,7 @@ class Evaluator:
         return float(case.timeout_s or self.cfg.timeout_s)
 
     async def _ask_local(self, case: EvalCase, query: str, thread: str, *, setup_turn: bool,
-                         model: Optional[str] = None, web: Optional[bool] = None) -> Dict[str, Any]:
+                         model: str | None = None, web: bool | None = None) -> dict[str, Any]:
         memory = setup_turn or bool(case.setup)
         res = await self.orchestrator.execute_inquiry(
             query, thread_id=thread, model_name=model or self._model(),
@@ -307,12 +324,12 @@ class Evaluator:
             await self._http_client.aclose()
             self._http_client = None
 
-    def _http_headers(self) -> Dict[str, str]:
+    def _http_headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._http_token}"} if self._http_token else {}
 
-    async def _ask_http(self, case: EvalCase, query: str, thread: str, *, setup_turn: bool) -> Dict[str, Any]:
+    async def _ask_http(self, case: EvalCase, query: str, thread: str, *, setup_turn: bool) -> dict[str, Any]:
         """POST /api/chat with the body the web client sends; the JSON reply is the orchestrator result's to_dict()."""
-        body: Dict[str, Any] = {"message": query, "thread_id": thread, "enable_web_search": self._web(case), **self._run_options(case)}
+        body: dict[str, Any] = {"message": query, "thread_id": thread, "enable_web_search": self._web(case), **self._run_options(case)}
         if self.cfg.model_name:
             body["model"] = self.cfg.model_name
         url = f"{str(self.cfg.via).rstrip('/')}/api/chat"
@@ -343,11 +360,11 @@ class Evaluator:
 
         return Path(self.cfg.cassette_dir) if self.cfg.cassette_dir else DEFAULT_DIR
 
-    def _cassette_identity(self, case: EvalCase) -> Dict[str, Any]:
+    def _cassette_identity(self, case: EvalCase) -> dict[str, Any]:
         """What a recording must have been made with for its replay to stand for the case."""
         return {"query": case.query, "setup": list(case.setup), "run_options": self._run_options(case)}
 
-    def _open_cassette(self, case: EvalCase) -> Tuple[Any, Optional[str], Optional[str]]:
+    def _open_cassette(self, case: EvalCase) -> tuple[Any, str | None, str | None]:
         """(cassette, skip reason, stale reason) for an answer case in record or replay mode."""
         from . import cassette as cas_mod
 
@@ -370,7 +387,7 @@ class Evaluator:
         result = self._result(case, "answer")
         expect = case.answer
         cassette = None
-        ask_kwargs: Dict[str, Any] = {}
+        ask_kwargs: dict[str, Any] = {}
         if self.cfg.cassette and not self.cfg.via:
             cassette, skip, stale = self._open_cassette(case)
             if skip:
@@ -415,7 +432,7 @@ class Evaluator:
         result.checks, result.metrics = await self._score_answer(case, observed, judge=self.cfg.judge)
         return result
 
-    def _finish_cassette(self, cassette: Any, observed: Dict[str, Any], latency: float) -> None:
+    def _finish_cassette(self, cassette: Any, observed: dict[str, Any], latency: float) -> None:
         """Save a recording; for a replay, report the recorded latency (replay time measures nothing) and the stats."""
         from .cassette import registry_tool_names
 
@@ -434,8 +451,8 @@ class Evaluator:
         observed["cassette"] = info
 
     async def _score_answer(
-        self, case: EvalCase, observed: Dict[str, Any], *, judge: bool, previous: Optional[Dict[str, Any]] = None
-    ) -> Tuple[List[Check], Dict[str, Any]]:
+        self, case: EvalCase, observed: dict[str, Any], *, judge: bool, previous: dict[str, Any] | None = None
+    ) -> tuple[list[Check], dict[str, Any]]:
         """Checks and metrics for an answer's observations, used by a live run and by rescore (no system call).
         judge: ask the judge model now. previous: earlier metrics; without judge, their judge scores and model-graded
         label are reused (a label the rules now decide is re-graded by rule)."""
@@ -444,12 +461,27 @@ class Evaluator:
         previous = previous or {}
         observed.setdefault("query", case.query)  # results stored before the query was recorded (citation gate)
         response = observed.get("response") or ""
-        gold = case.retrieval.gold_pmids if case.retrieval else []
+        gold = [
+            *(case.retrieval.gold_arxiv_ids if case.retrieval else []),
+            *(case.retrieval.gold_pmids if case.retrieval else []),
+            *(case.retrieval.gold_dois if case.retrieval else []),
+        ]
         checks, metrics = scoring.answer_checks(expect, observed, gold)
-        if case.retrieval is not None and (case.retrieval.gold_pmids or case.retrieval.gold_dois):
+        if case.retrieval is not None and (case.retrieval.gold_pmids or case.retrieval.gold_dois or case.retrieval.gold_arxiv_ids):
             # Retrieved-set recall from the run manifest (unordered), informational at this level.
-            unranked = RetrievalExpect(gold_pmids=case.retrieval.gold_pmids, gold_dois=case.retrieval.gold_dois, k=10**6, required=False)
-            r_checks, r_metrics = scoring.retrieval_scores(unranked, observed.get("lit_pmids") or [], observed.get("lit_dois") or [])
+            unranked = RetrievalExpect(
+                gold_pmids=case.retrieval.gold_pmids,
+                gold_dois=case.retrieval.gold_dois,
+                gold_arxiv_ids=case.retrieval.gold_arxiv_ids,
+                k=10**6,
+                required=False,
+            )
+            r_checks, r_metrics = scoring.retrieval_scores(
+                unranked,
+                observed.get("lit_pmids") or [],
+                observed.get("lit_dois") or [],
+                arxiv_ids=observed.get("lit_arxiv_ids") or [],
+            )
             checks += r_checks
             metrics.update({f"retrieval_{k}": v for k, v in r_metrics.items() if k in ("hit", "recall")})
         if expect.label is not None:
@@ -502,11 +534,17 @@ class Evaluator:
             if not new.checks:
                 new.skipped = "no plan expectations apply"
         elif old.level == "retrieval" and case.retrieval is not None:
-            if "pmids" not in obs:
+            if "pmids" not in obs and "arxiv_ids" not in obs and "dois" not in obs:
                 new.checks = [c for c in old.checks if c.name == "retrieval.ran"]
             else:
                 keep = {k: v for k, v in old.metrics.items() if k in ("plan_source", "attempts", "flaky")}
-                new.checks, new.metrics = scoring.retrieval_scores(case.retrieval, obs.get("pmids") or [], obs.get("dois") or [], obs.get("titles") or [])
+                new.checks, new.metrics = scoring.retrieval_scores(
+                    case.retrieval,
+                    obs.get("pmids") or [],
+                    obs.get("dois") or [],
+                    obs.get("titles") or [],
+                    obs.get("arxiv_ids") or [],
+                )
                 new.metrics.update(keep)
         elif old.level == "answer" and case.answer is not None and "response" in obs:
             keep = {k: v for k, v in old.metrics.items() if k in ("attempts", "flaky")}
@@ -517,7 +555,7 @@ class Evaluator:
         return new.finalize()
 
     @staticmethod
-    def _heuristic_label(expect: Any, response: str) -> Optional[str]:
+    def _heuristic_label(expect: Any, response: str) -> str | None:
         if expect.answer_type == "yesno":
             return scoring.heuristic_yesno(response, expect.options or ("yes", "no", "maybe"))
         if expect.options:
@@ -535,7 +573,7 @@ class Evaluator:
         timeout = self._timeout(case)
         try:
             result = await asyncio.wait_for(runner(case), timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             result = self._result(case, level)
             result.error = f"timed out after {timeout:.0f}s"
         except Exception as exc:  # noqa: BLE001
@@ -558,17 +596,17 @@ class Evaluator:
         self,
         cases: Sequence[EvalCase],
         *,
-        results_path: Optional[Path] = None,
-        done: Optional[set] = None,
-        on_result: Optional[Callable[[CaseResult, int, int], None]] = None,
-    ) -> List[CaseResult]:
+        results_path: Path | None = None,
+        done: set | None = None,
+        on_result: Callable[[CaseResult, int, int], None] | None = None,
+    ) -> list[CaseResult]:
         """Run every (case, level) the case has expectations for, skipping pairs in `done`; append as they finish."""
         jobs = [(c, lvl) for c in cases for lvl in self.cfg.levels
                 if getattr(c, lvl) is not None and (c.id, lvl) not in (done or set())]
         heavy = asyncio.Semaphore(max(1, self.cfg.concurrency))
         light = asyncio.Semaphore(max(1, self.cfg.concurrency * 4))
         lock = asyncio.Lock()
-        out: List[CaseResult] = []
+        out: list[CaseResult] = []
         total = len(jobs)
 
         async def attempt_once(case: EvalCase, level: str) -> CaseResult:
@@ -610,7 +648,7 @@ class Evaluator:
             await asyncio.gather(*(job(c, lvl) for c, lvl in jobs))
         return out
 
-    def meta(self, suites: Sequence[str], n_cases: int) -> Dict[str, Any]:
+    def meta(self, suites: Sequence[str], n_cases: int) -> dict[str, Any]:
         return {
             "run_id": self.run_id,
             "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -633,7 +671,7 @@ _RESULT_FIELDS = ("response", "thoughts", "selected_agents", "framework_used", "
                   "citations", "run_manifest", "query_context", "task_status", "duration_seconds", "model_used")
 
 
-def result_payload(res: Any) -> Dict[str, Any]:
+def result_payload(res: Any) -> dict[str, Any]:
     """An orchestrator result as the dict /api/chat returns (to_dict()); plain objects are read field by field."""
     if isinstance(res, dict):
         return dict(res)
@@ -649,25 +687,26 @@ def result_payload(res: Any) -> Dict[str, Any]:
     return {k: getattr(res, k, None) for k in _RESULT_FIELDS}
 
 
-def _budget_used(artifacts: Dict[str, Any]) -> Dict[str, Any]:
+def _budget_used(artifacts: dict[str, Any]) -> dict[str, Any]:
     run = artifacts.get("agent_run") if isinstance(artifacts, dict) else None
     budget = (run or {}).get("budget") if isinstance(run, dict) else None
     return dict((budget or {}).get("used") or {}) if isinstance(budget, dict) else {}
 
 
-def observe(payload: Dict[str, Any], latency: float, *, query: str = "") -> Dict[str, Any]:
+def observe(payload: dict[str, Any], latency: float, *, query: str = "") -> dict[str, Any]:
     """What the answer level stores and scores (so rescore never calls the system)."""
     report = payload.get("verification_report") or {}
     manifest = payload.get("run_manifest") or {}
     calls = [c for c in manifest.get("tool_calls") or [] if isinstance(c, dict)]
-    lit = [c for c in calls if c.get("tool_name") == LITERATURE_TOOL]
+    lit = [c for c in calls if c.get("tool_name") in LITERATURE_TOOLS]
     lit_pmids = [p for c in lit for p in (c.get("output_digest") or {}).get("pmids", [])]
     lit_dois = [d for c in lit for d in (c.get("output_digest") or {}).get("dois", [])]
+    lit_arxiv_ids = [a for c in lit for a in (c.get("output_digest") or {}).get("arxiv_ids", [])]
     qc = payload.get("query_context") or {}
     entries = (payload.get("citations") or {}).get("entries", {}) or {}
     framework = payload.get("framework_used")
     artifacts = payload.get("execution_artifacts") or {}
-    claim_counts: Dict[str, int] = {}
+    claim_counts: dict[str, int] = {}
     for c in report.get("claims") or []:
         status = str(c.get("status") if isinstance(c, dict) else getattr(c, "status", "")) or "unknown"
         claim_counts[status] = claim_counts.get(status, 0) + 1
@@ -692,6 +731,7 @@ def observe(payload: Dict[str, Any], latency: float, *, query: str = "") -> Dict
         "search_plan": qc.get("search_plan"),
         "lit_pmids": lit_pmids,
         "lit_dois": lit_dois,
+        "lit_arxiv_ids": lit_arxiv_ids,
         "latency_s": round(latency, 2),
         # Execution contract: what ran with which arguments, and whether the requested operation completed.
         "task_status": dict(payload.get("task_status") or {}),
@@ -716,7 +756,7 @@ def observe(payload: Dict[str, Any], latency: float, *, query: str = "") -> Dict
 REPEAT_METRICS = ("fact_recall", "faithfulness", "latency_s", "llm_calls", "tool_calls", "tokens_est", "steps_failed")
 
 
-def _sd(values: List[float]) -> float:
+def _sd(values: list[float]) -> float:
     return round(statistics.stdev(values), 3) if len(values) > 1 else 0.0
 
 
@@ -730,15 +770,15 @@ def aggregate_repeats(runs: Sequence[CaseResult], *, flaky_sd: float = 0.15) -> 
     if not scored:
         return first
     passes = [bool(r.passed) for r in scored]
-    per_run: List[Dict[str, Any]] = []
+    per_run: list[dict[str, Any]] = []
     for r in scored:
-        row: Dict[str, Any] = {"passed": r.passed, "error": r.error}
+        row: dict[str, Any] = {"passed": r.passed, "error": r.error}
         for k in REPEAT_METRICS:
             v = r.latency_s if k == "latency_s" else r.metrics.get(k)
             row[k] = v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
         per_run.append(row)
-    mean: Dict[str, Optional[float]] = {}
-    sd: Dict[str, Optional[float]] = {}
+    mean: dict[str, float | None] = {}
+    sd: dict[str, float | None] = {}
     for k in REPEAT_METRICS:
         vals = [float(row[k]) for row in per_run if row[k] is not None]
         mean[k] = round(statistics.mean(vals), 3) if vals else None
@@ -764,7 +804,7 @@ def json_roundtrip(value: Any) -> Any:
     return json.loads(json.dumps(value, sort_keys=True, default=str))
 
 
-def _dump(value: Any) -> Optional[Dict[str, Any]]:
+def _dump(value: Any) -> dict[str, Any] | None:
     if value is None:
         return None
     try:
@@ -773,9 +813,9 @@ def _dump(value: Any) -> Optional[Dict[str, Any]]:
         return None
 
 
-def _evidence_ids(manifest: Dict[str, Any], citation_entries: Any) -> List[str]:
+def _evidence_ids(manifest: dict[str, Any], citation_entries: Any) -> list[str]:
     """Identifiers the run's tools returned (canonical ids) and the citation keys matched to evidence."""
-    ids: List[str] = []
+    ids: list[str] = []
     for c in manifest.get("tool_calls") or []:
         if not isinstance(c, dict) or not c.get("success"):
             continue
@@ -788,11 +828,11 @@ def _evidence_ids(manifest: Dict[str, Any], citation_entries: Any) -> List[str]:
     return sorted(set(ids))
 
 
-def load_results(path: Path) -> List[CaseResult]:
+def load_results(path: Path) -> list[CaseResult]:
     """Results of a run, one per (case, level): the last line wins, so a re-run replaces an earlier result."""
     if not path.exists():
         return []
-    latest: Dict[Tuple[str, str], CaseResult] = {}
+    latest: dict[tuple[str, str], CaseResult] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
         if line.strip():
             r = CaseResult.model_validate_json(line)

@@ -5,10 +5,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-import subprocess
-import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import httpx
 import pytest
@@ -31,7 +29,7 @@ GOOD_ANSWER = (
 )
 
 
-def payload(response: str = GOOD_ANSWER, **over: Any) -> Dict[str, Any]:
+def payload(response: str = GOOD_ANSWER, **over: Any) -> dict[str, Any]:
     """An orchestrator result as to_dict() / POST /api/chat returns it."""
     base = {
         "thread_id": "t", "response": response, "framework_used": "agentic-plan-execute", "selected_agents": ["Lithoscribe"],
@@ -62,24 +60,24 @@ def payload(response: str = GOOD_ANSWER, **over: Any) -> Dict[str, Any]:
 
 class FakeMemory:
     def __init__(self) -> None:
-        self.cleared: List[str] = []
+        self.cleared: list[str] = []
 
     def clear_thread_memory(self, thread_id: str, user_id: Any = None) -> None:
         self.cleared.append(thread_id)
 
 
 class FakeResult:
-    def __init__(self, data: Dict[str, Any]) -> None:
+    def __init__(self, data: dict[str, Any]) -> None:
         self.data = data
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return dict(self.data)
 
 
 class FakeOrchestrator:
     """Returns the queued payloads in turn (the last one repeats); records every call's keyword arguments."""
 
-    def __init__(self, *payloads: Dict[str, Any], error: Exception | None = None) -> None:
+    def __init__(self, *payloads: dict[str, Any], error: Exception | None = None) -> None:
         self.payloads = list(payloads) or [payload()]
         self.memory, self.calls, self.error = FakeMemory(), [], error
 
@@ -92,7 +90,7 @@ class FakeOrchestrator:
 
 
 def kras_case(**over: Any) -> EvalCase:
-    data: Dict[str, Any] = {
+    data: dict[str, Any] = {
         "id": "g1", "suite": "golden", "query": "Compare sotorasib and adagrasib (CodeBreaK 200, KRYSTAL-12).",
         "framework": "agentic-plan-execute", "agent_options": {"budget": {"max_llm_calls": 30}}, "dataset_ids": ["ds_1"],
         "project_id": "prj_1",
@@ -108,7 +106,7 @@ def kras_case(**over: Any) -> EvalCase:
     return EvalCase.model_validate(data)
 
 
-def run(ev: Evaluator, cases: List[EvalCase]) -> List[CaseResult]:
+def run(ev: Evaluator, cases: list[EvalCase]) -> list[CaseResult]:
     return asyncio.run(ev.run(cases))
 
 
@@ -133,7 +131,7 @@ def test_case_run_options_reach_execute_inquiry_and_cli_framework_overrides():
 
 
 def test_cli_framework_flag_reaches_run_config(monkeypatch, tmp_path: Path):
-    seen: Dict[str, Any] = {}
+    seen: dict[str, Any] = {}
     orig = Evaluator.__init__
 
     def spy(self: Evaluator, config: RunConfig, **kw: Any) -> None:
@@ -302,35 +300,66 @@ def test_summary_has_framework_breakdown_p95_means_and_gate_failures():
 
 def test_golden_suite_is_live_with_frameworks_and_facts():
     cases = datasets.load_suite("golden")
-    assert len(cases) == 7 and datasets.is_live_suite(cases)
-    assert {c.framework for c in cases} == {"agentic-plan-execute", "multi-agent-supervisor", "multi-agent-debate",
-                                           "authoritative-react-compiler", "multi-agent-swarm"}
+    assert len(cases) == 5
+    assert {c.framework for c in cases} == {
+        "langgraph",
+        "crewai",
+        "autogen",
+        "multi-agent-supervisor",
+        "pydantic-ai",
+    }
     for c in cases:
-        assert c.answer and c.answer.facts and c.enable_web_search and c.plan is None and c.timeout_s
+        assert c.answer and c.answer.facts and c.plan is not None
         assert any(f.required for f in c.answer.facts)
     by_id = {c.id: c for c in cases}
-    kras = {f.id: f for f in by_id["golden-kras-g12c-nsclc"].answer.facts}
-    assert kras["codebreak200-pfs-hr"].ci == [0.51, 0.86] and kras["sotorasib-approval-date"].date == "2021-05-28"
-    # Facts hold on a correct answer written several ways (registry figures 0.663/0.509-0.864 included).
-    text = ("Sotorasib NDA 214665 was approved May 28, 2021; adagrasib NDA216340 on 12 December 2022. CodeBreaK 200: HR 0.663 "
-            "(95% CI 0.509–0.864). KRYSTAL-12: HR 0.58 (95% CI 0.45-0.76). Pharos: Tclin.")
-    _, m = scoring.fact_checks(by_id["golden-kras-g12c-nsclc"].answer.facts, text)
-    assert m["fact_recall"] == 1.0, m
-    brca = by_id["golden-brca2-synthetic-lethality"].answer
-    assert any("BRCA2" in p for p in brca.must_not_mention)
+    assert "golden-damped-oscillator" in by_id
+    assert "golden-euler-bernoulli-buckling" in by_id
+    assert "golden-fourier-heat-conduction" in by_id
+    assert "golden-pid-routh-stability" in by_id
+    assert "golden-schrodinger-tunneling-barrier" in by_id
+
+    # Facts hold on STEM cases
+    osc = by_id["golden-damped-oscillator"]
+    assert osc.answer.min_fact_recall == 0.66
+    _, m_osc = scoring.fact_checks(osc.answer.facts, osc.reference)
+    assert m_osc["fact_recall"] == 1.0, m_osc
+
+    buckling = by_id["golden-euler-bernoulli-buckling"]
+    assert buckling.answer.numeric_answer == 4.0
+    _, m_buckling = scoring.fact_checks(buckling.answer.facts, buckling.reference)
+    assert m_buckling["fact_recall"] == 1.0, m_buckling
+
+    fourier = by_id["golden-fourier-heat-conduction"]
+    assert fourier.answer.symbolic_answer == "L**2/(pi**2*alpha)"
+
+    pid = by_id["golden-pid-routh-stability"]
+    assert pid.answer.numeric_answer == 2.44949
+    _, m_pid = scoring.fact_checks(pid.answer.facts, pid.reference)
+    assert m_pid["fact_recall"] == 1.0, m_pid
+
+    schrod = by_id["golden-schrodinger-tunneling-barrier"]
+    assert schrod.answer.symbolic_answer == "sqrt(2*m*(V_0 - E))/hbar"
+    _, m_schrod = scoring.fact_checks(schrod.answer.facts, schrod.reference)
+    assert m_schrod["fact_recall"] == 1.0, m_schrod
 
 
 def test_audit_suite_converts_the_script_cases_with_assertions():
-    cases = {c.id: c for c in datasets.load_suite("audit")}
-    assert len(cases) >= 22 and datasets.is_live_suite(cases.values())
-    assert all(not c.enable_web_search and c.answer is not None for c in cases.values())
-    greet = cases["audit-01-greeting"].answer
-    assert greet.max_tool_calls == 0 and greet.framework == "conversational-direct"
-    assert cases["audit-07-memory-followup"].setup == ["Investigate KRAS G12D resistance mechanisms in PDAC."]
-    inj = cases["audit-21-prompt-injection"].answer
-    assert inj.abstain and any("API_KEY" in p for p in inj.must_not_mention)
-    checks, _ = scoring.answer_checks(inj, {"response": "Yes, compound X cured 100%. NVIDIA_API_KEY=nvapi-abcdefghijklmnopqrstu", "evidence_ids": []})
-    assert {c.name for c in checks if not c.passed} >= {"answer.avoids", "answer.abstains"}
+    cases = {c.id: c for c in datasets.load_suite("behavior")}
+    assert len(cases) >= 15
+    assert all(c.answer is not None and c.plan is not None for c in cases.values())
+    greet = cases["beh-greeting-hello"].answer
+    assert greet.framework == "conversational-direct"
+    assert "Consider a pinned-pinned Euler column" in cases["beh-multiturn-context-retention"].setup[0]
+    num_case = cases["beh-experimental-dataset-uncertainty"].answer
+    assert num_case.numeric_answer == 9.81
+    sym_case = cases["beh-dimensional-consistency-check"].answer
+    assert sym_case.symbolic_answer == "2*pi*sqrt(L/g)"
+    # Injection & safety check
+    inj = cases["beh-injection-fake-doi"].answer
+    assert "thermodynamics" in inj.required_terms
+    # Deterministic answer scoring checks
+    checks, _ = scoring.answer_checks(num_case, {"response": "The sample mean is 9.81 m/s^2.", "verified": True})
+    assert any(c.name == "answer.numeric" and c.passed for c in checks)
     all_ids = [c.id for n in datasets.builtin_suites() for c in datasets.load_suite(n)]
     assert len(all_ids) == len(set(all_ids))
 
@@ -338,14 +367,15 @@ def test_audit_suite_converts_the_script_cases_with_assertions():
 def test_cli_list_marks_live_suites(capsys):
     assert cli_main(["list"]) == 0
     out = capsys.readouterr().out
-    assert "golden" in out and "audit" in out and "(live only)" in out and "multi-agent-debate" in out
+    assert all(s in out for s in ["golden", "behavior", "physics", "math", "engineering"])
+    assert "multi-agent-supervisor" in out and "langgraph" in out
 
 
 # ---------------------------------------------------------------------------------------------------------------
 # 6. Baselines and repeats
 # ---------------------------------------------------------------------------------------------------------------
 
-def _write_run(d: Path, rows: List[CaseResult]) -> Path:
+def _write_run(d: Path, rows: list[CaseResult]) -> Path:
     d.mkdir(parents=True)
     (d / "results.jsonl").write_text("".join(r.model_dump_json() + "\n" for r in rows))
     (d / "meta.json").write_text(json.dumps({"run_id": d.name, "suites": ["golden"]}))
@@ -405,8 +435,8 @@ def test_repeat_reports_mean_sd_and_flaky():
 # 7. HTTP transport
 # ---------------------------------------------------------------------------------------------------------------
 
-def _mock_api(replies: List[Any]) -> tuple:
-    seen: List[httpx.Request] = []
+def _mock_api(replies: list[Any]) -> tuple:
+    seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)

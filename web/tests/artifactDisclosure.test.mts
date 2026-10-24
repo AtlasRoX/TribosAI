@@ -5,9 +5,9 @@ import * as ad from "../src/lib/artifactDisclosure.ts";
 
 const { artifactDisclosure, questionRequests, exclusionClauses } = ad;
 
-const EXACT_PMID_QUERY =
-  "Retrieve PMID 39369609 by exact identifier. If your tool cannot do exact lookup, say so and try one primary-source " +
-  "alternative.\nKeep the answer under 400 words.\nNo FDA sweep, simulation, omics, hypothesis generation or debate is " +
+const STEM_EXCLUSION_QUERY =
+  "Retrieve arXiv:2309.17452 by exact identifier. If your tool cannot do exact lookup, say so and try one primary-source " +
+  "alternative.\nKeep the answer under 400 words.\nNo symbolic derivation, simulation, physical constants or hypothesis generation is " +
   "needed. Do not rewrite the answer without new evidence.";
 
 test("literature, plan review, sandbox analysis and calibration open whenever present", () => {
@@ -19,44 +19,43 @@ test("literature, plan review, sandbox analysis and calibration open whenever pr
 });
 
 test("domain cards open only when the question asks for that evidence", () => {
-  const arts = { drug_intel: {}, clinical_trials: {}, vivarix: {}, lumicell: {}, omics_intel: {}, primekg: {} };
-  const open = artifactDisclosure({ question: "What are the FDA-approved indications and recruiting trials for sotorasib?", artifacts: arts });
-  assert.equal(open.drug_intel, true);
-  assert.equal(open.clinical_trials, true);
-  assert.equal(open.vivarix, false);
-  assert.equal(open.lumicell, false);
-  assert.equal(open.omics_intel, false);
-  assert.equal(open.primekg, false);
+  const arts = { derivation: {}, dynamis: {}, reference_data: {}, hypotheses: {} };
+  const open = artifactDisclosure({ question: "Derive the closed-form solution and check physical constants.", artifacts: arts });
+  assert.equal(open.derivation, true);
+  assert.equal(open.reference_data, true);
+  assert.equal(open.dynamis, false);
+  assert.equal(open.hypotheses, false);
 });
 
 test("explicit exclusion clauses keep excluded analyses compact", () => {
-  assert.equal(questionRequests("vivarix", "Run a kinetic simulation of EGFR signalling."), true);
-  assert.equal(questionRequests("vivarix", "Summarize EGFR trials. No simulation or single-cell analysis needed."), false);
-  assert.equal(questionRequests("lumicell", "Summarize EGFR trials. No simulation or single-cell analysis needed."), false);
-  assert.equal(questionRequests("clinical_trials", "Summarize EGFR trials. No simulation or single-cell analysis needed."), true);
-  // The list form of the live diagnostic query excludes FDA, simulation, omics and hypotheses together.
-  for (const key of ["drug_intel", "vivarix", "omics_intel", "hypotheses"]) {
-    assert.equal(questionRequests(key, EXACT_PMID_QUERY), false, key);
+  assert.equal(questionRequests("dynamis", "Run an ODE simulation of the damped harmonic oscillator."), true);
+  assert.equal(questionRequests("dynamis", "Summarize the literature. No simulation needed."), false);
+  assert.equal(questionRequests("derivation", "Summarize the literature. No symbolic derivation needed."), false);
+  assert.equal(questionRequests("reference_data", "Summarize the literature. No physical constants needed."), false);
+  assert.equal(questionRequests("literature", "Summarize the literature. No simulation needed."), true);
+  // The list form of the diagnostic query excludes derivation, simulation, constants and hypotheses together.
+  for (const key of ["derivation", "dynamis", "reference_data", "hypotheses"]) {
+    assert.equal(questionRequests(key, STEM_EXCLUSION_QUERY), false, key);
   }
-  assert.equal(questionRequests("vivarix", "Simulate the MAPK model without running a parameter scan."), true);
-  assert.equal(questionRequests("drug_intel", "Report FDA approvals; do not run a simulation."), true);
-  assert.equal(questionRequests("vivarix", "Report FDA approvals; do not run a simulation."), false);
-  assert.equal(questionRequests("vivarix", "Simulation is not needed; list the trials."), false);
+  assert.equal(questionRequests("dynamis", "Simulate the Lorenz attractor without running a parameter scan."), true);
+  assert.equal(questionRequests("reference_data", "Report CODATA constants; do not run a simulation."), true);
+  assert.equal(questionRequests("dynamis", "Report CODATA constants; do not run a simulation."), false);
+  assert.equal(questionRequests("dynamis", "Simulation is not needed; prove the identity."), false);
 });
 
 test("a plain 'no' inside other wording is not an exclusion", () => {
   assert.deepEqual(exclusionClauses("If no exact lookup works, try one alternative."), []);
-  assert.equal(questionRequests("clinical_trials", "If no trial is recruiting, say so."), true);
+  assert.equal(questionRequests("literature", "If no preprint is available, cite the journal paper."), true);
 });
 
 test("failed analyses open even when the question did not ask for them", () => {
   const open = artifactDisclosure({
     question: "Summarize the literature",
-    artifacts: { vivarix: { success: false, error: "solver failed" }, lumicell: { status: "error" }, structure_intel: { error: "" } },
+    artifacts: { dynamis: { success: false, error: "solver failed" }, derivation: { status: "error" }, reference_data: { error: "" } },
   });
-  assert.equal(open.vivarix, true);
-  assert.equal(open.lumicell, true);
-  assert.equal(open.structure_intel, false);
+  assert.equal(open.dynamis, true);
+  assert.equal(open.derivation, true);
+  assert.equal(open.reference_data, false);
 });
 
 test("counter-evidence opens for contradictions or heuristic-only classification", () => {

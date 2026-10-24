@@ -50,8 +50,9 @@ import socket
 import sys
 import threading
 import time
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ REPLAY_CHUNK_CHARS = 240
 
 # Applied for the whole record or replay run, so a backend that depends on the local machine (a cross-encoder in
 # the HF cache, a sentence-transformer) does not make CI take a different path from the recording.
-PINNED_ENV: Dict[str, str] = {"TRIBOS_NLI": "llm", "TRIBOS_TOOL_EMBEDDINGS": ""}
+PINNED_ENV: dict[str, str] = {"TRIBOS_NLI": "llm", "TRIBOS_TOOL_EMBEDDINGS": ""}
 
 # Tool arguments that never identify the call.
 VOLATILE_KEYS = frozenset({"request_id", "run_id", "trace_id", "timestamp", "started_at", "_repair_arguments"})
@@ -77,11 +78,11 @@ class CassetteRecordedError(RuntimeError):
     """Base of the exceptions replayed from a recording (each replay raises a subclass with the original name)."""
 
 
-_ACTIVE: contextvars.ContextVar[Optional["Cassette"]] = contextvars.ContextVar("tribos_eval_cassette", default=None)
+_ACTIVE: contextvars.ContextVar[Cassette | None] = contextvars.ContextVar("tribos_eval_cassette", default=None)
 _IN_TOOL: contextvars.ContextVar[bool] = contextvars.ContextVar("tribos_eval_cassette_in_tool", default=False)
 
 
-def active_cassette() -> Optional["Cassette"]:
+def active_cassette() -> Cassette | None:
     return _ACTIVE.get()
 
 
@@ -99,7 +100,7 @@ _HEX32_RE = re.compile(r"\b[0-9a-f]{32}\b")
 _UNIX_TS_RE = re.compile(r"(?<![\d.])1[5-9]\d{8}(?:\d{3})?(?:\.\d+)?(?![\d])")
 
 
-def _date_forms(day: _dt.date) -> List[str]:
+def _date_forms(day: _dt.date) -> list[str]:
     month = _MONTHS[day.month - 1]
     return [day.isoformat(), f"{month} {day.day}, {day.year}", f"{day.day} {month} {day.year}",
             f"{month[:3]} {day.day}, {day.year}", f"{day.month:02d}/{day.day:02d}/{day.year}"]
@@ -135,7 +136,7 @@ _URL_SECRET_RE = re.compile(r"(?i)([?&](?:api_?key|apikey|key|token|access_token
 REDACTED = "<redacted>"
 
 
-def _env_secrets() -> List[str]:
+def _env_secrets() -> list[str]:
     out = []
     for k, v in os.environ.items():
         if v and len(v) >= 8 and any(s in k.upper() for s in ("KEY", "TOKEN", "SECRET", "PASSWORD")):
@@ -143,7 +144,7 @@ def _env_secrets() -> List[str]:
     return sorted(set(out), key=len, reverse=True)
 
 
-def redact_text(text: str, env_secrets: Optional[Sequence[str]] = None) -> str:
+def redact_text(text: str, env_secrets: Sequence[str] | None = None) -> str:
     for value in env_secrets if env_secrets is not None else _env_secrets():
         if value in text:
             text = text.replace(value, REDACTED)
@@ -153,7 +154,7 @@ def redact_text(text: str, env_secrets: Optional[Sequence[str]] = None) -> str:
     return _URL_SECRET_RE.sub(lambda m: f"{m.group(1)}{REDACTED}", text)
 
 
-def redact(value: Any, env_secrets: Optional[Sequence[str]] = None) -> Any:
+def redact(value: Any, env_secrets: Sequence[str] | None = None) -> Any:
     """A JSON-like value with secret-named keys and secret-looking strings replaced by <redacted>."""
     secrets = env_secrets if env_secrets is not None else _env_secrets()
     if isinstance(value, dict):
@@ -206,15 +207,15 @@ def _sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _clean_kwargs(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+def _clean_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in kwargs.items() if k not in VOLATILE_KEYS and not _SECRET_KEY_RE.match(str(k))}
 
 
-def _message_parts(messages: Any) -> List[Tuple[str, str]]:
+def _message_parts(messages: Any) -> list[tuple[str, str]]:
     """(role, content) for LangChain messages, OpenAI-style dicts, (role, content) tuples or a plain string."""
     if isinstance(messages, str):
         return [("human", messages)]
-    out: List[Tuple[str, str]] = []
+    out: list[tuple[str, str]] = []
     for m in messages or []:
         if isinstance(m, dict):
             role, content = str(m.get("role") or m.get("type") or ""), m.get("content")
@@ -242,16 +243,16 @@ def _reasoning_of(message: Any) -> str:
     return ""
 
 
-def _recorded_exception(entry: Dict[str, Any]) -> BaseException:
+def _recorded_exception(entry: dict[str, Any]) -> BaseException:
     name = str(entry.get("error_type") or "Error")
     message = str(entry.get("error") or "")
     if name in ("TimeoutError", "CancelledError"):
-        return asyncio.TimeoutError(message or "recorded timeout")
+        return TimeoutError(message or "recorded timeout")
     safe = re.sub(r"\W", "_", name) or "Error"
     return type(safe, (CassetteRecordedError,), {})(message)
 
 
-def _error_entry(exc: BaseException) -> Dict[str, Any]:
+def _error_entry(exc: BaseException) -> dict[str, Any]:
     if isinstance(exc, asyncio.CancelledError):
         return {"error_type": "TimeoutError", "error": "cancelled while recording (caller timeout)"}
     return {"error_type": type(exc).__name__, "error": str(exc)[:500]}
@@ -269,7 +270,7 @@ def cassette_path(directory: Path | str, suite: str, case_id: str) -> Path:
     return Path(directory) / safe_name(Path(suite).stem if suite.endswith(".jsonl") else suite) / f"{safe_name(case_id)}.json"
 
 
-def find_cassette(directory: Path | str, suite: str, case_id: str) -> Optional[Path]:
+def find_cassette(directory: Path | str, suite: str, case_id: str) -> Path | None:
     """The cassette file of a case (.json or .json.gz), or None."""
     path = cassette_path(directory, suite, case_id)
     for candidate in (path, path.with_name(path.name + ".gz")):
@@ -278,7 +279,7 @@ def find_cassette(directory: Path | str, suite: str, case_id: str) -> Optional[P
     return None
 
 
-def list_cassettes(directory: Path | str = DEFAULT_DIR) -> List[Path]:
+def list_cassettes(directory: Path | str = DEFAULT_DIR) -> list[Path]:
     root = Path(directory)
     return sorted([*root.glob("*/*.json"), *root.glob("*/*.json.gz")]) if root.exists() else []
 
@@ -286,14 +287,14 @@ def list_cassettes(directory: Path | str = DEFAULT_DIR) -> List[Path]:
 class Cassette:
     """The recorded calls of one case; mode is "record" or "replay"."""
 
-    def __init__(self, path: Path | str, mode: str, *, lenient: bool = False, data: Optional[Dict[str, Any]] = None,
+    def __init__(self, path: Path | str, mode: str, *, lenient: bool = False, data: dict[str, Any] | None = None,
                  registries: Sequence[Any] = ()) -> None:
         if mode not in ("record", "replay"):
             raise ValueError(f"cassette mode must be record or replay, not {mode!r}")
         self.path = Path(path)
         self.mode = mode
         self.lenient = lenient
-        self.data: Dict[str, Any] = data or {"version": CASSETTE_VERSION, "meta": {}, "tools": {}, "llm": {}, "calls": {},
+        self.data: dict[str, Any] = data or {"version": CASSETTE_VERSION, "meta": {}, "tools": {}, "llm": {}, "calls": {},
                                              "factory_errors": {}}
         for channel in ("tools", "llm", "calls", "factory_errors"):
             self.data.setdefault(channel, {})
@@ -301,25 +302,25 @@ class Cassette:
         # Full normalised prompts make a miss easy to diagnose but the file large: off unless asked for.
         self.store_prompts = os.getenv("TRIBOS_CASSETTE_PROMPTS", "").strip().lower() in ("1", "true", "yes", "on")
         self._lock = threading.Lock()
-        self._cursor: Dict[Tuple[str, str], int] = {}
+        self._cursor: dict[tuple[str, str], int] = {}
         self._secrets = _env_secrets()
         recorded = self.meta.get("recorded_date")
-        self._dates: List[_dt.date] = []
+        self._dates: list[_dt.date] = []
         if recorded:
             try:
                 self._dates.append(_dt.date.fromisoformat(str(recorded)))
             except ValueError:
                 pass
-        self.stats: Dict[str, Any] = {"mode": mode, "tool_hits": 0, "llm_hits": 0, "call_hits": 0, "reused": 0,
+        self.stats: dict[str, Any] = {"mode": mode, "tool_hits": 0, "llm_hits": 0, "call_hits": 0, "reused": 0,
                                       "recorded": 0, "misses": [], "lenient": [], "network": []}
 
     # -- persistence ---------------------------------------------------------------------------------------------
     @property
-    def meta(self) -> Dict[str, Any]:
+    def meta(self) -> dict[str, Any]:
         return self.data.setdefault("meta", {})
 
     @classmethod
-    def load(cls, path: Path | str, *, lenient: bool = False, registries: Sequence[Any] = ()) -> "Cassette":
+    def load(cls, path: Path | str, *, lenient: bool = False, registries: Sequence[Any] = ()) -> Cassette:
         path = Path(path)
         raw = gzip.decompress(path.read_bytes()) if path.suffix == ".gz" else path.read_bytes()
         data = json.loads(raw.decode("utf-8"))
@@ -327,7 +328,7 @@ class Cassette:
             raise ValueError(f"{path}: cassette version {data.get('version')} (expected {CASSETTE_VERSION}); re-record it")
         return cls(path, "replay", lenient=lenient, data=data, registries=registries)
 
-    def save(self, path: Optional[Path | str] = None) -> Path:
+    def save(self, path: Path | str | None = None) -> Path:
         """Write the cassette (gzip when larger than 2 MB); the other variant of the file is removed."""
         target = Path(path) if path else self.path
         if target.suffix == ".gz":
@@ -349,7 +350,7 @@ class Cassette:
 
     # -- activation ----------------------------------------------------------------------------------------------
     @contextlib.contextmanager
-    def activate(self) -> Iterator["Cassette"]:
+    def activate(self) -> Iterator[Cassette]:
         """Route hooked calls in this context (and the tasks it starts) through the cassette."""
         _HOOKS.acquire(self)
         token = _ACTIVE.set(self)
@@ -364,12 +365,12 @@ class Cassette:
         # Pattern-based redaction only: a key must not depend on which secrets this machine's environment holds.
         return redact_text(normalize(text, self._dates), ())
 
-    def _append(self, channel: str, key: str, entry: Dict[str, Any]) -> None:
+    def _append(self, channel: str, key: str, entry: dict[str, Any]) -> None:
         with self._lock:
             self.data[channel].setdefault(key, []).append(redact(to_jsonable(entry), self._secrets))
             self.stats["recorded"] += 1
 
-    def _take(self, channel: str, key: str) -> Optional[Dict[str, Any]]:
+    def _take(self, channel: str, key: str) -> dict[str, Any] | None:
         with self._lock:
             entries = self.data[channel].get(key)
             if not entries:
@@ -384,7 +385,7 @@ class Cassette:
         with self._lock:
             (self.stats["lenient"] if self.lenient else self.stats["misses"]).append(f"{kind}: {detail}"[:600])
 
-    def summary(self) -> Dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
         """Counts for the case's observations (deterministic for a replay)."""
         s = self.stats
         out = {"mode": self.mode, "file": self.path.name, "tool_hits": s["tool_hits"], "llm_hits": s["llm_hits"],
@@ -395,15 +396,15 @@ class Cassette:
         return out
 
     @property
-    def failures(self) -> List[str]:
+    def failures(self) -> list[str]:
         """What makes a strict replay fail: misses and refused network connections."""
         return [*self.stats["misses"], *(f"network: {h}" for h in self.stats["network"])]
 
     # -- tools ---------------------------------------------------------------------------------------------------
-    def tool_key(self, tool_name: str, kwargs: Dict[str, Any]) -> str:
+    def tool_key(self, tool_name: str, kwargs: dict[str, Any]) -> str:
         return _sha(f"{tool_name}\n{self._norm(_canonical(_clean_kwargs(kwargs)))}")
 
-    async def tool_call(self, tool_name: str, kwargs: Dict[str, Any], trace: Optional[Dict[str, Any]],
+    async def tool_call(self, tool_name: str, kwargs: dict[str, Any], trace: dict[str, Any] | None,
                         run: Callable[[], Any], registry: Any = None) -> Any:
         from ..tools.registry import ErrorType, ToolResult
 
@@ -448,10 +449,10 @@ class Cassette:
         return result
 
     # -- side calls outside the registry -------------------------------------------------------------------------
-    def _call_key(self, name: str, args: Tuple[Any, ...], kwargs: Dict[str, Any]) -> str:
+    def _call_key(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
         return _sha(f"{name}\n{self._norm(_canonical([list(args), kwargs]))}")
 
-    async def async_call(self, name: str, fn: Callable[..., Any], args: Tuple[Any, ...], kwargs: Dict[str, Any]) -> Any:
+    async def async_call(self, name: str, fn: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         key = self._call_key(name, args, kwargs)
         if self.mode == "record":
             try:
@@ -464,7 +465,7 @@ class Cassette:
         await asyncio.sleep(0)
         return self._replay_call(name, key, args, kwargs)
 
-    def _replay_call(self, name: str, key: str, args: Tuple[Any, ...], kwargs: Dict[str, Any]) -> Any:
+    def _replay_call(self, name: str, key: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         entry = self._take("calls", key)
         if entry is None:
             detail = f"call {name}{self._norm(_canonical([list(args), kwargs]))[:200]}"
@@ -478,7 +479,7 @@ class Cassette:
             raise _recorded_exception(entry)
         return entry.get("result")
 
-    def sync_call(self, name: str, fn: Callable[..., Any], args: Tuple[Any, ...], kwargs: Dict[str, Any]) -> Any:
+    def sync_call(self, name: str, fn: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         key = self._call_key(name, args, kwargs)
         if self.mode == "record":
             try:
@@ -491,12 +492,12 @@ class Cassette:
         return self._replay_call(name, key, args, kwargs)
 
     # -- models --------------------------------------------------------------------------------------------------
-    def llm_key(self, model: str, messages: Any) -> Tuple[str, List[Tuple[str, str]]]:
+    def llm_key(self, model: str, messages: Any) -> tuple[str, list[tuple[str, str]]]:
         parts = [(role, self._norm(content)) for role, content in _message_parts(messages)]
         return _sha(_canonical([model, parts])), parts
 
-    def _prompt_info(self, parts: List[Tuple[str, str]], *, full: bool = False) -> Dict[str, Any]:
-        info: Dict[str, Any] = {
+    def _prompt_info(self, parts: list[tuple[str, str]], *, full: bool = False) -> dict[str, Any]:
+        info: dict[str, Any] = {
             "roles": [r for r, _ in parts], "hashes": [_sha(c)[:16] for _, c in parts], "chars": [len(c) for _, c in parts],
             "preview": [c[:PREVIEW_CHARS] + (" ... " + c[-PREVIEW_CHARS:] if len(c) > 2 * PREVIEW_CHARS else c[PREVIEW_CHARS:])
                         for _, c in parts]}
@@ -504,7 +505,7 @@ class Cassette:
             info["messages"] = [c for _, c in parts]
         return info
 
-    def make_llm(self, factory: Callable[..., Any], args: Tuple[Any, ...], kwargs: Dict[str, Any]) -> "CassetteLLM":
+    def make_llm(self, factory: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]) -> CassetteLLM:
         model = _resolve_model(args, kwargs)
         if self.mode == "record":
             try:
@@ -519,7 +520,7 @@ class Cassette:
             raise _recorded_exception(failed)
         return CassetteLLM(self, model, kwargs, None)
 
-    def _replay_llm(self, model: str, messages: Any) -> Dict[str, Any]:
+    def _replay_llm(self, model: str, messages: Any) -> dict[str, Any]:
         key, parts = self.llm_key(model, messages)
         entry = self._take("llm", key)
         if entry is not None:
@@ -539,7 +540,7 @@ class Cassette:
             raise _recorded_exception(near)
         return near
 
-    def _nearest(self, model: str, parts: List[Tuple[str, str]]) -> Tuple[Optional[Dict[str, Any]], str]:
+    def _nearest(self, model: str, parts: list[tuple[str, str]]) -> tuple[dict[str, Any] | None, str]:
         """The most similar recorded reply of the same model, and which message differs from it."""
         info = self._prompt_info(parts, full=True)
         best, best_score, best_diff = None, -1.0, ""
@@ -549,27 +550,27 @@ class Cassette:
                     continue
                 prompt = e.get("prompt") or {}
                 hashes = prompt.get("hashes") or []
-                same = sum(1 for a, b in zip(hashes, info["hashes"]) if a == b)
+                same = sum(1 for a, b in zip(hashes, info["hashes"], strict=False) if a == b)
                 ratio = difflib.SequenceMatcher(None, " ".join(prompt.get("preview") or []), " ".join(info["preview"])).ratio()
                 score = same * 2 + ratio + (1 if len(hashes) == len(info["hashes"]) else 0)
                 if score > best_score:
-                    differs = [i for i, (a, b) in enumerate(zip(hashes, info["hashes"])) if a != b]
+                    differs = [i for i, (a, b) in enumerate(zip(hashes, info["hashes"], strict=False)) if a != b]
                     best, best_score = e, score
                     best_diff = (f"nearest recording differs in message(s) {differs}" if differs else
                                  f"nearest recording has {len(hashes)} message(s)")
                     recorded = prompt.get("messages")
                     if differs and recorded and differs[0] < len(recorded):
                         a, b = recorded[differs[0]], info["messages"][differs[0]]
-                        at = next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), min(len(a), len(b)))
+                        at = next((i for i, (x, y) in enumerate(zip(a, b, strict=False)) if x != y), min(len(a), len(b)))
                         best_diff += f" at char {at}: recorded {a[max(0, at - 40):at + 60]!r} vs now {b[max(0, at - 40):at + 60]!r}"
         if best is None:
             return None, "no recording for this model"
         return best, best_diff
 
     def _record_llm(self, model: str, messages: Any, kind: str, *, text: Any = None, reasoning: str = "",
-                    exc: Optional[BaseException] = None) -> None:
+                    exc: BaseException | None = None) -> None:
         key, parts = self.llm_key(model, messages)
-        entry: Dict[str, Any] = {"model": model, "kind": kind, "prompt": self._prompt_info(parts, full=self.store_prompts)}
+        entry: dict[str, Any] = {"model": model, "kind": kind, "prompt": self._prompt_info(parts, full=self.store_prompts)}
         if exc is not None:
             entry.update(_error_entry(exc))
         else:
@@ -578,8 +579,8 @@ class Cassette:
                 entry["reasoning"] = reasoning
         self._append("llm", key, entry)
 
-    async def stream_with_reasoning(self, original: Callable[..., Any], llm: "CassetteLLM", messages: Any,
-                                    on_reasoning: Any, on_text: Any) -> Tuple[str, str]:
+    async def stream_with_reasoning(self, original: Callable[..., Any], llm: CassetteLLM, messages: Any,
+                                    on_reasoning: Any, on_text: Any) -> tuple[str, str]:
         if self.mode == "record":
             try:
                 text, reasoning = await original(llm.inner, messages, on_reasoning=on_reasoning, on_text=on_text)
@@ -608,11 +609,11 @@ def _dump_result(res: Any) -> Any:
         return to_jsonable(res.model_dump())
 
 
-def _chunks(text: str) -> List[str]:
+def _chunks(text: str) -> list[str]:
     return [text[i:i + REPLAY_CHUNK_CHARS] for i in range(0, len(text), REPLAY_CHUNK_CHARS)]
 
 
-def _resolve_model(args: Tuple[Any, ...], kwargs: Dict[str, Any]) -> str:
+def _resolve_model(args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
     model = kwargs.get("model_name") or (args[0] if args and isinstance(args[0], str) else None)
     if model:
         return str(model)
@@ -626,7 +627,7 @@ def _resolve_model(args: Tuple[Any, ...], kwargs: Dict[str, Any]) -> str:
 class CassetteLLM:
     """Chat model stand-in: records the wrapped model's replies, or replays them without any client."""
 
-    def __init__(self, cassette: Cassette, model: str, kwargs: Dict[str, Any], inner: Any) -> None:
+    def __init__(self, cassette: Cassette, model: str, kwargs: dict[str, Any], inner: Any) -> None:
         self._cassette = cassette
         self.model_name = model
         self.model = model
@@ -683,8 +684,8 @@ class CassetteLLM:
             if not hasattr(self.inner, "astream"):
                 yield AIMessageChunk(content=_content_text(getattr(await self.ainvoke(messages), "content", "")))
                 return
-            text_parts: List[str] = []
-            reasoning_parts: List[str] = []
+            text_parts: list[str] = []
+            reasoning_parts: list[str] = []
             try:
                 async for chunk in self.inner.astream(messages, *args, **kwargs):
                     text_parts.append(_content_text(getattr(chunk, "content", "")))
@@ -710,17 +711,17 @@ class CassetteLLM:
 _LLM_NAMES = ("get_llm", "astream_with_reasoning")
 _POLICY_NAME = "execute_with_policies"
 # Synchronous lookups the orchestrator makes outside the registry: (module, class, static method).
-SYNC_TARGETS: List[Tuple[str, str, str]] = [("tribos.vivarix.engine", "VivarixSimulationEngine", "search_models")]
+SYNC_TARGETS: list[tuple[str, str, str]] = []
 # Async lookups outside the registry, called through their module attribute: (module, function). The run manifest's
 # upstream version probes run in a background task of the run.
-ASYNC_TARGETS: List[Tuple[str, str]] = [("tribos.provenance.source_versions", "get_source_versions"),
+ASYNC_TARGETS: list[tuple[str, str]] = [("tribos.provenance.source_versions", "get_source_versions"),
                                         ("tribos.provenance.source_versions", "resolve_biomodel_pin")]
 # Imported before the hooks scan the loaded modules, so names they bind with "from ... import" are found.
 _PRELOAD = ("tribos.utils.llm.llm_factory", "tribos.tools.reliability", "tribos.tools.registry",
             "tribos.agents.authoritative_orchestrator", "tribos.agents.orchestration")
 
 
-def registry_tool_names(registry: Any) -> List[str]:
+def registry_tool_names(registry: Any) -> list[str]:
     """Names of the tools a registry has (empty when it cannot list them)."""
     try:
         return sorted(e.name for e in registry.list_tools())
@@ -728,7 +729,7 @@ def registry_tool_names(registry: Any) -> List[str]:
         return []
 
 
-def _tribos_modules() -> List[Any]:
+def _tribos_modules() -> list[Any]:
     return [m for name, m in list(sys.modules.items())
             if m is not None and (name == "tribos" or name.startswith("tribos.")) and not name.startswith("tribos.evals")]
 
@@ -765,11 +766,11 @@ class _Hooks:
         self._lock = threading.RLock()
         self._refs = 0
         self._replay_refs = 0
-        self._restore: List[Tuple[Any, str, Any]] = []
-        self._wrappers: Dict[int, Any] = {}  # id(wrapper) -> original
-        self._instance_restore: Dict[int, Tuple[Any, Any, int]] = {}  # id(registry) -> (registry, original, refs)
-        self._replaying: List[Cassette] = []
-        self._net_restore: List[Tuple[Any, str, Any]] = []
+        self._restore: list[tuple[Any, str, Any]] = []
+        self._wrappers: dict[int, Any] = {}  # id(wrapper) -> original
+        self._instance_restore: dict[int, tuple[Any, Any, int]] = {}  # id(registry) -> (registry, original, refs)
+        self._replaying: list[Cassette] = []
+        self._net_restore: list[tuple[Any, str, Any]] = []
 
     # -- install / release ----------------------------------------------------------------------------------------
     def acquire(self, cassette: Cassette) -> None:
@@ -811,7 +812,7 @@ class _Hooks:
                 importlib.import_module(mod)
             except Exception:  # noqa: BLE001
                 pass
-        wrapped: Dict[Tuple[str, int], Any] = {}
+        wrapped: dict[tuple[str, int], Any] = {}
         for module in _tribos_modules():
             for name in (*_LLM_NAMES, _POLICY_NAME):
                 value = module.__dict__.get(name)
@@ -880,7 +881,7 @@ class _Hooks:
 
             return astream_hook
 
-        async def policies_hook(registry: Any, tool_name: str, kwargs: Dict[str, Any], call: Any, *args: Any, **kw: Any) -> Any:
+        async def policies_hook(registry: Any, tool_name: str, kwargs: dict[str, Any], call: Any, *args: Any, **kw: Any) -> Any:
             cas = _ACTIVE.get()
             if cas is None or _IN_TOOL.get():
                 return await original(registry, tool_name, kwargs, call, *args, **kw)
@@ -985,7 +986,7 @@ _HOOKS = _Hooks()
 
 
 @contextlib.contextmanager
-def pinned_env(env: Optional[Dict[str, str]] = None) -> Iterator[None]:
+def pinned_env(env: dict[str, str] | None = None) -> Iterator[None]:
     """Set PINNED_ENV (or env) for the duration; previous values are restored."""
     env = PINNED_ENV if env is None else env
     saved = {k: os.environ.get(k) for k in env}
@@ -1000,7 +1001,7 @@ def pinned_env(env: Optional[Dict[str, str]] = None) -> Iterator[None]:
                 os.environ[k] = v
 
 
-def new_recording(path: Path | str, meta: Dict[str, Any], *, registries: Sequence[Any] = ()) -> Cassette:
+def new_recording(path: Path | str, meta: dict[str, Any], *, registries: Sequence[Any] = ()) -> Cassette:
     cas = Cassette(path, "record", registries=registries)
     cas.meta.update(meta)
     cas.meta.update({"recorded_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "recorded_date": _dt.date.today().isoformat(),

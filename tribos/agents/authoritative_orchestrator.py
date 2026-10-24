@@ -26,7 +26,9 @@ import re
 import time
 import uuid  # noqa: F401
 from collections import defaultdict  # noqa: F401
-from typing import Any, Callable, Coroutine, Dict, List, Optional, Set, Tuple  # noqa: F401
+from collections.abc import Callable, Coroutine  # noqa: F401
+from typing import Any
+
 from langchain_core.messages import HumanMessage, SystemMessage  # noqa: F401
 from pydantic import BaseModel, Field
 
@@ -39,23 +41,41 @@ from ..agentic.llm import AgentLLM  # noqa: F401
 from ..agentic.runtime import AgenticRuntime  # noqa: F401
 from ..agentic.state import AgentState  # noqa: F401
 from ..datasets.attach import resolve_attachments  # noqa: F401
-from ..datasets.provenance import postprocess_lumicell_result, postprocess_vivarix_result  # noqa: F401
+from ..datasets.provenance import (  # noqa: F401
+    postprocess_lumicell_result,
+    postprocess_vivarix_result,
+)
 from ..extensions import load_extensions  # noqa: F401
-from ..utils.text import fold_typography
-from ..extensions.hooks import get_artifact_builders, get_scope_note_providers, get_step_augmenters  # noqa: F401
-from ..verify.verifier import TribosVerifier, VerificationReport  # noqa: F401
+from ..extensions.hooks import (  # noqa: F401
+    get_artifact_builders,
+    get_scope_note_providers,
+    get_step_augmenters,
+)
 from ..provenance.run_manifest import RunRecorder, activate_recorder, reset_recorder
 from ..sources import EvidenceSource, SourceRunState, get_sources  # noqa: F401
 from ..sources.names import INTERNAL_ONLY_KEYS
 from ..sources.names import public_name as source_public_name
-from ..tools.registry import ToolRegistry, ErrorType, ToolResult, get_tool_registry
-from ..utils.llm.llm_factory import DEFAULT_ORCHESTRATOR_MODEL, astream_with_reasoning, get_llm, stream_timeout  # noqa: F401
+from ..tools.registry import ErrorType, ToolRegistry, ToolResult, get_tool_registry
+from ..utils.llm.llm_factory import (  # noqa: F401
+    DEFAULT_ORCHESTRATOR_MODEL,
+    astream_with_reasoning,
+    get_llm,
+    stream_timeout,
+)
 from ..utils.memory import get_research_memory_engine
 from ..utils.memory.research_memory import MemoryContextPackage  # noqa: F401
-from ..vivarix.engine import VivarixSimulationEngine
+from ..utils.text import fold_typography
+from ..verify.verifier import TribosVerifier, VerificationReport  # noqa: F401
 from . import query_planner
 from .citations import build_citation_map  # noqa: F401
 from .discovery import DiscoveryEngine, DiscoveryHypothesisReport  # noqa: F401
+from .orchestration import agent_rounds
+from .orchestration import draft as draft_stage
+from .orchestration import finalize as finalize_stage
+from .orchestration import gather as gather_stage
+from .orchestration import plan as plan_stage
+from .orchestration import verify as verify_stage
+from .orchestration.context import RunContext
 from .prompts import (
     CORRECTION_SYSTEM_PROMPT,  # noqa: F401
     build_correction_request,  # noqa: F401
@@ -74,13 +94,6 @@ from .query_context import (
     TaskStatus,
 )
 from .query_planner import build_query_context  # noqa: F401
-from .orchestration import agent_rounds
-from .orchestration import draft as draft_stage
-from .orchestration import finalize as finalize_stage
-from .orchestration import gather as gather_stage
-from .orchestration import plan as plan_stage
-from .orchestration import verify as verify_stage
-from .orchestration.context import RunContext
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +101,7 @@ logger = logging.getLogger(__name__)
 class OrchestrationStep(BaseModel):
     agent: str
     role: str = "assistant"
-    action: Optional[str] = None
+    action: str | None = None
     duration_seconds: float = 0.0
 
 
@@ -97,32 +110,32 @@ class OrchestrationThought(BaseModel):
     title: str
     text: str
     elapsed_seconds: float = 0.0
-    agent: Optional[str] = None
-    extra: Dict[str, Any] = Field(default_factory=dict)
+    agent: str | None = None
+    extra: dict[str, Any] = Field(default_factory=dict)
 
 
 class AuthoritativeOrchestrationResult(BaseModel):
     thread_id: str
     response: str
-    thoughts: List[Dict[str, Any]] = Field(default_factory=list)
+    thoughts: list[dict[str, Any]] = Field(default_factory=list)
     reasoning: str = ""
-    steps: List[Dict[str, Any]] = Field(default_factory=list)
-    selected_agents: List[str] = Field(default_factory=list)
+    steps: list[dict[str, Any]] = Field(default_factory=list)
+    selected_agents: list[str] = Field(default_factory=list)
     duration_seconds: float = 0.0
     model_used: str = DEFAULT_ORCHESTRATOR_MODEL
     framework_used: str = "authoritative-react-compiler"
-    verification_report: Optional[Dict[str, Any]] = None
-    execution_artifacts: Dict[str, Any] = Field(default_factory=dict)
-    citations: Dict[str, Any] = Field(default_factory=dict)
-    run_manifest: Optional[Dict[str, Any]] = None
-    query_context: Optional[Dict[str, Any]] = None
-    task_status: Optional[Dict[str, Any]] = None  # query_context.TaskOutcome; separate from verification
+    verification_report: dict[str, Any] | None = None
+    execution_artifacts: dict[str, Any] = Field(default_factory=dict)
+    citations: dict[str, Any] = Field(default_factory=dict)
+    run_manifest: dict[str, Any] | None = None
+    query_context: dict[str, Any] | None = None
+    task_status: dict[str, Any] | None = None  # query_context.TaskOutcome; separate from verification
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
 
 
-def _make_recorder(**kwargs: Any) -> Optional[RunRecorder]:
+def _make_recorder(**kwargs: Any) -> RunRecorder | None:
     try:
         return RunRecorder(**kwargs)
     except Exception as exc:  # noqa: BLE001
@@ -160,27 +173,23 @@ _CASUAL_RES = [
 
 
 _INTRODUCTION = (
-    "Hello! I am **Tribos**, your evidence-backed Clinical R&D AI assistant.\n\n"
-    "I provide publication-grade scientific research and systems biology capabilities:\n"
-    "- **🧬 Synapta**: Knowledge Graph topology, OpenTargets genetic associations, KEGG pathway mapping, "
-    "HGNC/OpenTargets entity normalization, ChEMBL drug mechanisms and bioactivities, and variant evidence "
-    "from ClinVar, CIViC, cBioPortal and gnomAD\n"
-    "- **⚙️ Vivarix**: Executable COPASI/BASICO kinetic ODE simulations of curated BioModels or your uploaded SBML models\n"
-    "- **🔬 Lumicell**: Single-cell transcriptomics (Scanpy/AnnData) on validated real datasets, including your uploaded .h5ad/.csv files\n"
-    "- **📚 Lithoscribe**: Grounded literature synthesis with real full-text XML from EuropePMC/PubMed (graded by study "
-    "design and checked for retractions), ClinicalTrials.gov registry records with posted results, and openFDA "
-    "adverse-event reports and labels\n"
-    "- **🌐 WebSurfer**: Real-time biomedical literature and trial search\n"
+    "Hello! I am **Tribos**, your verified Engineering, Mathematics & Scientific R&D AI assistant.\n\n"
+    "I provide publication-grade scientific research, computer algebra, and simulation capabilities:\n"
+    "- **📚 Archivon**: Grounded literature synthesis across arXiv, Crossref, Semantic Scholar, OpenAlex, and zbMATH Open\n"
+    "- **📐 Axiom**: Computer algebra and symbolic mathematics with SymPy: equation solving, calculus, ODE dsolve, linear algebra, and identity proofs\n"
+    "- **⚙️ Dynamis**: Numerical ODE simulation, parameter scans, fixed-point stability, optimization, and curve fitting with SciPy\n"
+    "- **💻 Calcula**: Sandboxed scientific Python computation and dataset analysis (NumPy, SciPy, SymPy, Pandas, Pint, Matplotlib)\n"
+    "- **🔬 Physis**: Physical constants (CODATA 2022), Pint unit conversions and dimensional checks, OEIS integer sequences, Materials Project, and WolframAlpha\n"
     "- **🔍 Reflexion Verifier**: Mathematical and citation auditing preventing ungrounded claims\n\n"
     "Answers carry clickable citations and can be exported as a DOCX or PDF report with a run manifest, "
     "then re-run to compare.\n\n"
-    "To get started, please ask a biomedical question, specify a target gene/protein (e.g. *KRAS*, *EGFR*, *BRAF*), or provide a scientific topic for literature review!"
+    "To get started, please ask a question about mathematics, physics, engineering, or scientific computing!"
 )
 
 _EXAMPLE_QUESTIONS = (
-    "- *Is KRAS G12C a tractable target in non-small cell lung cancer?*\n"
-    "- *What adverse events are reported for sotorasib?*\n"
-    "- *Simulate BIOMD0000000010 for 60 seconds.*"
+    "- *Solve the differential equation dy/dx + 2*y = exp(-x) with y(0) = 1.*\n"
+    "- *Simulate the harmonic oscillator for 20 seconds.*\n"
+    "- *What is the fine-structure constant and its CODATA 2022 uncertainty?*"
 )
 _THANKS_RE = re.compile(r"\b(?:thanks?|thx|ty|cheers|appreciate)\b", re.I)
 _FAREWELL_RE = re.compile(r"\b(?:bye|goodbye|see\s+(?:you|ya)|good\s*night)\b", re.I)
@@ -190,7 +199,7 @@ def _non_research_reply(query: str, scope: str) -> str:
     """A fixed reply for a message that is not a research question. Nothing is looked up, so nothing is claimed."""
     if scope == "conversational":
         if _THANKS_RE.search(query):
-            return "You're welcome! Ask me about a target, drug, disease, variant or BioModel whenever you're ready."
+            return "You're welcome! Ask me about an equation, simulation, physical constant, proof or dataset whenever you're ready."
         if _FAREWELL_RE.search(query):
             return "Goodbye! Your conversation stays here when you come back."
         return _INTRODUCTION
@@ -198,8 +207,8 @@ def _non_research_reply(query: str, scope: str) -> str:
     shown = shown if len(shown) <= 80 else shown[:77] + "..."
     shown = re.sub(r"([\\`*_\[\]<>])", r"\\\1", shown)
     return (
-        f"I couldn't find a biomedical question in “{shown}”, so I didn't search any sources.\n\n"
-        "Ask about a gene or protein target, a drug, a disease, a variant or a BioModel, or attach a dataset. "
+        f"I couldn't find a scientific or engineering question in “{shown}”, so I didn't search any sources.\n\n"
+        "Ask about an equation, a physical constant, a dynamical system, a mathematical proof or computation, or attach a dataset. "
         f"For example:\n{_EXAMPLE_QUESTIONS}"
     )
 
@@ -217,7 +226,7 @@ _QUESTION_TRIAL_NAME_RE = re.compile(r"\b([A-Z][A-Za-z]{2,}(?:[\s-]?\d{1,4}[A-Z]
 _NOT_TRIAL_WORDS = {"COVID", "SARS", "ICD", "ECOG", "RECIST", "CTCAE", "TNM", "AJCC", "WHO"}
 
 
-def question_trial_names(ctx: Any, text: str) -> List[str]:
+def question_trial_names(ctx: Any, text: str) -> list[str]:
     """Named trials mentioned in the question, so literature search can look up their publications directly."""
     known = set()
     for group in ("genes", "drugs", "variants"):
@@ -226,7 +235,7 @@ def question_trial_names(ctx: Any, text: str) -> List[str]:
                 val = getattr(ent, attr, None)
                 if isinstance(val, str) and val:
                     known.add(re.sub(r"[\s-]", "", val).upper())
-    out: List[str] = []
+    out: list[str] = []
     for m in _QUESTION_TRIAL_NAME_RE.finditer(text or ""):
         name = m.group(1)
         word = re.match(r"[A-Za-z]+", name).group(0)  # type: ignore[union-attr]
@@ -252,9 +261,9 @@ _TRANSIENT_STREAM_ERRORS = ("ReadError", "RemoteProtocolError", "APIConnectionEr
                             "APITimeoutError", "InternalServerError")
 
 
-async def stream_buffered_with_retry(llm: Any, messages: List[Any], parts: List[str], *, on_reasoning: Any = None,
-                                     attempts: int = 2, before_retry: Optional[Callable[[int], None]] = None,
-                                     timeout_s: Optional[float] = None) -> Tuple[str, str]:
+async def stream_buffered_with_retry(llm: Any, messages: list[Any], parts: list[str], *, on_reasoning: Any = None,
+                                     attempts: int = 2, before_retry: Callable[[int], None] | None = None,
+                                     timeout_s: float | None = None) -> tuple[str, str]:
     """A buffered (not shown live) completion, retried once from scratch when the connection drops mid-stream
     ("ReadError"): the buffer is cleared, so nothing partial or duplicated is kept.
 
@@ -269,7 +278,7 @@ async def stream_buffered_with_retry(llm: Any, messages: List[Any], parts: List[
         async def buffer(delta: str) -> None:
             parts.append(delta)
 
-        kwargs: Dict[str, Any] = {}
+        kwargs: dict[str, Any] = {}
         if t_end is not None:
             kwargs["total_timeout"] = stream_timeout(max(0.0, t_end - time.perf_counter()))
         try:
@@ -286,7 +295,7 @@ async def stream_buffered_with_retry(llm: Any, messages: List[Any], parts: List[
     return "", ""
 
 
-def _edit_llm_kwargs(model_name: str) -> Dict[str, Any]:
+def _edit_llm_kwargs(model_name: str) -> dict[str, Any]:
     """Rewrites and revisions edit an existing draft: the model's long reasoning pass adds minutes (a revision hit
     the 600 s stream cap) without improving an edit. The first draft keeps its reasoning."""
     from ..agentic.llm import agent_model_kwargs
@@ -294,11 +303,11 @@ def _edit_llm_kwargs(model_name: str) -> Dict[str, Any]:
     return agent_model_kwargs(model_name)
 
 
-def question_disease_words(ctx: Any) -> List[set]:
+def question_disease_words(ctx: Any) -> list[set]:
     """Distinctive words of each disease the question names ({"pancreatic"}, {"cutaneous", "melanoma"}). A class term
     ("cancer", "solid tumors", "malignancy") has none, so it never ranks associations next to a specific disease."""
     generic = _GENERIC_DISEASE_WORDS | {"malignancy", "malignancies", "solid", "neoplastic", "human", "illness", "disorders"}
-    out: List[set] = []
+    out: list[set] = []
     for ent in getattr(ctx, "diseases", None) or []:
         for attr in ("mention", "label"):
             text = getattr(ent, attr, None)
@@ -308,12 +317,12 @@ def question_disease_words(ctx: Any) -> List[set]:
     return out
 
 
-def prioritise_question_diseases(assocs: List[Dict[str, Any]], q_diseases: List[set], keep: int = 5) -> List[Dict[str, Any]]:
+def prioritise_question_diseases(assocs: list[dict[str, Any]], q_diseases: list[set], keep: int = 5) -> list[dict[str, Any]]:
     """Associations with the question's disease first (stable), then the strongest others, `keep` in all."""
     if not q_diseases:
         return list(assocs)[:keep]
 
-    def matches(a: Dict[str, Any]) -> bool:
+    def matches(a: dict[str, Any]) -> bool:
         name = set(re.findall(r"[a-z]{3,}", str(a.get("disease_name") or "").lower()))
         # "pancreatic" matches "pancreatic adenocarcinoma"; a stem match catches "pancreas" vs "pancreatic".
         return any(words <= name or any(n[:6] == w[:6] for w in words for n in name if len(w) >= 6) for words in q_diseases)
@@ -328,24 +337,19 @@ def prioritise_question_diseases(assocs: List[Dict[str, Any]], q_diseases: List[
     return (hit + rest)[: max(keep, min(len(hit), keep + 3))]
 
 
-def literature_request(ctx: Any, clean_query: str, plan: Any = None) -> Dict[str, Any]:
-    """Arguments of the Lithoscribe call for a question (shared with the evaluation harness, so both search alike)."""
+def literature_request(ctx: Any, clean_query: str, plan: Any = None) -> dict[str, Any]:
+    """Arguments of the Archivon call for a question (shared with the evaluation harness, so both search alike)."""
     from ..agentic.config import get_effort_profile
+
     effort_level = getattr(ctx, "effort_level", None) or "medium"
     profile = get_effort_profile(effort_level)
     max_articles = profile.get("max_passages", 8)
 
-    if ctx.biomodel_id in _BIOMODEL_LITERATURE:
-        return {"query": _BIOMODEL_LITERATURE[ctx.biomodel_id], "max_articles": max_articles}
-    if plan is not None and hasattr(plan, "trial_names") and not plan.trial_names:
-        from .search_plan import clean_trial_names
-
-        plan.trial_names = clean_trial_names(question_trial_names(ctx, getattr(ctx, "raw_query", "") or clean_query))
-    queries = plan.europepmc_queries() if plan is not None else []
-    if queries:
-        keywords = plan.keywords() if plan is not None else []
-        return {"query": clean_query, "max_articles": max_articles, "search_queries": queries, "keywords": keywords}
-    return {"query": clean_query, "max_articles": max_articles}
+    return {
+        "query": clean_query,
+        "max_results": max_articles,
+        "max_articles": max_articles,
+    }
 
 
 def _show_reasoning() -> bool:
@@ -353,7 +357,7 @@ def _show_reasoning() -> bool:
     return os.getenv("TRIBOS_SHOW_REASONING", "").strip().lower() in ("1", "true", "yes", "on")
 
 
-def _cite_marker(m: "re.Match[str]") -> str:
+def _cite_marker(m: re.Match[str]) -> str:
     """Keep the identifiers of a bracket marker as a plain parenthetical citation; drop markers naming evidence tags."""
     inner = m.group(1).strip()
     ids = [i.group(0) for i in _MARKER_ID_RE.finditer(inner)]
@@ -372,7 +376,7 @@ _INTERNAL_SOURCE_KEYS = (
     "structure_intel", "structintel", "clinical_trials", "clinicaltrials", "synapta", "lithoscribe", "vivarix",
     "lumicell", "websurfer", "disease_targets",
 )
-_INTERNAL_SOURCE_NAMES: Dict[str, Optional[str]] = {
+_INTERNAL_SOURCE_NAMES: dict[str, str | None] = {
     **{k: source_public_name(k) for k in _INTERNAL_SOURCE_KEYS},
     **dict.fromkeys(INTERNAL_ONLY_KEYS),
 }
@@ -419,14 +423,14 @@ def normalize_typography(text: str) -> str:
 _PROTECTED_RE = re.compile(r"```.*?```|`[^`\n]*`|https?://[^\s)>\]]+|\]\([^)\s]*\)", re.S)
 
 
-def _field_prose(m: "re.Match[str]") -> str:
+def _field_prose(m: re.Match[str]) -> str:
     value = m.group(2)
     if value.isdigit() and len(value) > 3:
         value = f"{int(value):,}"
     return _FIELD_PROSE[m.group(1)].format(value)
 
 
-def _public_paren(m: "re.Match[str]") -> str:
+def _public_paren(m: re.Match[str]) -> str:
     """A parenthetical naming internal source keys, rewritten with public names (or dropped); others unchanged."""
     items = [i.strip() for i in re.split(r"[;,]", m.group(1))]
     keys = [re.sub(r"[\s\-]+", "_", i.lower()) for i in items]
@@ -436,14 +440,14 @@ def _public_paren(m: "re.Match[str]") -> str:
         return m.group(0)
     kept = [
         _INTERNAL_SOURCE_NAMES[k] if k in _INTERNAL_SOURCE_NAMES else ("" if is_key else i)
-        for i, k, is_key in zip(items, keys, snake)
+        for i, k, is_key in zip(items, keys, snake, strict=False)
     ]
     kept = list(dict.fromkeys(k for k in kept if k))
     lead = m.group(0)[: m.start(1) - m.start(0) - 1]
     return f"{lead}({'; '.join(kept)})" if kept else ""
 
 
-def _bare_key(m: "re.Match[str]") -> str:
+def _bare_key(m: re.Match[str]) -> str:
     key = m.group(1)
     return _INTERNAL_SOURCE_NAMES.get(key) or key.replace("_", " ")
 
@@ -466,7 +470,7 @@ _INTERACTION_CLASS_PROSE = {
     "untyped": "interaction type not specified",
 }
 _DRUGGABLE_PARTNER_DATA = "SynLethDB/DGIdb druggable-partner data"
-_DATA_FIELD_RULES: Tuple[Tuple["re.Pattern[str]", Any], ...] = (
+_DATA_FIELD_RULES: tuple[tuple[re.Pattern[str], Any], ...] = (
     (
         re.compile(r"\bfda_status\s*(?:=|:|is)\s*[\"'“”]?([a-z_]+)[\"'“”]?", re.IGNORECASE),
         lambda m: _FDA_STATUS_PROSE.get(m.group(1).lower(), f"FDA status {m.group(1).replace('_', ' ')}"),
@@ -552,7 +556,7 @@ def clean_internal_keys(text: str) -> str:
             segment = re.sub(r"(?<=\S)[ \t]{2,}(?=\S)", " ", segment)  # the gap a removed key left (not "  \n" breaks)
         return _FIELD_BARE_RE.sub(_bare_key, segment)
 
-    out: List[str] = []
+    out: list[str] = []
     pos = 0
     for m in _PROTECTED_RE.finditer(text):
         out.append(clean(text[pos : m.start()]))
@@ -569,8 +573,12 @@ class AuthoritativeOrchestrator:
     """
 
     def __init__(self) -> None:
-        # Tools run through the registry; the engine is kept only for BioModels search.
-        self.vivarix = VivarixSimulationEngine()
+        try:
+            from ..dynamis.engine import DynamisEngine
+            self.dynamis = DynamisEngine()
+        except ImportError:
+            self.dynamis = None
+        self.vivarix = getattr(self, "vivarix", None) or type("VivarixDummy", (), {"search_models": staticmethod(lambda *_a, **_k: [])})()
         self.verifier = TribosVerifier()
         self.memory = get_research_memory_engine()
 
@@ -580,7 +588,7 @@ class AuthoritativeOrchestrator:
 
     # Query parsing lives in query_planner; these wrappers keep the historical entry points.
     @staticmethod
-    def _extract_primary_target(query: str) -> Optional[str]:
+    def _extract_primary_target(query: str) -> str | None:
         return query_planner.extract_primary_target(query)
 
     _NEGATIVE_SIMULATION_PATTERNS = query_planner.NEGATIVE_SIMULATION_PATTERNS
@@ -591,7 +599,7 @@ class AuthoritativeOrchestrator:
         return query_planner.detect_simulation_suppression(query)
 
     @staticmethod
-    def _extract_dataset_path(query: str) -> Optional[str]:
+    def _extract_dataset_path(query: str) -> str | None:
         """Extract a referenced single-cell dataset file (.h5ad / .zarr) from the query."""
         return query_planner.extract_dataset_path(query)
 
@@ -634,32 +642,49 @@ class AuthoritativeOrchestrator:
     # Progress labels for each tool step while it runs; the finished label comes from _describe_tool_result.
     _RUNNING_TITLES = {
         "synapta": "Looking up {target} in OpenTargets and KEGG",
-        "lithoscribe": "Searching EuropePMC and PubMed",
+        "archivon": "Searching arXiv, Crossref, and OpenAlex",
+        "lithoscribe": "Searching scientific literature",
         "websurfer": "Searching the web",
-        "vivarix": "Simulating {model} in COPASI",
-        "vivarix_steady_state": "Solving for the steady state of {model}",
-        "vivarix_scan": "Scanning {scan_parameter} in {model}",
+        "dynamis": "Simulating ODE model in Dynamis",
+        "dynamis_simulate_ode": "Simulating ODE model in Dynamis",
+        "dynamis_parameter_scan": "Scanning parameter in Dynamis",
+        "dynamis_equilibrium": "Finding equilibrium points in Dynamis",
+        "vivarix": "Simulating {model}",
+        "vivarix_steady_state": "Solving for steady state",
+        "vivarix_scan": "Scanning parameter",
+        "calcula": "Running sandboxed scientific computation",
+        "calcula_run_python": "Running sandboxed scientific computation",
+        "physis": "Looking up physical reference data",
+        "axiom": "Computing symbolic derivation in Axiom",
         "lumicell": "Analyzing {dataset}",
     }
 
     @staticmethod
-    def _describe_tool_result(name: str, res: ToolResult, ctx: Dict[str, Any]) -> tuple[str, str]:
+    def _describe_tool_result(name: str, res: ToolResult, ctx: dict[str, Any]) -> tuple[str, str]:
         """Summarize what a tool actually returned, as (title, detail) for the activity timeline."""
         if not res.success:
             err_type = getattr(res.error_type, "value", res.error_type) or "ERROR"
             labels = {
                 "synapta": f"OpenTargets/KEGG lookup for {ctx.get('target')} failed",
+                "archivon": "Literature search failed",
                 "lithoscribe": "Literature search failed",
                 "websurfer": "Web search failed",
+                "dynamis": f"Simulation of {ctx.get('model')} failed",
+                "dynamis_simulate_ode": "ODE simulation failed",
+                "dynamis_parameter_scan": "Parameter scan failed",
                 "vivarix": f"Simulation of {ctx.get('model')} failed",
                 "vivarix_steady_state": "Steady-state solve failed",
                 "vivarix_scan": f"Parameter scan of {ctx.get('model')} failed",
+                "calcula": "Calculation failed",
+                "calcula_run_python": "Sandboxed computation failed",
+                "physis": "Reference lookup failed",
+                "axiom": "Derivation failed",
                 "lumicell": f"Analysis of {ctx.get('dataset')} failed",
             }
             return labels.get(name, f"{name} failed"), f"{err_type}: {(res.error or '')[:240]}"
 
-        data: Dict[str, Any] = res.data if isinstance(res.data, dict) else {}
-        parts: List[str] = []
+        data: dict[str, Any] = res.data if isinstance(res.data, dict) else {}
+        parts: list[str] = []
         if name == "synapta":
             coverage = data.get("coverage") or {}
             status = coverage.get("status")
@@ -677,11 +702,11 @@ class AuthoritativeOrchestrator:
             failed = [k for k, v in (coverage.get("sources") or {}).items() if isinstance(v, dict) and v.get("status") == "error"]
             if failed:
                 parts.append(f"failed: {', '.join(failed)}")
-        elif name == "lithoscribe":
-            passages = data.get("ranked_passages") or []
+        elif name in ("archivon", "lithoscribe"):
+            passages = data.get("ranked_passages") or data.get("passages") or []
             title = f"Found {len(passages)} relevant literature passage{'s' if len(passages) != 1 else ''}"
             labels = [
-                str(p.get("citation") or p.get("citation_label") or (f"PMID {p['pmid']}" if p.get("pmid") else ""))
+                str(p.get("citation") or p.get("citation_label") or (f"PMID {p['pmid']}" if p.get("pmid") else (f"arXiv:{p['arxiv_id']}" if p.get("arxiv_id") else "")))
                 for p in passages[:3]
                 if isinstance(p, dict)
             ]
@@ -694,31 +719,43 @@ class AuthoritativeOrchestrator:
             titles = [str(r.get("title")) for r in results[:3] if isinstance(r, dict) and r.get("title")]
             if titles:
                 parts.append("; ".join(titles))
-        elif name == "vivarix":
-            title = f"Simulated {data.get('model_id') or ctx.get('model')}"
+        elif name in ("dynamis", "dynamis_simulate_ode", "vivarix"):
+            title = f"Simulated {data.get('model_name') or data.get('model_id') or ctx.get('model') or 'model'}"
             if data.get("model_name"):
                 parts.append(str(data["model_name"]))
-            parts.append(f"{len(data.get('species_list') or [])} species")
+            if data.get("species_list"):
+                parts.append(f"{len(data.get('species_list'))} species")
             units = data.get('units')
             time_unit = units.get('time', 's') if isinstance(units, dict) else 's'
-            parts.append(f"t = {data.get('duration')}{time_unit}")
-            diag = data.get("diagnostics")
-            convergence = diag.get("convergence_status") if isinstance(diag, dict) else None
-            if convergence:
-                parts.append(f"endpoint drift: {convergence}")
-        elif name == "vivarix_steady_state":
-            title = f"Steady state: {data.get('steady_state_status', 'computed')}"
+            if data.get('duration'):
+                parts.append(f"t = {data.get('duration')}{time_unit}")
+            elif data.get('t_span'):
+                parts.append(f"t = {data.get('t_span')}")
+            if data.get("verified"):
+                parts.append("verified numerical solution")
+        elif name in ("dynamis_equilibrium", "vivarix_steady_state"):
+            title = f"Steady state: {data.get('steady_state_status', data.get('stability', 'computed'))}"
             if data.get("stability"):
                 parts.append(f"stability: {data['stability']}")
-        elif name == "vivarix_scan":
-            n_ok = int(data.get("successful_points") or 0)
-            n_all = int(data.get("total_points") or 0)
-            title = f"Scanned {data.get('resolved_parameter') or data.get('parameter_name')} over {n_all} point{'s' if n_all != 1 else ''}"
+        elif name in ("dynamis_parameter_scan", "vivarix_scan"):
+            n_ok = int(data.get("successful_points") or len(data.get("scan_results") or []) or 0)
+            n_all = int(data.get("total_points") or len(data.get("scan_results") or []) or 0)
+            title = f"Scanned {data.get('resolved_parameter') or data.get('parameter_name') or 'parameter'} over {n_all} point{'s' if n_all != 1 else ''}"
             req = data.get("requested")
             req_d = req if isinstance(req, dict) else {}
-            parts.append(f"{req_d.get('start')} → {req_d.get('end')} ({req_d.get('spacing', 'linear')})")
-            parts.append(f"t = {data.get('duration_seconds')} s per point")
+            if req_d.get("start") is not None and req_d.get("end") is not None:
+                parts.append(f"{req_d.get('start')} → {req_d.get('end')} ({req_d.get('spacing', 'linear')})")
+            if data.get("duration_seconds"):
+                parts.append(f"t = {data.get('duration_seconds')} s per point")
             parts.append(f"{n_ok} succeeded" + (f", {n_all - n_ok} failed" if n_all - n_ok else ""))
+        elif name in ("calcula", "calcula_run_python"):
+            title = "Executed sandboxed scientific computation"
+            if data.get("output"):
+                parts.append(str(data["output"])[:100].strip())
+        elif name in ("physis", "physis_constants"):
+            title = "Looked up physical reference data"
+            if data.get("constants"):
+                parts.append(f"{len(data['constants'])} constants retrieved")
         elif name == "lumicell":
             title = f"Analyzed {data.get('dataset_name') or ctx.get('dataset')}"
             parts.append(f"{data.get('n_cells_post_qc')} cells after QC")
@@ -729,22 +766,22 @@ class AuthoritativeOrchestrator:
 
     # -- simulation plan and task status ------------------------------------------------------------------
     @staticmethod
-    def _simulation_plan(ctx: Any) -> Optional[SimulationPlan]:
-        """The planner's SimulationPlan, or one derived from the legacy routing fields when it set none."""
+    def _simulation_plan(ctx: Any) -> SimulationPlan | None:
+        """The planner's SimulationPlan for Dynamis / SciPy ODE simulation or parameter scan."""
         plan = getattr(ctx, "simulation_plan", None)
         if isinstance(plan, SimulationPlan):
             return plan
         if not getattr(ctx, "is_simulation_intent", False) and getattr(ctx, "model_attachment", None) is None:
             return None
         return SimulationPlan(
-            action="steady_state" if getattr(ctx, "wants_steady_state", False) else "time_course",
-            biomodel_id=getattr(ctx, "biomodel_id", None),
-            duration_seconds=float(getattr(ctx, "sim_duration", 60.0) or 60.0),
-            intervals=40,
+            action="parameter_scan" if getattr(ctx, "wants_parameter_scan", False) else ("steady_state" if getattr(ctx, "wants_steady_state", False) else "time_course"),
+            system_name=getattr(ctx, "system_name", None),
+            duration_seconds=float(getattr(ctx, "sim_duration", 10.0) or 10.0),
+            intervals=100,
         )
 
     @staticmethod
-    def _plan_errors(plan: SimulationPlan) -> List[Dict[str, str]]:
+    def _plan_errors(plan: SimulationPlan) -> list[dict[str, str]]:
         """The planner's validation errors plus the execution contract checked here, so nothing out of range runs."""
         errors = [dict(e) for e in plan.validation_errors if isinstance(e, dict)]
         codes = {e.get("code") for e in errors}
@@ -777,8 +814,8 @@ class AuthoritativeOrchestrator:
     @staticmethod
     def _task_outcome(
         ctx: Any,
-        plan: Optional[SimulationPlan],
-        tool_results: Dict[str, ToolResult],
+        plan: SimulationPlan | None,
+        tool_results: dict[str, ToolResult],
         verification: Any,
         llm_ok: bool,
         core_phase_note: str = "",
@@ -798,7 +835,7 @@ class AuthoritativeOrchestrator:
             else:
                 grounding = "unsupported" if float(getattr(verification, "verification_score", 0.0) or 0.0) < 0.5 else "partial"
 
-        def out(status: TaskStatus, requested: Optional[str], executed: Optional[str], reason: str, match: bool = True) -> TaskOutcome:
+        def out(status: TaskStatus, requested: str | None, executed: str | None, reason: str, match: bool = True) -> TaskOutcome:
             if core_phase_note and status in ("completed", "partial"):
                 status = "partial"
                 reason = core_phase_note if reason in ("", "Evidence gathered and synthesized.") else f"{core_phase_note} {reason}"
@@ -808,8 +845,10 @@ class AuthoritativeOrchestrator:
         def _simulation_outcome(plan: SimulationPlan) -> TaskOutcome:
             """The simulation part of the request: the requested action against what ran."""
             requested = plan.action
-            viv, ss, scan = tool_results.get("vivarix"), tool_results.get("vivarix_steady_state"), tool_results.get("vivarix_scan")
-            first_fail = next((r for r in (scan, ss, viv) if r is not None and not r.success), None)
+            dyn = tool_results.get("dynamis") or tool_results.get("dynamis_simulate_ode") or tool_results.get("vivarix")
+            ss = tool_results.get("dynamis_equilibrium") or tool_results.get("vivarix_steady_state")
+            scan = tool_results.get("dynamis_scan") or tool_results.get("dynamis_parameter_scan") or tool_results.get("vivarix_scan")
+            first_fail = next((r for r in (scan, ss, dyn) if r is not None and not r.success), None)
             meta = (first_fail.metadata or {}) if first_fail is not None else {}
             if first_fail is not None and meta.get("reason_code") == "MODEL_REQUIRED":
                 return out("needs_input", requested, None, first_fail.error or "No suitable model was found.", match=False)
@@ -820,19 +859,19 @@ class AuthoritativeOrchestrator:
                         n_ok, n_all = data.get("successful_points", 0), data.get("total_points", 0)
                         return out("partial", requested, "parameter_scan", f"{n_ok} of {n_all} scan points succeeded.")
                     return out("completed", requested, "parameter_scan", "All scan points ran.")
-                executed = "time_course" if viv is not None and viv.success else None
+                executed = "time_course" if dyn is not None and dyn.success else None
                 reason = (first_fail.error if first_fail is not None else "The parameter scan did not run.") or ""
                 return out("failed", requested, executed, reason[:300], match=False)
             if requested == "steady_state":
                 if ss is not None and ss.success:
                     return out("completed", requested, "steady_state", "Steady state computed.")
-                return out("failed", requested, "time_course" if viv is not None and viv.success else None,
+                return out("failed", requested, "time_course" if dyn is not None and dyn.success else None,
                            ((first_fail.error if first_fail else "") or "The steady state was not computed.")[:300], match=False)
-            if viv is not None and viv.success:
+            if dyn is not None and dyn.success:
                 return out("completed", requested, "time_course", "Time course computed.")
             return out("failed", requested, None, ((first_fail.error if first_fail else "") or "The simulation did not run.")[:300], match=False)
 
-        _sim_keys = ("vivarix", "vivarix_steady_state", "vivarix_scan")
+        _sim_keys = ("dynamis", "dynamis_simulate_ode", "dynamis_parameter_scan", "dynamis_scan", "dynamis_equilibrium", "vivarix", "vivarix_steady_state", "vivarix_scan")
         others = {k: r for k, r in tool_results.items() if r is not None and k not in _sim_keys and k != "lumicell"}
 
         def combined(primary: TaskOutcome) -> TaskOutcome:
@@ -841,7 +880,7 @@ class AuthoritativeOrchestrator:
             if primary.task_status != "completed":
                 return primary
             failed = sorted(k for k, r in others.items() if not r.success)
-            notes: List[str] = []
+            notes: list[str] = []
             if failed:
                 notes.append(f"{len(failed)} of {len(others)} other evidence sources failed ({', '.join(failed[:5])}).")
             if not llm_ok:
@@ -851,7 +890,7 @@ class AuthoritativeOrchestrator:
             return out("partial", primary.requested_operation, primary.executed_operation,
                        f"{primary.reason} {' '.join(notes)}".strip(), match=primary.request_match)
 
-        if plan is not None and getattr(ctx, "should_run", lambda _n: False)("vivarix"):
+        if plan is not None and (getattr(ctx, "should_run", lambda _n: False)("dynamis") or getattr(ctx, "should_run", lambda _n: False)("vivarix")):
             return combined(_simulation_outcome(plan))
 
         lum = tool_results.get("lumicell")
@@ -880,16 +919,16 @@ class AuthoritativeOrchestrator:
         thread_id: str,
         model_name: str = DEFAULT_ORCHESTRATOR_MODEL,
         enable_web_search: bool = True,
-        api_key: Optional[str] = None,
-        event_callback: Optional[Callable[[Dict[str, Any]], Coroutine[Any, Any, None]]] = None,
+        api_key: str | None = None,
+        event_callback: Callable[[dict[str, Any]], Coroutine[Any, Any, None]] | None = None,
         user_id: str = "default_user",
-        dataset_ids: Optional[List[str]] = None,
+        dataset_ids: list[str] | None = None,
         persist_memory: bool = True,
         recall_memory: bool = True,
-        framework: Optional[str] = None,
-        project_id: Optional[str] = None,
-        agent_options: Optional[Dict[str, Any]] = None,
-        run_control: Optional[RunControl] = None,
+        framework: str | None = None,
+        project_id: str | None = None,
+        agent_options: dict[str, Any] | None = None,
+        run_control: RunControl | None = None,
         interactive: bool = False,
     ) -> AuthoritativeOrchestrationResult:
         """
@@ -933,7 +972,7 @@ class AuthoritativeOrchestrator:
                 token = activate_recorder(rec)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Run recorder activation failed: %s", exc)
-        pending: Dict[str, Any] = {}  # planner task / search-plan future to stop if the turn ends early
+        pending: dict[str, Any] = {}  # planner task / search-plan future to stop if the turn ends early
         resolved_framework = agent_config.resolve_framework(framework, agent_config.CLASSIC)
         if rec is not None:
             try:  # PRV-004: what a full re-run needs to reproduce this run's configuration
@@ -944,7 +983,7 @@ class AuthoritativeOrchestrator:
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Run recorder request config failed: %s", exc)
-        control: Optional[RunControl] = None
+        control: RunControl | None = None
         if agent_config.is_agentic(resolved_framework):
             control = run_control or create_control(user_id, interactive)
         scope_cm: Any = contextlib.nullcontext()
@@ -1017,21 +1056,21 @@ class AuthoritativeOrchestrator:
         rec: Any,
         start_time: float,
         *,
-        pending: Optional[Dict[str, Any]] = None,
+        pending: dict[str, Any] | None = None,
         query: str,
         thread_id: str,
         model_name: str,
         enable_web_search: bool,
-        api_key: Optional[str],
-        event_callback: Optional[Callable[[Dict[str, Any]], Coroutine[Any, Any, None]]],
+        api_key: str | None,
+        event_callback: Callable[[dict[str, Any]], Coroutine[Any, Any, None]] | None,
         user_id: str,
-        dataset_ids: Optional[List[str]],
+        dataset_ids: list[str] | None,
         persist_memory: bool,
         recall_memory: bool,
         framework: str = agent_config.CLASSIC,
-        project_id: Optional[str] = None,
-        agent_options: Optional[Dict[str, Any]] = None,
-        control: Optional[RunControl] = None,
+        project_id: str | None = None,
+        agent_options: dict[str, Any] | None = None,
+        control: RunControl | None = None,
     ) -> AuthoritativeOrchestrationResult:
         run = RunContext(
             orch=self,
@@ -1089,7 +1128,7 @@ class AuthoritativeOrchestrator:
         return await finalize_stage.assemble_result(run)
 
 
-_GLOBAL_ORCHESTRATOR: Optional[AuthoritativeOrchestrator] = None
+_GLOBAL_ORCHESTRATOR: AuthoritativeOrchestrator | None = None
 
 
 def get_authoritative_orchestrator() -> AuthoritativeOrchestrator:

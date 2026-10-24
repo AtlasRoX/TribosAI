@@ -14,19 +14,24 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import datetime, timezone
+from collections.abc import Callable, Iterable
+from datetime import UTC, datetime
 from html import escape
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Any
 
 from ..extensions.hooks import get_evidence_decorators, get_prompt_components, get_prompt_rules
 
 # Who published a web page, from the record's own URL (one policy shared with citations, the verifier and exports).
-from ..utils.source_authority import SOURCE_AUTHORITY_LABELS, record_url, source_authority  # noqa: E402,F401
+from ..utils.source_authority import (  # noqa: E402,F401
+    SOURCE_AUTHORITY_LABELS,
+    record_url,
+    source_authority,
+)
 
 
 def utc_today() -> str:
     """Today's date in UTC (ISO) from the server clock: prompts state it rather than asking a model for it."""
-    return datetime.now(timezone.utc).date().isoformat()
+    return datetime.now(UTC).date().isoformat()
 
 
 def utc_date_line() -> str:
@@ -210,7 +215,7 @@ def _run_hook(fn: Callable[..., Any], *args: Any) -> Any:
 
 def _decorator_attrs(slot: str, payload: Any) -> str:
     """Extra XML attributes from every decorator of a slot, escaped, as ' key="value"' pairs."""
-    out: List[str] = []
+    out: list[str] = []
     for fn in get_evidence_decorators(slot):
         attrs = _run_hook(fn, payload)
         if isinstance(attrs, dict):
@@ -221,8 +226,8 @@ def _decorator_attrs(slot: str, payload: Any) -> str:
     return "".join(out)
 
 
-def _decorator_xml(slot: str, payload: Any) -> List[str]:
-    out: List[str] = []
+def _decorator_xml(slot: str, payload: Any) -> list[str]:
+    out: list[str] = []
     for fn in get_evidence_decorators(slot):
         xml = _run_hook(fn, payload)
         if isinstance(xml, str) and xml.strip():
@@ -237,7 +242,7 @@ def _json(value: Any) -> str:
     return escape(json.dumps(value, default=str), quote=False)
 
 
-def _endpoint_vs_steady_state(final: Dict[str, Any], steady: Dict[str, Any], tolerance: float = 0.05) -> str:
+def _endpoint_vs_steady_state(final: dict[str, Any], steady: dict[str, Any], tolerance: float = 0.05) -> str:
     """State whether the time course actually reached the computed steady state, so it is not assumed."""
     diffs = []
     for sp, end in final.items():
@@ -289,7 +294,7 @@ def _roman(numeral: str) -> str:
     return _PHASES[int(numeral) - 1] if numeral.isdigit() else numeral.upper()
 
 
-def _trial_phase(p: Dict[str, Any]) -> str:
+def _trial_phase(p: dict[str, Any]) -> str:
     """'III', 'I/II', ... from the indexed publication types, the title, or the passage opening."""
     tagged = sorted(
         {_roman(m.group(1)) for t in p.get("pub_types") or [] for m in _PHASE_RE.finditer(str(t))}, key=_PHASES.index
@@ -307,7 +312,7 @@ def _trial_phase(p: Dict[str, Any]) -> str:
 _INFERRED_SUFFIX = " (design inferred from wording, unverified)"
 
 
-def evidence_level(p: Dict[str, Any]) -> str:
+def evidence_level(p: dict[str, Any]) -> str:
     """A passage's evidence level in words on the answer's fixed scale (for example "phase III RCT").
 
     The level follows the article's grade only. An unclassified article is "unclassified": a phase or "patients"
@@ -336,7 +341,7 @@ def evidence_level(p: Dict[str, Any]) -> str:
     return level
 
 
-def level_attr(p: Dict[str, Any]) -> str:
+def level_attr(p: dict[str, Any]) -> str:
     """' evidence_level="..." ' for graded passages; ungraded ones keep the legacy rendering (setting only)."""
     level = evidence_level(p)
     graded = isinstance(p.get("evidence_grade"), dict) or level == "guideline"
@@ -370,7 +375,7 @@ _QUANT_SENTENCE_RE = re.compile(
 )
 
 
-def _result_ranges(text: str) -> List[tuple]:
+def _result_ranges(text: str) -> list[tuple]:
     """(start, end) spans of a structured abstract's Results / Conclusions segments."""
     labels = [(m.start(), m.group(0)) for m in _ABSTRACT_LABEL_RE.finditer(text)]
     out = []
@@ -409,7 +414,7 @@ def excerpt_passage(text: str, limit: int) -> tuple:
             score += 1.0
         return score
 
-    chosen: List[int] = []
+    chosen: list[int] = []
     used = 0
     for idx in sorted(range(len(spans)), key=lambda i: (-priority(i), i)):
         s, e = spans[idx]
@@ -421,7 +426,7 @@ def excerpt_passage(text: str, limit: int) -> tuple:
     if not chosen:
         return text[:limit].rsplit(" ", 1)[0] + " [...]", True
     chosen.sort()
-    pieces: List[str] = []
+    pieces: list[str] = []
     prev = -1
     for idx in chosen:
         if idx != prev + 1:
@@ -434,10 +439,10 @@ def excerpt_passage(text: str, limit: int) -> tuple:
     return " ".join(pieces), True
 
 
-def _literature_notes(lit: Dict[str, Any], excerpted: int, hidden: int) -> List[str]:
+def _literature_notes(lit: dict[str, Any], excerpted: int, hidden: int) -> list[str]:
     """Disclosures that travel with the literature evidence: the engine's limitations (Crossref availability,
     failed searches, excerpted full text, missing abstracts; LIT-005) and what this prompt cut (LIT-003)."""
-    out: List[str] = []
+    out: list[str] = []
     limitations = [str(x) for x in (lit.get("limitations") or []) if str(x).strip()]
     if limitations:
         out.append(
@@ -445,7 +450,7 @@ def _literature_notes(lit: Dict[str, Any], excerpted: int, hidden: int) -> List[
             + "".join(f"<limitation>{escape(x, quote=False)}</limitation>" for x in limitations)
             + "</literature_limitations>"
         )
-    notes: List[str] = []
+    notes: list[str] = []
     if excerpted:
         notes.append(
             f"{excerpted} document{'s are' if excerpted != 1 else ' is an'} excerpt{'s' if excerpted != 1 else ''} "
@@ -462,12 +467,12 @@ def _literature_notes(lit: Dict[str, Any], excerpted: int, hidden: int) -> List[
 
 
 def build_evidence_block(
-    tool_results: Dict[str, Any],
+    tool_results: dict[str, Any],
     discovery_markdown: str,
     passage_chars: int = LITERATURE_PASSAGE_CHARS,
     max_passages: int = LITERATURE_MAX_PASSAGES,
     query_context: Any = None,
-    extra_sections: Optional[List[str]] = None,
+    extra_sections: list[str] | None = None,
     literature_char_budget: int = LITERATURE_CHAR_BUDGET,
 ) -> str:
     """Render successful tool outputs as XML-tagged evidence and failed ones as <tool_status> entries.
@@ -475,11 +480,11 @@ def build_evidence_block(
     extra_sections are XML sections written by agentic phases, placed after the registered sources. Every value
     from a tool or the Discovery report is XML-escaped (ORC-010).
     """
-    parts: List[str] = ["<evidence>"]
+    parts: list[str] = ["<evidence>"]
     if query_context is not None:
         parts.extend(_decorator_xml("query_entities", query_context))
 
-    def ok(name: str) -> Optional[Dict[str, Any]]:
+    def ok(name: str) -> dict[str, Any] | None:
         res = tool_results.get(name)
         if res is not None and getattr(res, "success", False) and isinstance(getattr(res, "data", None), dict):
             return res.data
@@ -605,7 +610,7 @@ def build_evidence_block(
     return "\n".join(parts)
 
 
-def _plugin_evidence(tool_results: Dict[str, Any]) -> List[str]:
+def _plugin_evidence(tool_results: dict[str, Any]) -> list[str]:
     """Evidence XML from registered EvidenceSources whose results succeeded, in source order."""
     try:
         from ..sources import get_sources
@@ -614,7 +619,7 @@ def _plugin_evidence(tool_results: Dict[str, Any]) -> List[str]:
     except Exception as exc:  # noqa: BLE001
         logger.warning("Evidence sources unavailable for the evidence block: %s", exc)
         return []
-    out: List[str] = []
+    out: list[str] = []
     for src in sources:
         res = tool_results.get(src.key)
         if res is None or not getattr(res, "success", False):
@@ -629,7 +634,7 @@ def _plugin_evidence(tool_results: Dict[str, Any]) -> List[str]:
     return out
 
 
-def build_tool_status_block(tool_results: Dict[str, Any], scope_notes: Iterable[str]) -> str:
+def build_tool_status_block(tool_results: dict[str, Any], scope_notes: Iterable[str]) -> str:
     """Summarize which components failed or were deliberately skipped, so gaps can be reported honestly."""
     lines = ["<tool_status>"]
     for name, res in tool_results.items():
@@ -656,7 +661,7 @@ def build_synthesis_request(
     query: str,
     question_type: str = "general",
     research_brief: str = "",
-    retrieval_date: Optional[str] = None,
+    retrieval_date: str | None = None,
 ) -> str:
     """User-turn content for synthesis: evidence first, instructions next, the question last.
 

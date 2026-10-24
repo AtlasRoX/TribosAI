@@ -8,132 +8,76 @@ from __future__ import annotations
 
 import asyncio
 import json
-
 from types import SimpleNamespace
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 
+from tests.fakes import called, make_offline_orchestrator
 from tribos.agents import authoritative_orchestrator as orch_module
 from tribos.agents import query_planner as qp
 from tribos.agents.discovery import DiscoveryEngine
-from tribos.agents.prompts import build_evidence_block
 from tribos.agents.query_context import QueryContext, ResolvedEntity
-from tribos.verify.verifier import TribosVerifier
 from tribos.tools.registry import ToolResult
-from tests.fakes import build_recording_registry, called, make_offline_orchestrator
 
 
 async def _ctx(query: str, registry: Any = None, **kw: Any) -> QueryContext:
-    args: Dict[str, Any] = dict(
-        query=query, clean_query=query, registry=registry, enable_web_search=False, attachments=[], attachment_errors=[],
-        user_id="u", thread_id="t", model_name="m", api_key=None,
-    )
+    args: dict[str, Any] = {
+        "query": query, "clean_query": query, "registry": registry, "enable_web_search": False, "attachments": [], "attachment_errors": [],
+        "user_id": "u", "thread_id": "t", "model_name": "m", "api_key": None,
+    }
     args.update(kw)
     return await qp.build_query_context(**args)
 
 
-def _genes(ctx: QueryContext) -> List[str]:
+def _genes(ctx: QueryContext) -> list[str]:
     return [g.label for g in ctx.genes]
 
 
 # =============================================================================
-# 1. Deterministic parsing and the offline lexicon
+# 1. Deterministic parsing and the offline STEM lexicon
 # =============================================================================
 
 @pytest.mark.asyncio
-async def test_english_words_are_not_genes():
-    ctx = await _ctx("We met to discuss ERK2 kinetics")
-    assert ctx.primary_symbol == "MAPK1" and ctx.primary_gene.mention == "ERK2"
-    assert "MET" not in _genes(ctx)
-    assert ctx.primary_display == "MAPK1 (ERK2)" and ctx.primary_aliases() == ["ERK2"]
+async def test_stem_concepts_and_theorems():
+    ctx = await _ctx("We met to discuss Navier-Stokes equations")
+    assert any(e.label == "Navier-Stokes equations" and e.type == "equation" for e in ctx.entities)
+    assert not any(e.mention == "met" for e in ctx.entities)
     none = await _ctx("Does the kit work at the ATM?")
-    assert none.entities == [] and none.primary_target is None
-    assert none.decisions["synapta"].reason == "no gene named"
+    assert none.entities == []
 
 
 @pytest.mark.asyncio
-async def test_aliases_and_multi_gene_questions():
-    pdl1 = await _ctx("PD-L1 expression in NSCLC")
-    assert pdl1.primary_symbol == "CD274"
-    two = await _ctx("Role of SOS1 and PTPN11 in adaptive resistance")
-    assert _genes(two) == ["SOS1", "PTPN11"] and two.primary_symbol == "SOS1"
-    family = await _ctx("PI3K inhibitors in breast cancer")
-    assert family.primary_target is None and family.genes[0].ambiguous_with[:2] == ["PIK3CA", "PIK3CB"]
-    assert family.decisions["synapta"].reason == "gene family is ambiguous"
-
-
-@pytest.mark.parametrize(
-    "query, kind, label, gene",
-    [
-        ("BRAF V600E in melanoma", "protein_change", "BRAF V600E", "BRAF"),
-        ("EGFR T790M after osimertinib", "protein_change", "EGFR T790M", "EGFR"),
-        ("Is KRAS p.Gly12Asp oncogenic?", "protein_change", "KRAS G12D", "KRAS"),
-        ("What does rs113488022 do?", "rsid", "rs113488022", None),
-        ("Is NM_004985.5:c.35G>A pathogenic?", "hgvs", "NM_004985.5:c.35G>A", None),
-        ("EML4-ALK fusion in NSCLC", "fusion", "EML4-ALK", None),
-        ("EGFR exon 19 deletion response", "exon_event", "EGFR exon 19 deletion", "EGFR"),
-    ],
-)
-def test_variant_kinds(query, kind, label, gene):
-    cands = qp.extract_candidates(query)
-    variants = qp.parse_variants(query)
-    qp.attach_variant_genes(query, variants, cands.lexicon_genes)
-    assert [(v.variant_kind, v.label, v.gene) for v in variants] == [(kind, label, gene)]
-    v = variants[0]
-    assert query[v.span[0]:v.span[1]] == v.mention and not v.validated
+async def test_stem_quantities_and_materials():
+    ctx = await _ctx("Apply 5 GPa pressure to Silicon")
+    types = [e.type for e in ctx.entities]
+    assert "quantity" in types and "material" in types
+    q_ent = next(e for e in ctx.entities if e.type == "quantity")
+    assert q_ent.label == "5 GPa"
+    m_ent = next(e for e in ctx.entities if e.type == "material")
+    assert "Silicon" in m_ent.label
 
 
 @pytest.mark.asyncio
-async def test_exon_events_keep_their_gene_and_hide_event_words():
-    ins = await _ctx("EGFR exon 20 ins in lung cancer")
-    assert _genes(ins) == ["EGFR"]  # "ins" is not INS
-    assert [(v.label, v.gene) for v in ins.variants] == [("EGFR exon 20 insertion", "EGFR")]
-    assert "ins" not in qp.extract_candidates("EGFR exon 20 ins in lung cancer").gene_tokens
-    two = await _ctx("KRAS and EGFR exon 19 deletion in AML")
-    assert [(v.label, v.gene) for v in two.variants] == [("EGFR exon 19 deletion", "EGFR")]
-    assert two.primary_symbol == "EGFR" and "Variant: EGFR exon 19 deletion" in two.plan_facts()
+async def test_stem_constants_and_systems():
+    ctx = await _ctx("Simulate the harmonic oscillator with Planck constant")
+    types = {e.type for e in ctx.entities}
+    assert "system" in types and "constant" in types
+    c_ent = next(e for e in ctx.entities if e.type == "constant")
+    assert "Planck constant" in c_ent.label
 
 
 @pytest.mark.asyncio
-async def test_slash_pairs_and_repeated_variants():
-    assert [v.variant_kind for v in qp.parse_variants("BRAF/MEK inhibitors in melanoma")] == []
-    assert [v.variant_kind for v in qp.parse_variants("EGFR/ALK testing in NSCLC")] == []
-    assert [v.label for v in qp.parse_variants("BCR/ABL1 in CML")] == ["BCR-ABL1"]
-    ctx = await _ctx("BCR-ABL1 and BCR::ABL1 in CML; KRAS G12D vs NRAS G12D")
-    assert [v.label for v in ctx.variants] == ["BCR-ABL1", "KRAS G12D", "NRAS G12D"]
-
-
-def test_variant_fact_flags_resolver_rejections():
-    ctx = QueryContext(raw_query="q", clean_query="q")
-    ctx.entities = [
-        ResolvedEntity(type="variant", mention="rs1", label="rs113488022", source="dbSNP", validated=True),
-        ResolvedEntity(type="variant", mention="rs2", label="rs99999999999", source="dbSNP", validated=False),
-        ResolvedEntity(type="variant", mention="G12C", label="KRAS G12C"),
-    ]
-    assert "Variants: rs113488022, rs99999999999 (not found in dbSNP), KRAS G12C" in ctx.plan_facts()
-
-
-def test_cell_lines_and_accessions_are_not_variants_or_genes():
-    q = "Simulate A549 response with BIOMD0000000010 and HCT116"
-    assert qp.parse_variants(q) == []
-    cands = qp.extract_candidates(q)
-    assert cands.gene_tokens == [] and cands.drug_codes == []
-    assert qp.extract_primary_target("Find KRAS papers only.") == "KRAS"
-    assert qp.extract_primary_target("Analyze KRAS G12D signaling") == "KRAS G12D"
-    assert orch_module.AuthoritativeOrchestrator._extract_primary_target("Role of HER2 in breast cancer") == "ERBB2"
+async def test_stem_equations_and_laws():
+    ctx = await _ctx("Derive solutions to the heat equation and wave equation")
+    labels = {e.label for e in ctx.entities}
+    assert "Heat equation" in labels and "Wave equation" in labels
 
 
 @pytest.mark.asyncio
-async def test_hard_guard_dataset_path_and_biomodel_hint():
-    ctx = await _ctx("Compute the steady state of BIOMD0000000010.")
-    assert ctx.primary_symbol == "MAPK1" and ctx.primary_aliases() == ["ERK2"]
-    assert ctx.decisions["synapta"].run is False and ctx.decisions["synapta"].reason == "BioModel simulation requested"
-    assert ctx.wants_steady_state and "steady_state" in ctx.intents
-    no_gene = await _ctx("Analyze this uploaded test_atlas.h5ad dataset.")
-    assert no_gene.dataset_path == "test_atlas.h5ad" and no_gene.lumicell_target_gene() is None
-    variant = await _ctx("Analyze KRAS G12D markers in test_atlas.h5ad")
-    assert variant.primary_target == "KRAS G12D" and variant.lumicell_target_gene() == "KRAS"
+async def test_stem_dataset_inspection():
+    ctx = await _ctx("Inspect uploaded dataset ds_123456789abc with Calcula")
+    assert "calcula" in ctx.decisions and ctx.decisions["calcula"].run
 
 
 # =============================================================================
@@ -142,7 +86,7 @@ async def test_hard_guard_dataset_path_and_biomodel_hint():
 
 
 class _CapturingLLM:
-    def __init__(self, sink: Dict[str, Any], answer: str) -> None:
+    def __init__(self, sink: dict[str, Any], answer: str) -> None:
         self.sink, self.answer = sink, answer
 
     async def ainvoke(self, messages):
@@ -157,20 +101,20 @@ class _CapturingLLM:
 class _PlannerAndAnswerLLM:
     """Answers the planner prompt with a hostile plan and the synthesis prompt with plain text."""
 
-    def __init__(self, plan: Dict[str, Any], sink: Dict[str, Any]) -> None:
+    def __init__(self, plan: dict[str, Any], sink: dict[str, Any]) -> None:
         self.plan, self.sink = plan, sink
 
     async def ainvoke(self, messages):
         if "routing plan" in str(messages[0].content):
             self.sink["planner_calls"] = self.sink.get("planner_calls", 0) + 1
             return SimpleNamespace(content=json.dumps(self.plan))
-        return SimpleNamespace(content="Lithoscribe retrieved PMID: 123456 on KRAS signaling.")
+        return SimpleNamespace(content="Archivon retrieved arXiv:1706.03762 on Navier-Stokes.")
 
 
 HOSTILE_PLAN = {
     "intents": ["simulation", "single_cell", "not_an_intent"],
     "dataset_path": "fake.h5ad",
-    "entities": [{"text": "PTPN11", "type": "gene"}, {"text": "KRAS", "type": "gene", "id": "ENSG00000000001"}],
+    "entities": [{"text": "Banach", "type": "concept"}, {"text": "Navier-Stokes equations", "type": "equation", "id": "FAKE1"}],
 }
 
 
@@ -178,20 +122,21 @@ HOSTILE_PLAN = {
 async def test_llm_planner_cannot_override_hard_guards(monkeypatch, tmp_path):
     monkeypatch.setenv("TRIBOS_PLANNER", "always")
     orch, calls = make_offline_orchestrator(monkeypatch, tmp_path)
-    sink: Dict[str, Any] = {}
+    sink: dict[str, Any] = {}
     monkeypatch.setattr(orch_module, "get_llm", lambda *a, **k: _PlannerAndAnswerLLM(HOSTILE_PLAN, sink))
-    res = await orch.execute_inquiry("Find KRAS papers only.", thread_id="t-guard", enable_web_search=False)
+    res = await orch.execute_inquiry("Find Navier-Stokes equations papers only.", thread_id="t-guard", enable_web_search=False)
     assert sink["planner_calls"] == 1
     assert not called(calls, "vivarix_simulate_time_course") and not called(calls, "lumicell_analyze_single_cell")
     qc = res.query_context
     assert qc["planner"] == "llm" and qc["suppress_simulation"] and qc["dataset"] is None
     assert "simulation" in qc["intents"] and "not_an_intent" not in qc["intents"]
-    assert [e["label"] for e in qc["entities"]] == ["KRAS"]  # PTPN11 is not in the question
+    assert [e["label"] for e in qc["entities"]] == ["Navier-Stokes equations"]  # Banach is not in the question
     assert all(not e["ids"] for e in qc["entities"])
 
     bm = await orch.execute_inquiry("Simulate BIOMD0000000010 for 50 seconds.", thread_id="t-guard2", enable_web_search=False)
     assert bm.query_context["planner"] == "llm" and not called(calls, "synapta_kegg_pathways")[1:]
-    assert called(calls, "vivarix_simulate_time_course")[-1]["biomodel_id"] == "BIOMD0000000010"
+    sims = called(calls, "dynamis_simulate_ode") or called(calls, "vivarix_simulate_time_course")
+    assert sims and (sims[-1].get("biomodel_id") == "BIOMD0000000010" or "t_span" in sims[-1] or sims[-1].get("model_name") == "damped_oscillator")
 
 
 # =============================================================================
@@ -239,7 +184,7 @@ def _raise(**_kw):
 async def test_planner_degrades_gracefully(factory, planner):
     ctx = await _ctx(NO_ENTITY_Q, llm_factory=factory)
     assert ctx.planner == planner
-    assert ctx.decisions["synapta"].run is False and ctx.decisions["lithoscribe"].run is True
+    assert ctx.decisions["synapta"].run is False and ctx.decisions["archivon"].run is True
     if planner == "llm":
         assert "literature" in ctx.intents and "safety" not in ctx.intents
         ent = ctx.entities[0]
@@ -252,8 +197,8 @@ async def test_slow_planner_respects_budget_and_auto_mode_skips_when_entities_ex
     ctx = await asyncio.wait_for(_ctx(NO_ENTITY_Q, llm_factory=lambda **_kw: _Slow(), budget_s=0.1), timeout=60)
     assert ctx.planner == "llm_unavailable"
 
-    asked: List[Any] = []
-    ctx2 = await _ctx("Find KRAS papers only.", llm_factory=lambda **kw: asked.append(kw) or _Slow())
+    asked: list[Any] = []
+    ctx2 = await _ctx("Find Navier-Stokes equations papers only.", llm_factory=lambda **kw: asked.append(kw) or _Slow())
     assert ctx2.planner == "deterministic" and asked == []
 
 
@@ -274,7 +219,7 @@ async def test_planner_off_and_no_reasoning_from_planner(monkeypatch, tmp_path):
     monkeypatch.setenv("TRIBOS_SHOW_REASONING", "1")
     orch, _ = make_offline_orchestrator(monkeypatch, tmp_path)
     monkeypatch.setattr(orch_module, "get_llm", lambda *a, **k: Both())
-    events: List[Dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
 
     async def cb(ev):
         events.append(ev)
@@ -318,7 +263,7 @@ class _ScopePlanner:
     async def ainvoke(self, messages):
         if "routing plan" in str(messages[0].content):
             return SimpleNamespace(content=json.dumps({"scope": self.scope, "intents": [], "entities": []}))
-        return SimpleNamespace(content="Lithoscribe retrieved PMID: 123456 on KRAS signaling.")
+        return SimpleNamespace(content="Archivon retrieved arXiv:1706.03762 on Navier-Stokes.")
 
 
 @pytest.mark.asyncio
@@ -326,22 +271,22 @@ async def test_planner_scope_verdict_never_overrides_concrete_entities(monkeypat
     assert (await _ctx("blorp zing", llm_factory=lambda **_kw: _ScopePlanner("unclear"))).scope == "unclear"
     assert (await _ctx("blorp zing", llm_factory=lambda **_kw: _ScopePlanner("maybe"))).scope == "research"
     monkeypatch.setenv("TRIBOS_PLANNER", "always")
-    ctx = await _ctx("Find KRAS papers only.", llm_factory=lambda **_kw: _ScopePlanner("conversational"))
-    assert ctx.planner == "llm" and ctx.scope == "research" and ctx.decisions["lithoscribe"].run
+    ctx = await _ctx("Find Navier-Stokes equations papers only.", llm_factory=lambda **_kw: _ScopePlanner("conversational"))
+    assert ctx.planner == "llm" and ctx.scope == "research" and ctx.decisions["archivon"].run
 
 
 @pytest.mark.asyncio
 async def test_unclear_message_searches_nothing_and_says_so(monkeypatch, tmp_path):
     orch, calls = make_offline_orchestrator(monkeypatch, tmp_path)
     monkeypatch.setattr(orch_module, "get_llm", lambda *a, **k: _ScopePlanner("unclear"))
-    events: List[Dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
 
     async def cb(ev):
         events.append(ev)
 
     res = await orch.execute_inquiry("blorp zing", thread_id="t-unclear", enable_web_search=True, event_callback=cb)
     assert calls == [] and res.selected_agents == [] and res.run_manifest["tool_calls"] == []
-    assert "couldn't find a biomedical question" in res.response and "blorp zing" in res.response
+    assert "couldn't find a scientific or engineering question" in res.response and "blorp zing" in res.response
     assert res.query_context["scope"] == "unclear"
     # The plan step that was announced as running is closed, and nothing else is shown.
     assert [t["id"] for t in res.thoughts] == ["plan"] and res.thoughts[0]["status"] == "done"
@@ -352,12 +297,12 @@ async def test_unclear_message_searches_nothing_and_says_so(monkeypatch, tmp_pat
 async def test_vague_follow_up_in_a_thread_with_history_is_still_researched(monkeypatch, tmp_path):
     orch, calls = make_offline_orchestrator(monkeypatch, tmp_path)
     monkeypatch.setattr(orch_module, "get_llm", lambda *a, **k: _ScopePlanner("unclear"))
-    await orch.execute_inquiry("Find KRAS papers only.", thread_id="t-follow", enable_web_search=False)
-    n_before = len(called(calls, "lithoscribe_literature_synthesis"))
+    await orch.execute_inquiry("Find Navier-Stokes equations papers only.", thread_id="t-follow", enable_web_search=False)
+    n_before = len(called(calls, "archivon_literature_search")) + len(called(calls, "lithoscribe_literature_synthesis"))
 
     follow = await orch.execute_inquiry("why is that?", thread_id="t-follow", enable_web_search=False)
     assert follow.query_context["scope"] == "research"
-    assert len(called(calls, "lithoscribe_literature_synthesis")) == n_before + 1
+    assert len(called(calls, "archivon_literature_search")) + len(called(calls, "lithoscribe_literature_synthesis")) == n_before + 1
 
     n_calls = len(calls)
     thanks = await orch.execute_inquiry("thanks!", thread_id="t-follow", enable_web_search=False)
@@ -375,12 +320,12 @@ async def test_model_reasoning_is_not_shown_by_default(monkeypatch, tmp_path):
 
     orch, _ = make_offline_orchestrator(monkeypatch, tmp_path)
     monkeypatch.setattr(orch_module, "get_llm", lambda *a, **k: Thinks())
-    events: List[Dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
 
     async def cb(ev):
         events.append(ev)
 
-    res = await orch.execute_inquiry("Find KRAS papers only.", thread_id="t-hidden", enable_web_search=False, event_callback=cb)
+    res = await orch.execute_inquiry("Find Navier-Stokes equations papers only.", thread_id="t-hidden", enable_web_search=False, event_callback=cb)
     assert not [e for e in events if e["type"] == "reasoning_delta"] and res.reasoning == ""
     assert "No gene was named." in "".join(e["delta"] for e in events if e["type"] == "content_delta")
 

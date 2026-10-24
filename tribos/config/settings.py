@@ -19,9 +19,10 @@ import logging
 import math
 import os
 import threading
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +55,9 @@ class Setting:
     description: str = ""
     group: str = "Other"
     secret: bool = False
-    choices: Optional[Tuple[str, ...]] = None
-    min: Optional[float] = None
-    max: Optional[float] = None
+    choices: tuple[str, ...] | None = None
+    min: float | None = None
+    max: float | None = None
     aliases: Mapping[str, str] = field(default_factory=dict)  # accepted spellings -> choice
     sep: str = ","  # list separator
 
@@ -66,7 +67,7 @@ class Setting:
 
 
 # Groups in documentation order: title -> variable prefix shown in the heading ("" = none).
-GROUPS: Dict[str, str] = {
+GROUPS: dict[str, str] = {
     "State directories": "",
     "Retention and maintenance": "",
     "Authentication": "",
@@ -113,7 +114,7 @@ _TEST = "Testing"
 _SETTINGS: Sequence[Setting] = (
     # --- State directories ---------------------------------------------------------------------------------------
     Setting("TRIBOS_DATA_DIR", "path", None, "One data root (`~` expanded): memory/, runs/, uploads/, jobs/, tool_cache/ default under it.", _DIRS),
-    Setting("TRIBOS_MEMORY_DIR", "path", None, "Clinical memory vault directory (wins over TRIBOS_DATA_DIR); also the projects store fallback.", _DIRS),
+    Setting("TRIBOS_MEMORY_DIR", "path", None, "Research memory vault directory (wins over TRIBOS_DATA_DIR); also the projects store fallback.", _DIRS),
     Setting("TRIBOS_PROJECTS_DIR", "path", None, "Projects store directory (wins over TRIBOS_MEMORY_DIR and TRIBOS_DATA_DIR).", _DIRS),
     Setting("TRIBOS_RUNS_DIR", "path", None, "Run-manifest store (wins over TRIBOS_DATA_DIR; also hosts jobs/ and tool_cache/).", _DIRS),
     Setting("TRIBOS_UPLOAD_ROOT", "path", None, "Uploaded datasets directory (wins over TRIBOS_DATA_DIR).", _DIRS),
@@ -232,23 +233,21 @@ _SETTINGS: Sequence[Setting] = (
     Setting("TAVILY_API_KEY", "str", None, "Tavily web search (first provider when set).", _WEB, secret=True),
     Setting("TRIBOS_SEARXNG_URL", "str", None, "Base URL of a SearXNG instance with the JSON format enabled (used after Tavily).", _WEB),
     # --- Data sources ----------------------------------------------------------------------------------------------
+    Setting("TRIBOS_S2_API_KEY", "str", None, "Optional Semantic Scholar API key for higher rate limits in Archivon.", _SRC, secret=True),
+    Setting("TRIBOS_OPENALEX_API_KEY", "str", None, "Optional OpenAlex API key for polite/premium pool requests in Archivon.", _SRC, secret=True),
+    Setting("TRIBOS_ADS_API_TOKEN", "str", None, "Optional NASA ADS Bearer API token for astrophysics literature search in Archivon.", _SRC, secret=True),
+    Setting("TRIBOS_WOLFRAM_APPID", "str", None, "Optional Wolfram|Alpha LLM API AppID for Physis external reference queries.", _SRC, secret=True),
+    Setting("TRIBOS_MP_API_KEY", "str", None, "Optional Materials Project API v2 key for live crystalline/electronic material queries in Physis.", _SRC, secret=True),
+    Setting("TRIBOS_CONTACT_EMAIL", "str", "contact@tribos.science", "Polite-pool contact e-mail sent in User-Agent headers for arXiv, Crossref, OpenAlex, and Wikipedia.", _SRC),
     Setting("NCBI_API_KEY", "str", None, "NCBI E-utilities key (raises the rate limit from 3 to 10 requests/s).", _SRC, secret=True),
-    Setting("NCBI_EMAIL", "str", None, "Contact e-mail sent with NCBI E-utilities requests.", _SRC),
     Setting("TRIBOS_CROSSREF_MAILTO", "str", None, "Contact e-mail for the Crossref polite pool (citation integrity checks).", _SRC),
-    Setting("BIOCONTEXT_MCP_URL", "str", "https://mcp.biocontext.ai/mcp/", "BioContext MCP server URL.", _SRC),
-    Setting("BIOCONTEXT_TIMEOUT", "float", 25.0, "BioContext and direct-adapter request timeout in seconds.", _SRC),
     Setting("TRIBOS_PROVENANCE_PROBES", "str", "auto", "Live source-version probes for run manifests: off, auto (off under pytest) or on.", _SRC, choices=SWITCH, aliases=SWITCH_ALIASES),
     # --- Uploads and datasets --------------------------------------------------------------------------------------
     Setting("TRIBOS_UPLOAD_MAX_MB_H5AD", "float", 500.0, "Largest .h5ad upload in MB.", _UP),
     Setting("TRIBOS_UPLOAD_MAX_MB_CSV", "float", 100.0, "Largest table (CSV/TSV) upload in MB.", _UP),
-    Setting("TRIBOS_UPLOAD_MAX_MB_SBML", "float", 10.0, "Largest SBML model upload in MB.", _UP),
+    Setting("TRIBOS_UPLOAD_MAX_MB_HDF5", "float", 500.0, "Largest HDF5 (.h5/.hdf5) upload in MB.", _UP),
     Setting("TRIBOS_UPLOAD_MAX_TOTAL_MB", "float", 2048.0, "Total upload storage per user in MB.", _UP),
     Setting("TRIBOS_UPLOAD_MAX_DATASETS", "int", 50, "Uploaded datasets kept per user.", _UP),
-    # --- Simulation and single-cell analysis -----------------------------------------------------------------------
-    Setting("TRIBOS_COPASI_LOCK_WAIT", "float", 20.0, "Seconds a simulation waits for COPASI to be free before timing out.", _SIM),
-    Setting("TRIBOS_CALIBRATION_BACKEND", "str", "least_squares", "Model calibration backend: least_squares or copasi.", _SIM, choices=("least_squares", "copasi")),
-    Setting("TRIBOS_BIOMODELS_REVISION_CHECK", "str", "auto", "Check BioModels revisions over network: off, auto (off under pytest) or on.", _SIM, choices=SWITCH, aliases=SWITCH_ALIASES),
-    Setting("TRIBOS_BIOMODELS_REVISION_TTL_S", "float", 86400.0, "Seconds a cached BioModels SBML download is trusted before checking its revision.", _SIM, min=0.0),
     # --- Code sandbox ----------------------------------------------------------------------------------------------
     Setting("TRIBOS_SANDBOX", "bool", False, "Enable the code-execution sandbox tool (on/1/true/yes).", _SBX),
     Setting("TRIBOS_SANDBOX_TIMEOUT_S", "int", 60, "Seconds one sandboxed execution may run.", _SBX, min=5, max=110),
@@ -257,6 +256,7 @@ _SETTINGS: Sequence[Setting] = (
     Setting("TRIBOS_EVAL_CACHE", "path", None, "Downloaded benchmark datasets cache (default ~/.cache/tribos/evals).", _EVAL),
     Setting("TRIBOS_EVAL_TOKEN", "str", None, "Bearer token the eval runner sends to a remote Tribos API.", _EVAL, secret=True),
     Setting("TRIBOS_CASSETTE_PROMPTS", "bool", False, "Store full normalised prompts in recorded eval cassettes (easier miss diagnosis, larger files).", _EVAL),
+    Setting("HF_TOKEN", "str", None, "Hugging Face user access token for gated benchmark downloads (GPQA Diamond).", _EVAL, secret=True),
     # --- Milvus and the PrimeKG vector dump ------------------------------------------------------------------------
     # --- Streamlit frontend ----------------------------------------------------------------------------------------
     # --- Testing ---------------------------------------------------------------------------------------------------
@@ -264,7 +264,7 @@ _SETTINGS: Sequence[Setting] = (
     Setting("TRIBOS_LOAD_DOTENV", "bool", True, "Load the workspace `.env` when the API module is imported; tests/conftest.py sets 0 so a developer `.env` never reaches pytest.", _TEST),
 )
 
-REGISTRY: Dict[str, Setting] = {s.name: s for s in _SETTINGS}
+REGISTRY: dict[str, Setting] = {s.name: s for s in _SETTINGS}
 if len(REGISTRY) != len(_SETTINGS):  # pragma: no cover - guards copy/paste mistakes at import
     raise RuntimeError("duplicate names in the settings registry")
 for _s in _SETTINGS:
@@ -276,7 +276,7 @@ for _s in _SETTINGS:
 # Accessors
 # -----------------------------------------------------------------------------
 
-_warned: Set[Tuple[str, str]] = set()
+_warned: set[tuple[str, str]] = set()
 _warn_lock = threading.Lock()
 
 
@@ -286,7 +286,7 @@ def _reset_warnings() -> None:
         _warned.clear()
 
 
-def _shown(setting: Optional[Setting], raw: str) -> str:
+def _shown(setting: Setting | None, raw: str) -> str:
     return "<redacted>" if setting is not None and setting.secret else repr(raw)
 
 
@@ -299,7 +299,7 @@ def _warn_once(name: str, raw: str, message: str) -> None:
     logger.warning("%s", message)
 
 
-def _raw(name: str) -> Optional[str]:
+def _raw(name: str) -> str | None:
     """The stripped value, or None when the variable is unset or blank."""
     value = os.environ.get(name)
     if value is None:
@@ -308,7 +308,7 @@ def _raw(name: str) -> Optional[str]:
     return value or None
 
 
-def _lookup(name: str, default: Any) -> Tuple[Optional[Setting], Any]:
+def _lookup(name: str, default: Any) -> tuple[Setting | None, Any]:
     setting = REGISTRY.get(name)
     if default is _UNSET:
         if setting is None:
@@ -317,7 +317,7 @@ def _lookup(name: str, default: Any) -> Tuple[Optional[Setting], Any]:
     return setting, default
 
 
-def _bounds(setting: Optional[Setting], lo: Any, hi: Any) -> Tuple[Optional[float], Optional[float]]:
+def _bounds(setting: Setting | None, lo: Any, hi: Any) -> tuple[float | None, float | None]:
     if lo is _UNSET:
         lo = setting.min if setting is not None else None
     if hi is _UNSET:
@@ -325,7 +325,7 @@ def _bounds(setting: Optional[Setting], lo: Any, hi: Any) -> Tuple[Optional[floa
     return lo, hi
 
 
-def _clamp(value: Any, lo: Optional[float], hi: Optional[float]) -> Any:
+def _clamp(value: Any, lo: float | None, hi: float | None) -> Any:
     # max(lo, min(hi, value)), the order of the historical env helpers.
     if hi is not None:
         value = min(hi, value)
@@ -409,7 +409,7 @@ def get_str(name: str, default: Any = _UNSET, *, choices: Any = _UNSET) -> Any:
     return default
 
 
-def get_path(name: str, default: Any = _UNSET) -> Optional[Path]:
+def get_path(name: str, default: Any = _UNSET) -> Path | None:
     """The variable as a Path (`~` expanded), or the default (None unless registered/passed) when unset/blank."""
     _, default = _lookup(name, default)
     raw = _raw(name)
@@ -418,7 +418,7 @@ def get_path(name: str, default: Any = _UNSET) -> Optional[Path]:
     return Path(os.path.expanduser(raw))
 
 
-def get_list(name: str, default: Any = _UNSET) -> List[str]:
+def get_list(name: str, default: Any = _UNSET) -> list[str]:
     """The variable split on its separator (`,` unless registered otherwise), items stripped, blanks dropped."""
     setting, default = _lookup(name, default)
     sep = setting.sep if setting is not None else ","
@@ -437,7 +437,7 @@ def get_list(name: str, default: Any = _UNSET) -> List[str]:
 # Validation
 # -----------------------------------------------------------------------------
 
-def _problem(setting: Setting, raw: str) -> Optional[str]:
+def _problem(setting: Setting, raw: str) -> str | None:
     shown = _shown(setting, raw)
     if setting.type in ("int", "float"):
         kind = int if setting.type == "int" else float
@@ -468,11 +468,11 @@ def _problem(setting: Setting, raw: str) -> Optional[str]:
     return None
 
 
-def validate_environment(environ: Optional[Mapping[str, str]] = None) -> List[str]:
+def validate_environment(environ: Mapping[str, str] | None = None) -> list[str]:
     """Human-readable configuration problems: unparsable or out-of-range numbers, unknown choices, non-boolean
     flags, and TRIBOS_* variables that no code reads (likely typos, with a suggestion). Never raises."""
     env = os.environ if environ is None else environ
-    problems: List[str] = []
+    problems: list[str] = []
     for name, setting in REGISTRY.items():
         value = env.get(name)
         if value is None or not value.strip():
@@ -514,7 +514,7 @@ def describe_type(setting: Setting) -> str:
     return text
 
 
-def format_default(setting: Setting) -> Optional[str]:
+def format_default(setting: Setting) -> str | None:
     """The registered default as it would be written in a .env file (None when there is none)."""
     value = setting.default
     if value is None:

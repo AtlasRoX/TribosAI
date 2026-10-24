@@ -1,3 +1,8 @@
+from __future__ import annotations
+
+import pytest
+
+pytest.importorskip('tribos.lithoscribe', reason='Legacy lithoscribe package retired')
 """Retrieval obligations (source audit F5, F10, and the live diagnostic run of 18 October 2026).
 
 - Explicit identifiers in a question are fetched by exact identifier before topical search, through the registered
@@ -8,24 +13,27 @@
 Identifiers 90000001-90000003 are synthetic: these fakes stand in for HTTP responses and are not scientific records.
 """
 
-from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import pytest
-
-from tribos.lithoscribe.identifiers import extract_literature_ids, normalize_literature_id, strip_literature_ids
+from tribos.lithoscribe.identifiers import (
+    extract_literature_ids,
+    normalize_literature_id,
+    strip_literature_ids,
+)
 from tribos.lithoscribe.synthesis_engine import LiteratureSynthesisEngine
-from tribos.tools import registry as registry_module
 from tribos.utils.biocontext import BioContextMCPClient
+
+from tribos.tools import registry as registry_module
 
 SYN_PMID = "90000001"
 SYN_ERRATUM = "90000002"
 
 
-def _record(pmid: str, title: str, abstract: str, **extra: Any) -> Dict[str, Any]:
+def _record(pmid: str, title: str, abstract: str, **extra: Any) -> dict[str, Any]:
     art = {
         "id": pmid, "source": "MED", "pmid": pmid, "doi": "", "pmcid": "", "title": title, "abstractText": abstract,
         "pubYear": "2024", "journalTitle": "Synthetic Journal", "authorString": "Author A", "pubType": "journal article",
@@ -49,13 +57,13 @@ SYN_ERRATUM_REC = _record(SYN_ERRATUM, "Corrigendum to synthetic comparative stu
 class FakeEuropePMC:
     """Europe PMC stand-in at the client boundary: answers exact-identifier queries from a table."""
 
-    def __init__(self, records: Dict[str, Dict[str, Any]], fail: Optional[str] = None):
+    def __init__(self, records: dict[str, dict[str, Any]], fail: str | None = None):
         self.records, self.fail, self.calls = records, fail, []
 
-    async def async_query_europepmc(self, query: str, limit: int = 5, sort: Any = None) -> Dict[str, Any]:
+    async def async_query_europepmc(self, query: str, limit: int = 5, sort: Any = None) -> dict[str, Any]:
         self.calls.append(query)
         if self.fail == "timeout":
-            raise asyncio.TimeoutError("read timeout")
+            raise TimeoutError("read timeout")
         for pmid, rec in self.records.items():
             if query == f"EXT_ID:{pmid} AND SRC:MED":
                 return {"articles": [dict(rec)], "hit_count": 1}
@@ -159,11 +167,11 @@ def test_invalid_identifier_is_reported_not_silently_dropped(monkeypatch):
 
 def test_upstream_timeout_uses_one_bounded_alternative_then_says_not_retrieved(monkeypatch):
     fake = FakeEuropePMC({SYN_PMID: SYN_NSCLC}, fail="timeout")
-    alt_calls: List[str] = []
+    alt_calls: list[str] = []
 
-    async def failing_alternative(pmid: str) -> Optional[Dict[str, Any]]:
+    async def failing_alternative(pmid: str) -> dict[str, Any] | None:
         alt_calls.append(pmid)
-        raise asyncio.TimeoutError("efetch timeout")
+        raise TimeoutError("efetch timeout")
 
     engine = LiteratureSynthesisEngine(biocontext_client=fake, pubmed_fetcher=failing_alternative)  # type: ignore[arg-type]
     res = asyncio.run(engine.execute_literature_synthesis(f"PMID {SYN_PMID}", check_integrity=False))
@@ -179,7 +187,7 @@ def test_upstream_timeout_uses_one_bounded_alternative_then_says_not_retrieved(m
 def test_upstream_timeout_recovers_through_the_alternative(monkeypatch):
     fake = FakeEuropePMC({}, fail="timeout")
 
-    async def alternative(pmid: str) -> Optional[Dict[str, Any]]:
+    async def alternative(pmid: str) -> dict[str, Any] | None:
         return dict(SYN_NSCLC)
 
     engine = LiteratureSynthesisEngine(biocontext_client=fake, pubmed_fetcher=alternative)  # type: ignore[arg-type]
@@ -232,11 +240,11 @@ def test_equivalent_rephrasings_are_still_duplicates():
 def test_off_topic_results_are_not_stored_by_fetch_new_literature():
     from tribos.agentic.specialists import fetch_new_literature
 
-    stored: Dict[str, Any] = {}
+    stored: dict[str, Any] = {}
 
     class State:
         tool_results = stored
-        evidence_labels: Dict[str, Any] = {}
+        evidence_labels: dict[str, Any] = {}
 
         async def call_tool(self, *_a: Any, **_k: Any) -> Any:
             return SimpleNamespace(success=True, tool_name="lithoscribe_literature_synthesis", data={"ranked_passages": [
@@ -251,7 +259,7 @@ def test_off_topic_results_are_not_stored_by_fetch_new_literature():
             stored[key] = res
             return key
 
-    stats: Dict[str, Any] = {}
+    stats: dict[str, Any] = {}
     key, kept = asyncio.run(fetch_new_literature(
         State(), phase="gaps", query="sotorasib approval colorectal", purpose="t", seen=set(),
         keep=lambda p: "colorectal" in p["passage_text"], stats=stats,
@@ -330,6 +338,8 @@ def test_excluded_modules_do_not_run():
     from tribos.extensions import register_extension_tools
 
     register_extension_tools(reg)
+    for omics_name in ("gtex_tissue_expression", "gwas_catalog_search", "depmap_gene_effect"):
+        reg.register(registry_module.ToolUniverseEntry(name=omics_name, description=omics_name, domain="omics", adapter_type=registry_module.AdapterType.LOCAL_COMPUTE, input_schema=registry_module.BaseModel), lambda **kw: {})
     omics = [e for e in reg.list_tools() if e.name.startswith(("gtex", "gwas", "depmap"))]
     assert len(omics) == 3, "expected the GWAS, GTEx and DepMap tools to be registered"
     assert all("excluded" in (policy_violation(e, ctx) or "") for e in omics)

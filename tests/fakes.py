@@ -13,12 +13,46 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type
+from collections.abc import Callable
+from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+
+class SynaptaSearchInput(BaseModel):
+    query: str
+    size: int = Field(default=5, ge=1, le=25)
+
+
+class SynaptaAssocInput(BaseModel):
+    ensembl_id: str = Field(..., pattern=r"^ENSG\d{11}$")
+    size: int = Field(default=10, ge=1, le=50)
+
+
+class SynaptaKeggInput(BaseModel):
+    target_symbol: str
+
+
+class LumicellPipelineInput(BaseModel):
+    dataset_path: str
+    target_gene: str | None = None
+    dataset_name: str | None = None
+    max_pct_mt: float = 20.0
+    n_neighbors: int | None = None
+    resolution: float = 0.5
+
 
 from tribos.agents import authoritative_orchestrator as orch_module
 from tribos.agents.authoritative_orchestrator import AuthoritativeOrchestrator
+from tribos.axiom.schemas import (
+    AxiomCalculusInput,
+    AxiomSimplifyInput,
+    AxiomSolveInput,
+)
+from tribos.dynamis.schemas import DynamisParameterScanInput, DynamisSimulateOdeInput
+from tribos.extensions.archivon import ArchivonLiteratureSearchInput
+from tribos.extensions.physis import PhysisConstantsInput
+from tribos.extensions.sandbox import AnalysisRunInput
 from tribos.tools import registry as registry_module
 from tribos.tools.registry import (
     AdapterType,
@@ -28,10 +62,25 @@ from tribos.tools.registry import (
 )
 from tribos.utils.memory.research_memory import ResearchMemoryEngine
 
-ExtraTools = Dict[str, Tuple[Type[BaseModel], Callable[[Dict[str, Any]], Any]]]
-Calls = List[Tuple[str, Dict[str, Any]]]
+ExtraTools = dict[str, tuple[type[BaseModel], Callable[[dict[str, Any]], Any]]]
+Calls = list[tuple[str, dict[str, Any]]]
 
-_TOOL_SCHEMAS = {
+_TOOL_SCHEMAS: dict[str, type[BaseModel]] = {
+    # Tribos STEM tools
+    "archivon_literature_search": ArchivonLiteratureSearchInput,
+    "axiom_simplify": AxiomSimplifyInput,
+    "axiom_solve": AxiomSolveInput,
+    "axiom_calculus": AxiomCalculusInput,
+    "dynamis_simulate_ode": DynamisSimulateOdeInput,
+    "dynamis_parameter_scan": DynamisParameterScanInput,
+    "physis_constants": PhysisConstantsInput,
+    "calcula_run_python": AnalysisRunInput,
+    "analysis_run_python": AnalysisRunInput,
+    # Backward-compatible fallbacks
+    "synapta_opentargets_search": SynaptaSearchInput,
+    "synapta_opentargets_associations": SynaptaAssocInput,
+    "synapta_kegg_pathways": SynaptaKeggInput,
+    "lumicell_analyze_single_cell": LumicellPipelineInput,
     "vivarix_simulate_time_course": registry_module.VivarixSimInput,
     "vivarix_compute_steady_state": registry_module.VivarixSteadyStateInput,
     "vivarix_parameter_scan": registry_module.VivarixParamScanInput,
@@ -40,7 +89,66 @@ _TOOL_SCHEMAS = {
 }
 
 
-def _fake_output(tool_name: str, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+def _fake_output(tool_name: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+    if tool_name == "synapta_opentargets_search":
+        return {"results": [{"id": "ENSG00000133703", "name": kwargs.get("query", "KRAS")}]}
+    if tool_name == "synapta_opentargets_associations":
+        return {"associations": [{"disease_name": "pancreatic carcinoma", "overall_association_score": 0.83}]}
+    if tool_name == "synapta_kegg_pathways":
+        return {"results": [{"id": "hsa04010", "description": "MAPK signaling pathway - Homo sapiens (human)"}]}
+    if tool_name == "lumicell_analyze_single_cell":
+        return {
+            "dataset_path": kwargs.get("dataset_path", ""),
+            "n_cells_post_qc": 100,
+            "n_clusters": 2,
+            "top_markers_by_cluster": {"0": [{"gene": "CD3E", "cluster": "0", "log_fold_change": 2.0, "p_adj": 0.001}]},
+            "target_expression_summary": {},
+        }
+    if tool_name == "archivon_literature_search":
+        q = str(kwargs.get("query", ""))
+        pmid = "123456" if "KRAS" in q else None
+        p_text = "KRAS signaling in pancreatic cancer." if "KRAS" in q else "Navier-Stokes solutions."
+        rec = {"passage_text": p_text, "title": "Paper on " + (q or "Fluid Dynamics")}
+        if pmid:
+            rec["pmid"] = pmid
+        else:
+            rec["arxiv_id"] = "1706.03762"
+        return {
+            "ranked_passages": [rec],
+            "total_found": 1,
+        }
+    if tool_name in ("axiom_simplify", "axiom_solve", "axiom_calculus"):
+        return {"result": "x**2", "latex": "x^2", "verified": True}
+    if tool_name == "dynamis_simulate_ode":
+        dur = float((kwargs.get("t_span") or (0.0, 120.0))[1]) if isinstance(kwargs.get("t_span"), (list, tuple)) else 120.0
+        return {
+            "verified": True,
+            "canonical_id": "comp:dynamis_simulate_ode:test",
+            "model_id": kwargs.get("model_name") or "BIOMD0000000010",
+            "model_name": "Fake MAPK",
+            "simulation_type": "TIME_COURSE",
+            "duration": dur,
+            "units": {"time": "s", "quantity": "nmol"},
+            "initial_concentrations": {"Mos": 100.0, "Mos-P": 0.0},
+            "final_concentrations": {"Mos": 34.13, "Mos-P": 65.87},
+            "summary": {"x": {"initial": 1.0, "final": 0.5}},
+            "trajectory": {"t": [0.0, 1.0], "x": [1.0, 0.5]},
+        }
+    if tool_name == "physis_constants":
+        return {
+            "count": 1,
+            "constants": [
+                {
+                    "name": "speed of light in vacuum",
+                    "symbol": "c",
+                    "value": 299792458.0,
+                    "uncertainty": 0.0,
+                    "source": "NIST CODATA 2022",
+                }
+            ],
+        }
+    if tool_name in ("calcula_run_python", "analysis_run_python"):
+        return {"output": "42\n", "figures": [], "success": True}
     if tool_name == "vivarix_simulate_time_course":
         return {
             "model_id": kwargs["biomodel_id"],
@@ -81,29 +189,50 @@ def _fake_output(tool_name: str, kwargs: Dict[str, Any]) -> Dict[str, Any]:
     return {"results": []}
 
 
-def _register(reg: ToolRegistry, name: str, schema: Type[BaseModel], executor: Callable[..., Any]) -> None:
+def _register(reg: ToolRegistry, name: str, schema: type[BaseModel], executor: Callable[..., Any]) -> None:
+    desc = f"fake {name}"
+    tags = []
+    if name == "synapta_kegg_pathways":
+        desc = "KEGG pathways that contain a gene symbol."
+        tags = ["pathway", "kegg", "target"]
+    elif name == "synapta_opentargets_search":
+        desc = "Search Open Targets for a gene, target or disease."
+        tags = ["target", "opentargets"]
+    elif name == "synapta_opentargets_associations":
+        desc = "Retrieve disease associations for a target."
+        tags = ["target", "association"]
+    elif name == "vivarix_simulate_time_course":
+        tags = ["simulation", "copasi", "biomodels", "ode"]
+    elif name == "vivarix_compute_steady_state":
+        tags = ["simulation", "steady_state"]
+    elif name == "vivarix_parameter_scan":
+        tags = ["simulation", "scan"]
+    elif name == "lumicell_analyze_single_cell":
+        tags = ["single_cell", "scanpy", "anndata"]
+    elif name == "lithoscribe_literature_synthesis":
+        tags = ["literature", "europepmc", "citations"]
+    elif name == "websurfer_search":
+        tags = ["web", "search"]
     reg.register(
         ToolUniverseEntry(
             name=name,
-            description=f"fake {name}",
+            description=desc,
             domain=name.split("_")[0],
             adapter_type=AdapterType.LOCAL_COMPUTE,
             input_schema=schema,
             canonical_id_types=[],
             timeout_seconds=10.0,
-            tags=[],
+            tags=tags,
         ),
         executor=executor,
     )
-
-
-def build_recording_registry(extra_tools: Optional[ExtraTools] = None) -> Tuple[ToolRegistry, Calls]:
+def build_recording_registry(extra_tools: ExtraTools | None = None) -> tuple[ToolRegistry, Calls]:
     """Registry with the real input schemas and fake executors that record validated calls."""
     calls: Calls = []
     reg = ToolRegistry()
     for name, schema in _TOOL_SCHEMAS.items():
         def make_executor(tool_name: str):
-            def executor(**kwargs: Any) -> Dict[str, Any]:
+            def executor(**kwargs: Any) -> dict[str, Any]:
                 calls.append((tool_name, kwargs))
                 return _fake_output(tool_name, kwargs)
             return executor
@@ -111,7 +240,7 @@ def build_recording_registry(extra_tools: Optional[ExtraTools] = None) -> Tuple[
         _register(reg, name, schema, make_executor(name))
 
     for name, (schema, fake) in (extra_tools or {}).items():
-        def make_extra(tool_name: str, fn: Callable[[Dict[str, Any]], Any]):
+        def make_extra(tool_name: str, fn: Callable[[dict[str, Any]], Any]):
             def executor(**kwargs: Any) -> Any:
                 calls.append((tool_name, kwargs))
                 return fn(kwargs)
@@ -121,7 +250,7 @@ def build_recording_registry(extra_tools: Optional[ExtraTools] = None) -> Tuple[
     return reg, calls
 
 
-def make_offline_orchestrator(monkeypatch, tmp_path, extra_tools: Optional[ExtraTools] = None) -> Tuple[AuthoritativeOrchestrator, Calls]:
+def make_offline_orchestrator(monkeypatch, tmp_path, extra_tools: ExtraTools | None = None) -> tuple[AuthoritativeOrchestrator, Calls]:
     """The offline_orchestrator fixture as a function: recording registry, no LLM, memory under tmp_path."""
     reg, calls = build_recording_registry(extra_tools)
     monkeypatch.setattr(orch_module, "get_tool_registry", lambda: reg)
@@ -137,7 +266,7 @@ def make_offline_orchestrator(monkeypatch, tmp_path, extra_tools: Optional[Extra
     return orch, calls
 
 
-def called(calls: Calls, tool_name: str) -> List[Dict[str, Any]]:
+def called(calls: Calls, tool_name: str) -> list[dict[str, Any]]:
     return [kw for name, kw in calls if name == tool_name]
 
 
@@ -152,11 +281,11 @@ class RecordingRegistry:
     awaitable. ``delay`` holds each call open so concurrent calls overlap.
     """
 
-    def __init__(self, handler: Callable[[str, Dict[str, Any]], Any], *, delay: float = 0.0) -> None:
+    def __init__(self, handler: Callable[[str, dict[str, Any]], Any], *, delay: float = 0.0) -> None:
         self.handler = handler
         self.delay = delay
-        self.calls: List[str] = []
-        self.kwargs: List[Dict[str, Any]] = []
+        self.calls: list[str] = []
+        self.kwargs: list[dict[str, Any]] = []
         self.active = 0
         self.max_active = 0
 

@@ -16,8 +16,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import re
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
+from typing import (
+    Any,
+)
 
 GenerateFn = Callable[[str, str, int], Awaitable[str]]
 
@@ -30,43 +33,55 @@ DEFAULT_SECTION_MAX_TOKENS = 1200
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
 _BOLD_HEADING_RE = re.compile(r"^\*\*([^*\n]{2,80})\*\*\s*:?\s*$")
 _FENCE_RE = re.compile(r"^\s*(```|~~~)")
-_SUMMARY_TITLE_RE = re.compile(r"\b(bottom\s+line|summary|key\s+(?:findings|points|takeaways)|tl;?dr|conclusions?|overview|answer)\b", re.I)
+_SUMMARY_TITLE_RE = re.compile(
+    r"\b(result|bottom\s+line|summary|key\s+(?:findings|points|takeaways)|tl;?dr|conclusions?|overview|answer)\b",
+    re.I,
+)
 
-# Citation markers in answer text, normalised to evidence-key form ("PMID:123", "NCT:NCT01234567", ...).
-_CITE_PATTERNS: Sequence[Tuple[str, re.Pattern]] = (
+# Citation markers in answer text, normalised to evidence-key form ("ARXIV:2301.12345", "DOI:10.1103/...", ...).
+_CITE_PATTERNS: Sequence[tuple[str, re.Pattern]] = (
+    ("ARXIV", re.compile(r"\barXiv[:\s]*?(\d{4}\.\d{4,5}(?:v\d+)?)\b", re.I)),
+    ("DOI", re.compile(r"\b(10\.\d{4,9}/[^\s\)\]\(;,]+[^\s\)\]\(;,.])", re.I)),
+    ("ZBL", re.compile(r"\bZbl[:\s]*?(\d{4}\.\d{5})\b", re.I)),
+    ("MR", re.compile(r"\bMR(\d{6,8})\b", re.I)),
+    ("OEIS", re.compile(r"\b(A\d{6})\b")),
+    ("ADS", re.compile(r"\b(\d{4}[A-Za-z&.\d]{14}[A-Z])\b")),
+    ("MP", re.compile(r"\b(mp-\d{1,8})\b", re.I)),
+    ("OPENALEX", re.compile(r"\b(W\d{7,12})\b")),
+    ("COMP", re.compile(r"\bcomp:([a-zA-Z0-9_:-]+)\b", re.I)),
+    ("DATASET", re.compile(r"\b(ds_[0-9a-f]{12})\b", re.I)),
     ("PMID", re.compile(r"\bPMID[:\s]*?(\d{4,9})\b", re.I)),
     ("PMCID", re.compile(r"\b(PMC\d{4,9})\b")),
-    ("DOI", re.compile(r"\b(10\.\d{4,9}/[^\s\)\]\(;,]+[^\s\)\]\(;,.])", re.I)),
     ("NCT", re.compile(r"\b(NCT\d{8})\b", re.I)),
     ("CHEMBL", re.compile(r"\b(CHEMBL\d+)\b", re.I)),
     ("URL", re.compile(r"\]\((https?://[^\s\)]+)\)")),
 )
 
 
-def citation_keys(text: str) -> Set[str]:
+def citation_keys(text: str) -> set[str]:
     """Evidence keys cited in a piece of answer text."""
-    out: Set[str] = set()
+    out: set[str] = set()
     for kind, rx in _CITE_PATTERNS:
         for m in rx.finditer(text or ""):
             val = m.group(1)
-            if kind in ("NCT", "CHEMBL", "PMCID"):
+            if kind in ("NCT", "CHEMBL", "PMCID", "OEIS", "OPENALEX"):
                 val = val.upper()
-            elif kind == "DOI":
+            elif kind in ("DOI", "MP", "DATASET"):
                 val = val.lower()
             out.add(f"{kind}:{val}")
     return out
 
 
 def normalize_key(key: str) -> str:
-    """An evidence key in the same form citation_keys() returns ("PMID: 123" -> "PMID:123", "nct:nct0.." upper)."""
+    """An evidence key in the same form citation_keys() returns."""
     k = (key or "").strip()
     if ":" not in k:
         return k
     kind, _, val = k.partition(":")
     kind, val = kind.strip().upper(), val.strip()
-    if kind in ("NCT", "CHEMBL", "PMCID"):
+    if kind in ("NCT", "CHEMBL", "PMCID", "OEIS", "OPENALEX"):
         val = val.upper()
-    elif kind == "DOI":
+    elif kind in ("DOI", "MP", "DATASET"):
         val = val.lower()
     return f"{kind}:{val}"
 
@@ -100,18 +115,18 @@ class Section:
     @property
     def is_summary(self) -> bool:
         if self.level == 0:
-            return True  # the opening block before the first heading carries the bottom line
+            return True  # the opening block before the first heading carries the result / bottom line
         return bool(_SUMMARY_TITLE_RE.search(self.title))
 
     @property
     def hash(self) -> str:
         return _hash(self.text)
 
-    def cites(self) -> Set[str]:
+    def cites(self) -> set[str]:
         return citation_keys(self.text)
 
 
-def _heading(line: str) -> Optional[Tuple[int, str]]:
+def _heading(line: str) -> tuple[int, str] | None:
     m = _HEADING_RE.match(line)
     if m:
         return len(m.group(1)), m.group(2).strip()
@@ -121,13 +136,13 @@ def _heading(line: str) -> Optional[Tuple[int, str]]:
     return None
 
 
-def split_sections(markdown: str) -> List[Section]:
+def split_sections(markdown: str) -> list[Section]:
     """Split an answer into sections at headings ("#".."######" or a line that is only bold text). The text
     before the first heading is a preamble section. Lines inside code fences or tables never start a section,
     and joining every section's text reproduces the input exactly."""
     text = markdown or ""
     lines = text.splitlines(keepends=True)
-    starts: List[Tuple[int, str, str, int]] = []  # (line index, heading line, title, level)
+    starts: list[tuple[int, str, str, int]] = []  # (line index, heading line, title, level)
     in_fence = False
     for i, line in enumerate(lines):
         if _FENCE_RE.match(line):
@@ -138,15 +153,15 @@ def split_sections(markdown: str) -> List[Section]:
         h = _heading(line.rstrip("\r\n"))
         if h is not None:
             starts.append((i, line.rstrip("\r\n"), h[1], h[0]))
-    bounds: List[Tuple[int, int, str, str, int]] = []
+    bounds: list[tuple[int, int, str, str, int]] = []
     if not starts or starts[0][0] > 0:
         bounds.append((0, starts[0][0] if starts else len(lines), "", "", 0))
     for n, (i, line, title, level) in enumerate(starts):
         end = starts[n + 1][0] if n + 1 < len(starts) else len(lines)
         bounds.append((i, end, line, title, level))
-    sections: List[Section] = []
-    seen: Dict[str, int] = {}
-    for idx, (a, b, line, title, level) in enumerate(bounds):
+    sections: list[Section] = []
+    seen: dict[str, int] = {}
+    for _idx, (a, b, line, title, level) in enumerate(bounds):
         chunk = "".join(lines[a:b])
         if level == 0 and not chunk.strip() and len(bounds) > 1:
             # Leading blank lines: keep them attached to the next section so the join still reproduces the text.
@@ -172,21 +187,21 @@ def join_sections(sections: Iterable[Section]) -> str:
 @dataclass
 class RepairDecision:
     mode: str  # "targeted" | "whole" | "none"
-    sections: Dict[str, List[str]] = field(default_factory=dict)  # section id -> reasons
+    sections: dict[str, list[str]] = field(default_factory=dict)  # section id -> reasons
     reason: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {"mode": self.mode, "sections": dict(self.sections), "reason": self.reason}
 
 
 _QUOTE_RE = re.compile(r"[\"“”]([^\"“”]{12,400})[\"“”]")
 
 
-def _quoted_fragments(item: str) -> List[str]:
+def _quoted_fragments(item: str) -> list[str]:
     return [m.group(1).strip() for m in _QUOTE_RE.finditer(item or "") if len(m.group(1).split()) >= 3]
 
 
-def _feedback_keys(item: str) -> Set[str]:
+def _feedback_keys(item: str) -> set[str]:
     keys = citation_keys(item)
     for m in re.finditer(r"\(evidence:\s*([^;)]+)", item or ""):
         keys.add(normalize_key(m.group(1)))
@@ -217,24 +232,18 @@ def affected_sections(
     *,
     whole_fraction: float = WHOLE_FRACTION,
 ) -> RepairDecision:
-    """Which sections need repair and why.
-
-    A section is affected when it contains a sentence a feedback item quotes, cites a key a feedback item names or
-    whose evidence changed, or contains an unsupported/contradicted claim. The summary (preamble or "Bottom line")
-    is added whenever another section changes, since it restates them. Feedback that names no section (for
-    example "use the new gap-search documents") cannot be placed: the decision is "whole". So is a repair that
-    touches more than whole_fraction of the sections, or an answer with fewer than two sections."""
+    """Which sections need repair and why."""
     if len(sections) < 2:
         return RepairDecision("whole", reason="the answer has no section structure to repair in place")
     changed_keys = {normalize_key(k) for k in new_evidence_keys if k}
-    picks: Dict[str, List[str]] = {}
+    picks: dict[str, list[str]] = {}
 
     def add(sec: Section, why: str) -> None:
         reasons = picks.setdefault(sec.id, [])
         if why not in reasons:
             reasons.append(why)
 
-    unplaced: List[str] = []
+    unplaced: list[str] = []
     for item in feedback_items:
         placed = False
         for frag in _quoted_fragments(item):
@@ -279,18 +288,19 @@ def affected_sections(
 
 # Prompts ------------------------------------------------------------------------------------------------------
 SECTION_SYSTEM = (
-    "You repair one section of a cited biomedical research answer. Rewrite only the section given in "
-    "<section>, changing only what the listed reasons require; keep every other sentence, table row and citation "
-    "as written. Keep the heading line exactly. Cite only identifiers that appear in <evidence> or already in the "
-    "section, in the same format (for example \"(PMID: 12345678)\", NCT01234567, [Title](url)). If the evidence "
-    "cannot support a statement, qualify or remove it rather than inventing support. Return only the rewritten "
-    "section in Markdown: no preamble, no other sections, no code fences."
+    "You repair one section of a cited scientific, mathematical, or engineering research answer. Rewrite only the "
+    "section given in <section>, changing only what the listed reasons require; keep every other sentence, equation, "
+    "table row, and citation as written. Keep the heading line exactly. Cite only identifiers that appear in "
+    "<evidence> or already in the section, in the same format (for example arXiv:2301.12345, DOI:10.1103/..., "
+    "Zbl 1234.56789, [comp:sympy_solve], [Title](url)). If the evidence cannot support a statement, qualify or "
+    "remove it rather than inventing support. Return only the rewritten section in Markdown: no preamble, no other "
+    "sections, no outer code fences."
 )
 
 
 def build_section_prompt(
     section: Section, reasons: Sequence[str], evidence_block_excerpt: str = "", neighbors_summary: str = ""
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     """(system, user) for rewriting one section."""
     parts = ["<reasons>"] + [f"- {r}" for r in reasons] + ["</reasons>"]
     if neighbors_summary:
@@ -307,7 +317,7 @@ def build_section_prompt(
 
 def neighbors_summary(sections: Sequence[Section], skip_id: str, limit: int = 1200) -> str:
     """Headings and first sentences of the other sections, so a section rewrite stays consistent."""
-    lines: List[str] = []
+    lines: list[str] = []
     for s in sections:
         if s.id == skip_id:
             continue
@@ -325,8 +335,8 @@ def _norm_spaces(text: str) -> str:
 @dataclass
 class SpliceResult:
     markdown: str
-    applied: List[str] = field(default_factory=list)
-    rejected: Dict[str, str] = field(default_factory=dict)  # section id -> why the original was kept
+    applied: list[str] = field(default_factory=list)
+    rejected: dict[str, str] = field(default_factory=dict)  # section id -> why the original was kept
 
 
 _FENCE_WRAP_RE = re.compile(r"^\s*```(?:markdown|md)?\s*\n(.*?)\n```\s*$", re.S)
@@ -345,9 +355,9 @@ def validate_replacement(
     original: Section,
     replacement: str,
     sections: Sequence[Section],
-    allowed_keys: Optional[Iterable[str]] = None,
+    allowed_keys: Iterable[str] | None = None,
     reasons: Sequence[str] = (),
-) -> Tuple[Optional[str], str]:
+) -> tuple[str | None, str]:
     """(text to splice, "") or (None, why it was rejected)."""
     rep = _clean_reply(replacement)
     if not rep.strip():
@@ -364,8 +374,6 @@ def validate_replacement(
     others = {_norm(s.title) for s in sections if s.id != original.id and s.title}
     for line in rep.splitlines()[1 if original.heading else 0:]:
         h = _heading(line.rstrip())
-        # No duplicate of another section's title, and nothing at this section's level or above (a sub-heading
-        # inside a "##" section is fine); the opening block gets no heading at all.
         ceiling = 6 if original.level in (0, 7) else original.level
         if h is not None and (_norm(h[1]) in others or h[0] <= ceiling):
             return None, f"the replacement adds another section heading ({h[1][:60]})"
@@ -382,20 +390,19 @@ def validate_replacement(
         extra = citation_keys(rep) - allowed
         if extra:
             return None, "cites identifiers outside the evidence: " + ", ".join(sorted(extra)[:5])
-    # Keep the original's trailing whitespace so the section boundary (blank line before the next heading) holds.
     trail = original.text[len(original.text.rstrip("\n")):]
     return rep.rstrip("\n") + (trail or "\n"), ""
 
 
 def splice(
     sections: Sequence[Section],
-    replacements: Dict[str, str],
-    allowed_keys: Optional[Iterable[str]] = None,
-    reasons: Optional[Mapping[str, Sequence[str]]] = None,
+    replacements: dict[str, str],
+    allowed_keys: Iterable[str] | None = None,
+    reasons: Mapping[str, Sequence[str]] | None = None,
 ) -> SpliceResult:
     """The answer with each valid replacement spliced in; invalid ones keep the original section."""
     allowed = list(allowed_keys) if allowed_keys is not None else None
-    out: List[str] = []
+    out: list[str] = []
     result = SpliceResult(markdown="")
     for sec in sections:
         if sec.id not in replacements:
@@ -426,11 +433,11 @@ class AnswerVersion:
     answer_version: int = 1
     evidence_version: str = ""
     verified_version: int = 0
-    section_hashes: Dict[str, str] = field(default_factory=dict)
-    log: List[Dict[str, Any]] = field(default_factory=list)
+    section_hashes: dict[str, str] = field(default_factory=dict)
+    log: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
-    def start(cls, markdown: str, evidence_keys: Iterable[str] = ()) -> "AnswerVersion":
+    def start(cls, markdown: str, evidence_keys: Iterable[str] = ()) -> AnswerVersion:
         v = cls(evidence_version=evidence_version_of(evidence_keys))
         v.section_hashes = {s.id: s.hash for s in split_sections(markdown)}
         return v
@@ -442,7 +449,7 @@ class AnswerVersion:
         self.evidence_version = new
         return changed
 
-    def record_repair(self, before: str, after: str, mode: str, reasons: Dict[str, List[str]]) -> Dict[str, Any]:
+    def record_repair(self, before: str, after: str, mode: str, reasons: dict[str, list[str]]) -> dict[str, Any]:
         """Log a repair. Returns the log entry, including which sections changed and need re-verification."""
         old_hashes = dict(self.section_hashes)
         new_sections = split_sections(after)
@@ -473,7 +480,7 @@ class AnswerVersion:
     def verification_stale(self) -> bool:
         return self.verified_version != self.answer_version
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "answer_version": self.answer_version,
             "evidence_version": self.evidence_version,
@@ -483,7 +490,7 @@ class AnswerVersion:
         }
 
 
-def claims_to_reverify(markdown: str, section_ids: Iterable[str], claims: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def claims_to_reverify(markdown: str, section_ids: Iterable[str], claims: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
     """Claim records (verifier dicts with claim_text) that sit in the given sections of the answer."""
     wanted = set(section_ids)
     texts = [s.text for s in split_sections(markdown) if s.id in wanted]
@@ -495,18 +502,18 @@ def claims_to_reverify(markdown: str, section_ids: Iterable[str], claims: Sequen
 class RepairReport:
     mode: str  # "targeted" | "whole" | "none"
     reason: str = ""
-    sections: Dict[str, List[str]] = field(default_factory=dict)
-    applied: List[str] = field(default_factory=list)
-    rejected: Dict[str, str] = field(default_factory=dict)
-    failed: Dict[str, str] = field(default_factory=dict)  # section id -> generation error
+    sections: dict[str, list[str]] = field(default_factory=dict)
+    applied: list[str] = field(default_factory=list)
+    rejected: dict[str, str] = field(default_factory=dict)
+    failed: dict[str, str] = field(default_factory=dict)  # section id -> generation error
     calls: int = 0
-    version: Optional[Dict[str, Any]] = None
+    version: dict[str, Any] | None = None
 
     @property
     def changed(self) -> bool:
         return bool(self.applied)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "mode": self.mode, "reason": self.reason, "sections": dict(self.sections), "applied": list(self.applied),
             "rejected": dict(self.rejected), "failed": dict(self.failed), "calls": self.calls, "version": self.version,
@@ -520,19 +527,14 @@ async def repair_sections(
     *,
     new_evidence_keys: Iterable[str] = (),
     unsupported_claims: Sequence[str] = (),
-    allowed_keys: Optional[Iterable[str]] = None,
+    allowed_keys: Iterable[str] | None = None,
     evidence_excerpt: str = "",
     max_parallel: int = 2,
     per_section_max_tokens: int = DEFAULT_SECTION_MAX_TOKENS,
     whole_fraction: float = WHOLE_FRACTION,
-    version: Optional[AnswerVersion] = None,
-) -> Tuple[str, RepairReport]:
-    """Repair the affected sections of an answer in place.
-
-    Returns (markdown, report). report.mode is "whole" when the caller should fall back to its whole-answer
-    rewrite (markdown is then returned unchanged), "none" when nothing needs repair, else "targeted". A section
-    whose generation fails or whose replacement is invalid keeps its original text (report.failed / rejected).
-    generate exceptions other than asyncio.CancelledError are caught per section; cancellation propagates."""
+    version: AnswerVersion | None = None,
+) -> tuple[str, RepairReport]:
+    """Repair the affected sections of an answer in place."""
     sections = split_sections(markdown)
     decision = affected_sections(
         sections, feedback, new_evidence_keys, unsupported_claims, whole_fraction=whole_fraction
@@ -542,9 +544,9 @@ async def repair_sections(
         return markdown, report
     by_id = {s.id: s for s in sections}
     sem = asyncio.Semaphore(max(1, int(max_parallel)))
-    replies: Dict[str, str] = {}
+    replies: dict[str, str] = {}
 
-    async def one(sid: str, reasons: List[str]) -> None:
+    async def one(sid: str, reasons: list[str]) -> None:
         sec = by_id[sid]
         system, user = build_section_prompt(sec, reasons, evidence_excerpt, neighbors_summary(sections, sid))
         async with sem:
@@ -553,10 +555,9 @@ async def repair_sections(
                 replies[sid] = await generate(system, user, int(per_section_max_tokens))
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:  # noqa: BLE001 - one failed section keeps its text, the others still repair
+            except Exception as exc:  # noqa: BLE001
                 report.failed[sid] = f"{type(exc).__name__}: {str(exc)[:200]}"
 
-    # Repair the non-summary sections first, then the summary with their new text as context.
     order = list(decision.sections.items())
     body = [(sid, r) for sid, r in order if not by_id[sid].is_summary]
     summary = [(sid, r) for sid, r in order if by_id[sid].is_summary]

@@ -26,7 +26,7 @@ neither set, every store keeps its historical location under the workspace.
 | `TRIBOS_DATASET_ROOTS` | list | unset | `tribos/datasets/paths.py` | Directories (os.pathsep-separated) that typed dataset paths may point into; <cwd>/data when unset. |
 | `TRIBOS_DATA_DIR` | path | unset | `tribos/utils/paths.py` | One data root (`~` expanded): memory/, runs/, uploads/, jobs/, tool_cache/ default under it. |
 | `TRIBOS_JOBS_DIR` | path | unset | `tribos/agentic/jobs.py` | Background-job SQLite store directory (wins over TRIBOS_RUNS_DIR/jobs). |
-| `TRIBOS_MEMORY_DIR` | path | unset | `tribos/utils/memory/project_store.py`<br>`tribos/utils/memory/research_memory.py` | Clinical memory vault directory (wins over TRIBOS_DATA_DIR); also the projects store fallback. |
+| `TRIBOS_MEMORY_DIR` | path | unset | `tribos/utils/memory/project_store.py`<br>`tribos/utils/memory/research_memory.py` | Research memory vault directory (wins over TRIBOS_DATA_DIR); also the projects store fallback. |
 | `TRIBOS_PROJECTS_DIR` | path | unset | `tribos/utils/memory/project_store.py` | Projects store directory (wins over TRIBOS_MEMORY_DIR and TRIBOS_DATA_DIR). |
 | `TRIBOS_RUNS_DIR` | path | unset | `tribos/agentic/jobs.py`<br>`tribos/agentic/router_store.py`<br>`tribos/provenance/run_store.py` (+1) | Run-manifest store (wins over TRIBOS_DATA_DIR; also hosts jobs/ and tool_cache/). |
 | `TRIBOS_TOOL_CACHE_DIR` | path | unset | `tribos/tools/reliability.py` | Tool-result SQLite cache directory (wins over TRIBOS_RUNS_DIR/tool_cache). |
@@ -195,12 +195,15 @@ neither set, every store keeps its historical location under the workspace.
 
 | Variable | Type | Default | Read at | Description |
 | --- | --- | --- | --- | --- |
-| `BIOCONTEXT_MCP_URL` | str | `https://mcp.biocontext.ai/mcp/` | `tribos/utils/biocontext/client.py` | BioContext MCP server URL. |
-| `BIOCONTEXT_TIMEOUT` | float | `25.0` | `tribos/utils/biocontext/client.py` | BioContext and direct-adapter request timeout in seconds. |
-| `NCBI_API_KEY` | str | (secret, unset) | `tribos/datasets/geo.py`<br>`tribos/lithoscribe/pubmed_fallback.py`<br>`tribos/utils/biocontext/entity_resolver.py` (+1) | NCBI E-utilities key (raises the rate limit from 3 to 10 requests/s). |
-| `NCBI_EMAIL` | str | unset | `tribos/datasets/geo.py`<br>`tribos/lithoscribe/pubmed_fallback.py` | Contact e-mail sent with NCBI E-utilities requests. |
-| `TRIBOS_CROSSREF_MAILTO` | str | unset | `tribos/lithoscribe/integrity.py` | Contact e-mail for the Crossref polite pool (citation integrity checks). |
+| `NCBI_API_KEY` | str | (secret, unset) | `tribos/utils/http_limits.py` | NCBI E-utilities key (raises the rate limit from 3 to 10 requests/s). |
+| `TRIBOS_ADS_API_TOKEN` | str | (secret, unset) | `tribos/archivon/clients.py` | Optional NASA ADS Bearer API token for astrophysics literature search in Archivon. |
+| `TRIBOS_CONTACT_EMAIL` | str | `contact@tribos.science` | `tribos/archivon/clients.py`<br>`tribos/archivon/integrity.py`<br>`tribos/physis/clients.py` | Polite-pool contact e-mail sent in User-Agent headers for arXiv, Crossref, OpenAlex, and Wikipedia. |
+| `TRIBOS_CROSSREF_MAILTO` | str | unset | `tribos/archivon/clients.py`<br>`tribos/archivon/integrity.py` | Contact e-mail for the Crossref polite pool (citation integrity checks). |
+| `TRIBOS_MP_API_KEY` | str | (secret, unset) | `tribos/physis/clients.py` | Optional Materials Project API v2 key for live crystalline/electronic material queries in Physis. |
+| `TRIBOS_OPENALEX_API_KEY` | str | (secret, unset) | `tribos/archivon/clients.py` | Optional OpenAlex API key for polite/premium pool requests in Archivon. |
 | `TRIBOS_PROVENANCE_PROBES` | off \| auto \| on | `auto` | `tribos/provenance/source_versions.py` | Live source-version probes for run manifests: off, auto (off under pytest) or on. |
+| `TRIBOS_S2_API_KEY` | str | (secret, unset) | `tribos/archivon/clients.py` | Optional Semantic Scholar API key for higher rate limits in Archivon. |
+| `TRIBOS_WOLFRAM_APPID` | str | (secret, unset) | `tribos/physis/clients.py` | Optional Wolfram\|Alpha LLM API AppID for Physis external reference queries. |
 
 ## TRIBOS_UPLOAD_*: Uploads and datasets
 
@@ -209,17 +212,8 @@ neither set, every store keeps its historical location under the workspace.
 | `TRIBOS_UPLOAD_MAX_DATASETS` | int | `50` | `tribos/datasets/store.py` | Uploaded datasets kept per user. |
 | `TRIBOS_UPLOAD_MAX_MB_CSV` | float | `100.0` | `tribos/datasets/store.py` | Largest table (CSV/TSV) upload in MB. |
 | `TRIBOS_UPLOAD_MAX_MB_H5AD` | float | `500.0` | `tribos/datasets/store.py` | Largest .h5ad upload in MB. |
-| `TRIBOS_UPLOAD_MAX_MB_SBML` | float | `10.0` | `tribos/datasets/store.py` | Largest SBML model upload in MB. |
+| `TRIBOS_UPLOAD_MAX_MB_HDF5` | float | `500.0` | `tribos/datasets/store.py` | Largest HDF5 (.h5/.hdf5) upload in MB. |
 | `TRIBOS_UPLOAD_MAX_TOTAL_MB` | float | `2048.0` | `tribos/datasets/store.py` | Total upload storage per user in MB. |
-
-## Simulation and single-cell analysis
-
-| Variable | Type | Default | Read at | Description |
-| --- | --- | --- | --- | --- |
-| `TRIBOS_BIOMODELS_REVISION_CHECK` | off \| auto \| on | `auto` | `tribos/vivarix/engine.py` | Check BioModels revisions over network: off, auto (off under pytest) or on. |
-| `TRIBOS_BIOMODELS_REVISION_TTL_S` | float (>= 0) | `86400.0` | `tribos/vivarix/engine.py` | Seconds a cached BioModels SBML download is trusted before checking its revision. |
-| `TRIBOS_CALIBRATION_BACKEND` | least_squares \| copasi | `least_squares` | `tribos/vivarix/calibration.py` | Model calibration backend: least_squares or copasi. |
-| `TRIBOS_COPASI_LOCK_WAIT` | float | `20.0` | `tribos/vivarix/engine.py` | Seconds a simulation waits for COPASI to be free before timing out. |
 
 ## TRIBOS_SANDBOX_*: Code sandbox
 
@@ -233,6 +227,7 @@ neither set, every store keeps its historical location under the workspace.
 
 | Variable | Type | Default | Read at | Description |
 | --- | --- | --- | --- | --- |
+| `HF_TOKEN` | str | (secret, unset) | `tribos/evals/datasets.py` | Hugging Face user access token for gated benchmark downloads (GPQA Diamond). |
 | `TRIBOS_CASSETTE_PROMPTS` | bool | `false` | `tribos/evals/cassette.py` | Store full normalised prompts in recorded eval cassettes (easier miss diagnosis, larger files). |
 | `TRIBOS_EVAL_CACHE` | path | unset | `tribos/evals/datasets.py` | Downloaded benchmark datasets cache (default ~/.cache/tribos/evals). |
 | `TRIBOS_EVAL_TOKEN` | str | (secret, unset) | `tribos/evals/runner.py` | Bearer token the eval runner sends to a remote Tribos API. |
@@ -241,5 +236,5 @@ neither set, every store keeps its historical location under the workspace.
 
 | Variable | Type | Default | Read at | Description |
 | --- | --- | --- | --- | --- |
-| `PYTEST_CURRENT_TEST` | str | unset | `tribos/agentic/jobs.py`<br>`tribos/agentic/router_store.py`<br>`tribos/provenance/run_store.py` (+6) | Set by pytest; `auto` switches and default stores treat its presence as a test run. Never set it yourself. |
+| `PYTEST_CURRENT_TEST` | str | unset | `tribos/agentic/jobs.py`<br>`tribos/agentic/router_store.py`<br>`tribos/agentic/sandbox/__init__.py` (+6) | Set by pytest; `auto` switches and default stores treat its presence as a test run. Never set it yourself. |
 | `TRIBOS_LOAD_DOTENV` | bool | `true` | `app/backend/main.py` | Load the workspace `.env` when the API module is imported; tests/conftest.py sets 0 so a developer `.env` never reaches pytest. |

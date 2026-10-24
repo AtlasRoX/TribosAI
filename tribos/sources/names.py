@@ -17,21 +17,20 @@ approval label is "Literature search (Europe PMC, Semantic Scholar)").
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
 
 
 @dataclass(frozen=True)
 class SourceName:
     key: str
     public: str
-    description: Optional[str] = None
-    agent: Optional[str] = None
-    component: Optional[str] = None
-    version_label: Optional[str] = None
-    aliases: Tuple[str, ...] = ()
+    description: str | None = None
+    agent: str | None = None
+    component: str | None = None
+    version_label: str | None = None
+    aliases: tuple[str, ...] = ()
 
 
-_ENTRIES: Tuple[SourceName, ...] = (
+_ENTRIES: tuple[SourceName, ...] = (
     # Tribos agents.
     SourceName("synapta", "OpenTargets/KEGG", "Target-disease associations and pathways (OpenTargets, KEGG)",
                agent="Synapta", component="Synapta"),
@@ -77,50 +76,50 @@ _ENTRIES: Tuple[SourceName, ...] = (
     SourceName("europepmc", "Europe PMC", version_label="EuropePMC API version"),
 )
 
-SOURCE_REGISTRY: Dict[str, SourceName] = {e.key: e for e in _ENTRIES}
-_ALIASES: Dict[str, str] = {alias: e.key for e in _ENTRIES for alias in e.aliases}
+SOURCE_REGISTRY: dict[str, SourceName] = {e.key: e for e in _ENTRIES}
+_ALIASES: dict[str, str] = {alias: e.key for e in _ENTRIES for alias in e.aliases}
 
-VARIANT_EVIDENCE_SOURCES: Tuple[str, ...] = ("clinvar", "civic", "cbioportal", "gnomad")
+VARIANT_EVIDENCE_SOURCES: tuple[str, ...] = ("clinvar", "civic", "cbioportal", "gnomad")
 
 # Internal keys that name a pipeline step, not a source a reader can check (a "(tool_status)" citation is dropped).
-INTERNAL_ONLY_KEYS: Tuple[str, ...] = (
+INTERNAL_ONLY_KEYS: tuple[str, ...] = (
     "tool_status", "tool_status_note", "evidence_integration_step", "evidence_integration", "biodiscovery",
     "biodiscovery_ranking",
 )
 
 
-def source_entry(key: Optional[str]) -> Optional[SourceName]:
+def source_entry(key: str | None) -> SourceName | None:
     """The registry entry for `key` or one of its aliases ("structintel", "clinicaltrials", "variants"), else None."""
     if not key:
         return None
     return SOURCE_REGISTRY.get(key) or SOURCE_REGISTRY.get(_ALIASES.get(key, ""))
 
 
-def public_name(key: Optional[str], default: Optional[str] = None) -> Optional[str]:
+def public_name(key: str | None, default: str | None = None) -> str | None:
     """Short public name of a source key ("chembl" -> "ChEMBL"); `default` when the key is unknown."""
     entry = source_entry(key)
     return entry.public if entry else default
 
 
-def description(key: Optional[str], default: Optional[str] = None) -> Optional[str]:
+def description(key: str | None, default: str | None = None) -> str | None:
     """The approval card's label for a source switch; `default` when the key has none."""
     entry = source_entry(key)
     return entry.description if entry and entry.description else default
 
 
-def agent_label(key: Optional[str], default: Optional[str] = None) -> Optional[str]:
+def agent_label(key: str | None, default: str | None = None) -> str | None:
     """The agent a source's evidence is reported under ("chembl" -> "Synapta"); `default` when unknown."""
     entry = source_entry(key)
     return entry.agent if entry and entry.agent else default
 
 
-def version_label(key: Optional[str], default: Optional[str] = None) -> Optional[str]:
+def version_label(key: str | None, default: str | None = None) -> str | None:
     """The reproducibility-table label of a probed source's release ("chembl" -> "ChEMBL release")."""
     entry = source_entry(key)
     return entry.version_label if entry and entry.version_label else default
 
 
-def labels(field: str, keys: Optional[Tuple[str, ...]] = None) -> Dict[str, str]:
+def labels(field: str, keys: tuple[str, ...] | None = None) -> dict[str, str]:
     """{key: value of `field`} for the given keys (default: every key that has the field set)."""
     selected = [SOURCE_REGISTRY[k] for k in keys] if keys is not None else list(_ENTRIES)
     return {e.key: getattr(e, field) for e in selected if getattr(e, field)}

@@ -5,8 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -31,7 +31,7 @@ def first_draft_output_cap() -> int:
 
 def retrieval_date() -> str:
     """Today's date in UTC (YYYY-MM-DD), from the server clock: what time-sensitive facts are dated "as of"."""
-    return datetime.now(timezone.utc).date().isoformat()
+    return datetime.now(UTC).date().isoformat()
 
 
 # A rewrite edits the previous draft rather than writing a new answer: unchanged sections stay verbatim, so a round
@@ -127,7 +127,7 @@ def prepare_context(run: RunContext) -> None:
             pw_str = ", ".join(f"{p.get('description', p.get('id'))} ({p.get('id')})" for p in pathways[:5])
             synapta_summary += f"\n- **KEGG Pathway Memberships**: {pw_str}"
 
-    scope_notes: List[str] = []
+    scope_notes: list[str] = []
     # Notes about Vivarix/Synapta not running only matter to questions they could have informed.
     qtype = ctx.search_plan.question_type if ctx.search_plan is not None else "general"
     molecular = qtype in ("mechanism", "target", "genetics", "biomarker", "general")
@@ -156,7 +156,7 @@ def prepare_context(run: RunContext) -> None:
     syn_res = tool_results.get("synapta")
     syn_data = syn_res.data if syn_res is not None and isinstance(syn_res.data, dict) else {}
     syn_cov = syn_data.get("coverage") if isinstance(syn_data, dict) else None
-    syn_cov_d: Dict[str, Any] = syn_cov if isinstance(syn_cov, dict) else {}
+    syn_cov_d: dict[str, Any] = syn_cov if isinstance(syn_cov, dict) else {}
     if syn_cov_d.get("status") in ("partial", "unavailable"):
         failed = [k for k, v in (syn_cov_d.get("sources") or {}).items() if isinstance(v, dict) and v.get("status") == "error"]
         scope_notes.append(
@@ -189,12 +189,12 @@ def prepare_context(run: RunContext) -> None:
     run.scope_notes = scope_notes
 
 
-def build_prompt(run: RunContext, feedback: Optional[List[str]] = None, previous_draft: str = "") -> str:
+def build_prompt(run: RunContext, feedback: list[str] | None = None, previous_draft: str = "") -> str:
     """The synthesis request; agentic runs add the research brief, the critique to address and the previous draft."""
     ao = orchestrator_module()
     agent_state, tool_results, discovery_report, ctx = run.agent_state, run.tool_results, run.discovery_report, run.ctx
     scope_notes, memory_summary, query = run.scope_notes, run.memory_summary, run.query
-    extra_sections: List[str] = []
+    extra_sections: list[str] = []
     brief = ""
     if agent_state is not None:
         extra_sections = ao.render_agent_evidence(tool_results, agent_state.evidence_labels, agent_state.evidence_sections)
@@ -264,7 +264,7 @@ async def write_first_draft(run: RunContext) -> None:
 
     candidate_response = ""
     llm_ok = True
-    fallback_error: Optional[str] = None
+    fallback_error: str | None = None
     llm: Any = None
     # The answer can be written by a larger model than the one that routes and plans (TRIBOS_SYNTHESIS_MODEL).
     synthesis_model = os.getenv("TRIBOS_SYNTHESIS_MODEL", "").strip() or model_name
@@ -282,7 +282,7 @@ async def write_first_draft(run: RunContext) -> None:
         await on_text(delta)
 
     try:
-        llm_kwargs: Dict[str, Any] = {}
+        llm_kwargs: dict[str, Any] = {}
         if budget is not None:
             want = first_draft_output_cap()
             try:
@@ -303,7 +303,7 @@ async def write_first_draft(run: RunContext) -> None:
             SystemMessage(content=system_prompt),
             HumanMessage(content=synthesis_prompt),
         ]
-        stream_kwargs: Dict[str, Any] = {}
+        stream_kwargs: dict[str, Any] = {}
         if budget is not None and budget.time_limited:
             stream_kwargs["total_timeout"] = ao.stream_timeout(budget.remaining_seconds())
         draft_text, draft_reasoning = await run.watched(

@@ -13,7 +13,7 @@ Controls live in this process only (tribos.agentic.control).
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel, Field
@@ -30,7 +30,7 @@ RunIdPath = Path(..., min_length=5, max_length=64)
 class ApproveRequest(BaseModel):
     approval_id: str = Field(..., min_length=4, max_length=64, pattern=r"^apr_[0-9a-f]{6,32}$")
     approved: bool
-    payload: Optional[Dict[str, Any]] = Field(default=None, description="The edited plan (e.g. sources switched off)")
+    payload: dict[str, Any] | None = Field(default=None, description="The edited plan (e.g. sources switched off)")
     message: str = Field(default="", max_length=2000)
 
 
@@ -50,13 +50,13 @@ def _control(run_id: str, user_id: str) -> RunControl:
 
 
 @router.get("/runs/{run_id}")
-async def get_run(run_id: str = RunIdPath, user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+async def get_run(run_id: str = RunIdPath, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     """The run's control state: pending approvals, decisions so far, queued steering, cancelled."""
     return _control(run_id, user_id).to_dict()
 
 
 @router.post("/runs/{run_id}/approve")
-async def approve_run(req: ApproveRequest, run_id: str = RunIdPath, user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+async def approve_run(req: ApproveRequest, run_id: str = RunIdPath, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     control = _control(run_id, user_id)
     if len(str(req.payload or "")) > 50_000:
         raise HTTPException(status_code=413, detail="The edited payload is too large")
@@ -67,7 +67,7 @@ async def approve_run(req: ApproveRequest, run_id: str = RunIdPath, user_id: str
 
 
 @router.post("/runs/{run_id}/steer")
-async def steer_run(req: SteerRequest, run_id: str = RunIdPath, user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+async def steer_run(req: SteerRequest, run_id: str = RunIdPath, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     """Queue an instruction; it is read before synthesis and after each draft (a steer during drafting triggers one rewrite)."""
     control = _control(run_id, user_id)
     if control.cancelled:
@@ -77,14 +77,14 @@ async def steer_run(req: SteerRequest, run_id: str = RunIdPath, user_id: str = D
 
 
 @router.post("/runs/{run_id}/cancel")
-async def cancel_run(req: Optional[CancelRequest] = None, run_id: str = RunIdPath, user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+async def cancel_run(req: CancelRequest | None = None, run_id: str = RunIdPath, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     control = _control(run_id, user_id)
     control.cancel((req.reason if req and req.reason else "") or "cancelled by the user")
     return {"success": True, "run_id": control.run_id, "cancelled": True}
 
 
 @router.get("/reliability")
-async def reliability(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+async def reliability(user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     """Tool reliability telemetry (circuit breakers, retries, cache) when the reliability layer provides it."""
     try:
         from tribos.tools import reliability as reliability_module

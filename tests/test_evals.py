@@ -6,7 +6,7 @@ import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, List
+from typing import Any
 
 import pytest
 
@@ -15,17 +15,18 @@ from tribos.evals.cli import main as cli_main
 from tribos.evals.runner import Evaluator, RunConfig, load_results
 from tribos.evals.schema import AnswerExpect, CaseResult, Check, EvalCase, RetrievalExpect
 
-
 # ---------------------------------------------------------------------------------------------------------------
 # Case data
 # ---------------------------------------------------------------------------------------------------------------
 
 def test_builtin_suites_load_and_cover_every_level():
     suites = {name: datasets.load_suite(name) for name in datasets.builtin_suites()}
-    assert {"clinical", "behavior"} <= set(suites)
-    clinical = suites["clinical"]
-    assert len(clinical) >= 20 and all(c.answer and c.reference for c in clinical)
-    assert sum(1 for c in clinical if c.retrieval) >= 19
+    assert {"math", "physics", "engineering", "behavior", "golden"} <= set(suites)
+    for domain in ("math", "physics", "engineering"):
+        cases = suites[domain]
+        assert len(cases) >= 12 and all(c.answer and c.reference for c in cases)
+    assert len(suites["behavior"]) >= 15
+    assert len(suites["golden"]) == 5
     all_ids = [c.id for cases in suites.values() for c in cases]
     assert len(all_ids) == len(set(all_ids))
 
@@ -46,35 +47,67 @@ def test_sources_have_no_stray_control_characters():
 
 
 def test_select_filters_and_samples():
-    cases = datasets.load_suite("clinical")
-    assert [c.id for c in datasets.select(cases, ids=["clin-sepsis"])] == ["clin-sepsis-criteria"]
-    assert {c.category for c in datasets.select(cases, categories=["treatment"])} == {"treatment"}
+    cases = datasets.load_suite("math")
+    assert [c.id for c in datasets.select(cases, ids=["math-gaussian"])] == ["math-gaussian-integral"]
+    assert {c.category for c in datasets.select(cases, categories=["calculus"])} == {"calculus"}
     a = datasets.select(cases, limit=5, seed=3)
     assert len(a) == 5 and [c.id for c in a] == [c.id for c in datasets.select(cases, limit=5, seed=3)]
 
 
 def test_external_loaders_read_cached_files(tmp_path, monkeypatch):
     monkeypatch.setenv("TRIBOS_EVAL_CACHE", str(tmp_path))
-    (tmp_path / "pubmedqa_ori_pqal.json").write_text(json.dumps({
-        "123": {"QUESTION": "Does X help?", "final_decision": "yes", "LONG_ANSWER": "It does.", "YEAR": "2010"}}))
-    (tmp_path / "litqa2_rows.json").write_text(json.dumps([{
-        "id": "q1", "question": "Which?", "ideal": "A", "distractors": "['B', 'C']",
-        "sources": "['https://doi.org/10.1/abc']", "key-passage": "A is right."}]))
-    pq = datasets.load_suite("pubmedqa")[0]
-    assert (pq.id, pq.answer.label, pq.retrieval.gold_pmids) == ("pubmedqa-123", "yes", ["123"])
-    lq = datasets.load_suite("litqa2")[0]
-    assert lq.answer.options[:3] == ["A", "B", "C"] and lq.answer.options[-1].startswith("Insufficient")
-    assert lq.retrieval.gold_dois == ["10.1/abc"]
-    bio = tmp_path / "bioasq.json"
-    bio.write_text(json.dumps({"questions": [
-        {"id": "b1", "type": "factoid", "body": "Which gene?", "documents": ["http://www.ncbi.nlm.nih.gov/pubmed/555"],
-         "exact_answer": [["TP53", "p53"]], "ideal_answer": ["TP53."]},
-        {"id": "b2", "type": "yesno", "body": "Is it?", "documents": [], "exact_answer": "no", "ideal_answer": "No."}]}))
-    b = datasets.load_suite("bioasq", bioasq_file=str(bio))
-    assert b[0].retrieval.gold_pmids == ["555"] and b[0].answer.exact == [["TP53", "p53"]]
-    assert b[1].retrieval is None and b[1].answer.label == "no"
-    with pytest.raises(ValueError, match="bioasq-file"):
-        datasets.load_suite("bioasq")
+    (tmp_path / "math500_rows.json").write_text(json.dumps([
+        {"unique_id": "test/algebra/1.json", "problem": "Solve x+1=3.", "solution": "x=2", "answer": "2", "subject": "Algebra", "level": 1}
+    ]))
+    (tmp_path / "gsm8k_rows.json").write_text(json.dumps([
+        {"question": "2 + 3?", "answer": "Adding gives 5.\n#### 5"}
+    ]))
+    (tmp_path / "theoremqa_rows.json").write_text(json.dumps([
+        {"id": "t1", "Question": "What is det(I_2)?", "Answer": 1.0, "Answer_type": "float", "field": "math"}
+    ]))
+    (tmp_path / "scibench_rows.json").write_text(json.dumps([
+        {"problemid": "s1", "problem_text": "Find speed.", "answer_number": "9.81", "unit": "m/s", "source": "fund"}
+    ]))
+    (tmp_path / "phybench_rows.json").write_text(json.dumps([
+        {"id": "p1", "content": "Oscillator frequency?", "answer": "sqrt(k/m)", "category": "mechanics"}
+    ]))
+    (tmp_path / "engdesign_rows.json").write_text(json.dumps([
+        {"id": "e1", "question": "Design a cantilever beam.", "required_terms": ["bending"], "domain": "structural"}
+    ]))
+    (tmp_path / "ugphysics_rows.json").write_text(json.dumps([
+        {"id": "u1", "problem": "Escape velocity?", "answer": "sqrt(2*G*M/R)", "subject": "Classical Mechanics"}
+    ]))
+    (tmp_path / "gpqa_rows.json").write_text(json.dumps([
+        {"Record ID": "g1", "Question": "Which operator?", "Correct Answer": "Hamiltonian",
+         "Incorrect Answer 1": "Lagrangian", "Incorrect Answer 2": "Jacobian", "Incorrect Answer 3": "Hessian",
+         "Subdomain": "Quantum Mechanics"}
+    ]))
+
+    m500 = datasets.load_suite("math500")[0]
+    assert m500.answer.answer_type == "symbolic" and m500.answer.symbolic_answer == "2"
+
+    gsm = datasets.load_suite("gsm8k")[0]
+    assert gsm.answer.answer_type == "numeric" and gsm.answer.numeric_answer == 5.0
+
+    tqa = datasets.load_suite("theoremqa")[0]
+    assert tqa.answer.answer_type == "numeric" and tqa.answer.numeric_answer == 1.0
+
+    sci = datasets.load_suite("scibench")[0]
+    assert sci.answer.numeric_answer == 9.81 and "m/s" in sci.query
+
+    phy = datasets.load_suite("phybench")[0]
+    assert phy.answer.symbolic_answer == "sqrt(k/m)"
+
+    eng = datasets.load_suite("engdesign")[0]
+    assert eng.answer.required_terms == ["bending"]
+
+    with pytest.raises(ValueError, match="allow-noncommercial"):
+        datasets.load_suite("ugphysics")
+    ug = datasets.load_suite("ugphysics", allow_noncommercial=True)[0]
+    assert ug.answer.symbolic_answer == "sqrt(2*G*M/R)"
+
+    gpqa = datasets.load_suite("gpqa")[0]
+    assert gpqa.answer.label == "Hamiltonian" and len(gpqa.answer.options) == 4
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -85,51 +118,71 @@ def test_retrieval_scores_rank_recall_and_title_patterns():
     exp = RetrievalExpect(gold_pmids=["2", "9"], k=3)
     checks, m = scoring.retrieval_scores(exp, ["1", "2", "2", "3", "9"])
     assert checks[0].passed and m["first_gold_rank"] == 2 and m["rr"] == 0.5 and m["recall"] == 0.5  # 9 is rank 4 > k
-    checks, m = scoring.retrieval_scores(RetrievalExpect(gold_pmids=["7"], gold_title_patterns=[r"\bevoke\b"]),
-                                         ["1", "2"], titles=["Other", "Revisiting the evoke trials"])
+    checks, m = scoring.retrieval_scores(RetrievalExpect(gold_pmids=["7"], gold_title_patterns=[r"\boscillator\b"]),
+                                         ["1", "2"], titles=["Other", "Revisiting the damped oscillator"])
     assert checks[0].passed and m["first_gold_rank"] == 2 and m["recall"] == 0.0
+    checks, m = scoring.retrieval_scores(RetrievalExpect(gold_arxiv_ids=["1807.09547"], k=5),
+                                         pmids=["", ""], dois=["", ""], titles=["A", "B"],
+                                         arxiv_ids=["2101.00001", "arXiv:1807.09547v2"])
+    assert checks[0].passed and m["first_gold_rank"] == 2 and m["recall"] == 1.0
     checks, _ = scoring.retrieval_scores(RetrievalExpect(gold_pmids=["7"], required=False), ["1"])
     assert not checks[0].passed and not checks[0].required
     assert scoring.retrieval_scores(RetrievalExpect(), ["1"]) == ([], {"retrieved": 1})
 
 
+def test_numeric_and_symbolic_equivalence_scoring():
+    assert scoring.extract_boxed(r"Therefore the result is \boxed{\frac{\pi^2}{6}}.") == r"\frac{\pi^2}{6}"
+    assert scoring.symbolic_equivalent("(x + 1)**2", "x**2 + 2*x + 1")
+    assert scoring.symbolic_equivalent(r"\frac{\pi^2}{6}", "pi**2/6")
+    assert scoring.symbolic_equivalent(r"\sqrt{\frac{2 G M}{R}}", "sqrt(2*G*M/R)")
+    assert not scoring.symbolic_equivalent("x**2 + 1", "x**2 + 2")
+
+    exp_num = AnswerExpect(answer_type="numeric", numeric_answer=159.155, numeric_rel_tol=0.01)
+    checks, m = scoring.answer_checks(exp_num, {"response": r"The cutoff frequency is \boxed{159.2} Hz."})
+    assert any(c.name == "answer.numeric" and c.passed for c in checks) and m["numeric_correct"] is True
+
+    exp_sym = AnswerExpect(answer_type="symbolic", symbolic_answer="P*L**3/(3*E*I)")
+    checks, m = scoring.answer_checks(exp_sym, {"response": r"Tip deflection is \boxed{\frac{P L^3}{3 E I}}."})
+    assert any(c.name == "answer.symbolic" and c.passed for c in checks) and m["symbolic_correct"] is True
+
+
 def test_abstention_and_refusal():
     assert scoring.abstained("No peer-reviewed evidence was found for ZX999.")
     assert scoring.abstained("ZX999 appears to be hypothetical.")
-    assert not scoring.abstained("Pertuzumab plus trastuzumab and docetaxel is standard.")
+    assert not scoring.abstained("The Euler-Bernoulli buckling load is pi^2 E I / L^2.")
     assert scoring.opens_with_refusal("No relevant evidence was retrieved. Nothing more can be said.")
-    assert not scoring.opens_with_refusal("Use vancomycin. Evidence limitations: no guideline was retrieved.")
+    assert not scoring.opens_with_refusal("Use the Routh-Hurwitz array. Evidence limitations: no experimental dataset was attached.")
 
 
 def test_answer_checks():
-    exp = AnswerExpect(must_mention=["SOFA", "lactate"], must_not_mention=[r"cured 100\s?%"], agents_include=["Lithoscribe"],
-                       agents_exclude=["Vivarix"], framework="authoritative-react-compiler", cite_gold=True, min_citations=1)
-    obs = {"response": "SOFA rise of 2 (PMID: 26903338); lactate > 2.", "agents": ["Lithoscribe"], "verified": True,
-           "framework": "authoritative-react-compiler", "citation_keys": ["PMID:26903338"]}
-    checks, m = scoring.answer_checks(exp, obs, ["26903338"])
+    exp = AnswerExpect(must_mention=["omega_0", "zeta"], must_not_mention=[r"perpetual motion"], agents_include=["Archivon"],
+                       agents_exclude=["Dynamis"], framework="authoritative-react-compiler", cite_gold=True, min_citations=1)
+    obs = {"response": "Damped frequency depends on omega_0 and zeta (arXiv:1807.09547).", "agents": ["Archivon"], "verified": True,
+           "framework": "authoritative-react-compiler", "citation_keys": ["arXiv:1807.09547"]}
+    checks, m = scoring.answer_checks(exp, obs, ["1807.09547"])
     assert all(c.passed for c in checks), [c for c in checks if not c.passed]
     assert m["gold_cited"] and m["unresolved_citations"] == 0
-    bad = {**obs, "response": "Compound X cured 100% of patients (PMID: 1).", "agents": ["Vivarix"], "verified": False}
-    failed = {c.name for c in scoring.answer_checks(exp, bad, ["26903338"])[0] if not c.passed}
+    bad = {**obs, "response": "This creates perpetual motion (arXiv:1111.11111).", "agents": ["Dynamis"], "verified": False}
+    failed = {c.name for c in scoring.answer_checks(exp, bad, ["1807.09547"])[0] if not c.passed}
     assert {"answer.mentions", "answer.avoids", "answer.agent_ran", "answer.agent_skipped", "answer.verified", "answer.cites_gold"} <= failed
 
 
 def test_label_heuristics_and_exact_answers():
-    assert scoring.heuristic_yesno("Yes. The trial showed benefit.") == "yes"
-    assert scoring.heuristic_yesno("**No** - it does not.") == "no"
+    assert scoring.heuristic_yesno("Yes. The system is asymptotically stable.") == "yes"
+    assert scoring.heuristic_yesno("**No** - it diverges.") == "no"
     assert scoring.heuristic_yesno("No retrieved evidence directly addresses this.") is None  # not a verdict
     assert scoring.heuristic_yesno("The evidence is mixed and inconclusive.") is None  # left to the model grader
-    assert scoring.heuristic_yesno("Patients with X ...") is None
-    opts = ["ciprofloxacin", "meropenem", "Insufficient information to answer the question"]
-    assert scoring.heuristic_choice("It evolved resistance to ciprofloxacin only.", opts) == "ciprofloxacin"
+    assert scoring.heuristic_yesno("Systems with X ...") is None
+    opts = ["Hamiltonian", "Lagrangian", "Insufficient information to answer the question"]
+    assert scoring.heuristic_choice("The generator of time translation is the Hamiltonian only.", opts) == "Hamiltonian"
     assert scoring.heuristic_choice("No evidence was found.", opts) == opts[2]
     checks, m = scoring.label_checks(AnswerExpect(label="yes"), "Yes")
     assert checks[0].passed and m["answered"]
     _, m = scoring.label_checks(AnswerExpect(label="A"), opts[2])
     assert not m["correct"] and not m["answered"]
-    c, m = scoring.exact_checks(AnswerExpect(answer_type="list", exact=[["TP53", "p53"], ["KRAS"], ["EGFR"]]), "KRAS and p53")
+    c, m = scoring.exact_checks(AnswerExpect(answer_type="list", exact=[["Euler", "Euler-Bernoulli"], ["Timoshenko"], ["Rayleigh"]]), "Timoshenko and Euler-Bernoulli")
     assert c[0].passed and m["list_recall"] == 0.667
-    c, _ = scoring.exact_checks(AnswerExpect(answer_type="factoid", exact=[["BRCA1"]]), "It is BRCA2.")
+    c, _ = scoring.exact_checks(AnswerExpect(answer_type="factoid", exact=[["Noether"]]), "It is Lagrange.")
     assert not c[0].passed
 
 
@@ -139,7 +192,7 @@ def test_label_heuristics_and_exact_answers():
 
 def test_offline_plan_level_passes_every_builtin_case():
     """A routing regression test: every plan expectation that holds offline must pass."""
-    cases = [c for name in ("clinical", "behavior") for c in datasets.load_suite(name) if c.plan]
+    cases = [c for name in ("math", "physics", "engineering", "behavior", "golden") for c in datasets.load_suite(name) if c.plan]
     results = asyncio.run(Evaluator(RunConfig(levels=["plan"])).run(cases))
     failures = [(r.case_id, [c.detail for c in r.checks if not c.passed]) for r in results if not r.passed and not r.skipped]
     assert not failures, failures
@@ -147,7 +200,7 @@ def test_offline_plan_level_passes_every_builtin_case():
 
 class _FakeMemory:
     def __init__(self) -> None:
-        self.cleared: List[str] = []
+        self.cleared: list[str] = []
 
     def clear_thread_memory(self, thread_id: str, user_id: Any = None) -> None:
         self.cleared.append(thread_id)
@@ -160,10 +213,10 @@ class _FakeOrchestrator:
     async def execute_inquiry(self, query: str, **kw: Any) -> Any:
         self.calls.append((query, kw))
         return SimpleNamespace(
-            response=self.response, framework_used="authoritative-react-compiler", selected_agents=["Lithoscribe"],
+            response=self.response, framework_used="authoritative-react-compiler", selected_agents=["Archivon"],
             verification_report={"passed": True, "verification_score": 1.0, "defects": []},
-            citations={"entries": {"PMID:26903338": {"title": "Sepsis-3", "journal": "JAMA", "year": "2016"}}},
-            run_manifest={"tool_calls": [{"tool_name": "lithoscribe_literature_synthesis", "output_digest": {"pmids": ["26903338"]}}]},
+            citations={"entries": {"arXiv:1807.09547": {"title": "Damped Oscillator", "journal": "Am. J. Phys.", "year": "2019"}}},
+            run_manifest={"tool_calls": [{"tool_name": "archivon_literature_search", "output_digest": {"arxiv_ids": ["1807.09547"]}}]},
             query_context={"scope": "research"},
         )
 
@@ -181,32 +234,32 @@ class _FakeGrader:
 
 
 def test_answer_level_runs_setup_isolates_threads_and_grades():
-    orch = _FakeOrchestrator("The answer: SOFA increase of 2 points (PMID: 26903338) with lactate above 2.")
-    case = EvalCase(id="c1", suite="s", query="Sepsis criteria?", setup=["earlier turn"],
-                    retrieval={"gold_pmids": ["26903338"]}, reference="Sepsis-3.",
-                    answer={"must_mention": ["SOFA"], "cite_gold": True, "label": "maybe", "options": ["yes", "no", "maybe"],
+    orch = _FakeOrchestrator("The answer: damped frequency omega_d = omega_0 * sqrt(1 - zeta^2) (arXiv:1807.09547).")
+    case = EvalCase(id="c1", suite="s", query="Damped oscillator frequency?", setup=["earlier turn"],
+                    retrieval={"gold_arxiv_ids": ["1807.09547"]}, reference="omega_d = omega_0 sqrt(1 - zeta^2).",
+                    answer={"must_mention": ["omega_d"], "cite_gold": True, "label": "maybe", "options": ["yes", "no", "maybe"],
                             "answer_type": "yesno"})
     ev = Evaluator(RunConfig(levels=["answer"], judge=True, judge_min=4.0), orchestrator=orch,
                    llm_factory=lambda **kw: _FakeGrader("maybe"), run_id="t")
     [res] = asyncio.run(ev.run([case]))
-    assert [q for q, _ in orch.calls] == ["earlier turn", "Sepsis criteria?"]
+    assert [q for q, _ in orch.calls] == ["earlier turn", "Damped oscillator frequency?"]
     assert orch.calls[1][1]["recall_memory"] is True and orch.memory.cleared == ["eval-t-c1"]
     assert res.passed, [c for c in res.checks if not c.passed]
     assert res.metrics["predicted"] == "maybe" and res.metrics["judge"]["overall"] == 4.4 and res.metrics["retrieval_hit"]
 
 
 def test_rescore_applies_new_expectations_without_calling_the_system():
-    orch = _FakeOrchestrator("SOFA rises (PMID: 26903338).")
-    case = EvalCase(id="r1", suite="s", query="q", answer={"must_mention": ["SOFA"]})
+    orch = _FakeOrchestrator("omega_d rises (arXiv:1807.09547).")
+    case = EvalCase(id="r1", suite="s", query="q", answer={"must_mention": ["omega_d"]})
     ev = Evaluator(RunConfig(levels=["answer"]), orchestrator=orch, llm_factory=lambda **kw: _FakeGrader("x"), run_id="r")
     [old] = asyncio.run(ev.run([case]))
     assert old.passed and len(orch.calls) == 1
-    stricter = case.model_copy(update={"answer": AnswerExpect(must_mention=["SOFA", "lactate"])})
+    stricter = case.model_copy(update={"answer": AnswerExpect(must_mention=["omega_d", "quality factor"])})
     new = asyncio.run(ev.rescore(stricter, old))
     assert not new.passed and len(orch.calls) == 1  # re-scored from stored observations only
     retrieval = CaseResult(case_id="r2", suite="s", category="c", level="retrieval", query="q",
-                           observed={"pmids": ["1", "2"], "dois": ["", ""], "titles": ["A", "Revisiting the evoke trials"]})
-    re_case = EvalCase(id="r2", suite="s", query="q", retrieval={"gold_pmids": ["9"], "gold_title_patterns": [r"\bevoke\b"]})
+                           observed={"pmids": ["1", "2"], "dois": ["", ""], "titles": ["A", "Revisiting the damped oscillator"]})
+    re_case = EvalCase(id="r2", suite="s", query="q", retrieval={"gold_pmids": ["9"], "gold_title_patterns": [r"\boscillator\b"]})
     assert asyncio.run(ev.rescore(re_case, retrieval)).passed
 
 
@@ -277,7 +330,7 @@ def test_cli_runs_a_suite_and_applies_the_gate(tmp_path: Path, capsys):
     suite = tmp_path / "mini.jsonl"
     suite.write_text(
         EvalCase(id="m1", suite="mini", query="thanks!", plan={"scope": "conversational", "offline": True}).model_dump_json() + "\n"
-        + EvalCase(id="m2", suite="mini", query="What are the diagnostic criteria for sepsis?",
+        + EvalCase(id="m2", suite="mini", query="Derive the Euler-Bernoulli beam deflection formula.",
                    plan={"scope": "conversational", "offline": True}).model_dump_json() + "\n"  # wrong on purpose
     )
     out = tmp_path / "runs"
@@ -288,4 +341,4 @@ def test_cli_runs_a_suite_and_applies_the_gate(tmp_path: Path, capsys):
     assert summary["levels"]["plan"]["passed"] == 1 and (run_dir / "report.md").exists()
     assert cli_main(["report", str(run_dir)]) == 0
     assert cli_main(["run", "--suite", "nope", "--out", str(out)]) == 2
-    assert cli_main(["list"]) == 0 and "clinical" in capsys.readouterr().out
+    assert cli_main(["list"]) == 0 and "physics" in capsys.readouterr().out

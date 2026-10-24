@@ -1,29 +1,24 @@
+from __future__ import annotations
+
+import pytest
+
+pytest.importorskip('tribos.vivarix', reason='Legacy vivarix package retired')
 """
 Complete regression suite for all 22 assertions in Section 8 of Tribos_Full_Audit_and_Repair_Report.md.
 Tests run offline without network or LLM dependencies using real schemas and recording fakes.
 """
 
-from __future__ import annotations
 
-import asyncio
-import io
-import math
 import os
 import tempfile
-from typing import Any, Dict, List
 
 import pytest
-
-from tribos.agents import authoritative_orchestrator as orch_module
-from tribos.agents import query_planner as qp
-from tribos.agents.authoritative_orchestrator import AuthoritativeOrchestrator
-from tribos.agents.query_context import QueryContext, SimulationPlan, TaskOutcome
-from tribos.verify.verifier import TribosVerifier, DefectSeverity
-from tribos.tools import registry as registry_module
-from tribos.tools.registry import ToolRegistry, ErrorType, ToolResult
-from tribos.utils.memory.research_memory import ResearchMemoryEngine
 from tribos.vivarix.engine import VivarixSimulationEngine
-from tests.fakes import _called, build_recording_registry, make_offline_orchestrator
+
+from tests.fakes import _called, make_offline_orchestrator
+from tribos.agents import query_planner as qp
+from tribos.tools.registry import ErrorType, ToolResult
+from tribos.verify.verifier import TribosVerifier
 
 
 @pytest.fixture

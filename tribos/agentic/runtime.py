@@ -22,7 +22,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from .budget import BudgetExhausted
 from .config import AGENTIC_FRAMEWORKS
@@ -44,14 +44,14 @@ SKIP_WHEN_REWRITE_PENDING = frozenset({"nli_precompute"})
 @dataclass
 class PhaseOutcome:
     # before_evidence only: end the turn with this reply (a clarifying question, a refusal, ...)
-    stop_response: Optional[str] = None
-    stop_task_status: Optional[Dict[str, Any]] = None
+    stop_response: str | None = None
+    stop_task_status: dict[str, Any] | None = None
     # after_draft only: write the answer again with the new evidence and/or this feedback
     resynthesize: bool = False
-    feedback: List[str] = field(default_factory=list)
-    artifacts: Dict[str, Any] = field(default_factory=dict)
+    feedback: list[str] = field(default_factory=list)
+    artifacts: dict[str, Any] = field(default_factory=dict)
 
-    def merge(self, other: Optional["PhaseOutcome"]) -> None:
+    def merge(self, other: PhaseOutcome | None) -> None:
         if other is None:
             return
         if other.stop_response and not self.stop_response:
@@ -65,17 +65,17 @@ class AgentPhase:
     key: str = ""
     stage: str = "augment"
     order: int = 100
-    frameworks: Optional[Tuple[str, ...]] = None  # None = every agentic framework
+    frameworks: tuple[str, ...] | None = None  # None = every agentic framework
     needs_llm: bool = False  # skipped (with a note) when the agent model is unavailable
 
     def applies(self, state: AgentState) -> bool:
         return True
 
-    async def run(self, state: AgentState) -> Optional[PhaseOutcome]:
+    async def run(self, state: AgentState) -> PhaseOutcome | None:
         raise NotImplementedError
 
 
-_PHASES: Dict[str, AgentPhase] = {}
+_PHASES: dict[str, AgentPhase] = {}
 
 
 def register_phase(phase: AgentPhase) -> None:
@@ -89,7 +89,7 @@ def unregister_phase(key: str) -> None:
     _PHASES.pop(key, None)
 
 
-def get_phases(stage: str, framework: str) -> List[AgentPhase]:
+def get_phases(stage: str, framework: str) -> list[AgentPhase]:
     out = [
         p for p in _PHASES.values()
         if p.stage == stage and (framework in (p.frameworks or AGENTIC_FRAMEWORKS))
@@ -97,11 +97,11 @@ def get_phases(stage: str, framework: str) -> List[AgentPhase]:
     return sorted(out, key=lambda p: (p.order, p.key))
 
 
-def snapshot_phases() -> Dict[str, AgentPhase]:
+def snapshot_phases() -> dict[str, AgentPhase]:
     return dict(_PHASES)
 
 
-def restore_phases(state: Dict[str, AgentPhase]) -> None:
+def restore_phases(state: dict[str, AgentPhase]) -> None:
     _PHASES.clear()
     _PHASES.update(state)
 
@@ -163,7 +163,7 @@ class AgenticRuntime:
             except BudgetExhausted as exc:
                 status = "budget"
                 failure = f"Stopped: agent budget used up ({exc})"
-            except asyncio.TimeoutError as exc:
+            except TimeoutError as exc:
                 if time.perf_counter() - t0 < limit - 0.5:  # a timeout raised inside the phase, not the bound
                     status = "error"
                     failure = f"TimeoutError: {str(exc)[:200]}"

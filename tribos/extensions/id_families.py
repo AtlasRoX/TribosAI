@@ -10,8 +10,9 @@ This module imports nothing from tribos.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Set, Tuple
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -20,21 +21,47 @@ class IdentifierFamily:
     pattern: re.Pattern
     normalize: Callable[[str], str]
     label: str
-    canonical_keys: Tuple[str, ...]
+    canonical_keys: tuple[str, ...]
     correction: str
     severity: str = "CRITICAL"
 
 
 def _identity(s: str) -> str:
-    return s
+    return s.strip()
 
 
 def _upper(s: str) -> str:
-    return s.upper()
+    return s.strip().upper()
 
 
 def _lower(s: str) -> str:
-    return s.lower()
+    return s.strip().lower()
+
+
+def _norm_arxiv(s: str) -> str:
+    cleaned = re.sub(r"^arxiv:\s*", "", s.strip(), flags=re.IGNORECASE)
+    return f"arXiv:{cleaned}"
+
+
+def _norm_zbl(s: str) -> str:
+    cleaned = re.sub(r"^zbl\s*:?\s*", "", s.strip(), flags=re.IGNORECASE)
+    return f"Zbl {cleaned}"
+
+
+def _norm_mr(s: str) -> str:
+    cleaned = re.sub(r"^mr\s*:?\s*", "", s.strip(), flags=re.IGNORECASE)
+    return f"MR{cleaned}"
+
+
+def _norm_isbn(s: str) -> str:
+    cleaned = re.sub(r"^isbn(?:-1[03])?:?\s*", "", s.strip(), flags=re.IGNORECASE)
+    cleaned = re.sub(r"[\s-]", "", cleaned).upper()
+    return f"ISBN:{cleaned}"
+
+
+def _norm_comp(s: str) -> str:
+    cleaned = re.sub(r"^comp:\s*", "", s.strip(), flags=re.IGNORECASE)
+    return f"comp:{cleaned}"
 
 
 def _ontology(s: str) -> str:
@@ -58,7 +85,89 @@ def _uuid_only(s: str) -> str:
     return m.group(0).lower() if m else s.lower()
 
 
-FAMILIES: Tuple[IdentifierFamily, ...] = (
+FAMILIES: tuple[IdentifierFamily, ...] = (
+    # STEM identifier families
+    IdentifierFamily(
+        name="arxiv",
+        pattern=re.compile(r"\barXiv:\d{4}\.\d{4,5}(?:v\d+)?\b", re.IGNORECASE),
+        normalize=_norm_arxiv,
+        label="ARXIV",
+        canonical_keys=("arxiv_ids", "arxiv_id", "arxiv"),
+        correction="Cite only arXiv identifiers (arXiv:YYMM.NNNNN) that appear in the retrieved literature or passages.",
+    ),
+    IdentifierFamily(
+        name="zbl",
+        pattern=re.compile(r"\bZbl\s*\d{4}\.\d{5}\b", re.IGNORECASE),
+        normalize=_norm_zbl,
+        label="ZBL",
+        canonical_keys=("zbl_ids", "zbl_id", "zbl"),
+        correction="Cite only zbMATH Open identifiers (Zbl NNNN.NNNNN) returned by an executed literature lookup.",
+    ),
+    IdentifierFamily(
+        name="mr",
+        pattern=re.compile(r"\bMR\d{6,8}\b", re.IGNORECASE),
+        normalize=_norm_mr,
+        label="MR",
+        canonical_keys=("mr_ids", "mr_id", "mr"),
+        correction="Cite only MathSciNet Mathematical Reviews identifiers (MR######) present in the retrieved evidence.",
+    ),
+    IdentifierFamily(
+        name="oeis",
+        pattern=re.compile(r"\bA\d{6}\b"),
+        normalize=_upper,
+        label="OEIS",
+        canonical_keys=("oeis_ids", "oeis_id", "a_numbers", "a_number"),
+        correction="Cite only OEIS sequence A-numbers (A######) returned by Physis or present in the user's question.",
+    ),
+    IdentifierFamily(
+        name="ads",
+        pattern=re.compile(r"\b\d{4}[A-Za-z&.\d]{14}[A-Z]\b"),
+        normalize=_identity,
+        label="ADS",
+        canonical_keys=("ads_bibcodes", "bibcodes", "bibcode", "ads_id"),
+        correction="Cite only NASA ADS 19-character bibcodes returned by an executed literature search.",
+    ),
+    IdentifierFamily(
+        name="mp",
+        pattern=re.compile(r"\bmp-\d{1,8}\b", re.IGNORECASE),
+        normalize=_lower,
+        label="MP",
+        canonical_keys=("mp_ids", "mp_id", "material_ids", "material_id"),
+        correction="Cite only Materials Project identifiers (mp-...) returned by Physis in this investigation.",
+    ),
+    IdentifierFamily(
+        name="isbn",
+        pattern=re.compile(r"\bISBN(?:-1[03])?:?\s*[0-9Xx-]{10,17}\b", re.IGNORECASE),
+        normalize=_norm_isbn,
+        label="ISBN",
+        canonical_keys=("isbns", "isbn"),
+        correction="Cite only ISBN book identifiers present in the retrieved bibliographic evidence.",
+    ),
+    IdentifierFamily(
+        name="openalex",
+        pattern=re.compile(r"\bW\d{7,12}\b"),
+        normalize=_upper,
+        label="OPENALEX",
+        canonical_keys=("openalex_ids", "openalex_id"),
+        correction="Cite only OpenAlex work identifiers (W...) returned by an executed literature search.",
+    ),
+    IdentifierFamily(
+        name="computation",
+        pattern=re.compile(r"\bcomp:[a-zA-Z0-9_:-]+\b", re.IGNORECASE),
+        normalize=_norm_comp,
+        label="COMP",
+        canonical_keys=("computation_ids", "computation_id", "comp_ids"),
+        correction="Cite only computation identifiers (comp:...) produced by Axiom, Dynamis, or Calcula in this run.",
+    ),
+    IdentifierFamily(
+        name="dataset",
+        pattern=re.compile(r"\bds_[0-9a-f]{12}\b", re.IGNORECASE),
+        normalize=_lower,
+        label="DATASET",
+        canonical_keys=("dataset_ids", "dataset_id"),
+        correction="Refer only to uploaded dataset ids that were attached to this question.",
+    ),
+    # Legacy biomedical identifier families retained for compatibility
     IdentifierFamily(
         name="nct",
         pattern=re.compile(r"\bNCT\d{8}\b", re.IGNORECASE),
@@ -140,7 +249,6 @@ FAMILIES: Tuple[IdentifierFamily, ...] = (
         correction="Cite only FDA application numbers (NDA/ANDA/BLA) shown on the retrieved openFDA label.",
     ),
     IdentifierFamily(
-        # A bare UUID is too generic; only one presented as a DailyMed / label set id is checked.
         name="dailymed_setid",
         pattern=re.compile(
             r"(?:\bset[\s_-]?id\b[\"'`*\s:=(]{0,6}|\bsetid=|\bDailyMed\b[^\n.]{0,60}?)" + _UUID, re.IGNORECASE
@@ -150,20 +258,12 @@ FAMILIES: Tuple[IdentifierFamily, ...] = (
         canonical_keys=("set_ids",),
         correction="Cite only DailyMed label set ids returned by the openFDA label lookup.",
     ),
-    IdentifierFamily(
-        name="dataset",
-        pattern=re.compile(r"\bds_[0-9a-f]{12}\b"),
-        normalize=_identity,
-        label="DATASET",
-        canonical_keys=("dataset_ids",),
-        correction="Refer only to uploaded dataset ids that were attached to this question.",
-    ),
 )
 
-_BY_NAME: Dict[str, IdentifierFamily] = {f.name: f for f in FAMILIES}
+_BY_NAME: dict[str, IdentifierFamily] = {f.name: f for f in FAMILIES}
 
 
-def family_names() -> List[str]:
+def family_names() -> list[str]:
     return [f.name for f in FAMILIES]
 
 
@@ -171,9 +271,9 @@ def get_family(name: str) -> IdentifierFamily:
     return _BY_NAME[name]
 
 
-def extract_family_ids(text: str) -> Dict[str, Set[str]]:
+def extract_family_ids(text: str) -> dict[str, set[str]]:
     """Normalized ids of every family found in text (every family key is present)."""
-    out: Dict[str, Set[str]] = {f.name: set() for f in FAMILIES}
+    out: dict[str, set[str]] = {f.name: set() for f in FAMILIES}
     if not text:
         return out
     for fam in FAMILIES:
@@ -182,10 +282,10 @@ def extract_family_ids(text: str) -> Dict[str, Set[str]]:
     return out
 
 
-def normalize_ids(name: str, ids) -> Set[str]:
+def normalize_ids(name: str, ids: Any) -> set[str]:
     """Normalize ids of one family, splitting comma-separated strings and dropping blanks."""
     fam = _BY_NAME.get(name)
-    out: Set[str] = set()
+    out: set[str] = set()
     if ids is None:
         return out
     items = [ids] if isinstance(ids, str) else list(ids)

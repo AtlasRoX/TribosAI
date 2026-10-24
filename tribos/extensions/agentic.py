@@ -10,7 +10,6 @@ from __future__ import annotations
 import importlib
 import logging
 from types import ModuleType
-from typing import List
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +29,7 @@ AGENT_PHASE_MODULES = (
     "tribos.agentic.confidence",  # 9 calibrated per-claim confidence (finalize)
 )
 
-LOADED: List[ModuleType] = []
+LOADED: list[ModuleType] = []
 
 for _name in AGENT_PHASE_MODULES:
     try:

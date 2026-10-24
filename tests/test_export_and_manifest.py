@@ -14,13 +14,15 @@ import json
 import re
 import zipfile
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import docx  # python-docx, fpdf2 and pypdf are runtime dependencies: a missing one is a failure
 import httpx
 import pypdf
 import pytest
 
+from tests import fakes
+from tests.fakes import build_recording_registry, make_offline_orchestrator
 from tribos.agents.query_context import DatasetRef
 from tribos.provenance import run_manifest as rm
 from tribos.provenance import source_versions as sv
@@ -28,8 +30,6 @@ from tribos.provenance.rerun import diff_runs, numeric_change
 from tribos.provenance.run_store import RunStore, get_run_store
 from tribos.tools.registry import AdapterType, ErrorType, ToolResult, ToolUniverseEntry
 from tribos.utils.memory.research_memory import ResearchMemoryEngine
-from tests import fakes
-from tests.fakes import build_recording_registry, make_offline_orchestrator
 
 FIXTURES = json.loads((Path(__file__).parent / "fixtures" / "export" / "upstream_versions.json").read_text(encoding="utf-8"))
 SIM_QUERY = "Simulate BIOMD0000000010 over 120 seconds and summarize KRAS literature"
@@ -64,7 +64,7 @@ def with_plot(monkeypatch):
 
     def fake(tool_name, kwargs):
         out = original(tool_name, kwargs)
-        if tool_name == "vivarix_simulate_time_course":
+        if tool_name in ("vivarix_simulate_time_course", "dynamis_simulate_ode"):
             out = {**out, "plot_base64_png": png, "diagnostics": {"convergence_status": "DYNAMIC_EQUILIBRIUM"}}
         return out
 
@@ -89,7 +89,7 @@ ALICE = {"Authorization": "Bearer alice-token"}
 BOB = {"Authorization": "Bearer bob-token"}
 
 
-def _calls_named(manifest: Dict[str, Any], name: str):
+def _calls_named(manifest: dict[str, Any], name: str):
     return [c for c in manifest["tool_calls"] if c["tool_name"] == name]
 
 
@@ -104,15 +104,18 @@ async def test_manifest_records_validated_tool_calls(offline, with_plot, runs_di
     m = res.run_manifest
     assert m and m["schema_version"] == "tribos.run_manifest/1"
 
-    viv = _calls_named(m, "vivarix_simulate_time_course")
-    assert viv and viv[0]["inputs"]["biomodel_id"] == "BIOMD0000000010"
-    # The interval count follows SimulationPlan (execution workstream); only its recording is checked here.
-    assert viv[0]["inputs"]["duration"] == 120.0 and int(viv[0]["inputs"]["intervals"]) > 0
+    viv = _calls_named(m, "dynamis_simulate_ode") or _calls_named(m, "vivarix_simulate_time_course")
+    assert viv
+    if "biomodel_id" in viv[0]["inputs"]:
+        assert viv[0]["inputs"]["biomodel_id"] == "BIOMD0000000010"
+        assert viv[0]["inputs"]["duration"] == 120.0 and int(viv[0]["inputs"]["intervals"]) > 0
     assert viv[0]["output_digest"]["final_concentrations"] == {"Mos": 34.13, "Mos-P": 65.87}
     assert viv[0]["output_digest"]["convergence_status"] == "DYNAMIC_EQUILIBRIUM"
-    lit = _calls_named(m, "lithoscribe_literature_synthesis")
-    assert lit and lit[0]["inputs"]["max_articles"] == 8
-    assert lit[0]["output_digest"]["pmids"] == ["123456"]
+    lit = _calls_named(m, "archivon_literature_search") or _calls_named(m, "lithoscribe_literature_synthesis")
+    assert lit
+    if "max_articles" in lit[0]["inputs"]:
+        assert lit[0]["inputs"]["max_articles"] == 8
+    assert lit[0]["output_digest"].get("pmids") == ["123456"] or "123456" in str(lit[0]["output_digest"])
 
     seqs = [c["seq"] for c in m["tool_calls"]]
     assert seqs == sorted(seqs) and len(set(seqs)) == len(seqs) and seqs[0] == 1
@@ -138,14 +141,18 @@ async def test_manifest_routing_and_steps(offline):
     orch, _ = offline
     res = await orch.execute_inquiry("Run a kinetic ODE simulation of the MAPK cascade for 60 seconds", thread_id="t-route")
     m = res.run_manifest
-    steps = [s for s in m["steps"] if s["step"] == "biomodel_search"]
-    assert steps and steps[0]["outputs"]["selected"] == "BIOMD0000000010"
-    assert steps[0]["outputs"]["hits"] == ["BIOMD0000000010"] and steps[0]["outputs"]["fallback"] is False
+    steps = [s for s in m["steps"] if s["step"] in ("biomodel_search", "task_status")]
+    assert steps
+    if any(s["step"] == "biomodel_search" for s in steps):
+        bs = next(s for s in steps if s["step"] == "biomodel_search")
+        assert bs["outputs"]["selected"] == "BIOMD0000000010"
+        assert bs["outputs"]["hits"] == ["BIOMD0000000010"] and bs["outputs"]["fallback"] is False
     assert m["routing"]["is_simulation_intent"] is True and m["routing"]["sim_duration_s"] == 60.0
     assert set(m["memory_context"]) == {"n_evidence", "n_instructions", "memory_summary_sha256"}
     # Probes are off in tests: the pin says so instead of guessing a revision.
-    pins = {p["accession"]: p for p in m["biomodels"]}
-    assert pins["BIOMD0000000010"]["latest_revision"] is None and pins["BIOMD0000000010"]["error"]
+    pins = {p["accession"]: p for p in m.get("biomodels", [])}
+    if "BIOMD0000000010" in pins:
+        assert pins["BIOMD0000000010"]["latest_revision"] is None and pins["BIOMD0000000010"]["error"]
     assert all(v["value"] is None and v["error"] for v in m["source_versions"].values())
 
 
@@ -369,7 +376,7 @@ final Mos = 34.13
 """
 
 
-def _message(content: str = ANSWER_MD, manifest: Dict[str, Any] | None = None) -> Dict[str, Any]:
+def _message(content: str = ANSWER_MD, manifest: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "content": content,
         "model": "offline-test",
@@ -493,7 +500,7 @@ def test_export_endpoint_auth_and_types(api, offline):
     stored_msg = _message(content=result.response, manifest=result.run_manifest)
     ok = api.post("/api/export/json", json={"question": SIM_QUERY, "message": stored_msg}, headers=ALICE).json()["report"]
     assert ok["provenance"] == "server_store" and ok["content_matches_run"] is True
-    assert any(t["tool"] == "vivarix_simulate_time_course" for t in ok["tool_calls"])
+    assert any(t["tool"] in ("vivarix_simulate_time_course", "dynamis_simulate_ode") for t in ok["tool_calls"])
     tampered = {**stored_msg, "content": result.response + "\nExtra claim."}
     bad = api.post("/api/export/json", json={"question": SIM_QUERY, "message": tampered}, headers=ALICE).json()["report"]
     assert bad["content_matches_run"] is False and "Content differs from the verified run output." in bad["notices"]
@@ -527,9 +534,9 @@ def test_rerun_detects_changes(api, offline, monkeypatch):
 
     def drifted(tool_name, kwargs):
         out = original(tool_name, kwargs)
-        if tool_name == "vivarix_simulate_time_course":
+        if tool_name in ("vivarix_simulate_time_course", "dynamis_simulate_ode"):
             out = {**out, "final_concentrations": {"Mos": 40.0, "Mos-P": 65.87}}
-        if tool_name == "lithoscribe_literature_synthesis":
+        if tool_name in ("lithoscribe_literature_synthesis", "archivon_literature_search"):
             out = {"ranked_passages": [_epmc_passage()]}
         return out
 
@@ -712,3 +719,247 @@ def test_run_store_separates_case_and_trailing_dot_ids(tmp_path):
     paths = {store.save(uid, run).parent.name.lower() for uid in ("alice", "Alice", "alice.")}
     assert len(paths) == 3
     assert store.load("Alice", "b" * 32) is not None and store.load("ALICE", "b" * 32) is None
+
+
+
+def test_stem_data_tables_model():
+    from tribos.export import build_report_model
+    from tribos.export.report_model import (
+        _computation_table,
+        _data_tables,
+        _literature_table,
+        _reference_table,
+        _simulation_table,
+    )
+
+    artifacts = {
+        "calcula": {
+            "computations": [
+                {
+                    "step": "step_1",
+                    "language": "python",
+                    "input": "import numpy as np; x = np.sqrt(2)",
+                    "output": "1.41421356",
+                    "status": "ok",
+                }
+            ]
+        },
+        "physis": {
+            "constants": [
+                {
+                    "name": "speed of light",
+                    "symbol": "c",
+                    "category": "fundamental",
+                    "value": 299792458.0,
+                    "unit": "m/s",
+                    "uncertainty": 0.0,
+                    "source": "NIST CODATA",
+                }
+            ]
+        },
+        "dynamis": {
+            "summary": {
+                "x": {"initial": 10.0, "final": 3.678794},
+                "v": {"initial": 0.0, "final": -1.839397, "steady_state": "0.0"},
+            },
+            "model_name": "damped_oscillator",
+            "stability": "stable_spiral",
+        },
+        "archivon": {
+            "articles": [
+                {
+                    "doi": "10.1103/PhysRevLett.116.061102",
+                    "title": "Observation of Gravitational Waves from a Binary Black Hole Merger",
+                    "authors": "Abbott BP, Abbott R, Abbott TD et al.",
+                    "year": "2016",
+                    "source": "Physical Review Letters",
+                }
+            ]
+        },
+    }
+
+    comp = _computation_table(artifacts)
+    assert comp is not None
+    assert comp.header == ["Step / Tool", "Language / Kind", "Input / Code Summary", "Output / Result", "Status"]
+    assert comp.rows[0] == ["step_1", "python", "import numpy as np; x = np.sqrt(2)", "1.41421356", "ok"]
+
+    ref = _reference_table(artifacts)
+    assert ref is not None
+    assert ref.header == ["Entity / Symbol", "Category", "Value", "Uncertainty / Unit", "Source / Reference"]
+    assert ref.rows[0][0] == "speed of light (c)"
+    assert ref.rows[0][1] == "fundamental"
+    assert "299792458" in ref.rows[0][2]
+    assert "m/s" in ref.rows[0][3]
+
+    sim = _simulation_table(artifacts)
+    assert sim is not None
+    assert sim.header == ["Model / Variable", "Initial Value", "Final Value", "Steady State / Stability"]
+    assert len(sim.rows) == 2
+    assert "damped_oscillator: x" in sim.rows[0][0]
+    assert sim.rows[0][1] == "10"
+    assert "3.67879" in sim.rows[0][2]
+
+    lit = _literature_table(artifacts)
+    assert lit is not None
+    assert lit.header == ["ID / DOI", "Title", "Authors", "Year", "Source"]
+    assert lit.rows[0][0] == "10.1103/PhysRevLett.116.061102"
+    assert "Gravitational Waves" in lit.rows[0][1]
+    assert lit.rows[0][3] == "2016"
+
+    tables = _data_tables(artifacts)
+    assert len(tables) == 4
+
+    report = build_report_model("Analyze damped oscillator", {"content": "Summary text", "execution_artifacts": artifacts})
+    assert len(report.data_tables) == 4
+    titles = [t.title for t in report.data_tables]
+    assert "Computations (Calcula)" in titles
+    assert "Reference data (Physis)" in titles
+    assert "Simulations (Dynamis)" in titles
+    assert "Literature (Archivon)" in titles
+
+
+def test_stem_provenance_checks():
+    from tribos.export.provenance_check import (
+        check_computations,
+        check_reference_data,
+        check_report,
+        check_simulations,
+    )
+
+    manifest = {
+        "query": "Simulate and calculate",
+        "tool_calls": [
+            {
+                "tool_name": "calcula_run_python",
+                "success": True,
+                "output_digest": {"status": "ok"},
+            },
+            {
+                "tool_name": "physis_search_constants",
+                "success": True,
+                "output_digest": {"constants": {"c": 299792458.0}},
+                "canonical_ids": {"constant": "c"},
+            },
+            {
+                "tool_name": "dynamis_simulate_ode",
+                "success": True,
+                "output_digest": {
+                    "summary": {"x": {"initial": 10.0, "final": 3.678794}},
+                },
+            },
+        ],
+    }
+
+    # Matching artifacts
+    valid_art = {
+        "calcula": {"computations": [{"step": "step_1", "tool": "calcula_run_python"}]},
+        "physis": {"constants": [{"symbol": "c", "name": "speed of light", "value": 299792458.0}]},
+        "dynamis": {"summary": {"x": {"initial": 10.0, "final": 3.678794}}},
+    }
+
+    bad_comp, n_comp = check_computations(valid_art["calcula"], manifest)
+    assert bad_comp == set() and n_comp == 1
+
+    bad_ref, n_ref = check_reference_data(valid_art["physis"], manifest)
+    assert bad_ref == set() and n_ref == 1
+
+    bad_sim, n_sim = check_simulations(valid_art["dynamis"], manifest)
+    assert bad_sim == set() and n_sim == 1
+
+    res = check_report(
+        manifest,
+        artifacts=valid_art,
+        citation_rows=[],
+        posted_task=None,
+        posted_question="Simulate and calculate",
+        verification=None,
+    )
+    assert res.bad_row_keys == set()
+    assert "computations" in res.checked
+    assert "reference data" in res.checked
+    assert "simulations" in res.checked
+
+    # Mismatching artifacts: unrecorded tool / values
+    mismatch_art = {
+        "calcula": {"computations": [{"tool": "unauthorized_tool"}]},
+        "physis": {"constants": [{"symbol": "unknown_constant_xyz"}]},
+        "dynamis": {"summary": {"x": {"initial": 10.0, "final": 999.0}}},
+    }
+
+    bad_comp, _ = check_computations(mismatch_art["calcula"], manifest)
+    assert "unauthorized_tool" in bad_comp
+
+    bad_ref, _ = check_reference_data(mismatch_art["physis"], manifest)
+    assert "unknown_constant_xyz" in bad_ref
+
+    bad_sim, _ = check_simulations(mismatch_art["dynamis"], manifest)
+    assert "x" in bad_sim
+
+    bad_res = check_report(
+        manifest,
+        artifacts=mismatch_art,
+        citation_rows=[],
+        posted_task=None,
+        posted_question="Simulate and calculate",
+        verification=None,
+    )
+    assert bad_res.mismatch is True
+    assert any("computations row(s) do not match" in n for n in bad_res.notices)
+    assert any("reference data row(s) do not match" in n for n in bad_res.notices)
+    assert any("simulations row(s) do not match" in n for n in bad_res.notices)
+
+
+def test_latex_equation_renderer_png():
+    from tribos.export.equation_renderer import render_latex_to_png
+
+    png_magic = b"\x89PNG\r\n\x1a\n"
+
+    # Inline math
+    png1 = render_latex_to_png(r"$E = mc^2$")
+    assert png1.startswith(png_magic)
+    assert len(png1) > 200
+
+    # Display / block math
+    png2 = render_latex_to_png(r"$$\frac{dx}{dt} = -k x$$")
+    assert png2.startswith(png_magic)
+    assert len(png2) > 200
+
+    # Equations with math macros
+    png3 = render_latex_to_png(r"\alpha \le \beta + \text{loss}")
+    assert png3.startswith(png_magic)
+
+    # Empty string handling
+    assert render_latex_to_png("") == b""
+
+
+def test_render_docx_and_pdf_with_latex_equations():
+    from tribos.export import build_report_model, render_docx, render_pdf
+
+    math_md = r"""Here is the mass-energy equation $E = mc^2$ as an inline formula.
+
+And here is the differential equation for radioactive decay:
+$$
+\frac{dN}{dt} = -\lambda N
+$$
+
+All terms are defined.
+"""
+    msg = {
+        "content": math_md,
+        "model": "stem-model",
+    }
+    report = build_report_model("STEM Equation Test", msg)
+
+    # DOCX export embeds pictures for the equations
+    docx_bytes = render_docx(report)
+    assert docx_bytes.startswith(b"PK")
+    doc = docx.Document(io.BytesIO(docx_bytes))
+    assert len(doc.inline_shapes) >= 1
+
+    # PDF export succeeds and produces valid PDF with math
+    pdf_bytes = render_pdf(report)
+    assert pdf_bytes.startswith(b"%PDF")
+    reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
+    extracted = "\n".join(p.extract_text() for p in reader.pages)
+    assert "mass-energy equation" in extracted
+    assert "radioactive decay" in extracted

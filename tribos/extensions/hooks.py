@@ -12,13 +12,14 @@ from __future__ import annotations
 import contextlib
 import logging
 import re
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # kind -> {key: value}; dicts preserve registration order.
-_REGISTRIES: Dict[str, Dict[str, Any]] = {
+_REGISTRIES: dict[str, dict[str, Any]] = {
     "prompt_component": {},
     "prompt_rule": {},
     "evidence_decorator": {},  # keyed by "<slot>::<key>"
@@ -53,17 +54,17 @@ def unregister(kind: str, key: str) -> None:
     _REGISTRIES[kind].pop(key, None)
 
 
-def clear(kind: Optional[str] = None) -> None:
+def clear(kind: str | None = None) -> None:
     """Remove every registration of one kind (or of all kinds). Intended for tests."""
     for k in ([kind] if kind else list(_REGISTRIES)):
         _REGISTRIES[k].clear()
 
 
-def snapshot() -> Dict[str, Dict[str, Any]]:
+def snapshot() -> dict[str, dict[str, Any]]:
     return {k: dict(v) for k, v in _REGISTRIES.items()}
 
 
-def restore(state: Dict[str, Dict[str, Any]]) -> None:
+def restore(state: dict[str, dict[str, Any]]) -> None:
     for k, v in state.items():
         _REGISTRIES[k].clear()
         _REGISTRIES[k].update(v)
@@ -93,11 +94,11 @@ def register_prompt_rule(key: str, text: str) -> None:
     _put("prompt_rule", key, text)
 
 
-def get_prompt_components() -> List[str]:
+def get_prompt_components() -> list[str]:
     return list(_REGISTRIES["prompt_component"].values())
 
 
-def get_prompt_rules() -> List[str]:
+def get_prompt_rules() -> list[str]:
     return list(_REGISTRIES["prompt_rule"].values())
 
 
@@ -115,7 +116,7 @@ def unregister_evidence_decorator(slot: str, key: str) -> None:
     unregister("evidence_decorator", f"{slot}::{key}")
 
 
-def get_evidence_decorators(slot: str) -> List[Callable[..., Any]]:
+def get_evidence_decorators(slot: str) -> list[Callable[..., Any]]:
     prefix = f"{slot}::"
     return [fn for k, fn in _REGISTRIES["evidence_decorator"].items() if k.startswith(prefix)]
 
@@ -124,7 +125,7 @@ def get_evidence_decorators(slot: str) -> List[Callable[..., Any]]:
 # Orchestrator
 # -----------------------------------------------------------------------------
 
-def register_step_augmenter(tool_key: str, key: str, fn: Callable[..., Tuple[Optional[str], List[str]]]) -> None:
+def register_step_augmenter(tool_key: str, key: str, fn: Callable[..., tuple[str | None, list[str]]]) -> None:
     """fn(res: ToolResult, title_ctx: dict) -> (title override or None, extra detail parts joined with ' · ')."""
     _put("step_augmenter", f"{tool_key}::{key}", fn)
 
@@ -133,26 +134,26 @@ def unregister_step_augmenter(tool_key: str, key: str) -> None:
     unregister("step_augmenter", f"{tool_key}::{key}")
 
 
-def get_step_augmenters(tool_key: str) -> List[Callable[..., Tuple[Optional[str], List[str]]]]:
+def get_step_augmenters(tool_key: str) -> list[Callable[..., tuple[str | None, list[str]]]]:
     prefix = f"{tool_key}::"
     return [fn for k, fn in _REGISTRIES["step_augmenter"].items() if k.startswith(prefix)]
 
 
-def register_artifact_builder(key: str, fn: Callable[..., Dict[str, Any]]) -> None:
+def register_artifact_builder(key: str, fn: Callable[..., dict[str, Any]]) -> None:
     """fn(tool_results: Dict[str, ToolResult], ctx: QueryContext) -> dict merged into execution_artifacts."""
     _put("artifact_builder", key, fn)
 
 
-def get_artifact_builders() -> List[Callable[..., Dict[str, Any]]]:
+def get_artifact_builders() -> list[Callable[..., dict[str, Any]]]:
     return list(_REGISTRIES["artifact_builder"].values())
 
 
-def register_scope_note_provider(key: str, fn: Callable[..., List[str]]) -> None:
+def register_scope_note_provider(key: str, fn: Callable[..., list[str]]) -> None:
     """fn(ctx: QueryContext, tool_results: Dict[str, ToolResult]) -> notes added to <tool_status>."""
     _put("scope_note_provider", key, fn)
 
 
-def get_scope_note_providers() -> List[Callable[..., List[str]]]:
+def get_scope_note_providers() -> list[Callable[..., list[str]]]:
     return list(_REGISTRIES["scope_note_provider"].values())
 
 
@@ -160,12 +161,12 @@ def get_scope_note_providers() -> List[Callable[..., List[str]]]:
 # Verifier and memory
 # -----------------------------------------------------------------------------
 
-def register_serialization_filter(key: str, fn: Callable[[str, Dict[str, Any]], Dict[str, Any]]) -> None:
+def register_serialization_filter(key: str, fn: Callable[[str, dict[str, Any]], dict[str, Any]]) -> None:
     """fn(tool_key, data) -> a copy of data with keys removed before identifier harvest, evidence docs and memory."""
     _put("serialization_filter", key, fn)
 
 
-def get_serialization_filters() -> List[Callable[[str, Dict[str, Any]], Dict[str, Any]]]:
+def get_serialization_filters() -> list[Callable[[str, dict[str, Any]], dict[str, Any]]]:
     return list(_REGISTRIES["serialization_filter"].values())
 
 
@@ -178,7 +179,7 @@ def apply_serialization_filters(tool_key: str, data: Any) -> Any:
         return data
     import copy
 
-    out: Dict[str, Any] = copy.deepcopy(data)
+    out: dict[str, Any] = copy.deepcopy(data)
     for fn in filters:
         try:
             filtered = fn(tool_key, out)
@@ -189,30 +190,30 @@ def apply_serialization_filters(tool_key: str, data: Any) -> Any:
     return out
 
 
-def register_evidence_doc_provider(key: str, fn: Callable[..., Optional[List[Tuple[str, str]]]]) -> None:
+def register_evidence_doc_provider(key: str, fn: Callable[..., list[tuple[str, str]] | None]) -> None:
     """fn(tool_key, result) -> [(evidence_key, lowercased doc)] replacing the whole-tool doc, or None to decline."""
     _put("evidence_doc_provider", key, fn)
 
 
-def get_evidence_doc_providers() -> List[Callable[..., Optional[List[Tuple[str, str]]]]]:
+def get_evidence_doc_providers() -> list[Callable[..., list[tuple[str, str]] | None]]:
     return list(_REGISTRIES["evidence_doc_provider"].values())
 
 
-def register_identifier_veto(key: str, fn: Callable[..., Dict[str, Dict[str, str]]]) -> None:
+def register_identifier_veto(key: str, fn: Callable[..., dict[str, dict[str, str]]]) -> None:
     """fn(tool_results) -> {family: {id: reason}}; families 'pmids', 'dois' or any id family name."""
     _put("identifier_veto", key, fn)
 
 
-def get_identifier_vetoes() -> List[Callable[..., Dict[str, Dict[str, str]]]]:
+def get_identifier_vetoes() -> list[Callable[..., dict[str, dict[str, str]]]]:
     return list(_REGISTRIES["identifier_veto"].values())
 
 
-def register_verification_check(key: str, fn: Callable[["VerificationContext"], List[Dict[str, Any]]]) -> None:
+def register_verification_check(key: str, fn: Callable[[VerificationContext], list[dict[str, Any]]]) -> None:
     """fn(vctx) -> [{category, severity: 'CRITICAL'|'MAJOR'|'MINOR', description, suggested_correction, claim}]."""
     _put("verification_check", key, fn)
 
 
-def get_verification_checks() -> List[Tuple[str, Callable[["VerificationContext"], List[Dict[str, Any]]]]]:
+def get_verification_checks() -> list[tuple[str, Callable[[VerificationContext], list[dict[str, Any]]]]]:
     return list(_REGISTRIES["verification_check"].items())
 
 
@@ -221,15 +222,15 @@ class VerificationContext:
     """Everything a registered verification check may read. Treat all fields as read-only."""
     query: str
     response: str
-    sentences: List[str]
-    table_rows: List[str]
-    tool_results: Dict[str, Any]
-    evidence_documents: List[str]
-    evidence_keys: List[str]
-    observed: Dict[str, Set[str]]  # legacy keys (biomodels, pmids, dois, ensembl, uniprot) + every id family
-    cited: Dict[str, List[str]]  # ids extracted from the response for the same keys
-    historical: Dict[str, Set[str]]
-    context_identifiers: Dict[str, Set[str]]
-    vetoed: Dict[str, Dict[str, str]]
+    sentences: list[str]
+    table_rows: list[str]
+    tool_results: dict[str, Any]
+    evidence_documents: list[str]
+    evidence_keys: list[str]
+    observed: dict[str, set[str]]  # legacy keys (biomodels, pmids, dois, ensembl, uniprot) + every id family
+    cited: dict[str, list[str]]  # ids extracted from the response for the same keys
+    historical: dict[str, set[str]]
+    context_identifiers: dict[str, set[str]]
+    vetoed: dict[str, dict[str, str]]
     query_context: Any = None
     hedge_pattern: re.Pattern = field(default_factory=lambda: re.compile(r"(?!x)x"))

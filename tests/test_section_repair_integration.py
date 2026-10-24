@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from typing import Any, Dict, List
+from typing import Any
 
 from tribos.agentic.budget import RunBudget
 from tribos.agents.orchestration import agent_rounds
@@ -19,7 +19,7 @@ DRAFT = (
 HEDGED = "Whether a correction exists was not retrieved in this run."
 
 
-def _gap_report(hedged: bool) -> Dict[str, Any]:
+def _gap_report(hedged: bool) -> dict[str, Any]:
     return {
         "round": 0,
         "items": [{"id": "h1" if hedged else "q2", "text": HEDGED if hedged else "Is there a correction?", "hedged": hedged}],
@@ -33,7 +33,7 @@ class FakeLLM:
         self.max_tokens = max_tokens
 
 
-def _run(hedged: bool, sent_caps: List[int], prompts: List[str]):
+def _run(hedged: bool, sent_caps: list[int], prompts: list[str]):
     budget = RunBudget(max_tokens=60_000)
     state = SimpleNamespace(budget=budget, bag={"gap_report": [_gap_report(hedged)]}, evidence_labels={}, evidence_sections=[])
 
@@ -64,8 +64,8 @@ def _run(hedged: bool, sent_caps: List[int], prompts: List[str]):
 
 
 def test_a_filled_hedged_gap_repairs_only_its_section_and_the_summary(monkeypatch):
-    caps: List[int] = []
-    prompts: List[str] = []
+    caps: list[int] = []
+    prompts: list[str] = []
     run, ao, budget = _run(hedged=True, sent_caps=caps, prompts=prompts)
     monkeypatch.setattr(agent_rounds, "orchestrator_module", lambda: ao)
     feedback = ["Gap re-retrieval (round 1) added new evidence for: ... Use the new gap-search documents ..."]
@@ -84,7 +84,7 @@ def test_a_filled_hedged_gap_repairs_only_its_section_and_the_summary(monkeypatc
 
 
 def test_a_filled_sub_question_gap_falls_back_to_a_whole_rewrite(monkeypatch):
-    caps: List[int] = []
+    caps: list[int] = []
     run, ao, _budget = _run(hedged=False, sent_caps=caps, prompts=[])
     monkeypatch.setattr(agent_rounds, "orchestrator_module", lambda: ao)
     feedback = ["Gap re-retrieval (round 1) added new evidence for: Is there a correction? Use the new gap-search documents ..."]
@@ -94,7 +94,7 @@ def test_a_filled_sub_question_gap_falls_back_to_a_whole_rewrite(monkeypatch):
 
 def test_a_filled_sub_question_is_placed_on_its_matching_section(monkeypatch):
     # The live run's correction sub-question: its new evidence belongs in "Correction status", not a whole rewrite.
-    caps: List[int] = []
+    caps: list[int] = []
     run, ao, _budget = _run(hedged=False, sent_caps=caps, prompts=[])
     run.agent_state.bag["gap_report"][0]["items"][0]["text"] = (
         "Determine whether a correction exists for PMID 39369609 and whether corrected content was applied."

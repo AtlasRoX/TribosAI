@@ -384,50 +384,6 @@ export interface ModelCalibrationArtifact {
   fit?: Record<string, { time?: number[]; observed?: (number | null)[]; simulated?: (number | null)[] }>;
 }
 
-export interface PdbEntry {
-  pdb_id?: string;
-  title?: string;
-  method?: string;
-  resolution?: number | null;
-  ligands?: (string | { id?: string; name?: string })[];
-  url?: string;
-}
-
-export interface StructureIntelArtifact {
-  uniprot?: string;
-  gene?: string;
-  alphafold?: {
-    model_id?: string;
-    mean_plddt?: number | null;
-    plddt_band?: string;
-    url?: string;
-    pdb_url?: string;
-    version?: string | number;
-  } | null;
-  pdb_entries?: PdbEntry[];
-  docking?: Record<string, any> | null;
-  generated?: any[] | null;
-}
-
-export interface OmicsSection {
-  status?: string;
-  items?: Record<string, any>[];
-  note?: string;
-  scope_note?: string;
-  [k: string]: any;
-}
-
-export interface OmicsIntelArtifact {
-  gwas?: OmicsSection;
-  gtex?: OmicsSection;
-  string?: OmicsSection;
-  reactome?: OmicsSection;
-  pubchem?: OmicsSection;
-  preprints?: OmicsSection;
-  depmap?: OmicsSection;
-  [k: string]: OmicsSection | undefined;
-}
-
 export interface ProjectMemoryArtifact {
   project_id?: string;
   recalled?: MemoryFact[];
@@ -488,8 +444,6 @@ export interface AgenticArtifacts {
   claim_confidence?: ClaimConfidenceArtifact;
   sandbox_analysis?: SandboxAnalysisArtifact;
   model_calibration?: ModelCalibrationArtifact;
-  structure_intel?: StructureIntelArtifact;
-  omics_intel?: OmicsIntelArtifact;
   project_memory?: ProjectMemoryArtifact;
   agent_dialogue?: AgentDialogueArtifact;
 }

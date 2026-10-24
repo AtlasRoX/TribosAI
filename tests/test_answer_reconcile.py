@@ -4,7 +4,7 @@ trial's primary report is cited next to a review cited for the trial's figures."
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 
@@ -77,10 +77,10 @@ class _Run(SimpleNamespace):
     pass
 
 
-def _run(answer: str, artifacts: Dict[str, Any]) -> Any:
-    events: List[Dict[str, Any]] = []
+def _run(answer: str, artifacts: dict[str, Any]) -> Any:
+    events: list[dict[str, Any]] = []
 
-    async def send(ev: Dict[str, Any]) -> None:
+    async def send(ev: dict[str, Any]) -> None:
         events.append(ev)
 
     async def emit(*_a: Any, **_k: Any) -> None:
@@ -95,7 +95,7 @@ def _run(answer: str, artifacts: Dict[str, Any]) -> Any:
 
 @pytest.mark.asyncio
 async def test_report_result_reconciles_and_resends_the_answer(monkeypatch):
-    rebuilt: List[str] = []
+    rebuilt: list[str] = []
     monkeypatch.setattr(verify_stage, "build_citations", lambda run: rebuilt.append(run.candidate_response))
     run = _run(ANSWER, {"claim_confidence": {"answer_confidence": 0.66, "claims": []}})
     await verify_stage.report_result(run)
@@ -161,7 +161,7 @@ SENTENCE = (
 )
 
 
-def _tools(*passages: Dict[str, Any]) -> Dict[str, Any]:
+def _tools(*passages: dict[str, Any]) -> dict[str, Any]:
     return {"lithoscribe": SimpleNamespace(success=True, data={"ranked_passages": list(passages)})}
 
 

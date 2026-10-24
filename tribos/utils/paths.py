@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional
 
 DATA_DIR_ENV = "TRIBOS_DATA_DIR"
 
@@ -26,13 +25,13 @@ DATA_DIR_ENV = "TRIBOS_DATA_DIR"
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 
 
-def data_root() -> Optional[Path]:
+def data_root() -> Path | None:
     """The configured data root (TRIBOS_DATA_DIR, `~` expanded), or None when it is not set."""
     raw = os.getenv(DATA_DIR_ENV, "").strip()
     return Path(os.path.expanduser(raw)) if raw else None
 
 
-def data_dir(sub: str) -> Optional[Path]:
+def data_dir(sub: str) -> Path | None:
     """`<TRIBOS_DATA_DIR>/<sub>`, or None when TRIBOS_DATA_DIR is not set (callers keep their default)."""
     root = data_root()
     return root / sub if root is not None else None

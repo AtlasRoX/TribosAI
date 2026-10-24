@@ -16,17 +16,20 @@ export function decodeEntities(text: string | null | undefined): string {
   });
 }
 
-// Verifier defect categories that older runs wrote into step text as "[CATEGORY] claim".
-const DEFECT_LABELS: Record<string, string> = {
-  CLAIM_CONTRADICTED: "Contradicted by a source:",
-  CLINICAL_CLAIM: "Clinical claim not found in the evidence:",
-  POPULATION_MISMATCH: "Population mismatch:",
-  UNSUPPORTED_CLAIM: "Not found in the evidence:",
-  UNVERIFIED_IDENTIFIER: "Identifier not in the evidence:",
+// Verifier defect categories that runs write into step text as "[CATEGORY] claim".
+export const DEFECT_LABELS: Record<string, string> = {
+  CONSTANT_MISMATCH: "Physical constant does not match CODATA:",
+  DIMENSION_MISMATCH: "Dimensional mismatch:",
+  UNVERIFIED_IDENTITY: "Mathematical identity not verified:",
+  COMPUTATION_MISMATCH: "Computation does not match the evidence:",
   NUMERIC_MISMATCH: "Number does not match the evidence:",
-  NUMERIC_RELATION_MISMATCH: "Number belongs to a different group, arm or endpoint:",
-  REGIMEN_MISMATCH: "Regimen mislabelled:",
+  NUMERIC_RELATION_MISMATCH: "Number belongs to a different parameter, regime or condition:",
+  UNVERIFIED_IDENTIFIER: "Identifier not in the evidence:",
+  IDENTIFIER: "Identifier not in the evidence:",
+  UNSUPPORTED_CLAIM: "Not found in the evidence:",
+  CLAIM_CONTRADICTED: "Contradicted by a source:",
   CITATION_MISMATCH: "Cited source does not support this:",
+  RETRACTED_CITATION: "Cited source is retracted or withdrawn:",
 };
 
 /** Step text for display: internal "[CATEGORY]" prefixes become plain labels and list markers are dropped. */

@@ -10,11 +10,12 @@ import asyncio
 import json
 import math
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import numpy as np
 import pytest
 
+from tests.agentic_fakes import ScriptedLLM, collect_events, make_agentic_orchestrator
 from tribos.agentic import calibration_stats as cs
 from tribos.agentic import confidence as conf
 from tribos.agentic import nli
@@ -23,9 +24,8 @@ from tribos.agentic.config import AGENTIC
 from tribos.agentic.control import RunControl
 from tribos.agentic.llm import AgentLLM
 from tribos.agentic.state import AgentState
-from tribos.verify.verifier import TribosVerifier
 from tribos.tools.registry import ToolResult
-from tests.agentic_fakes import ScriptedLLM, collect_events, make_agentic_orchestrator
+from tribos.verify.verifier import TribosVerifier
 
 # Logits in the cross-encoder/nli-deberta-v3-base order: 0=contradiction, 1=entailment, 2=neutral.
 ENTAIL = [-2.0, 4.0, -1.0]
@@ -54,12 +54,12 @@ def _fresh_nli_cache(monkeypatch):
 class FakePredictor:
     """Fixed logits by cue word in the premise (the evidence chunk); records every (premise, hypothesis) pair."""
 
-    def __init__(self, rules: List[Tuple[str, List[float]]], default: List[float] = NEUTRAL) -> None:
+    def __init__(self, rules: list[tuple[str, list[float]]], default: list[float] = NEUTRAL) -> None:
         self.rules = rules
         self.default = default
-        self.pairs: List[Tuple[str, str]] = []
+        self.pairs: list[tuple[str, str]] = []
 
-    def __call__(self, pairs: List[Tuple[str, str]]) -> np.ndarray:
+    def __call__(self, pairs: list[tuple[str, str]]) -> np.ndarray:
         self.pairs.extend(pairs)
         out = []
         for premise, _hyp in pairs:
@@ -72,8 +72,8 @@ class FakePredictor:
         return np.array(out, dtype=float)
 
 
-def patch_loader(monkeypatch, predictor: FakePredictor, id2label: Dict[Any, Any] = None) -> List[str]:
-    loaded: List[str] = []
+def patch_loader(monkeypatch, predictor: FakePredictor, id2label: dict[Any, Any] = None) -> list[str]:
+    loaded: list[str] = []
 
     def fake_load(mid: str):
         loaded.append(mid)
@@ -83,7 +83,7 @@ def patch_loader(monkeypatch, predictor: FakePredictor, id2label: Dict[Any, Any]
     return loaded
 
 
-def lit_result(passages: List[Dict[str, Any]]) -> ToolResult:
+def lit_result(passages: list[dict[str, Any]]) -> ToolResult:
     return ToolResult(success=True, tool_name="lithoscribe_literature_synthesis", data={"ranked_passages": passages})
 
 
@@ -95,7 +95,7 @@ async def _noop(*_a, **_k) -> None:
     return None
 
 
-def make_state(tool_results: Dict[str, Any], scripted: ScriptedLLM = None, budget: RunBudget = None, draft: str = "") -> AgentState:
+def make_state(tool_results: dict[str, Any], scripted: ScriptedLLM = None, budget: RunBudget = None, draft: str = "") -> AgentState:
     budget = budget or RunBudget()
     factory = (lambda **_k: scripted) if scripted is not None else None
     return AgentState(
@@ -175,7 +175,7 @@ def test_cross_encoder_loads_local_only_and_never_in_auto_without_cache(monkeypa
 
 
 # Judge contract with the verifier -------------------------------------------------------------------------------
-def _tool_results() -> Dict[str, ToolResult]:
+def _tool_results() -> dict[str, ToolResult]:
     return {
         "lithoscribe": lit_result(
             [
@@ -219,7 +219,7 @@ def test_judge_downgrades_but_never_upgrades():
     assert not worse.passed
 
     # A judge that always says "supported" cannot rescue a deterministic clinical failure or a contradiction.
-    asked: List[str] = []
+    asked: list[str] = []
 
     def yes(claim, passages):
         asked.append(claim)
@@ -250,7 +250,7 @@ def test_judge_abstains_and_never_raises():
 
 
 # Model judge: precompute, cache and call cap -------------------------------------------------------------------
-def _scifact_responder(label: str, calls: List[str]):
+def _scifact_responder(label: str, calls: list[str]):
     def respond(system: str, user: str) -> str:
         calls.append(user)
         labels = []
@@ -264,7 +264,7 @@ def _scifact_responder(label: str, calls: List[str]):
 
 def test_llm_precompute_fills_cache_and_judge_serves_it(monkeypatch):
     monkeypatch.setenv("TRIBOS_NLI", "llm")
-    calls: List[str] = []
+    calls: list[str] = []
     llm = ScriptedLLM({"nli": _scifact_responder("REFUTES", calls)})
     state = make_state(_tool_results(), llm, draft=MECH_SUPPORTED)
     store = nli.install(state)
@@ -297,7 +297,7 @@ def test_llm_judge_call_cap_and_budget(monkeypatch):
     genes = ["BRAF", "EGFR", "MYC", "TP53", "PIK3CA", "SMAD4"]
     passages = [{"pmid": str(100000 + i), "passage_text": f"{g} signaling in pancreatic cancer."} for i, g in enumerate(genes)]
     draft = " ".join(f"{g} signaling drives pancreatic tumour growth (PMID: {100000 + i})." for i, g in enumerate(genes))
-    calls: List[str] = []
+    calls: list[str] = []
     llm = ScriptedLLM({"nli": _scifact_responder("SUPPORTS", calls)})
     state = make_state({"lit": lit_result(passages)}, llm, draft=draft)
     nli.install(state)
@@ -307,7 +307,7 @@ def test_llm_judge_call_cap_and_budget(monkeypatch):
     assert len(calls) == 3  # the cap holds across draft rounds
 
     monkeypatch.setenv("TRIBOS_NLI_MAX_LLM_CALLS", "12")
-    calls2: List[str] = []
+    calls2: list[str] = []
     llm2 = ScriptedLLM({"nli": _scifact_responder("SUPPORTS", calls2)})
     tight = make_state({"lit": lit_result(passages)}, llm2, budget=RunBudget(max_llm_calls=4), draft=draft)
     nli.install(tight)
@@ -383,7 +383,7 @@ def test_conformal_threshold_coverage():
     cal_s, cal_y = answers(500)
     tau = cs.conformal_threshold(cal_s, cal_y, alpha)
     test_s, test_y = answers(3000)
-    ok = [all(y for s, y in zip(gs, gy) if s > tau) for gs, gy in zip(test_s, test_y)]
+    ok = [all(y for s, y in zip(gs, gy, strict=False) if s > tau) for gs, gy in zip(test_s, test_y, strict=False)]
     assert np.mean(ok) >= 1 - alpha - 0.02  # every kept claim correct in >= 1 - alpha of answers
     kept = np.mean([s > tau for gs in test_s for s in gs])
     assert 0.0 < kept < 1.0
@@ -399,7 +399,7 @@ def test_conformal_threshold_coverage():
 def test_confidence_weights_and_calibration_file(tmp_path, monkeypatch):
     strong = {"nli_entailment": 0.95, "nli_contradiction": 0.01, "n_sources": 3, "best_grade": 0.9, "verifier_status": "supported"}
     weak = {"nli_entailment": 0.05, "nli_contradiction": 0.9, "n_sources": 0, "defect": True, "verifier_status": "contradicted"}
-    plain: Dict[str, Any] = {}
+    plain: dict[str, Any] = {}
     assert conf.score(strong) > 0.9 and conf.band(conf.score(strong)) == "high"
     assert conf.score(weak) < 0.1 and conf.band(conf.score(weak)) == "low"
     assert 0.3 < conf.score(plain) < 0.5
@@ -419,7 +419,7 @@ def test_confidence_phase_uses_nli_conflicts_and_stated_blend(monkeypatch):
     pred = FakePredictor([("kras signaling in pancreatic", ENTAIL)], default=NEUTRAL)
     patch_loader(monkeypatch, pred)
     monkeypatch.setenv("TRIBOS_NLI", "model")
-    stated: List[str] = []
+    stated: list[str] = []
 
     def p_true(system: str, user: str) -> str:
         stated.append(user)
@@ -457,7 +457,7 @@ def _run(monkeypatch, tmp_path, responses=None, thread="v1"):
     return res, events, calls, llm
 
 
-def _phases(res) -> List[str]:
+def _phases(res) -> list[str]:
     return [p["phase"] for p in res.execution_artifacts["agent_run"]["phases"]]
 
 
@@ -489,7 +489,7 @@ def test_end_to_end_cross_encoder_judge_and_confidence_artifact(monkeypatch, tmp
 
 def test_end_to_end_model_judge_precomputed_before_verification(monkeypatch, tmp_path):
     monkeypatch.setenv("TRIBOS_NLI", "llm")
-    nli_calls: List[str] = []
+    nli_calls: list[str] = []
     res, _events, _calls, llm = _run(monkeypatch, tmp_path, responses={"nli": _scifact_responder("REFUTES", nli_calls)}, thread="v2")
     assert nli_calls and len(nli_calls) <= nli.MAX_LLM_CALLS
     # the model call happened in the after_draft precompute, before the (synchronous) verification used the cache

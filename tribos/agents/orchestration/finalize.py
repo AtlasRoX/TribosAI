@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Dict, List
+from typing import Any
 
 from ..query_context import TaskOutcome
 from .context import RunContext, logger, orchestrator_module
@@ -29,9 +29,9 @@ def turn_fully_supported(report: Any) -> bool:
     return True
 
 
-def _verification_counts(report: Any) -> Dict[str, Any]:
+def _verification_counts(report: Any) -> dict[str, Any]:
     """The report fields session memory needs to decide what may be stored as verified."""
-    out: Dict[str, Any] = {"passed": bool(getattr(report, "passed", False))}
+    out: dict[str, Any] = {"passed": bool(getattr(report, "passed", False))}
     for attr in ("fully_verified", "unsupported_claims", "contradicted_claims", "unchecked_claims"):
         value = getattr(report, attr, None)
         if value is not None:
@@ -51,7 +51,7 @@ async def consolidate_memory(run: RunContext) -> None:
     # -------------------------------------------------------------
     if persist_memory:
         try:
-            active_subj: Dict[str, str] = {}
+            active_subj: dict[str, str] = {}
             if ctx.primary_target:
                 active_subj["gene"] = ctx.primary_target
             if ctx.drugs:
@@ -83,7 +83,7 @@ async def consolidate_memory(run: RunContext) -> None:
             logger.warning("Memory consolidation error: %s", mem_err)
 
 
-async def _record_routing_outcome(run: RunContext, task_status: Dict[str, Any]) -> None:
+async def _record_routing_outcome(run: RunContext, task_status: dict[str, Any]) -> None:
     """Feed the router's outcome history (tribos/agentic/router_store.py) from every agentic research run."""
     agent_state = run.agent_state
     if agent_state is None or run.ctx is None or run.ctx.scope != "research":
@@ -110,13 +110,13 @@ async def _record_routing_outcome(run: RunContext, task_status: Dict[str, Any]) 
         logger.info("Routing outcome not recorded: %s", exc)
 
 
-def apply_incomplete_status(task_status: Dict[str, Any], agent_state: Any) -> Dict[str, Any]:
+def apply_incomplete_status(task_status: dict[str, Any], agent_state: Any) -> dict[str, Any]:
     """Add `incomplete_reasons` and `unresolved` (lists, always present) to the task status, and make a run that
     stopped early or left sub-questions unanswered "partial" even when its computation (a time course) completed:
     the request is the whole brief, not its simulation step."""
-    status: Dict[str, Any] = dict(task_status)
-    reasons: List[str] = []
-    unresolved: List[str] = []
+    status: dict[str, Any] = dict(task_status)
+    reasons: list[str] = []
+    unresolved: list[str] = []
     if agent_state is not None:
         try:
             info = agent_state.incomplete_status()

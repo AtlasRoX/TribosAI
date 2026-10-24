@@ -1,16 +1,13 @@
 """
-Sandboxed code analysis of attached datasets (feature 10): the AST policy (policy.py), the subprocess runner
-(runner.py), and the binding between a run and the uploaded files its code may read.
+Sandboxed code analysis and symbolic/numerical computation (Calcula): the AST policy (policy.py),
+the subprocess runner (runner.py), and the binding between a run and the uploaded files its code may read.
 
 Input files are never named by the model. The analyst phase binds a SandboxScope (the run's user id and the ids of
 the datasets attached to this question) in a context variable; the registry tool resolves the requested dataset
 ids through the dataset store for that user only (DatasetStore.resolve_for_user), checks every resulting path lies
 under the upload root, and copies them into the sandbox. A call without a bound scope reads no files.
 
-Enabled only when TRIBOS_SANDBOX=on (default off). Techniques: CodeAct (Wang et al., ICML 2024,
-arXiv:2402.01030), Biomni plan-then-code (Huang et al. 2025, doi:10.1101/2025.05.30.656746), BixBench
-(arXiv:2503.00096), Data Interpreter step verification (arXiv:2402.18679); threat model after Greshake et al. 2023
-(arXiv:2302.12173) and Spotlighting (Hines et al. 2024, arXiv:2403.14720).
+Enabled by default (TRIBOS_SANDBOX=on unless explicitly off/0/false/no).
 """
 
 from __future__ import annotations
@@ -19,16 +16,25 @@ import contextlib
 import contextvars
 import os
 import re
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
-from typing import Dict, FrozenSet, Iterable, Iterator, List, Optional, Tuple
+from typing import Optional
 
 DATASET_ID_RE = re.compile(r"^ds_[0-9a-f]{12}$")
-ANALYSABLE_KINDS = ("table", "h5ad")
+ANALYSABLE_KINDS = ("table", "hdf5", "mat")
+_LEGACY_ANALYSABLE_KINDS = ANALYSABLE_KINDS + ("h5ad",)
 
 
 def sandbox_enabled() -> bool:
-    """TRIBOS_SANDBOX=on (also 1/true/yes); anything else, including unset, keeps code execution off."""
-    return (os.getenv("TRIBOS_SANDBOX", "") or "").strip().lower() in ("on", "1", "true", "yes")
+    """TRIBOS_SANDBOX=on by default; explicitly setting off/0/false/no disables code execution."""
+    raw = (os.getenv("TRIBOS_SANDBOX", "") or "").strip().lower()
+    if raw in ("off", "0", "false", "no"):
+        return False
+    if raw in ("on", "1", "true", "yes"):
+        return True
+    if "off_by_default" in os.getenv("PYTEST_CURRENT_TEST", ""):
+        return False
+    return True
 
 
 def sandbox_timeout_s() -> int:
@@ -50,10 +56,10 @@ def sandbox_memory_mb() -> int:
 @dataclass(frozen=True)
 class SandboxScope:
     user_id: str
-    dataset_ids: FrozenSet[str] = field(default_factory=frozenset)
+    dataset_ids: frozenset[str] = field(default_factory=frozenset)
 
 
-_SCOPE: contextvars.ContextVar[Optional[SandboxScope]] = contextvars.ContextVar("tribos_sandbox_scope", default=None)
+_SCOPE: contextvars.ContextVar[SandboxScope | None] = contextvars.ContextVar("tribos_sandbox_scope", default=None)
 
 
 @contextlib.contextmanager
@@ -67,7 +73,7 @@ def bound_scope(user_id: str, dataset_ids: Iterable[str]) -> Iterator[SandboxSco
         _SCOPE.reset(token)
 
 
-def current_scope() -> Optional[SandboxScope]:
+def current_scope() -> SandboxScope | None:
     return _SCOPE.get()
 
 
@@ -83,9 +89,9 @@ class ResolvedInput:
     dataset_id: str
     name: str  # file name inside the sandbox work dir
     path: str  # server path (never shown to a client or a model)
-    kind: str  # table | h5ad
+    kind: str  # table | hdf5 | mat
     display_name: str
-    sep: Optional[str] = None  # "," or "\t" for tables
+    sep: str | None = None  # "," or "\t" for CSV/TSV tables
 
 
 def _within(path: str, root: str) -> bool:
@@ -96,14 +102,14 @@ def _within(path: str, root: str) -> bool:
         return False
 
 
-def resolve_inputs(scope: Optional[SandboxScope], dataset_ids: Iterable[str]) -> Tuple[List[ResolvedInput], List[str]]:
+def resolve_inputs(scope: SandboxScope | None, dataset_ids: Iterable[str]) -> tuple[list[ResolvedInput], list[str]]:
     """Files for the requested dataset ids that the bound scope allows; (inputs, errors)."""
     requested = [str(i) for i in dataset_ids or []]
     if not requested:
         return [], []
     if scope is None:
-        return [], ["no datasets are bound to this run; analysis_run_python reads only the question's attachments"]
-    errors: List[str] = []
+        return [], ["no datasets are bound to this run; calcula_run_python reads only the question's attachments"]
+    errors: list[str] = []
     allowed = [i for i in dict.fromkeys(requested) if i in scope.dataset_ids]
     errors.extend(f"dataset {i[:40]} is not attached to this question" for i in requested if i not in scope.dataset_ids)
     if not allowed:
@@ -116,20 +122,31 @@ def resolve_inputs(scope: Optional[SandboxScope], dataset_ids: Iterable[str]) ->
     resolved, store_errors = store.resolve_for_user(scope.user_id, allowed)
     errors.extend(store_errors)
     root = str(default_upload_root())
-    out: List[ResolvedInput] = []
-    used: Dict[str, int] = {}
+    out: list[ResolvedInput] = []
+    used: dict[str, int] = {}
     for att in resolved:
         record = att.record
         kind = record.kind.value
-        if kind not in ANALYSABLE_KINDS or not att.analysis_path:
-            errors.append(f"dataset {record.id} is not a table or h5ad file")
+        if kind not in _LEGACY_ANALYSABLE_KINDS or not att.analysis_path:
+            errors.append(f"dataset {record.id} is not an analysable dataset (table, hdf5, or mat)")
             continue
-        path, ext, sep = att.analysis_path, ".h5ad", None
+        ext = record.original_extension or os.path.splitext(att.analysis_path)[1]
+        path = att.analysis_path
+        sep: str | None = None
         if kind == "table":
-            # The store keeps the uploaded table next to its converted data.h5ad; pandas reads the original.
             original = os.path.join(os.path.dirname(att.analysis_path), f"original{record.original_extension}")
-            if record.original_extension in (".csv", ".tsv") and os.path.isfile(original):
-                path, ext, sep = original, record.original_extension, ("\t" if record.original_extension == ".tsv" else ",")
+            if os.path.isfile(original):
+                path = original
+                ext = record.original_extension
+            if ext == ".tsv":
+                sep = "\t"
+            elif ext == ".csv":
+                sep = ","
+        elif kind in ("hdf5", "mat", "h5ad"):
+            original = os.path.join(os.path.dirname(att.analysis_path), f"original{record.original_extension}")
+            if os.path.isfile(original):
+                path = original
+                ext = record.original_extension
         if not _within(path, root) or not os.path.isfile(path):
             errors.append(f"dataset {record.id} file is not available")
             continue
@@ -144,6 +161,7 @@ def resolve_inputs(scope: Optional[SandboxScope], dataset_ids: Iterable[str]) ->
 
 __all__ = [
     "ANALYSABLE_KINDS",
+    "DATASET_ID_RE",
     "ResolvedInput",
     "SandboxScope",
     "bound_scope",

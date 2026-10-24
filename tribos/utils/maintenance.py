@@ -27,7 +27,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 from tribos.utils.paths import WORKSPACE_ROOT, data_root
 
@@ -67,7 +67,7 @@ def stamp_path() -> Path:
 
 def _last_run() -> float:
     try:
-        with open(stamp_path(), "r", encoding="utf-8") as fh:
+        with open(stamp_path(), encoding="utf-8") as fh:
             return float(json.load(fh).get("last", 0.0))
     except (OSError, ValueError, TypeError, AttributeError):
         return 0.0
@@ -88,7 +88,7 @@ def _mark(now: float) -> None:
         logger.debug("Could not write the maintenance timestamp %s", path, exc_info=True)
 
 
-def run_maintenance(*, force: bool = False) -> Dict[str, Any]:
+def run_maintenance(*, force: bool = False) -> dict[str, Any]:
     """Apply every retention rule now (unless disabled or not due; force skips both checks)."""
     now = time.time()
     if not force:
@@ -97,7 +97,7 @@ def run_maintenance(*, force: bool = False) -> Dict[str, Any]:
         if not _due(now):
             return {"ran": False, "reason": "not_due"}
     _mark(now)
-    results: Dict[str, Any] = {"ran": True}
+    results: dict[str, Any] = {"ran": True}
 
     try:
         from tribos.tools.reliability import purge_expired_cache

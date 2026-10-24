@@ -14,9 +14,9 @@ import os
 import re
 import tempfile
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 import httpx
 
@@ -39,7 +39,7 @@ _ACCESSION_RE = re.compile(r"^(?:BIOMD|MODEL)\d{10}$")
 _KEGG_UPDATE_RE = re.compile(r"Last update (\d{4}/\d{2}/\d{2})")
 _OT_META_QUERY = "{ meta { name apiVersion { x y z } dataVersion { year month iteration } } }"
 
-_cache: Dict[str, Tuple[float, Any]] = {}
+_cache: dict[str, tuple[float, Any]] = {}
 
 
 def probes_enabled() -> bool:
@@ -55,7 +55,7 @@ def clear_cache() -> None:
     _cache.clear()
 
 
-def _cached(key: str) -> Optional[Any]:
+def _cached(key: str) -> Any | None:
     hit = _cache.get(key)
     if hit and time.monotonic() < hit[0]:
         return hit[1]
@@ -67,13 +67,13 @@ def _store(key: str, value: Any, ttl_s: float = CACHE_TTL_S) -> Any:
     return value
 
 
-def _failure(exc: BaseException | str) -> Dict[str, Any]:
+def _failure(exc: BaseException | str) -> dict[str, Any]:
     if isinstance(exc, str):
         return {"value": None, "error": exc[:200]}
     return {"value": None, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
 
 
-def _client(transport: Optional[httpx.AsyncBaseTransport]) -> httpx.AsyncClient:
+def _client(transport: httpx.AsyncBaseTransport | None) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         timeout=PROBE_TIMEOUT_S,
         follow_redirects=True,
@@ -86,7 +86,7 @@ def _client(transport: Optional[httpx.AsyncBaseTransport]) -> httpx.AsyncClient:
 # Data-source versions
 # -----------------------------------------------------------------------------
 
-def parse_opentargets_meta(payload: Dict[str, Any]) -> Dict[str, Any]:
+def parse_opentargets_meta(payload: dict[str, Any]) -> dict[str, Any]:
     meta = ((payload or {}).get("data") or {}).get("meta") or {}
     api = meta.get("apiVersion") or {}
     data = meta.get("dataVersion") or {}
@@ -98,21 +98,21 @@ def parse_opentargets_meta(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {"value": data_version, "api": api_version, "data": data_version, "name": meta.get("name")}
 
 
-def parse_kegg_info(text: str) -> Dict[str, Any]:
+def parse_kegg_info(text: str) -> dict[str, Any]:
     m = _KEGG_UPDATE_RE.search(text or "")
     if not m:
         return _failure("KEGG info carried no 'Last update' line")
     return {"value": m.group(1), "last_update": m.group(1)}
 
 
-def parse_europepmc_version(payload: Dict[str, Any]) -> Dict[str, Any]:
+def parse_europepmc_version(payload: dict[str, Any]) -> dict[str, Any]:
     version = (payload or {}).get("version")
     if not version:
         return _failure("EuropePMC response carried no version")
     return {"value": str(version), "version": str(version)}
 
 
-def parse_ctgov_version(payload: Dict[str, Any]) -> Dict[str, Any]:
+def parse_ctgov_version(payload: dict[str, Any]) -> dict[str, Any]:
     """/api/v2/version: {"apiVersion": "2.0.3", "dataTimestamp": "2026-10-13T09:00:05"}; the data timestamp pins the
     registry snapshot the trial search saw."""
     stamp = (payload or {}).get("dataTimestamp")
@@ -121,56 +121,56 @@ def parse_ctgov_version(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {"value": str(stamp), "data_timestamp": str(stamp), "api": (payload or {}).get("apiVersion")}
 
 
-def parse_chembl_status(payload: Dict[str, Any]) -> Dict[str, Any]:
+def parse_chembl_status(payload: dict[str, Any]) -> dict[str, Any]:
     version = (payload or {}).get("chembl_db_version")
     if not version:
         return _failure("ChEMBL status carried no chembl_db_version")
     return {"value": str(version), "release_date": (payload or {}).get("chembl_release_date")}
 
 
-def parse_openfda_meta(payload: Dict[str, Any]) -> Dict[str, Any]:
+def parse_openfda_meta(payload: dict[str, Any]) -> dict[str, Any]:
     updated = ((payload or {}).get("meta") or {}).get("last_updated")
     if not updated:
         return _failure("openFDA meta carried no last_updated")
     return {"value": str(updated), "last_updated": str(updated)}
 
 
-async def _probe_ctgov(client: httpx.AsyncClient) -> Dict[str, Any]:
+async def _probe_ctgov(client: httpx.AsyncClient) -> dict[str, Any]:
     resp = await client.get(CTGOV_VERSION_URL)
     if resp.status_code != 200:
         return _failure(f"HTTP {resp.status_code}")
     return parse_ctgov_version(resp.json())
 
 
-async def _probe_chembl(client: httpx.AsyncClient) -> Dict[str, Any]:
+async def _probe_chembl(client: httpx.AsyncClient) -> dict[str, Any]:
     resp = await client.get(CHEMBL_STATUS_URL, headers={"Accept": "application/json"})
     if resp.status_code != 200:
         return _failure(f"HTTP {resp.status_code}")
     return parse_chembl_status(resp.json())
 
 
-async def _probe_openfda(client: httpx.AsyncClient) -> Dict[str, Any]:
+async def _probe_openfda(client: httpx.AsyncClient) -> dict[str, Any]:
     resp = await client.get(OPENFDA_EVENT_URL, params={"limit": 1})
     if resp.status_code != 200:
         return _failure(f"HTTP {resp.status_code}")
     return parse_openfda_meta(resp.json())
 
 
-async def _probe_opentargets(client: httpx.AsyncClient) -> Dict[str, Any]:
+async def _probe_opentargets(client: httpx.AsyncClient) -> dict[str, Any]:
     resp = await client.post(OPENTARGETS_GRAPHQL, json={"query": _OT_META_QUERY})
     if resp.status_code != 200:
         return _failure(f"HTTP {resp.status_code}")
     return parse_opentargets_meta(resp.json())
 
 
-async def _probe_kegg(client: httpx.AsyncClient) -> Dict[str, Any]:
+async def _probe_kegg(client: httpx.AsyncClient) -> dict[str, Any]:
     resp = await client.get(KEGG_INFO_URL)
     if resp.status_code != 200:
         return _failure(f"HTTP {resp.status_code}")
     return parse_kegg_info(resp.text)
 
 
-async def _probe_europepmc(client: httpx.AsyncClient) -> Dict[str, Any]:
+async def _probe_europepmc(client: httpx.AsyncClient) -> dict[str, Any]:
     resp = await client.get(
         EUROPEPMC_SEARCH,
         params={"query": "EXT_ID:10712587 AND SRC:MED", "format": "json", "resultType": "lite", "pageSize": 1},
@@ -190,11 +190,11 @@ _PROBES = {
 }
 
 
-async def get_source_versions(transport: Optional[httpx.AsyncBaseTransport] = None) -> Dict[str, Dict[str, Any]]:
+async def get_source_versions(transport: httpx.AsyncBaseTransport | None = None) -> dict[str, dict[str, Any]]:
     """Versions of the upstream sources the agents query; each value is cached for an hour."""
     if transport is None and not probes_enabled():
         return {k: _failure("version probes disabled") for k in SOURCE_KEYS}
-    out: Dict[str, Dict[str, Any]] = {}
+    out: dict[str, dict[str, Any]] = {}
     missing = []
     for key in SOURCE_KEYS:
         hit = _cached(f"src:{key}") if transport is None else None
@@ -205,7 +205,7 @@ async def get_source_versions(transport: Optional[httpx.AsyncBaseTransport] = No
     if missing:
         async with _client(transport) as client:
             results = await asyncio.gather(*(_PROBES[k](client) for k in missing), return_exceptions=True)
-        for key, res in zip(missing, results):
+        for key, res in zip(missing, results, strict=False):
             value = _failure(res) if isinstance(res, BaseException) else res
             out[key] = value
             if transport is None:
@@ -225,7 +225,7 @@ def vivarix_cache_path(accession: str) -> Path:
     return root / f"{accession}.cps"
 
 
-def _local_cache_sha256(accession: str) -> Optional[str]:
+def _local_cache_sha256(accession: str) -> str | None:
     path = vivarix_cache_path(accession)
     if not path.is_file():
         return None
@@ -236,7 +236,7 @@ def _local_cache_sha256(accession: str) -> Optional[str]:
     return h.hexdigest()
 
 
-def _json_or_none(resp: httpx.Response) -> Optional[Any]:
+def _json_or_none(resp: httpx.Response) -> Any | None:
     if resp.status_code != 200 or "json" not in (resp.headers.get("content-type") or "").lower():
         return None
     try:
@@ -246,11 +246,11 @@ def _json_or_none(resp: httpx.Response) -> Optional[Any]:
 
 
 async def resolve_biomodel_pin(
-    accession: str, transport: Optional[httpx.AsyncBaseTransport] = None
-) -> Dict[str, Any]:
+    accession: str, transport: httpx.AsyncBaseTransport | None = None
+) -> dict[str, Any]:
     """Latest revision, main SBML file and its sha256 from BioModels, plus the sha256 of the local .cps cache."""
-    now = datetime.now(timezone.utc).isoformat()
-    pin: Dict[str, Any] = {
+    now = datetime.now(UTC).isoformat()
+    pin: dict[str, Any] = {
         "accession": accession,
         "latest_revision": None,
         "main_file": None,
@@ -276,7 +276,7 @@ async def resolve_biomodel_pin(
         return {**pin, **hit, "local_cache_sha256": pin["local_cache_sha256"]}
 
     errors = []
-    remote: Dict[str, Any] = {}
+    remote: dict[str, Any] = {}
     try:
         async with _client(transport) as client:
             files_resp, meta_resp = await asyncio.gather(

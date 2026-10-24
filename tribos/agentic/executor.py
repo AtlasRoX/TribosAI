@@ -15,11 +15,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from collections.abc import Iterable
+from typing import Any
 
+from ..tools.arg_repair import adjustment_text
 from .config import env_int
 from .control import RunCancelled
-from ..tools.arg_repair import adjustment_text
 from .plan_graph import PlanGraph, PlanNode, RefError, canonical, resolve_args, validated_inputs
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ def _concurrency() -> int:
     return env_int("TRIBOS_AGENT_PLAN_CONCURRENCY", 4, 1, 16)
 
 
-def _short_args(args: Dict[str, Any], limit: int = 160) -> str:
+def _short_args(args: dict[str, Any], limit: int = 160) -> str:
     text = ", ".join(f"{k}={v!r}" for k, v in args.items())
     return text if len(text) <= limit else text[: limit - 3] + "..."
 
@@ -40,10 +41,10 @@ def _short_args(args: Dict[str, Any], limit: int = 160) -> str:
 from .plan_graph import DRUG_ARG_KEYS as _DRUG_ARG_KEYS  # noqa: E402
 
 
-def run_known_drugs(state: Any, limit: int = 8) -> List[str]:
+def run_known_drugs(state: Any, limit: int = 8) -> list[str]:
     """Drugs this run has already found, best first: ChEMBL approved drugs acting on the target, drugs resolved in
     ChEMBL, DGIdb approved interactions (by score), then drugs named in the question."""
-    found: List[str] = []
+    found: list[str] = []
 
     def add(name: Any) -> None:
         text = " ".join(str(name or "").split())
@@ -80,16 +81,16 @@ _GENE_ARG_KEYS = {"gene", "genes", "symbol", "symbols", "target_symbol", "gene_s
 class _NeedsTarget(str):
     """A gene whose ChEMBL target id is looked up just before the call."""
 
-    def __new__(cls, gene: str) -> "_NeedsTarget":
+    def __new__(cls, gene: str) -> _NeedsTarget:
         obj = super().__new__(cls, gene)
         obj.gene = gene  # type: ignore[attr-defined]
         return obj
 
 
-def run_known_genes(state: Any, referenced_tools: Iterable[str] = (), limit: int = 3) -> List[str]:
+def run_known_genes(state: Any, referenced_tools: Iterable[str] = (), limit: int = 3) -> list[str]:
     """Genes for an argument whose reference came back empty: when it pointed at SynLethDB, its partners with screen
     or experimental evidence (PARP1 for BRCA2 loss); otherwise the question's genes, primary first."""
-    out: List[str] = []
+    out: list[str] = []
     if any("synleth" in t for t in referenced_tools):
         for res in (getattr(state, "tool_results", None) or {}).values():
             data = getattr(res, "data", None)
@@ -100,10 +101,10 @@ def run_known_genes(state: Any, referenced_tools: Iterable[str] = (), limit: int
     if not out:
         out += [primary] if primary else []
         out += [str(getattr(g, "label", "") or getattr(g, "mention", "")) for g in getattr(ctx, "genes", None) or []]
-    return [g for g in dict.fromkeys(x for x in out if x)][:limit]
+    return list(dict.fromkeys(x for x in out if x))[:limit]
 
 
-def _drug_value(key: str, drugs: List[str], state: Any, tool: str) -> Any:
+def _drug_value(key: str, drugs: list[str], state: Any, tool: str) -> Any:
     """The fallback in the shape the tool's argument takes: a list, one drug, or alternatives for a trial search."""
     entry = state.registry.get_entry(tool) if getattr(state, "registry", None) is not None else None
     field = (getattr(getattr(entry, "input_schema", None), "model_fields", {}) or {}).get(key)
@@ -123,20 +124,20 @@ class PlanExecutor:
         state: Any,
         *,
         phase: str = PHASE,
-        results: Optional[Dict[str, Any]] = None,
-        failed: Optional[Set[str]] = None,
-        prior_calls: Optional[Iterable[Tuple[str, Dict[str, Any]]]] = None,
-        concurrency: Optional[int] = None,
+        results: dict[str, Any] | None = None,
+        failed: set[str] | None = None,
+        prior_calls: Iterable[tuple[str, dict[str, Any]]] | None = None,
+        concurrency: int | None = None,
     ) -> None:
         self.state = state
         self.phase = phase
-        self.results: Dict[str, Any] = results if results is not None else {}
-        self.failed: Set[str] = failed if failed is not None else set()
-        self.seen_calls: Set[Tuple[str, str]] = {(t, canonical(a)) for t, a in (prior_calls or [])}
+        self.results: dict[str, Any] = results if results is not None else {}
+        self.failed: set[str] = failed if failed is not None else set()
+        self.seen_calls: set[tuple[str, str]] = {(t, canonical(a)) for t, a in (prior_calls or [])}
         self.concurrency = max(1, int(concurrency or _concurrency()))
-        self.dispatch_log: List[str] = []  # node ids in dispatch order (tests and the artifact use it)
-        self.finish_log: List[str] = []
-        self.known_ids: Set[str] = set(self.results) | set(self.failed)
+        self.dispatch_log: list[str] = []  # node ids in dispatch order (tests and the artifact use it)
+        self.finish_log: list[str] = []
+        self.known_ids: set[str] = set(self.results) | set(self.failed)
 
     async def _node_step(self, node: PlanNode, status: str, text: str) -> None:
         title = f"{node.tool.replace('_', ' ')}" + (f": {node.purpose}" if node.purpose else "")
@@ -157,7 +158,7 @@ class PlanExecutor:
         self.failed.add(node.id)
         await self._node_step(node, "skipped", reason)
 
-    def _resolve_with_fallback(self, node: PlanNode) -> Tuple[Any, str]:
+    def _resolve_with_fallback(self, node: PlanNode) -> tuple[Any, str]:
         """Resolved arguments, plus a note when a drug argument whose reference came back empty was filled with the
         drugs this run already found (ChEMBL approved drugs for the target, DGIdb approved interactions, drugs
         named in the question). The planner often points "names" at a step that returned no drug field; the drugs
@@ -173,14 +174,14 @@ class PlanExecutor:
             note = "; ".join(x for x in (note, f"{'/'.join(blank)} filled with drugs found in this run ({', '.join(drugs[:5])})") if x)
         return args, note
 
-    def _resolve_refs(self, node: PlanNode) -> Tuple[Any, str]:
+    def _resolve_refs(self, node: PlanNode) -> tuple[Any, str]:
         try:
             return resolve_args(node.args, self.results, known=self.known_ids), ""
         except RefError as first:
             if not isinstance(node.args, dict):
                 raise
-            out: Dict[str, Any] = {}
-            notes: List[str] = []
+            out: dict[str, Any] = {}
+            notes: list[str] = []
             for key, value in node.args.items():
                 try:
                     out[key] = resolve_args(value, self.results, known=self.known_ids)
@@ -189,26 +190,26 @@ class PlanExecutor:
                     if k in _DRUG_ARG_KEYS:
                         drugs = run_known_drugs(self.state)
                         if not drugs:
-                            raise first
+                            raise first from None
                         out[key] = _drug_value(key, drugs, self.state, node.tool)
                         notes.append(f"{key} taken from drugs found earlier in this run ({', '.join(drugs[:5])})")
                     elif k in _GENE_ARG_KEYS:
                         genes = run_known_genes(self.state, self._referenced_tools(value))
                         if not genes:
-                            raise first
+                            raise first from None
                         # A ChEMBL target id is looked up from the gene just before the call (_fill_targets).
                         out[key] = _NeedsTarget(genes[0]) if k == "target_chembl_id" else _drug_value(key, genes, self.state, node.tool)
                         notes.append(f"{key} taken from genes found earlier in this run ({', '.join(genes[:3])})")
                     else:
-                        raise first
+                        raise first from None
             return out, "; ".join(notes)
 
-    def _referenced_tools(self, value: Any) -> List[str]:
+    def _referenced_tools(self, value: Any) -> list[str]:
         from .plan_graph import refs_in
 
         return [str(getattr(self.results.get(n), "tool_name", "") or "") for n in refs_in(value, self.known_ids)]
 
-    async def _fill_targets(self, node: PlanNode, args: Dict[str, Any]) -> None:
+    async def _fill_targets(self, node: PlanNode, args: dict[str, Any]) -> None:
         """Replace each pending target with its ChEMBL id (chembl_resolve_drugs); RefError when it cannot be found."""
         for key, value in list(args.items()):
             if not isinstance(value, _NeedsTarget):
@@ -265,10 +266,10 @@ class PlanExecutor:
             node.error = str(getattr(res, "error", "") or "tool call failed")[:300]
 
     async def run(self, graph: PlanGraph) -> PlanGraph:
-        pending: Dict[str, PlanNode] = {n.id: n for n in graph.nodes if n.status == "pending"}
+        pending: dict[str, PlanNode] = {n.id: n for n in graph.nodes if n.status == "pending"}
         self.known_ids = set(self.results) | set(self.failed) | set(graph.ids())
         order = {n.id: i for i, n in enumerate(graph.nodes)}
-        running: Dict["asyncio.Task[None]", PlanNode] = {}
+        running: dict[asyncio.Task[None], PlanNode] = {}
         state = self.state
         try:
             while pending or running:

@@ -36,23 +36,23 @@ import inspect
 import logging
 import re
 from html import escape
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from pydantic import BaseModel, Field
 
-from ..verify.verifier import truncate_words
 from ..utils.text import sentence_spans
+from ..verify.verifier import truncate_words
 from .config import env_flag
 from .guardrails import SPOTLIGHT_RULE, neutralise, spotlight
 from .runtime import AgentPhase, PhaseOutcome, register_phase
 from .specialists import (
-    LITERATURE_TOOL,
     ask_json,
     fetch_new_literature,
     iter_passages,
     named_tool_allowed,
     passage_source_key,
     query_entities,
+    resolve_literature_tool,
     seen_passages,
     stems,
 )
@@ -70,7 +70,7 @@ _CLAIM_CUE_RE = re.compile(
     re.I,
 )
 # Cue words for the heuristic classifier: (pattern, weight). Strong cues state a negative finding outright.
-_CONTRA_CUES: Tuple[Tuple[re.Pattern, int], ...] = (
+_CONTRA_CUES: tuple[tuple[re.Pattern, int], ...] = (
     (re.compile(r"\bno (?:statistically )?significant\b", re.I), 3),
     (re.compile(r"\b(?:did|does|do) not (?:improve|reduce|increase|prolong|show|respond|benefit|differ|predict)\b", re.I), 3),
     (re.compile(r"\b(?:not|no longer) associated\b|\bno association\b", re.I), 3),
@@ -115,7 +115,7 @@ class _Rating(BaseModel):
 
 
 class _RatingReply(BaseModel):
-    ratings: List[_Rating] = Field(default_factory=list)
+    ratings: list[_Rating] = Field(default_factory=list)
 
 
 COUNTER_SYSTEM = (
@@ -128,16 +128,16 @@ COUNTER_SYSTEM = (
 )
 
 
-def _sentences(text: str) -> List[str]:
+def _sentences(text: str) -> list[str]:
     text = text or ""
     return [text[s:e].strip() for s, e in sentence_spans(text) if len(text[s:e].split()) >= 5]
 
 
-def extract_claims(state: Any, entities: Dict[str, List[str]]) -> List[Dict[str, Any]]:
+def extract_claims(state: Any, entities: dict[str, list[str]]) -> list[dict[str, Any]]:
     """Up to 3 checkable claims from the gathered evidence, else one from the question."""
     names = [*entities["genes"], *entities["drugs"]]
     name_stems = stems(" ".join(names))
-    claims: List[Dict[str, Any]] = []
+    claims: list[dict[str, Any]] = []
     gene = entities["genes"][0] if entities["genes"] else ""
     for key, res in list(state.tool_results.items()):  # the top target-disease association
         data = getattr(res, "data", None)
@@ -148,7 +148,7 @@ def extract_claims(state: Any, entities: Dict[str, List[str]]) -> List[Dict[str,
             top = max(assoc, key=lambda a: float(a.get("overall_association_score") or 0.0))
             claims.append({"text": f"{gene} is associated with {top['disease_name']}", "source_key": key, "entity": gene})
             break
-    scored: List[Tuple[float, str, str]] = []
+    scored: list[tuple[float, str, str]] = []
     for rkey, p in iter_passages(state.tool_results):
         for s in _sentences(str(p.get("passage_text") or "")):
             cues = len(_CLAIM_CUE_RE.findall(s))
@@ -170,7 +170,7 @@ def extract_claims(state: Any, entities: Dict[str, List[str]]) -> List[Dict[str,
     return claims
 
 
-def negation_queries(entities: Dict[str, List[str]]) -> List[str]:
+def negation_queries(entities: dict[str, list[str]]) -> list[str]:
     """Deterministic contradiction queries for the question's main entity (and drug)."""
     entity = (entities["genes"] or entities["drugs"] or [""])[0]
     drug = entities["drugs"][0] if entities["drugs"] else ""
@@ -187,7 +187,7 @@ def label_for(likert: float) -> str:
     return "contradicts" if likert >= FLAG_AT else ("supports" if likert <= 2 else "neutral")
 
 
-def heuristic_rating(claim: str, passage: str) -> Tuple[int, str]:
+def heuristic_rating(claim: str, passage: str) -> tuple[int, str]:
     """Cue-word estimate of the Likert score: at most FLAG_AT - 1, so cue words alone never reach "contradicts"
     (they can still be flagged as a possible conflict to check at 7). Negated safety findings are not counted as
     negative findings."""
@@ -208,7 +208,7 @@ def heuristic_rating(claim: str, passage: str) -> Tuple[int, str]:
     return 5, "no cue words either way (heuristic)"
 
 
-async def _judge(fn: Any, claim: str, source_key: str, passage: str) -> Optional[Dict[str, Any]]:
+async def _judge(fn: Any, claim: str, source_key: str, passage: str) -> dict[str, Any] | None:
     try:
         out = fn(claim, [{"source_key": source_key, "passage": passage}])
         if inspect.isawaitable(out):
@@ -233,9 +233,10 @@ class CounterEvidencePhase(AgentPhase):
             return False
         if getattr(state.ctx, "scope", "research") != "research":
             return False
-        return named_tool_allowed(state, LITERATURE_TOOL)
+        lit_tool = resolve_literature_tool(state.registry, state)
+        return named_tool_allowed(state, lit_tool)
 
-    async def run(self, state: Any) -> Optional[PhaseOutcome]:
+    async def run(self, state: Any) -> PhaseOutcome | None:
         entities = query_entities(state.ctx)
         queries = negation_queries(entities)
         if not queries:
@@ -244,7 +245,7 @@ class CounterEvidencePhase(AgentPhase):
                          status="running", agent="Counter-evidence searcher")
         claims = extract_claims(state, entities)
         seen = seen_passages(state.tool_results)
-        new: List[Tuple[str, Dict[str, Any]]] = []
+        new: list[tuple[str, dict[str, Any]]] = []
         for q in queries:
             if state.budget.exhausted():
                 break
@@ -255,7 +256,7 @@ class CounterEvidencePhase(AgentPhase):
             )
             new.extend((key, p) for p in passages if key)
 
-        pairs: List[Dict[str, Any]] = []
+        pairs: list[dict[str, Any]] = []
         for rkey, p in new[:MAX_PAIRS]:
             text = re.sub(r"\s+", " ", str(p.get("passage_text") or "")).strip()
             p_stems = stems(text)
@@ -305,10 +306,10 @@ class CounterEvidencePhase(AgentPhase):
         await state.step("agent_counter_evidence", "Searched for contradicting evidence", text, agent="Counter-evidence searcher")
         return None
 
-    async def _classify(self, state: Any, pairs: List[Dict[str, Any]]) -> None:
+    async def _classify(self, state: Any, pairs: list[dict[str, Any]]) -> None:
         # The async judge may call the NLI model on a cache miss; the sync one answers from its cache or local model.
         judges = [j for j in (state.bag.get("nli_judge_async"), state.bag.get("nli_judge_fn")) if callable(j)]
-        pending: List[Dict[str, Any]] = []
+        pending: list[dict[str, Any]] = []
         for r in pairs:
             out = None
             for judge in judges:
@@ -335,7 +336,7 @@ class CounterEvidencePhase(AgentPhase):
                     r.update(likert=likert, label=label_for(likert), classifier="heuristic", reason=reason,
                              score=round(likert / 10 * 0.6, 2))
 
-    async def _model_ratings(self, state: Any, pairs: List[Dict[str, Any]]) -> Dict[int, Tuple[int, str]]:
+    async def _model_ratings(self, state: Any, pairs: list[dict[str, Any]]) -> dict[int, tuple[int, str]]:
         blocks = [
             f"Pair {i}:\nClaim: {spotlight(r['claim'], 'claim', 400)}\nPassage ({r['source_key']}): "
             f"{spotlight(r['passage'], r['source_key'] or 'passage', 1000)}"
@@ -344,14 +345,14 @@ class CounterEvidencePhase(AgentPhase):
         reply = await ask_json(state, COUNTER_SYSTEM, "\n\n".join(blocks), phase=self.key, schema=_RatingReply)
         if not isinstance(reply, _RatingReply):
             return {}
-        out: Dict[int, Tuple[int, str]] = {}
+        out: dict[int, tuple[int, str]] = {}
         for row in reply.ratings:
             if 1 <= row.pair <= len(pairs):
                 out[row.pair] = (int(round(max(0.0, min(10.0, float(row.likert))))), row.reason[:300])
         return out
 
     @staticmethod
-    def _section(claims: List[Dict[str, Any]], rows: List[Dict[str, Any]], classifier: str) -> str:
+    def _section(claims: list[dict[str, Any]], rows: list[dict[str, Any]], classifier: str) -> str:
         heuristic = any(r["classifier"] == "heuristic" for r in rows)
         note = (
             "Passages from a targeted search for contradicting evidence (PaperQA2/ContraCrow scale: 0 strongly supports, "
@@ -391,10 +392,10 @@ def _attr(obj: Any, name: str, default: Any = None) -> Any:
     return obj.get(name, default) if isinstance(obj, dict) else getattr(obj, name, default)
 
 
-def recheck_claims(report: Any, limit: int = MAX_RECHECK_CLAIMS) -> List[Dict[str, Any]]:
+def recheck_claims(report: Any, limit: int = MAX_RECHECK_CLAIMS) -> list[dict[str, Any]]:
     """The answer's top claims for a counter-evidence re-check: clinical claims and claims with a figure from the
     verifier report (contradicted ones are already flagged and skipped), clinical first."""
-    picked: List[Tuple[int, Dict[str, Any]]] = []
+    picked: list[tuple[int, dict[str, Any]]] = []
     for c in list(_attr(report, "claims", None) or []):
         text = str(_attr(c, "claim_text", "") or "").strip()
         kind = str(_attr(c, "claim_type", "") or "")
@@ -412,10 +413,10 @@ def recheck_claims(report: Any, limit: int = MAX_RECHECK_CLAIMS) -> List[Dict[st
     return [c for _r, c in picked[:limit]]
 
 
-def recheck_pairs(claims: List[Dict[str, Any]], passages: List[Dict[str, Any]], max_pairs: int = MAX_PAIRS) -> List[Dict[str, Any]]:
+def recheck_pairs(claims: list[dict[str, Any]], passages: list[dict[str, Any]], max_pairs: int = MAX_PAIRS) -> list[dict[str, Any]]:
     """(answer claim, counter-evidence passage) pairs: each claim with the passages sharing at least two stems,
     never the claim's own supporting source."""
-    pairs: List[Dict[str, Any]] = []
+    pairs: list[dict[str, Any]] = []
     for c in claims:
         c_stems = stems(c["text"])
         for p in passages:
@@ -431,7 +432,7 @@ def recheck_pairs(claims: List[Dict[str, Any]], passages: List[Dict[str, Any]], 
     return pairs
 
 
-async def recheck_answer_claims(state: Any, claims: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+async def recheck_answer_claims(state: Any, claims: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     """Re-check the answer's claims against the counter-evidence passages already in the evidence_conflicts
     artifact, with the NLI judge (if installed) or the cue-word heuristic. No model or literature calls. A heuristic
     row is capped below the contradiction flag so cue words alone never count as a contradiction."""
@@ -470,7 +471,7 @@ class CounterEvidenceRecheckPhase(AgentPhase):
         art = state.artifacts.get("evidence_conflicts") if isinstance(state.artifacts, dict) else None
         return bool(isinstance(art, dict) and art.get("conflicts") and state.verification is not None)
 
-    async def run(self, state: Any) -> Optional[PhaseOutcome]:
+    async def run(self, state: Any) -> PhaseOutcome | None:
         claims = recheck_claims(state.verification)
         if not claims:
             return None

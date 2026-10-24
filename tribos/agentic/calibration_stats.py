@@ -21,7 +21,8 @@ Calibration statistics for per-claim confidence (feature 9). Pure numpy/scipy, n
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, List, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 
@@ -105,14 +106,14 @@ def apply_temperature(logits: Any, temperature: float) -> Any:
     return logistic(np.asarray(logits, dtype=float) / max(float(temperature), _EPS))
 
 
-def reliability_table(scores: Sequence[float], labels: Sequence[Any], bins: int = 10) -> List[Dict[str, Any]]:
+def reliability_table(scores: Sequence[float], labels: Sequence[Any], bins: int = 10) -> list[dict[str, Any]]:
     """Equal-width bins over [0, 1]: count, mean confidence and observed accuracy per non-empty bin."""
     s = np.clip(np.asarray(scores, dtype=float).ravel(), 0.0, 1.0)
     y = np.asarray(labels, dtype=float).ravel()
     edges = np.linspace(0.0, 1.0, bins + 1)
     # bin i holds (edges[i], edges[i+1]]; score 0 goes to the first bin
     idx = np.clip(np.searchsorted(edges, s, side="left") - 1, 0, bins - 1)
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for i in range(bins):
         mask = idx == i
         n = int(mask.sum())
@@ -148,7 +149,7 @@ def brier(scores: Sequence[float], labels: Sequence[Any]) -> float:
 
 def _group_nonconformity(scores: Sequence[float], labels: Sequence[Any]) -> float:
     """Highest score of an incorrect claim in one answer (-inf when every claim is correct)."""
-    bad = [float(s) for s, y in zip(scores, labels) if not bool(y)]
+    bad = [float(s) for s, y in zip(scores, labels, strict=False) if not bool(y)]
     return max(bad) if bad else float("-inf")
 
 
@@ -169,9 +170,9 @@ def conformal_threshold(cal_scores: Any, cal_labels: Any, alpha: float = 0.1) ->
         raise ValueError("cal_scores and cal_labels differ in length")
     grouped = bool(scores) and isinstance(scores[0], (list, tuple, np.ndarray))
     if grouped:
-        r = np.array([_group_nonconformity(s, y) for s, y in zip(scores, labels)], dtype=float)
+        r = np.array([_group_nonconformity(s, y) for s, y in zip(scores, labels, strict=False)], dtype=float)
     else:
-        r = np.array([float(s) if not bool(y) else float("-inf") for s, y in zip(scores, labels)], dtype=float)
+        r = np.array([float(s) if not bool(y) else float("-inf") for s, y in zip(scores, labels, strict=False)], dtype=float)
     n = len(r)
     if n == 0:
         return float("inf")
@@ -184,7 +185,7 @@ def conformal_threshold(cal_scores: Any, cal_labels: Any, alpha: float = 0.1) ->
 def conformal_coverage(test_scores: Sequence[Sequence[float]], test_labels: Sequence[Sequence[Any]], tau: float) -> float:
     """Empirical coverage of a back-off threshold on held-out answers: the fraction of answers whose kept claims
     (score > tau) are all correct. The split-conformal guarantee is coverage >= 1 - alpha in expectation."""
-    groups = list(zip(test_scores, test_labels))
+    groups = list(zip(test_scores, test_labels, strict=False))
     if not groups:
         return float("nan")
     ok = sum(1 for s, y in groups if _group_nonconformity(s, y) <= tau)
@@ -199,11 +200,11 @@ def coverage_tolerance(alpha: float, n_answers: int, z: float = 1.645) -> float:
     return z * math.sqrt(alpha * (1.0 - alpha) / n_answers)
 
 
-def split_groups(group_ids: Sequence[Any], fractions: Sequence[float], seed: int = 0) -> List[List[int]]:
+def split_groups(group_ids: Sequence[Any], fractions: Sequence[float], seed: int = 0) -> list[list[int]]:
     """Row indices split by group (answer), so every claim of one answer lands in the same split: per-answer
     exchangeability is what the conformal guarantee assumes, and a claim-level split would leak an answer's
     claims across calibration and test. Deterministic for a seed; fractions are normalised."""
-    order: Dict[Any, List[int]] = {}
+    order: dict[Any, list[int]] = {}
     for i, g in enumerate(group_ids):
         order.setdefault(g, []).append(i)
     groups = sorted(order, key=str)
@@ -214,7 +215,7 @@ def split_groups(group_ids: Sequence[Any], fractions: Sequence[float], seed: int
     for f in fractions:
         acc += f / total
         bounds.append(int(round(acc * len(perm))))
-    out: List[List[int]] = []
+    out: list[list[int]] = []
     start = 0
     for end in bounds:
         out.append([i for g in perm[start:end] for i in order[g]])
@@ -222,7 +223,7 @@ def split_groups(group_ids: Sequence[Any], fractions: Sequence[float], seed: int
     return out
 
 
-def fit_logistic(X: Any, y: Sequence[Any], l2: float = 1.0, iterations: int = 100) -> Dict[str, Any]:
+def fit_logistic(X: Any, y: Sequence[Any], l2: float = 1.0, iterations: int = 100) -> dict[str, Any]:
     """L2-regularised logistic regression by Newton's method (IRLS); the intercept is not penalised.
 
     Returns {"coef": array of len(X[0]), "intercept": float}. Pure numpy."""
@@ -245,7 +246,7 @@ def fit_logistic(X: Any, y: Sequence[Any], l2: float = 1.0, iterations: int = 10
     return {"coef": w[1:], "intercept": float(w[0])}
 
 
-def calibration_summary(scores: Sequence[float], labels: Sequence[Any], bins: int = 10) -> Dict[str, Any]:
+def calibration_summary(scores: Sequence[float], labels: Sequence[Any], bins: int = 10) -> dict[str, Any]:
     """ECE, Brier score and the reliability table in one JSON-safe dict."""
     return {
         "n": len(np.asarray(scores).ravel()),
@@ -256,8 +257,8 @@ def calibration_summary(scores: Sequence[float], labels: Sequence[Any], bins: in
 
 
 def fit_calibration(
-    raw_logits: Sequence[float], labels: Sequence[Any], alpha: Optional[float] = 0.1
-) -> Dict[str, Any]:
+    raw_logits: Sequence[float], labels: Sequence[Any], alpha: float | None = 0.1
+) -> dict[str, Any]:
     """Fit T on binary logits and (optionally) a conformal threshold on the calibrated scores: the JSON shape
     TRIBOS_CONFIDENCE_CALIBRATION reads ({"temperature", "conformal_threshold"})."""
     t = fit_temperature(np.asarray(raw_logits, dtype=float), labels)

@@ -1,19 +1,18 @@
 // Citation map types (owned by CITATIONS, feature 4). Additive changes only.
 
 export type CiteType =
-  | "pmid"
+  | "arxiv"
   | "doi"
-  | "nct"
-  | "chembl"
-  | "biomodel"
-  | "ensembl"
-  | "uniprot"
-  | "kegg"
-  | "clinvar"
-  | "rsid"
-  | "civic"
-  | "geo"
-  | "drugbank"
+  | "zbl"
+  | "mr"
+  | "oeis"
+  | "ads"
+  | "mp"
+  | "isbn"
+  | "openalex"
+  | "pmid"
+  | "comp"
+  | "dataset"
   | "url";
 
 export interface CitationPassage {
@@ -39,7 +38,7 @@ export interface CitationEntry {
   pmcid?: string | null;
   pub_types?: string[];
   evidence_level?: string | null;
-  /** Who published a web source: regulatory | trial_registry | manufacturer | literature | web. */
+  /** Who published a web source: standards_body | reference_database | preprint_server | literature | web. */
   source_authority?: string | null;
   retracted?: boolean | null;
   retraction_notice?: string | null;

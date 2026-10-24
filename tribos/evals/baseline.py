@@ -16,8 +16,9 @@ import json
 import random
 import statistics
 import time
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 from .runner import load_results
 from .schema import CaseResult
@@ -28,11 +29,11 @@ CHECK_METRICS = ("fact_recall", "faithfulness", "pass")
 SNAPSHOT_VERSION = 1
 
 
-def _num(v: Any) -> Optional[float]:
+def _num(v: Any) -> float | None:
     return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
 
-def case_snapshot(r: CaseResult) -> Dict[str, Any]:
+def case_snapshot(r: CaseResult) -> dict[str, Any]:
     return {
         "suite": r.suite,
         "passed": bool(r.passed),
@@ -47,7 +48,7 @@ def case_snapshot(r: CaseResult) -> Dict[str, Any]:
     }
 
 
-def snapshot(run_dir: Path, *, name: str) -> Dict[str, Any]:
+def snapshot(run_dir: Path, *, name: str) -> dict[str, Any]:
     """The baseline document for a finished run directory."""
     run_dir = Path(run_dir)
     meta_path = run_dir / "meta.json"
@@ -65,13 +66,13 @@ def snapshot(run_dir: Path, *, name: str) -> Dict[str, Any]:
     }
 
 
-def baseline_path(name: Optional[str] = None, *, directory: Optional[Path] = None, path: Optional[str] = None) -> Path:
+def baseline_path(name: str | None = None, *, directory: Path | None = None, path: str | None = None) -> Path:
     if path:
         return Path(path)
     return Path(directory or DEFAULT_DIR) / f"{name or 'baseline'}.json"
 
 
-def save(run_dir: Path, *, name: str = "baseline", directory: Optional[Path] = None, path: Optional[str] = None) -> Path:
+def save(run_dir: Path, *, name: str = "baseline", directory: Path | None = None, path: str | None = None) -> Path:
     doc = snapshot(run_dir, name=name)
     out = baseline_path(name, directory=directory, path=path)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -79,7 +80,7 @@ def save(run_dir: Path, *, name: str = "baseline", directory: Optional[Path] = N
     return out
 
 
-def bootstrap_ci(deltas: Sequence[float], *, n_boot: int = 2000, seed: int = 0, alpha: float = 0.05) -> Tuple[float, float, float]:
+def bootstrap_ci(deltas: Sequence[float], *, n_boot: int = 2000, seed: int = 0, alpha: float = 0.05) -> tuple[float, float, float]:
     """(mean, low, high): percentile bootstrap CI of the mean, deterministic for a seed. One delta gives [d, d]."""
     vals = [float(d) for d in deltas]
     if not vals:
@@ -96,20 +97,20 @@ def bootstrap_ci(deltas: Sequence[float], *, n_boot: int = 2000, seed: int = 0, 
 
 
 def check(
-    base: Dict[str, Any],
+    base: dict[str, Any],
     run_dir: Path,
     *,
     delta: float = 0.03,
     metrics: Sequence[str] = CHECK_METRICS,
     seed: int = 0,
     n_boot: int = 2000,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Paired comparison of a run against a baseline; result["ok"] is False on a significant drop or a new gate failure."""
     new = snapshot(run_dir, name="current")["cases"]
     old = base.get("cases") or {}
     shared = sorted(set(old) & set(new))
-    rows: List[Dict[str, Any]] = []
-    failures: List[str] = []
+    rows: list[dict[str, Any]] = []
+    failures: list[str] = []
     for metric in metrics:
         pairs = [(k, old[k].get(metric), new[k].get(metric)) for k in shared]
         deltas = [(k, float(b) - float(a)) for k, a, b in pairs if a is not None and b is not None]
@@ -126,7 +127,7 @@ def check(
         rows.append(row)
         if row["regressed"]:
             failures.append(f"{metric}: mean delta {mean:+.3f}, 95% CI [{lo:+.3f}, {hi:+.3f}] is below -{delta}")
-    new_gate_failures: List[Dict[str, str]] = []
+    new_gate_failures: list[dict[str, str]] = []
     for k in shared:
         before = old[k].get("gates") or {}
         for gate, ok in (new[k].get("gates") or {}).items():
@@ -149,7 +150,7 @@ def check(
     }
 
 
-def check_markdown(result: Dict[str, Any]) -> str:
+def check_markdown(result: dict[str, Any]) -> str:
     lines = [f"# Baseline check against `{result.get('baseline')}` (run {result.get('baseline_run')})", "",
              f"{result['shared_cases']} shared cases · tolerance {result['delta']} · "
              + ("**OK**" if result["ok"] else "**REGRESSION**"), "",

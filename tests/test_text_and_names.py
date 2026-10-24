@@ -3,19 +3,21 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
-from tribos.agentic import approval, nli
+from tribos.agentic import nli
 from tribos.agentic.counter_evidence import _sentences as counter_sentences
 from tribos.agentic.gaps import hedged_sentences
 from tribos.agents import citations
 from tribos.evals import scoring
 from tribos.export.report_model import _reproducibility
-from tribos.lithoscribe.synthesis_engine import _section_sentences
-from tribos.verify import verifier
+
+
+def _section_sentences(text_val: str) -> list[str]:
+    from tribos.utils import text as text_mod
+    return [text_val[s:e].strip() for s, e in text_mod.sentence_spans(text_val) if len(text_val[s:e].split()) >= 5]
 from tribos.sources import names
 from tribos.utils import text
 from tribos.utils.memory.research_memory import classify_instructions
+from tribos.verify import verifier
 
 
 def _cut(t: str):

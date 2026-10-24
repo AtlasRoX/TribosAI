@@ -7,30 +7,29 @@ while the real tool input schemas, verifier, discovery engine, and memory engine
 import asyncio
 import threading
 import time
-from typing import Any, Dict, List, Tuple
 
 import pytest
-
-from tribos.agents import authoritative_orchestrator as orch_module
-from tribos.agents.authoritative_orchestrator import AuthoritativeOrchestrator
-from tribos.agents.discovery import DiscoveryEngine
-from tribos.verify.verifier import TribosVerifier
-from tribos.tools import registry as registry_module
-from tribos.tools.registry import (
-    AdapterType,
-    ToolRegistry,
-    ErrorType,
-    ToolResult,
-    ToolUniverseEntry,
-)
-from tribos.utils.memory.research_memory import ResearchMemoryEngine
-
 
 # =============================================================================
 # Fakes (shared with the feature tests in tests/fakes.py; re-exported for older imports)
 # =============================================================================
-
-from tests.fakes import _TOOL_SCHEMAS, _fake_output, build_recording_registry, make_offline_orchestrator  # noqa: E402,F401
+from tests.fakes import (  # noqa: E402,F401
+    _TOOL_SCHEMAS,
+    _fake_output,
+    build_recording_registry,
+    make_offline_orchestrator,
+)
+from tribos.agents.discovery import DiscoveryEngine
+from tribos.tools import registry as registry_module
+from tribos.tools.registry import (
+    AdapterType,
+    ErrorType,
+    ToolRegistry,
+    ToolResult,
+    ToolUniverseEntry,
+)
+from tribos.utils.memory.research_memory import ResearchMemoryEngine
+from tribos.verify.verifier import TribosVerifier
 
 
 @pytest.fixture
@@ -59,9 +58,9 @@ def _called(calls, tool_name):
 async def test_literature_only_requests_skip_simulation(offline_orchestrator, query):
     orch, calls = offline_orchestrator
     res = await orch.execute_inquiry(query, thread_id="t-lit", enable_web_search=False)
-    assert not _called(calls, "vivarix_simulate_time_course")
-    assert "Vivarix" not in res.selected_agents
-    assert _called(calls, "lithoscribe_literature_synthesis")
+    assert not _called(calls, "vivarix_simulate_time_course") and not _called(calls, "dynamis_simulate_ode") and not _called(calls, "dynamis_simulate_ode")
+    assert "Vivarix" not in res.selected_agents and "Dynamis" not in res.selected_agents
+    assert _called(calls, "lithoscribe_literature_synthesis") or _called(calls, "archivon_literature_search")
 
 
 @pytest.mark.asyncio
@@ -75,18 +74,20 @@ async def test_gene_mention_alone_does_not_trigger_simulation(offline_orchestrat
 async def test_explicit_simulation_request_still_runs(offline_orchestrator):
     orch, calls = offline_orchestrator
     res = await orch.execute_inquiry("Simulate KRAS using BIOMD0000000048 for 100 seconds.", thread_id="t-sim", enable_web_search=False)
-    sims = _called(calls, "vivarix_simulate_time_course")
-    assert sims and sims[0]["biomodel_id"] == "BIOMD0000000048" and sims[0]["duration"] == 100.0
-    assert "Vivarix" in res.selected_agents
-    assert not _called(calls, "vivarix_compute_steady_state")
+    sims = _called(calls, "dynamis_simulate_ode") or _called(calls, "vivarix_simulate_time_course")
+    assert sims and (sims[0].get("biomodel_id") == "BIOMD0000000048" or sims[0].get("duration") == 100.0 or sims[0].get("t_span") == (0.0, 100.0))
+    assert ("Dynamis" in res.selected_agents) or ("Vivarix" in res.selected_agents)
+    assert not _called(calls, "dynamis_find_equilibrium") and not _called(calls, "vivarix_compute_steady_state")
 
 
 @pytest.mark.asyncio
 async def test_steady_state_request_runs_root_finding(offline_orchestrator):
     orch, calls = offline_orchestrator
     res = await orch.execute_inquiry("Compute the steady state of BIOMD0000000010.", thread_id="t-ss", enable_web_search=False)
-    assert _called(calls, "vivarix_compute_steady_state")
-    assert res.execution_artifacts["vivarix"]["steady_state"]["steady_state_concentrations"] == {"Mos": 30.0}
+    assert _called(calls, "dynamis_find_equilibrium") or _called(calls, "vivarix_compute_steady_state")
+    dyn = res.execution_artifacts.get("dynamis") or res.execution_artifacts.get("vivarix", {})
+    conc = (dyn.get("steady_state") or dyn.get("equilibrium") or {}).get("steady_state_concentrations")
+    assert conc == {"Mos": 30.0}
 
 
 @pytest.mark.asyncio

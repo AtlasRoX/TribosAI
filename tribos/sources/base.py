@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
@@ -23,15 +24,15 @@ logger = logging.getLogger(__name__)
 class CitationRecord(BaseModel):
     type: str  # pmid|doi|nct|chembl|biomodel|ensembl|uniprot|kegg|clinvar|rsid|civic|geo|url|dailymed
     id: str
-    title: Optional[str] = None
-    url: Optional[str] = None
-    passage: Optional[str] = None
-    section: Optional[str] = None
-    authors: Optional[str] = None
-    journal: Optional[str] = None
-    year: Optional[str] = None
-    evidence_level: Optional[str] = None
-    retracted: Optional[bool] = None
+    title: str | None = None
+    url: str | None = None
+    passage: str | None = None
+    section: str | None = None
+    authors: str | None = None
+    journal: str | None = None
+    year: str | None = None
+    evidence_level: str | None = None
+    retracted: bool | None = None
     source_agent: str = ""
     source_tool: str = ""
 
@@ -43,7 +44,7 @@ class SourceRunState:
     def __init__(self, registry: Any, ctx: QueryContext) -> None:
         self.registry = registry
         self.ctx = ctx
-        self._tasks: Dict[str, "asyncio.Task[Any]"] = {}
+        self._tasks: dict[str, asyncio.Task[Any]] = {}
 
     async def once(self, key: str, factory: Callable[[], Awaitable[Any]]) -> Any:
         """The first caller starts factory() as a task; every caller awaits that same task's result."""
@@ -65,8 +66,8 @@ class SourceRunState:
         return await asyncio.shield(task)
 
     async def source_result(
-        self, key: str, *, requester: Optional["EvidenceSource"] = None, timeout_s: Optional[float] = None
-    ) -> Optional["ToolResult"]:
+        self, key: str, *, requester: EvidenceSource | None = None, timeout_s: float | None = None
+    ) -> ToolResult | None:
         """The result of another registered stage-1 source that runs this turn, awaited without running it a
         second time (the orchestrator runs all stage-1 sources concurrently, so this is how a source can depend
         on an earlier one). None when that source does not run this turn, is not registered, is not ordered
@@ -84,7 +85,7 @@ class SourceRunState:
             if timeout_s is None:
                 return await asyncio.shield(fut)
             return await asyncio.wait_for(asyncio.shield(fut), timeout_s)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("Source %s did not finish within %ss for a dependent source", key, timeout_s)
             return None
         except asyncio.CancelledError:
@@ -97,14 +98,14 @@ class SourceRunState:
             return None
 
 
-def share_source_run(src: "EvidenceSource") -> None:
+def share_source_run(src: EvidenceSource) -> None:
     """Make src.run() run once per inquiry (per SourceRunState), so the orchestrator's own call and any
     dependent source's source_result() share one run. Applied by register_source; idempotent."""
     if getattr(src.run, "_shared_source_run", False):
         return
     inner = src.run
 
-    async def run(ctx: QueryContext, registry: Any, state: SourceRunState) -> "ToolResult":
+    async def run(ctx: QueryContext, registry: Any, state: SourceRunState) -> ToolResult:
         if isinstance(state, SourceRunState) and state.ctx is ctx:
             return await state.run_source_once(src.key, lambda: inner(ctx, registry, state))
         return await inner(ctx, registry, state)
@@ -117,7 +118,7 @@ class EvidenceSource:
     key: str = ""  # tool_results key and step id, e.g. "clinical_trials"
     agent: str = ""  # Tribos agent label, e.g. "Lithoscribe"
     action: str = ""  # steps[] action text
-    required_tools: Tuple[str, ...] = ()  # skipped (not an error) when any is not registered
+    required_tools: tuple[str, ...] = ()  # skipped (not an error) when any is not registered
     stage: int = 1  # only stage 1 is supported
     order: int = 100  # ordering for the run and the evidence block
 
@@ -127,36 +128,36 @@ class EvidenceSource:
     def running_title(self, ctx: QueryContext) -> str:
         return f"Running {self.key}"
 
-    async def run(self, ctx: QueryContext, registry: Any, state: SourceRunState) -> "ToolResult":
+    async def run(self, ctx: QueryContext, registry: Any, state: SourceRunState) -> ToolResult:
         raise NotImplementedError
 
-    def describe(self, result: "ToolResult", ctx: QueryContext) -> Tuple[str, str]:
+    def describe(self, result: ToolResult, ctx: QueryContext) -> tuple[str, str]:
         if not result.success:
             err_type = getattr(result.error_type, "value", result.error_type) or "ERROR"
             return f"{self.key} failed", f"{err_type}: {str(result.error or '')[:240]}"
         return f"{self.key} finished", ""
 
-    def evidence_xml(self, result: "ToolResult") -> str:
+    def evidence_xml(self, result: ToolResult) -> str:
         """Only called for successful results; must escape every value."""
         return ""
 
-    def allowed_identifiers(self, result: "ToolResult") -> Dict[str, Set[str]]:
+    def allowed_identifiers(self, result: ToolResult) -> dict[str, set[str]]:
         """family name -> ids this result legitimately contains (merged into the verifier's observed sets)."""
         return {}
 
-    def citations(self, result: "ToolResult") -> List[CitationRecord]:
+    def citations(self, result: ToolResult) -> list[CitationRecord]:
         return []
 
-    def artifact(self, result: "ToolResult") -> Optional[Tuple[str, Any]]:
+    def artifact(self, result: ToolResult) -> tuple[str, Any] | None:
         """(execution_artifacts key, compact JSON-safe value); dict values for one key are shallow-merged."""
         return None
 
-    def fallback_markdown(self, result: "ToolResult") -> str:
+    def fallback_markdown(self, result: ToolResult) -> str:
         return ""
 
-    def scope_notes(self, ctx: QueryContext, result: Optional["ToolResult"]) -> List[str]:
+    def scope_notes(self, ctx: QueryContext, result: ToolResult | None) -> list[str]:
         """result is None when the source did not run."""
         return []
 
-    def plan_fact(self, ctx: QueryContext) -> Optional[str]:
+    def plan_fact(self, ctx: QueryContext) -> str | None:
         return None

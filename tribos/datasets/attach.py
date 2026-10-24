@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import List, Sequence
 
 from tribos.agents.query_context import DatasetRef
 
@@ -15,11 +15,11 @@ MAX_ATTACHMENTS = 5
 
 @dataclass
 class AttachmentResolution:
-    attachments: List[DatasetRef] = field(default_factory=list)
-    errors: List[str] = field(default_factory=list)
+    attachments: list[DatasetRef] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
 
-def _requested_ids(dataset_ids: Sequence[str], query: str) -> List[str]:
+def _requested_ids(dataset_ids: Sequence[str], query: str) -> list[str]:
     ids = [str(i) for i in (dataset_ids or [])] + TYPED_ID_RE.findall(query or "")
     return list(dict.fromkeys(ids))[:MAX_ATTACHMENTS]
 
@@ -35,7 +35,7 @@ async def resolve_attachments(user_id: str, dataset_ids: Sequence[str], query: s
     if store is None:
         return AttachmentResolution(errors=[f"Attached dataset {i[:40]} not found" for i in ids])
     resolved, errors = await asyncio.to_thread(store.resolve_for_user, user_id, ids)
-    refs: List[DatasetRef] = []
+    refs: list[DatasetRef] = []
     for att in resolved:
         record = att.record
         geo_verified = record.geo_verified

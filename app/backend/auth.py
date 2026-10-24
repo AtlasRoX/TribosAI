@@ -20,7 +20,6 @@ import hmac
 import logging
 import os
 import re
-from typing import Dict, List, Optional
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -37,8 +36,8 @@ def auth_disabled() -> bool:
     return os.getenv("TRIBOS_AUTH_MODE", "").strip().lower() == "disabled"
 
 
-def _load_static_tokens() -> Dict[str, str]:
-    tokens: Dict[str, str] = {}
+def _load_static_tokens() -> dict[str, str]:
+    tokens: dict[str, str] = {}
     for pair in os.getenv("TRIBOS_API_TOKENS", "").split(","):
         pair = pair.strip()
         if not pair:
@@ -51,7 +50,7 @@ def _load_static_tokens() -> Dict[str, str]:
     return tokens
 
 
-def secret_strength_problems() -> List[str]:
+def secret_strength_problems() -> list[str]:
     """Weak bearer secrets (SEC-009): static tokens shorter than 32 characters, an HS256 secret shorter than
     32 bytes. Checked by tribos.config.validate_environment, so startup logs them and TRIBOS_STRICT_CONFIG=1
     refuses to start; values are never included in the text."""
@@ -60,14 +59,14 @@ def secret_strength_problems() -> List[str]:
     return secret_problems(os.environ)
 
 
-def _match_static_token(token: str) -> Optional[str]:
+def _match_static_token(token: str) -> str | None:
     for known, user_id in _load_static_tokens().items():
         if hmac.compare_digest(known.encode(), token.encode()):
             return user_id
     return None
 
 
-def _decode_jwt(token: str) -> Optional[str]:
+def _decode_jwt(token: str) -> str | None:
     secret = os.getenv("TRIBOS_JWT_SECRET")
     if not secret:
         return None
@@ -97,7 +96,7 @@ def _decode_jwt(token: str) -> Optional[str]:
 
 
 async def get_current_user(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ) -> str:
     """FastAPI dependency returning the authenticated user id."""
     if auth_disabled():

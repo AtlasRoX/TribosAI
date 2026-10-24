@@ -14,7 +14,6 @@ from tribos.datasets import store as dataset_store
 from tribos.provenance import run_store
 from tribos.tools import reliability
 from tribos.utils import maintenance, paths
-from tribos.utils.http_limits import TTLCache
 
 _SPECIFIC = (
     "TRIBOS_MEMORY_DIR",
@@ -71,9 +70,7 @@ def test_data_dir_drives_every_state_dir(monkeypatch, tmp_path):
     assert Path(engine.storage_dir) == tmp_path / "memory"
     assert (tmp_path / "memory" / "research_memory_v2.db").is_file()
 
-    from tribos.vivarix.engine import VivarixSimulationEngine
-
-    assert VivarixSimulationEngine._cache_dir() == tmp_path / "biomodels_cache"
+    # Vivarix package removed in Tribos transformation
 
 
 def test_specific_env_wins_over_data_dir(monkeypatch, tmp_path):

@@ -6,28 +6,36 @@ from __future__ import annotations
 import asyncio
 import itertools
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage
 
+from tests.agentic_fakes import collect_events, make_agentic_orchestrator
+from tests.fakes import _fake_output
 from tribos.agentic import config as agent_config
 from tribos.agentic.budget import BudgetExhausted, RunBudget
 from tribos.agentic.control import RunCancelled, RunControl
 from tribos.agentic.gaps import GAP_PHASE, near_duplicate, useful_for_gap
 from tribos.agentic.llm import AgentLLM
-from tribos.agentic.runtime import AgentPhase, AgenticRuntime, PhaseOutcome, register_phase, restore_phases, snapshot_phases
+from tribos.agentic.runtime import (
+    AgenticRuntime,
+    AgentPhase,
+    PhaseOutcome,
+    register_phase,
+    restore_phases,
+    snapshot_phases,
+)
 from tribos.agentic.state import AgentState, SubQuestion
 from tribos.agents.authoritative_orchestrator import strip_evidence_markup
 from tribos.agents.orchestration import draft as draft_stage
 from tribos.agents.orchestration.context import RunContext
 from tribos.agents.orchestration.finalize import apply_incomplete_status, turn_fully_supported
 from tribos.agents.query_context import QueryContext
+from tribos.extensions.archivon import ArchivonLiteratureSearchInput
 from tribos.tools import registry as registry_module
-from tests.agentic_fakes import collect_events, make_agentic_orchestrator
-from tests.fakes import _fake_output, called
 
 QUERY = "What diseases is KRAS associated with?"
 
@@ -55,21 +63,29 @@ def run(orch: Any, framework: str = agent_config.AGENTIC, **kw: Any) -> Any:
     return asyncio.run(collect_events(orch, query=QUERY, thread_id=f"t-{framework}", framework=framework, **kw))
 
 
-def lit_queries(calls: Any) -> List[str]:
-    return [kw["query"] for kw in called(calls, "lithoscribe_literature_synthesis")]
+def lit_queries(calls: Any) -> list[str]:
+    return [
+        kw.get("query")
+        for name, kw in calls
+        if name in ("lithoscribe_literature_synthesis", "archivon_literature_search") and isinstance(kw, dict) and "query" in kw
+    ]
 
 
-def fresh_literature(text: str) -> Dict[str, Any]:
-    """A lithoscribe fake: every call returns a new passage about `text` (so it is always new evidence)."""
+def fresh_literature(text: str) -> dict[str, Any]:
+    """A literature fake: every call returns a new passage about `text` (so it is always new evidence)."""
     counter = itertools.count(1)
 
-    def fake(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    def fake(kwargs: dict[str, Any]) -> dict[str, Any]:
         n = next(counter)
         if n == 1:  # the pipeline's own literature search
-            return _fake_output("lithoscribe_literature_synthesis", kwargs)
+            return _fake_output("archivon_literature_search", kwargs)
         return {"ranked_passages": [{"pmid": str(40000000 + n), "passage_text": f"{text} (report {n}).", "citation": f"Ref {n}"}]}
 
-    return {"lithoscribe_literature_synthesis": (registry_module.LithoscribeSynthesisInput, fake)}
+    input_cls = getattr(registry_module, "LithoscribeSynthesisInput", ArchivonLiteratureSearchInput)
+    return {
+        "lithoscribe_literature_synthesis": (input_cls, fake),
+        "archivon_literature_search": (ArchivonLiteratureSearchInput, fake),
+    }
 
 
 def changing_synthesis() -> Any:
@@ -172,7 +188,7 @@ def test_concurrent_calls_cannot_overshoot_the_budget(monkeypatch):
     budget = RunBudget(max_tokens=10_000, max_llm_calls=40)
     llm = AgentLLM(lambda **_k: SlowLLM(), "m", None, budget)
 
-    async def go() -> List[Any]:
+    async def go() -> list[Any]:
         prompt = "x" * 4_000  # 1,000 tokens; with its 2,000-token output reservation, 3,000 per call
         return await asyncio.gather(*(llm.complete("[phase:debate]", prompt, phase="debate") for _ in range(5)),
                                     return_exceptions=True)
@@ -186,7 +202,7 @@ def test_concurrent_calls_cannot_overshoot_the_budget(monkeypatch):
 
 
 # Runtime / terminal status -----------------------------------------------------------------------------------
-def _state(budget: Optional[RunBudget] = None, framework: str = agent_config.DEBATE) -> AgentState:
+def _state(budget: RunBudget | None = None, framework: str = agent_config.DEBATE) -> AgentState:
     budget = budget or RunBudget()
 
     async def noop(*_a: Any, **_k: Any) -> None:
@@ -201,13 +217,13 @@ def _state(budget: Optional[RunBudget] = None, framework: str = agent_config.DEB
 
 
 def test_finalize_phases_without_model_calls_still_run_after_exhaustion(phases):
-    ran: List[str] = []
+    ran: list[str] = []
 
     class Deterministic(AgentPhase):
         key = "det_finalize"
         stage = "finalize"
 
-        async def run(self, state: Any) -> Optional[PhaseOutcome]:
+        async def run(self, state: Any) -> PhaseOutcome | None:
             ran.append(self.key)
             return None
 
@@ -257,7 +273,7 @@ def test_agentic_run_reports_pipeline_stage_timing_and_task_status_lists(monkeyp
         key = "critic"
         stage = "after_draft"
 
-        async def run(self, state: Any) -> Optional[PhaseOutcome]:
+        async def run(self, state: Any) -> PhaseOutcome | None:
             return PhaseOutcome(resynthesize=True, feedback=["Mention the pathway."]) if state.draft_round == 0 else None
 
     phases(Critic())
@@ -293,8 +309,8 @@ def test_evidence_markup_is_stripped_from_the_answer():
 
 
 # Liveness and cancellation --------------------------------------------------------------------------------------
-def _run_context(events: List[Dict[str, Any]], control: Optional[RunControl] = None) -> RunContext:
-    async def cb(ev: Dict[str, Any]) -> None:
+def _run_context(events: list[dict[str, Any]], control: RunControl | None = None) -> RunContext:
+    async def cb(ev: dict[str, Any]) -> None:
         events.append(ev)
 
     return RunContext(
@@ -306,7 +322,7 @@ def _run_context(events: List[Dict[str, Any]], control: Optional[RunControl] = N
 
 def test_a_slow_model_call_emits_heartbeats_on_its_step(monkeypatch):
     monkeypatch.setenv("TRIBOS_PROGRESS_HEARTBEAT_S", "0.05")
-    events: List[Dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
     rc = _run_context(events)
 
     async def go() -> Any:
@@ -338,14 +354,14 @@ def test_cancel_stops_a_long_model_call_promptly(monkeypatch):
 
 # Dates ----------------------------------------------------------------------------------------------------------
 def test_retrieval_date_is_utc(monkeypatch):
-    seen: Dict[str, Any] = {}
+    seen: dict[str, Any] = {}
 
     class FakeDatetime:
         @staticmethod
         def now(tz: Any = None) -> datetime:
             seen["tz"] = tz
-            return datetime(2026, 10, 18, 23, 30, tzinfo=timezone.utc)
+            return datetime(2026, 10, 18, 23, 30, tzinfo=UTC)
 
     monkeypatch.setattr(draft_stage, "datetime", FakeDatetime)
     assert draft_stage.retrieval_date() == "2026-10-18"
-    assert seen["tz"] is timezone.utc
+    assert seen["tz"] is UTC

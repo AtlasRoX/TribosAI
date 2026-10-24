@@ -3,7 +3,7 @@ reported verification result."""
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -13,7 +13,7 @@ from ...verify.verifier import VerificationReport
 from .context import RunContext, logger, orchestrator_module
 
 
-def prefer_primary_reports(text: str, tool_results: Dict[str, Any]) -> str:
+def prefer_primary_reports(text: str, tool_results: dict[str, Any]) -> str:
     """The answer with a named trial's retrieved primary report cited where only a review was cited for its figures."""
     from ...verify import verifier as verifier_mod
 
@@ -27,7 +27,7 @@ def prefer_primary_reports(text: str, tool_results: Dict[str, Any]) -> str:
     return out
 
 
-def computed_confidence_band(run: RunContext) -> Optional[str]:
+def computed_confidence_band(run: RunContext) -> str | None:
     """The band of the computed answer confidence (agentic confidence phase), or None when it did not run."""
     art = run.execution_artifacts.get("claim_confidence")
     if not isinstance(art, dict) and run.agent_state is not None:
@@ -95,7 +95,7 @@ async def check_and_correct(run: RunContext) -> None:
     # -------------------------------------------------------------
     await emit("verification", title="Checking claims against the evidence", status="running", agent="Verifier")
 
-    context_identifiers: Dict[str, Set[str]] = {}
+    context_identifiers: dict[str, set[str]] = {}
 
     def merge_ids(ids: Any) -> None:
         for fam, values in (ids or {}).items():
@@ -126,7 +126,7 @@ async def check_and_correct(run: RunContext) -> None:
         "n_defects": len(verification_report.defects),
     }
     correction_attempted = False
-    correction_error: Optional[str] = None
+    correction_error: str | None = None
 
     # Bounded Correction Loop (Max 1 retry if critical/major defect)
     if not verification_report.passed:
@@ -171,8 +171,8 @@ async def check_and_correct(run: RunContext) -> None:
             correction_attempted = True
         if not skip_reason:
             budget = agent_state.budget if agent_state is not None else None
-            holder: Dict[str, Any] = {"alloc": revision_alloc}
-            revised_parts: List[str] = []
+            holder: dict[str, Any] = {"alloc": revision_alloc}
+            revised_parts: list[str] = []
             try:
                 llm_kwargs = dict(ao._edit_llm_kwargs(synthesis_model))
                 if revision_alloc is not None:
@@ -303,7 +303,7 @@ def build_citations(run: RunContext) -> None:
     )
     candidate_response, verification_report = run.candidate_response, run.verification_report
 
-    source_citations: Dict[str, List[Any]] = {}
+    source_citations: dict[str, list[Any]] = {}
     for src in successful_sources:
         try:
             source_citations[src.key] = list(src.citations(tool_results[src.key]) or [])

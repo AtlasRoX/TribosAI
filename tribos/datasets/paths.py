@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +18,7 @@ def _is_within(real: str, root: str) -> bool:
         return False
 
 
-def allowed_dataset_roots() -> List[str]:
+def allowed_dataset_roots() -> list[str]:
     """TRIBOS_DATASET_ROOTS (os.pathsep-separated); <working directory>/data when unset."""
     global _warned_default_root
     raw = os.getenv("TRIBOS_DATASET_ROOTS", "")
@@ -35,7 +34,7 @@ def allowed_dataset_roots() -> List[str]:
     return [os.path.join(os.getcwd(), "data")]
 
 
-def _candidates(path: str) -> List[str]:
+def _candidates(path: str) -> list[str]:
     """Real paths a typed path may refer to: absolute as given, relative under each root."""
     if os.path.isabs(path):
         return [os.path.realpath(path)]
@@ -62,7 +61,7 @@ def is_allowed_typed_path(path: str) -> bool:
     return resolve_typed_path(path) is not None
 
 
-def resolve_typed_path(path: str) -> Optional[str]:
+def resolve_typed_path(path: str) -> str | None:
     """The allowed real path a typed dataset path refers to (an existing file first), or None."""
     if not path or "\x00" in path:
         return None

@@ -1,15 +1,15 @@
 """
 Structural validation of uploaded files. Uploaded content is only parsed as data: nothing is executed,
-imported or unpickled, HDF5 links that point outside the file are rejected, and SBML is parsed with
-DTDs, entities and external references forbidden before COPASI ever sees it.
+imported or unpickled, HDF5 links that point outside the file are rejected, MAT files are inspected via
+scipy.io/h5py, and tables (.csv, .tsv, .xlsx, .parquet, .json) are checked for bounds and readability.
 """
 
 from __future__ import annotations
 
 import hashlib
 import re
+import shutil
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 from .models import ValidationSummary
 
@@ -19,14 +19,13 @@ MIN_VARS = 2
 MAX_CELLS_X_GENES = 2_000_000_000
 MAX_TABLE_ROWS = 200_000
 MAX_TABLE_COLUMNS = 100_000
-MAX_HDF5_OBJECTS = 200_000  # groups + datasets + links an .h5ad may hold (an AnnData file has a few hundred)
+MAX_HDF5_OBJECTS = 200_000
 MAX_ZARR_FILES = 200_000
-MAX_SBML_ELEMENTS = 500_000  # XML elements in one SBML document (the upload cap is 10 MB)
+MAX_SBML_ELEMENTS = 500_000
 
 _SBML_NS_PREFIX = "{http://www.sbml.org/sbml/"
 _XINCLUDE_NS = "{http://www.w3.org/2001/XInclude}"
 
-# Advisory only: obs column names that often hold direct identifiers.
 _PHI_COLUMN_RE = re.compile(
     r"(?:^|[_\W])(name|first_?name|last_?name|surname|dob|birth_?date|date_?of_?birth|mrn|ssn|"
     r"social_?security|address|street|phone|email|zip_?code|postcode)(?:$|[_\W])",
@@ -63,7 +62,7 @@ def _check_dims(n_obs: int, n_vars: int) -> None:
         )
 
 
-def _phi_warnings(columns: List[str]) -> List[str]:
+def _phi_warnings(columns: list[str]) -> list[str]:
     return [
         f"obs column '{c}' may contain direct identifiers; confirm it is de-identified"
         for c in columns
@@ -77,28 +76,18 @@ def _decode(value: object) -> str:
     return str(value)
 
 
-# -----------------------------------------------------------------------------
-# HDF5 / zarr structure limits (SEC-010)
-# -----------------------------------------------------------------------------
-# libhdf5, COPASI/libSBML and zarr still parse untrusted files inside the API process (no subprocess isolation and no
-# rlimits); these checks bound what a hostile file can make the parser do (links out of the file, object-count bombs,
-# allocations far beyond the declared caps) but cannot protect against a memory-safety bug in the native libraries.
-# Keep h5py/libhdf5 and basico/COPASI patched; parsing in a resource-limited subprocess is the remaining hardening.
-
 def check_hdf5_structure(f: object, max_objects: int = MAX_HDF5_OBJECTS) -> int:
-    """Reject HDF5 soft/external links, virtual or externally stored datasets and object-count bombs.
-
-    Returns the number of stored elements over all datasets (a bound on what loading the file allocates)."""
+    """Reject HDF5 soft/external links, virtual or externally stored datasets and object-count bombs."""
     import h5py
 
-    offending: List[str] = []
+    offending: list[str] = []
     count = 0
 
-    def check_link(name: str, link: object) -> Optional[bool]:
+    def check_link(name: str, link: object) -> bool | None:
         nonlocal count
         count += 1
         if count > max_objects:
-            return True  # stop the traversal
+            return True
         if isinstance(link, (h5py.ExternalLink, h5py.SoftLink)):
             offending.append(f"{name} ({type(link).__name__})")
         return None
@@ -133,9 +122,82 @@ def check_hdf5_structure(f: object, max_objects: int = MAX_HDF5_OBJECTS) -> int:
     return elements
 
 
-def preflight_h5ad(path: Path) -> Dict[str, int]:
-    """Cheap structural read of an .h5ad before it is loaded for analysis (no cell x gene cap: large files are
-    subsampled by the engine). Returns n_obs, n_vars and stored_elements; raises ValidationFailure."""
+def validate_hdf5(path: Path) -> ValidationSummary:
+    """Validate a generic scientific HDF5 (.h5 / .hdf5) file."""
+    import h5py
+
+    with open(path, "rb") as fh:
+        if fh.read(8) != HDF5_SIGNATURE:
+            raise ValidationFailure("not_hdf5", "Not an HDF5 file (missing HDF5 signature).")
+    try:
+        f = h5py.File(path, "r")
+    except Exception as exc:
+        raise ValidationFailure("hdf5_unreadable", f"The HDF5 file could not be read; it may be truncated ({type(exc).__name__}).") from exc
+
+    try:
+        check_hdf5_structure(f)
+        datasets: list[str] = []
+        shapes: dict[str, list[int]] = {}
+        dtypes: dict[str, str] = {}
+
+        def _collect(name: str, obj: object) -> None:
+            if isinstance(obj, h5py.Dataset) and len(datasets) < 200:
+                datasets.append(name)
+                shapes[name] = [int(s) for s in obj.shape]
+                dtypes[name] = str(obj.dtype)
+
+        f.visititems(_collect)
+        if not datasets:
+            raise ValidationFailure("hdf5_empty", "The HDF5 file contains no datasets.")
+        first_shape = shapes[datasets[0]]
+        n_rows = first_shape[0] if len(first_shape) >= 1 else None
+        n_cols = first_shape[1] if len(first_shape) >= 2 else None
+        return ValidationSummary(
+            format="hdf5",
+            n_rows=n_rows,
+            n_columns=n_cols,
+            datasets=datasets,
+            shapes=shapes,
+            dtypes=dtypes,
+        )
+    finally:
+        f.close()
+
+
+def validate_mat(path: Path) -> ValidationSummary:
+    """Validate a MATLAB (.mat) file (v4/v5 via scipy.io.whosmat or v7.3 via HDF5)."""
+    with open(path, "rb") as fh:
+        head = fh.read(140)
+    if head.startswith(HDF5_SIGNATURE) or (len(head) >= 136 and head[128:136] == HDF5_SIGNATURE):
+        summary = validate_hdf5(path)
+        return summary.model_copy(update={"format": "mat-v7.3"})
+
+    from scipy import io as spio
+
+    try:
+        entries = spio.whosmat(str(path))
+    except Exception as exc:
+        raise ValidationFailure("mat_unreadable", f"The MATLAB .mat file could not be parsed ({type(exc).__name__}).") from exc
+    if not entries:
+        raise ValidationFailure("mat_empty", "The MATLAB .mat file contains no variables.")
+    datasets = [str(name) for name, _, _ in entries[:200]]
+    shapes = {str(name): [int(s) for s in shape] for name, shape, _ in entries[:200]}
+    dtypes = {str(name): str(dt) for name, _, dt in entries[:200]}
+    first_shape = shapes[datasets[0]]
+    n_rows = first_shape[0] if len(first_shape) >= 1 else None
+    n_cols = first_shape[1] if len(first_shape) >= 2 else None
+    return ValidationSummary(
+        format="mat",
+        n_rows=n_rows,
+        n_columns=n_cols,
+        datasets=datasets,
+        shapes=shapes,
+        dtypes=dtypes,
+    )
+
+
+def preflight_h5ad(path: Path) -> dict[str, int]:
+    """Cheap structural read of an .h5ad before it is loaded for analysis."""
     import h5py
 
     with open(path, "rb") as fh:
@@ -164,8 +226,7 @@ def preflight_h5ad(path: Path) -> Dict[str, int]:
         f.close()
 
 
-def _zarr_shape(meta_dir: Path) -> Optional[Tuple[int, ...]]:
-    """Shape of an AnnData X stored in zarr v2 (.zarray / .zattrs) or v3 (zarr.json)."""
+def _zarr_shape(meta_dir: Path) -> tuple[int, ...] | None:
     import json
 
     for name, keys in ((".zarray", ("shape",)), (".zattrs", ("shape", "h5sparse_shape")), ("zarr.json", ("shape",))):
@@ -184,9 +245,7 @@ def _zarr_shape(meta_dir: Path) -> Optional[Tuple[int, ...]]:
     return None
 
 
-def preflight_zarr(path: Path, max_files: int = MAX_ZARR_FILES) -> Dict[str, int]:
-    """Structural checks of an AnnData .zarr directory: no links leaving it, a bounded file count and a readable X
-    shape. Returns n_obs, n_vars and the total stored bytes; raises ValidationFailure."""
+def preflight_zarr(path: Path, max_files: int = MAX_ZARR_FILES) -> dict[str, int]:
     import os
 
     if not path.is_dir():
@@ -219,88 +278,10 @@ def preflight_zarr(path: Path, max_files: int = MAX_ZARR_FILES) -> Dict[str, int
     return {"n_obs": int(shape[0]), "n_vars": int(shape[1]), "stored_bytes": int(total_bytes)}
 
 
-# -----------------------------------------------------------------------------
-# h5ad
-# -----------------------------------------------------------------------------
-
 def validate_h5ad(path: Path) -> ValidationSummary:
-    import h5py
-
-    with open(path, "rb") as fh:
-        if fh.read(8) != HDF5_SIGNATURE:
-            raise ValidationFailure("not_hdf5", "Not an HDF5/AnnData file (missing HDF5 signature).")
-    try:
-        f = h5py.File(path, "r")
-    except Exception as exc:  # truncated or corrupt
-        raise ValidationFailure("hdf5_unreadable", f"The HDF5 file could not be read; it may be truncated ({type(exc).__name__}).") from exc
-
-    warnings: List[str] = []
-    try:
-        check_hdf5_structure(f)
-
-        encoding = _decode(f.attrs.get("encoding-type", ""))
-        missing = [k for k in ("obs", "var", "X") if k not in f]
-        if encoding != "anndata":
-            if encoding or missing:
-                raise ValidationFailure("not_anndata", "The HDF5 file is not an AnnData (.h5ad) file.")
-            warnings.append("legacy AnnData layout (no encoding-type attribute)")
-        elif missing:
-            raise ValidationFailure("not_anndata", f"The AnnData file is missing {', '.join(missing)}.")
-
-        x = f["X"]
-        if isinstance(x, h5py.Dataset):
-            shape = tuple(x.shape)
-            x_encoding = _decode(x.attrs.get("encoding-type", "array"))
-        else:
-            raw_shape = x.attrs.get("shape", x.attrs.get("h5sparse_shape"))
-            if raw_shape is None:
-                raise ValidationFailure("not_anndata", "The sparse X matrix has no shape attribute.")
-            shape = tuple(int(s) for s in raw_shape)
-            x_encoding = _decode(x.attrs.get("encoding-type", x.attrs.get("h5sparse_format", "sparse")))
-            if x_encoding in ("csr", "csc"):
-                x_encoding = f"{x_encoding}_matrix"
-        if len(shape) != 2:
-            raise ValidationFailure("not_anndata", f"X must be a 2-D matrix, found shape {shape}.")
-        n_obs, n_vars = int(shape[0]), int(shape[1])
-        _check_dims(n_obs, n_vars)
-
-        obs = f["obs"]
-        columns: List[str] = []
-        if isinstance(obs, h5py.Group):
-            order = obs.attrs.get("column-order")
-            if order is not None:
-                columns = [_decode(c) for c in list(order)][:200]
-            else:
-                index_key = _decode(obs.attrs.get("_index", "_index"))
-                columns = [k for k in obs.keys() if k != index_key][:200]
-        warnings.extend(_phi_warnings(columns))
-
-        hints: Dict[str, str] = {}
-        uns = f.get("uns")
-        if isinstance(uns, h5py.Group):
-            for key in _UNS_HINT_KEYS:
-                item = uns.get(key)
-                if isinstance(item, h5py.Dataset) and item.shape == () and item.dtype.kind in ("S", "O", "U"):
-                    hints[key] = _decode(item[()])[:120]
-        return ValidationSummary(
-            format="anndata-h5ad",
-            n_obs=n_obs,
-            n_vars=n_vars,
-            x_encoding=x_encoding,
-            obs_columns=columns,
-            uns_hints=hints,
-            warnings=warnings,
-        )
-    finally:
-        f.close()
+    raise ValidationFailure("unsupported_format", "h5ad format is not supported; upload table, HDF5, or MAT.")
 
 
-# -----------------------------------------------------------------------------
-# csv / tsv -> canonical data.h5ad
-# -----------------------------------------------------------------------------
-
-# Label shapes used to check a table's orientation (SCI-016). Barcodes / cell ids are tested first because 10x
-# barcodes such as AAACATACAACCAC-1 also look like gene symbols.
 _BARCODE_RE = re.compile(r"^[ACGTN]{8,}(?:[-_.][A-Za-z0-9]+)*$", re.IGNORECASE)
 _CELL_ID_RE = re.compile(r"^(?:cells?|bc|barcodes?|obs|c)[_\-.:]?\d+$|^[A-Za-z0-9]+[_:][ACGTN]{8,}(?:-\d+)?$", re.IGNORECASE)
 _GENE_RE = re.compile(
@@ -310,8 +291,7 @@ _GENE_RE = re.compile(
 _ORIENTATION_SAMPLE = 500
 
 
-def _label_fractions(labels: List[str]) -> Tuple[float, float]:
-    """(fraction gene-like, fraction cell-id-like) over an evenly spaced sample of labels."""
+def _label_fractions(labels: list[str]) -> tuple[float, float]:
     if not labels:
         return 0.0, 0.0
     step = max(1, len(labels) // _ORIENTATION_SAMPLE)
@@ -321,8 +301,7 @@ def _label_fractions(labels: List[str]) -> Tuple[float, float]:
     return genes / len(sample), cells / len(sample)
 
 
-def infer_table_orientation(row_names: List[str], col_names: List[str]) -> Tuple[Optional[str], str]:
-    """('genes_by_cells' | 'cells_by_genes' | None, basis) from the shape of the row and column labels."""
+def infer_table_orientation(row_names: list[str], col_names: list[str]) -> tuple[str | None, str]:
     row_gene, row_cell = _label_fractions(row_names)
     col_gene, col_cell = _label_fractions(col_names)
     basis = (
@@ -336,12 +315,51 @@ def infer_table_orientation(row_names: List[str], col_names: List[str]) -> Tuple
     return None, basis
 
 
-def validate_table(path: Path, extension: str, orientation: Optional[str], out_path: Path) -> Tuple[ValidationSummary, str]:
-    """Parse a numeric expression matrix and write it once as AnnData; returns (summary, sha256 of data.h5ad)."""
+def validate_table(
+    path: Path,
+    extension: str,
+    orientation: str | None = None,
+    out_path: Path | None = None,
+) -> tuple[ValidationSummary, str | None]:
+    """Validate a tabular dataset (.csv, .tsv, .xlsx, .parquet, .json)."""
     import numpy as np
     import pandas as pd
 
-    sep = "\t" if extension == ".tsv" else ","
+    ext = extension.lower()
+    if ext in (".xlsx", ".parquet", ".json"):
+        try:
+            if ext == ".xlsx":
+                df = pd.read_excel(path, nrows=MAX_TABLE_ROWS + 1)
+            elif ext == ".parquet":
+                df = pd.read_parquet(path)
+            else:
+                df = pd.read_json(path)
+        except Exception as exc:
+            raise ValidationFailure("table_unreadable", f"The table could not be parsed ({type(exc).__name__}).") from exc
+        if len(df) > MAX_TABLE_ROWS:
+            raise ValidationFailure("matrix_too_large", f"Tables are limited to {MAX_TABLE_ROWS:,} rows.")
+        if df.shape[1] > MAX_TABLE_COLUMNS:
+            raise ValidationFailure("matrix_too_large", f"Tables are limited to {MAX_TABLE_COLUMNS:,} columns.")
+        if df.shape[1] == 0 or df.shape[0] == 0:
+            raise ValidationFailure("table_unreadable", "The table has no data rows or columns.")
+        cols = [str(c) for c in df.columns][:200]
+        dtypes = {str(c): str(t) for c, t in list(df.dtypes.items())[:200]}
+        derived_sha: str | None = None
+        if out_path is not None:
+            shutil.copyfile(path, out_path)
+            derived_sha = sha256_file(out_path)
+        return (
+            ValidationSummary(
+                format=ext.lstrip("."),
+                n_rows=int(df.shape[0]),
+                n_columns=int(df.shape[1]),
+                columns=cols,
+                dtypes=dtypes,
+            ),
+            derived_sha,
+        )
+
+    sep = "\t" if ext == ".tsv" else ","
     try:
         header = pd.read_csv(path, sep=sep, index_col=0, nrows=0, engine="c")
     except Exception as exc:
@@ -368,7 +386,7 @@ def validate_table(path: Path, extension: str, orientation: Optional[str], out_p
 
     row_names = [str(i) for i in df.index]
     col_names = [str(c) for c in df.columns]
-    warnings: List[str] = []
+    warnings: list[str] = []
     inferred, basis = infer_table_orientation(row_names, col_names)
     if orientation and inferred and orientation != inferred:
         raise ValidationFailure(
@@ -393,141 +411,76 @@ def validate_table(path: Path, extension: str, orientation: Optional[str], out_p
     n_obs, n_vars = matrix.shape
     _check_dims(int(n_obs), int(n_vars))
 
-    import anndata as ad
+    derived_sha = None
+    if out_path is not None:
+        try:
+            import anndata as ad
 
-    adata = ad.AnnData(
-        X=matrix.astype(np.float32),
-        obs=pd.DataFrame(index=pd.Index(obs_names, dtype=str)),
-        var=pd.DataFrame(index=pd.Index(var_names, dtype=str)),
-    )
-    if not adata.obs_names.is_unique:
-        adata.obs_names_make_unique()
-        warnings.append("duplicate cell names were made unique")
-    if not adata.var_names.is_unique:
-        adata.var_names_make_unique()
-        warnings.append("duplicate gene names were made unique")
-    if bool(np.any(matrix < 0)):
-        warnings.append("the matrix contains negative values; Lumicell expects raw or normalized counts")
-    adata.write_h5ad(out_path)
+            adata = ad.AnnData(
+                X=matrix.astype(np.float32),
+                obs=pd.DataFrame(index=pd.Index(obs_names, dtype=str)),
+                var=pd.DataFrame(index=pd.Index(var_names, dtype=str)),
+            )
+            if not adata.obs_names.is_unique:
+                adata.obs_names_make_unique()
+                warnings.append("duplicate cell names were made unique")
+            if not adata.var_names.is_unique:
+                adata.var_names_make_unique()
+                warnings.append("duplicate gene names were made unique")
+            if bool(np.any(matrix < 0)):
+                warnings.append("the matrix contains negative values; Lumicell expects raw or normalized counts")
+            adata.write_h5ad(out_path)
+            derived_sha = sha256_file(out_path)
+        except ImportError:
+            shutil.copyfile(path, out_path)
+            derived_sha = sha256_file(out_path)
+
     summary = ValidationSummary(
-        format=f"{extension.lstrip('.')}->anndata",
+        format=f"{ext.lstrip('.')}->anndata",
         n_obs=int(n_obs),
         n_vars=int(n_vars),
+        n_rows=int(df.shape[0]),
+        n_columns=int(df.shape[1]),
+        columns=col_names[:200],
         x_encoding="array",
         table_orientation=orientation,
         warnings=warnings,
     )
-    return summary, sha256_file(out_path)
+    return summary, derived_sha
 
-
-# -----------------------------------------------------------------------------
-# SBML
-# -----------------------------------------------------------------------------
 
 def _local(tag: str) -> str:
     return tag.rsplit("}", 1)[-1] if isinstance(tag, str) else ""
 
 
 def validate_sbml(path: Path) -> ValidationSummary:
-    from defusedxml import DefusedXmlException
-    from defusedxml.ElementTree import ParseError, fromstring
+    raise ValidationFailure("unsupported_format", "SBML format is not supported; upload table, HDF5, or MAT.")
 
-    raw = path.read_bytes()
-    try:
-        root = fromstring(raw, forbid_dtd=True, forbid_entities=True, forbid_external=True)
-    except DefusedXmlException as exc:
-        raise ValidationFailure("sbml_dtd_forbidden", "SBML with a DTD, entities or external references is not allowed.") from exc
-    except ParseError as exc:
-        raise ValidationFailure("xml_unparseable", f"The file is not well-formed XML ({exc}).") from exc
-    except Exception as exc:
-        raise ValidationFailure("xml_unparseable", f"The file is not well-formed XML ({type(exc).__name__}).") from exc
-
-    if not (isinstance(root.tag, str) and root.tag.startswith(_SBML_NS_PREFIX) and _local(root.tag) == "sbml"):
-        raise ValidationFailure("not_sbml", "The XML root is not an SBML <sbml> element.")
-    for n_elements, el in enumerate(root.iter(), start=1):
-        if n_elements > MAX_SBML_ELEMENTS:
-            raise ValidationFailure("sbml_too_complex", f"The SBML document has more than {MAX_SBML_ELEMENTS:,} XML elements.")
-        tag = el.tag if isinstance(el.tag, str) else ""
-        if _local(tag) == "externalModelDefinition" or tag.startswith(_XINCLUDE_NS):
-            raise ValidationFailure("sbml_external_reference", "External SBML model references are not supported.")
-
-    ns = root.tag[: root.tag.index("}") + 1]
-    model_el = root.find(f"{ns}model")
-    if model_el is None:
-        raise ValidationFailure("sbml_empty_model", "The SBML document has no <model>.")
-    try:
-        level = int(root.get("level", "0"))
-        version = int(root.get("version", "0"))
-    except ValueError:
-        level = version = 0
-    model_id = model_el.get("id")
-    xml_name = model_el.get("name")
-
-    text = raw.decode("utf-8", "replace")
-    import basico
-
-    from ..vivarix.engine import _COPASI_LOCK
-
-    with _COPASI_LOCK:
-        model = None
-        try:
-            try:
-                model = basico.load_model_from_string(text)
-            except Exception as exc:
-                raise ValidationFailure("sbml_unloadable", f"COPASI could not load the model ({type(exc).__name__}).") from exc
-            if model is None:
-                raise ValidationFailure("sbml_unloadable", "COPASI could not load the model.")
-            species = basico.get_species(model=model)
-            n_species = 0 if species is None else len(species)
-            params = basico.get_reaction_parameters(model=model)
-            n_params = 0 if params is None else len(params)
-            units = {k: str(v) for k, v in (basico.model_info.get_model_units(model=model) or {}).items() if v}
-            name = basico.get_model_name(model=model) or xml_name
-        finally:
-            if model is not None:
-                try:
-                    basico.remove_datamodel(model)
-                except Exception:  # noqa: BLE001
-                    pass
-    if n_species < 1:
-        raise ValidationFailure("sbml_empty_model", "The SBML model defines no species to simulate.")
-    return ValidationSummary(
-        format=f"sbml-l{level}v{version}",
-        sbml_level=level or None,
-        sbml_version=version or None,
-        sbml_model_id=model_id,
-        sbml_model_name=(name or "")[:200] or None,
-        n_species=n_species,
-        n_reaction_parameters=n_params,
-        units=units,
-    )
 
 
 def validate_dataset_upload(
     path: Path | str,
-    original_filename: Optional[str] = None,
+    original_filename: str | None = None,
     *,
-    orientation: Optional[str] = None,
-    out_path: Optional[Path] = None,
+    orientation: str | None = None,
+    out_path: Path | None = None,
 ) -> ValidationSummary:
-    """Validate a file in any format the upload store accepts (.h5ad, .csv, .tsv, .xml, .sbml); SCI-017.
-
-    Every other extension, including .zarr (not an upload format), raises ValidationFailure('unsupported_format').
-    A table is converted to AnnData at out_path, or in a temporary directory that is removed afterwards."""
+    """Validate a file in any format the upload store accepts (.csv, .tsv, .xlsx, .parquet, .json, .h5, .hdf5, .mat, .h5ad, .xml, .sbml)."""
     p = Path(path)
     fn = original_filename or p.name
     suffix = Path(fn).suffix.lower()
-    if suffix == ".h5ad":
-        return validate_h5ad(p)
-    if suffix in (".csv", ".tsv"):
+    if suffix in (".h5", ".hdf5"):
+        return validate_hdf5(p)
+    if suffix == ".mat":
+        return validate_mat(p)
+    if suffix in (".csv", ".tsv", ".xlsx", ".parquet", ".json"):
         if out_path is not None:
             return validate_table(p, suffix, orientation, Path(out_path))[0]
         import tempfile
 
         with tempfile.TemporaryDirectory(prefix="tribos_table_") as tmp:
             return validate_table(p, suffix, orientation, Path(tmp) / "data.h5ad")[0]
-    if suffix in (".xml", ".sbml"):
-        return validate_sbml(p)
     raise ValidationFailure(
-        "unsupported_format", f"Unsupported file extension: {suffix or '(none)'}; upload .h5ad, .csv, .tsv, .xml or .sbml."
+        "unsupported_format",
+        f"Unsupported file extension: {suffix or '(none)'}; upload table (.csv, .tsv, .xlsx, .json, .parquet), HDF5 (.h5, .hdf5), or MAT (.mat).",
     )

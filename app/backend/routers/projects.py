@@ -17,7 +17,7 @@ Routes (all scoped to the authenticated user; another user's project is a 404):
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, Field
@@ -42,18 +42,18 @@ class ProjectCreate(BaseModel):
 
 
 class ProjectPatch(BaseModel):
-    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
-    description: Optional[str] = Field(default=None, max_length=2000)
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
 
 
 class FactPatch(BaseModel):
     invalidate: bool = Field(default=False, description="Mark the fact no longer valid (kept in the history)")
     reason: str = Field(default="", max_length=300)
-    object: Optional[str] = Field(default=None, min_length=1, max_length=500)
-    value: Optional[str] = Field(default=None, max_length=64)
-    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    verified: Optional[bool] = None
-    tags: Optional[List[str]] = Field(default=None, max_length=10)
+    object: str | None = Field(default=None, min_length=1, max_length=500)
+    value: str | None = Field(default=None, max_length=64)
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    verified: bool | None = None
+    tags: list[str] | None = Field(default=None, max_length=10)
 
 
 def _check_project(project_id: str) -> None:
@@ -67,7 +67,7 @@ def _check_fact(fact_id: str) -> None:
 
 
 @router.post("", status_code=201)
-async def create_project(req: ProjectCreate, user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+async def create_project(req: ProjectCreate, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     try:
         return await asyncio.to_thread(get_project_store().create_project, user_id, req.name, req.description)
     except ProjectStoreError as exc:
@@ -75,13 +75,13 @@ async def create_project(req: ProjectCreate, user_id: str = Depends(get_current_
 
 
 @router.get("")
-async def list_projects(limit: int = Query(default=100, ge=1, le=500), user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+async def list_projects(limit: int = Query(default=100, ge=1, le=500), user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     projects = await asyncio.to_thread(get_project_store().list_projects, user_id, limit)
     return {"projects": projects, "count": len(projects)}
 
 
 @router.get("/{project_id}")
-async def get_project(project_id: str = ProjectIdPath, user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+async def get_project(project_id: str = ProjectIdPath, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     _check_project(project_id)
     project = await asyncio.to_thread(get_project_store().get_project, project_id, user_id)
     if project is None:
@@ -90,7 +90,7 @@ async def get_project(project_id: str = ProjectIdPath, user_id: str = Depends(ge
 
 
 @router.patch("/{project_id}")
-async def patch_project(req: ProjectPatch, project_id: str = ProjectIdPath, user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+async def patch_project(req: ProjectPatch, project_id: str = ProjectIdPath, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     _check_project(project_id)
     try:
         project = await asyncio.to_thread(get_project_store().update_project, project_id, user_id, req.name, req.description)
@@ -102,7 +102,7 @@ async def patch_project(req: ProjectPatch, project_id: str = ProjectIdPath, user
 
 
 @router.delete("/{project_id}")
-async def delete_project(project_id: str = ProjectIdPath, user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+async def delete_project(project_id: str = ProjectIdPath, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     _check_project(project_id)
     if not await asyncio.to_thread(get_project_store().delete_project, project_id, user_id):
         raise HTTPException(status_code=404, detail="Project not found")
@@ -116,7 +116,7 @@ async def project_memory(
     include_invalid: bool = Query(default=False),
     limit: int = Query(default=50, ge=1, le=500),
     user_id: str = Depends(get_current_user),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Facts of a project: ranked for `query` (the recall the agent would get), else the newest first."""
     _check_project(project_id)
     store = get_project_store()
@@ -132,7 +132,7 @@ async def project_memory(
 
 
 @router.patch("/{project_id}/memory/{fact_id}")
-async def patch_fact(req: FactPatch, project_id: str = ProjectIdPath, fact_id: str = FactIdPath, user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+async def patch_fact(req: FactPatch, project_id: str = ProjectIdPath, fact_id: str = FactIdPath, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     _check_project(project_id)
     _check_fact(fact_id)
     store = get_project_store()
@@ -153,7 +153,7 @@ async def patch_fact(req: FactPatch, project_id: str = ProjectIdPath, fact_id: s
 
 
 @router.delete("/{project_id}/memory/{fact_id}")
-async def delete_fact(project_id: str = ProjectIdPath, fact_id: str = FactIdPath, user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+async def delete_fact(project_id: str = ProjectIdPath, fact_id: str = FactIdPath, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     _check_project(project_id)
     _check_fact(fact_id)
     if not await asyncio.to_thread(get_project_store().delete_fact, project_id, fact_id, user_id):

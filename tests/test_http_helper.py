@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
-from typing import List
 
 import httpx
 import pytest
@@ -24,7 +23,7 @@ URL = "https://api.example.org/v1/thing"
 
 class _Sleeps:
     def __init__(self) -> None:
-        self.calls: List[float] = []
+        self.calls: list[float] = []
 
     async def __call__(self, seconds: float) -> None:
         self.calls.append(seconds)
@@ -35,7 +34,7 @@ class _CountingLimiter:
         self.entered = 0
         self.exited = 0
 
-    async def __aenter__(self) -> "_CountingLimiter":
+    async def __aenter__(self) -> _CountingLimiter:
         self.entered += 1
         return self
 
@@ -49,7 +48,7 @@ def _client(handler) -> httpx.AsyncClient:
 
 def _sequence(*responses):
     """A handler answering with each item in turn (an exception class is raised instead)."""
-    calls: List[httpx.Request] = []
+    calls: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         item = responses[min(len(calls), len(responses) - 1)]
@@ -76,10 +75,10 @@ def test_retry_after_seconds_value_default_and_cap():
 
 
 def test_retry_after_seconds_http_date():
-    future = format_datetime(datetime.now(timezone.utc) + timedelta(seconds=20), usegmt=True)
+    future = format_datetime(datetime.now(UTC) + timedelta(seconds=20), usegmt=True)
     assert 15.0 <= retry_after_seconds(future, cap=60.0) <= 20.0
     assert retry_after_seconds(future, cap=5.0) == 5.0
-    past = format_datetime(datetime.now(timezone.utc) - timedelta(minutes=5), usegmt=True)
+    past = format_datetime(datetime.now(UTC) - timedelta(minutes=5), usegmt=True)
     assert retry_after_seconds(past) == 0.0
 
 
@@ -127,7 +126,7 @@ async def test_429_honours_retry_after_seconds():
 
 @pytest.mark.asyncio
 async def test_429_honours_retry_after_http_date_capped():
-    when = format_datetime(datetime.now(timezone.utc) + timedelta(hours=1), usegmt=True)
+    when = format_datetime(datetime.now(UTC) + timedelta(hours=1), usegmt=True)
     handler, _ = _sequence(httpx.Response(429, headers={"Retry-After": when}), httpx.Response(200, json={}))
     sleeps = _Sleeps()
     async with _client(handler) as client:

@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from ..tools.registry import ToolResult
@@ -17,7 +18,7 @@ from ..tools.registry import ToolResult
 logger = logging.getLogger(__name__)
 
 
-def _num(value: Any) -> Optional[float]:
+def _num(value: Any) -> float | None:
     """A finite float, or None for missing/non-numeric values (tool payloads can carry nulls)."""
     try:
         out = float(value)
@@ -31,7 +32,7 @@ _SPECIES_SUFFIXES = {"p", "pp", "ppp", "gtp", "gdp", "star", "act", "active", "i
 _SPECIES_PREFIXES = {"p", "pp", "phospho"}
 
 
-def _species_names_target(species: str, keys: List[str]) -> bool:
+def _species_names_target(species: str, keys: list[str]) -> bool:
     """Whole-token match of a target symbol in a model species name ('Metabolite' does not name MET)."""
     tokens = [t for t in re.split(r"[^a-z0-9]+", species.lower()) if t]
     for tok in tokens:
@@ -49,12 +50,12 @@ class PrioritizedCandidate(BaseModel):
     """Ranked therapeutic target or combination hypothesis grounded strictly in observed evidence."""
     target: str
     rank: int
-    composite_priority_score: Optional[float] = None  # None if insufficient data
-    observed_components: Dict[str, Optional[float]] = Field(default_factory=dict)
+    composite_priority_score: float | None = None  # None if insufficient data
+    observed_components: dict[str, float | None] = Field(default_factory=dict)
     rationale: str
     prediction_label: str  # [PROPOSED HYPOTHESIS: ...]
     proposed_validation_experiment: str
-    supporting_sources: List[str] = Field(default_factory=list)
+    supporting_sources: list[str] = Field(default_factory=list)
 
 
 class DiscoveryHypothesisReport(BaseModel):
@@ -62,8 +63,8 @@ class DiscoveryHypothesisReport(BaseModel):
     inquiry: str
     primary_target: str
     status: str = "COMPLETED"  # COMPLETED | INSUFFICIENT_EVIDENCE
-    candidates: List[PrioritizedCandidate] = Field(default_factory=list)
-    iterative_update_summary: Optional[str] = None
+    candidates: list[PrioritizedCandidate] = Field(default_factory=list)
+    iterative_update_summary: str | None = None
 
     def to_markdown_summary(self) -> str:
         if self.status == "INSUFFICIENT_EVIDENCE" or not self.candidates:
@@ -75,7 +76,7 @@ class DiscoveryHypothesisReport(BaseModel):
             )
 
         lines = [
-            f"### Evidence-Backed Target & Combination Prioritization (DiscoveryAgent)",
+            "### Evidence-Backed Target & Combination Prioritization (DiscoveryAgent)",
             f"**Inquiry Focus**: {self.inquiry} | Primary Target: **{self.primary_target}**",
             "",
             "| Rank | Proposed Intervention / Combination | Evidence Score | Hypothesis Tier | Evidence-Based Rationale | Proposed Laboratory Validation |",
@@ -109,10 +110,10 @@ class DiscoveryEngine:
     @staticmethod
     def prioritize_hypotheses(
         inquiry: str,
-        primary_target: Optional[str],
-        tool_results: Dict[str, ToolResult],
+        primary_target: str | None,
+        tool_results: dict[str, ToolResult],
         *,
-        target_aliases: Optional[List[str]] = None,
+        target_aliases: list[str] | None = None,
     ) -> DiscoveryHypothesisReport:
         """
         Evaluate candidate hypotheses strictly based on observed tool results.
@@ -131,15 +132,15 @@ class DiscoveryEngine:
 
         # 1. Audit observed evidence across tools
         has_any_evidence = False
-        ot_association_score: Optional[float] = None
-        ot_sources: List[str] = []
+        ot_association_score: float | None = None
+        ot_sources: list[str] = []
         observed_passages_count = 0
-        lit_sources: List[str] = []
+        lit_sources: list[str] = []
         sim_executed = False
-        sim_flux_change: Optional[float] = None
+        sim_flux_change: float | None = None
         sim_species_basis = ""
         sc_executed = False
-        sc_score: Optional[float] = None
+        sc_score: float | None = None
         sc_basis = ""
 
         # Check Synapta evidence
@@ -156,7 +157,7 @@ class DiscoveryEngine:
 
         # Check Lithoscribe evidence
         lith_res = tool_results.get("lithoscribe") or tool_results.get("lithoscribe_literature_synthesis")
-        lit_graded: Optional[Tuple[float, int, str]] = None  # (support, articles, rationale)
+        lit_graded: tuple[float, int, str] | None = None  # (support, articles, rationale)
         if lith_res and lith_res.success and isinstance(lith_res.data, dict):
             passages = [p for p in lith_res.data.get("ranked_passages", []) or [] if isinstance(p, dict)]
             passages = [p for p in passages if p.get("retracted") is not True and p.get("integrity_status") not in ("retracted", "withdrawn")]
@@ -212,9 +213,9 @@ class DiscoveryEngine:
         # - pathway_kinetics: mean normalized |final - initial| concentration change (None if unsimulated)
         # - single_cell_marker_evidence: |logFC|-scaled strength of FDR-significant markers (None if unobserved)
 
-        candidates: List[PrioritizedCandidate] = []
+        candidates: list[PrioritizedCandidate] = []
 
-        components: Dict[str, Optional[float]] = {
+        components: dict[str, float | None] = {
             "disease_association": ot_association_score,
             "literature_support": (
                 lit_graded[0] if lit_graded is not None
@@ -304,16 +305,21 @@ class DiscoveryEngine:
 
     @staticmethod
     def _graded_literature(
-        passages: List[Dict[str, Any]], excluded: List[Dict[str, Any]], sources_out: List[str]
-    ) -> Optional[Tuple[float, int, str]]:
+        passages: list[dict[str, Any]], excluded: list[dict[str, Any]], sources_out: list[str]
+    ) -> tuple[float, int, str] | None:
         """
         Grade-weighted literature support over unique articles: min(1, sum(article_weight) / 2), where
         article_weight = policy weight x0.7 if preprint x0.5 if expression of concern x0.8 if text-heuristic.
         Returns None when any passage lacks a grade (the caller falls back to count / 4).
         """
-        from ..lithoscribe.evidence_grading import basis_phrase, summary_phrases
+        try:
+            from ..archivon.grading import basis_phrase, summary_phrases
+        except ImportError:
+            from ..archivon.grading import summary_phrases
+            def basis_phrase(grade: dict[str, Any]) -> str:
+                return str(grade.get("basis") or "unclassified")
 
-        articles: Dict[str, Dict[str, Any]] = {}
+        articles: dict[str, dict[str, Any]] = {}
         for p in passages:
             if not isinstance(p.get("evidence_grade"), dict):
                 return None
@@ -321,7 +327,7 @@ class DiscoveryEngine:
             articles.setdefault(key or f"passage-{len(articles)}", p)
 
         total = 0.0
-        counts: Dict[str, int] = {}
+        counts: dict[str, int] = {}
         for p in articles.values():
             g = p["evidence_grade"]
             weight = _num(g.get("weight")) or 0.0
@@ -344,7 +350,7 @@ class DiscoveryEngine:
         support = round(min(1.0, total / 2.0), 2)
         n = len(articles)
         text = f"Supported by {n} EuropePMC article{'s' if n != 1 else ''} ({', '.join(summary_phrases(counts, 'long'))})"
-        excluded_counts: Dict[str, int] = {}
+        excluded_counts: dict[str, int] = {}
         for ex in excluded:
             reason = ex.get("excluded_reason") if isinstance(ex, dict) else None
             if reason in ("retracted", "withdrawn"):
@@ -356,13 +362,13 @@ class DiscoveryEngine:
 
     @staticmethod
     def _kinetic_response_score(
-        initial: Dict[str, Any], final: Dict[str, Any], target: str, aliases: Optional[List[str]] = None
-    ) -> Tuple[Optional[float], str]:
+        initial: dict[str, Any], final: dict[str, Any], target: str, aliases: list[str] | None = None
+    ) -> tuple[float | None, str]:
         """
         Mean normalized concentration change |f - i| / max(|i|, |f|) in [0, 1] over simulated species.
         Species whose names contain the target symbol (e.g. 'Erk2-PP' for ERK2) are used when present.
         """
-        def norm_change(sp: str) -> Optional[float]:
+        def norm_change(sp: str) -> float | None:
             f, i = _num(final.get(sp)), _num(initial.get(sp))
             if f is None or i is None:
                 return None
@@ -380,17 +386,17 @@ class DiscoveryEngine:
 
     @staticmethod
     def _single_cell_evidence_score(
-        top_markers: Dict[str, List[Dict[str, Any]]],
-        target_expression: Dict[str, Dict[str, float]],
+        top_markers: dict[str, list[dict[str, Any]]],
+        target_expression: dict[str, dict[str, float]],
         target: str,
-        aliases: Optional[List[str]] = None,
-    ) -> Tuple[Optional[float], str]:
+        aliases: list[str] | None = None,
+    ) -> tuple[float | None, str]:
         """
         Score single-cell evidence from FDR-significant (p_adj < 0.05) Wilcoxon markers, scaling |log2FC|
         so that a 4-unit change saturates at 1.0. Target-gene markers take precedence; otherwise the target's
         detected expression fraction; otherwise overall marker strength weighted by cluster coverage.
         """
-        def strength(m: Dict[str, Any]) -> float:
+        def strength(m: dict[str, Any]) -> float:
             return min(1.0, abs(_num(m.get("log_fold_change")) or 0.0) / 4.0)
 
         markers = [m for ms in top_markers.values() for m in (ms or []) if isinstance(m, dict)]
@@ -416,5 +422,5 @@ class DiscoveryEngine:
         return None, "no FDR-significant markers"
 
 
-def _fmt(v: Optional[float]) -> str:
+def _fmt(v: float | None) -> str:
     return "Unknown" if v is None else f"{v:.2f}"

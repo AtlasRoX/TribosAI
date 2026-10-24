@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from .report_model import ExportMessage, ExportRequest, ReportModel, build_report_model, report_markdown
+from .report_model import (
+    ExportMessage,
+    ExportRequest,
+    ReportModel,
+    build_report_model,
+    report_markdown,
+)
 
 
 def render_markdown(report: ReportModel) -> bytes:
@@ -27,6 +33,12 @@ def render_bundle(report: ReportModel) -> bytes:
     return _render(report)
 
 
+def render_latex_to_png(latex_str: str, dpi: int = 180) -> bytes:
+    from .equation_renderer import render_latex_to_png as _render
+
+    return _render(latex_str, dpi=dpi)
+
+
 __all__ = [
     "ExportMessage",
     "ExportRequest",
@@ -34,6 +46,7 @@ __all__ = [
     "build_report_model",
     "render_bundle",
     "render_docx",
+    "render_latex_to_png",
     "render_markdown",
     "render_pdf",
 ]

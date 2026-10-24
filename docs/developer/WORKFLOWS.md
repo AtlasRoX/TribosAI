@@ -1,22 +1,21 @@
 # GitHub Workflows Documentation — Tribos
 
-> **Tribos** — Biomedical Research Assistant  
+> **Tribos** — Engineering & Scientific R&D Assistant  
 > **Made by ChronoStrider Engineering**
 
-This document provides a comprehensive overview of all GitHub Actions workflows in the **Tribos** repository, made by **ChronoStrider Engineering** (**ChronoStrider Engineering**), detailing their purpose, triggers, and functionality.
+This document provides a comprehensive overview of all GitHub Actions workflows in the **Tribos** repository, made by **ChronoStrider Engineering**, detailing their purpose, triggers, and functionality.
 
 ## Overview
 
-Our CI/CD pipeline uses **UV** for fast, reliable dependency management across all workflows. All workflows are designed to be efficient, secure, and provide comprehensive quality assurance.
+Our CI/CD pipeline uses **uv** for fast, deterministic dependency management across all workflows. All workflows are designed to be efficient, secure, and provide comprehensive quality assurance.
 
 ## Workflow Categories
 
 ### 🧪 Testing Workflows
 - [`tests_tribos.yml`](#tests-tribos)
-- [`tests_vivarix.yml`](#tests-vivarix)
-- [`tests_synapta.yml`](#tests-synapta)
-- [`tests_lithoscribe.yml`](#tests-lithoscribe)
-- [`tests_lumicell.yml`](#tests-lumicell)
+- [`tests_scientific_validation.yml`](#tests-scientific-validation)
+- [`tests_web.yml`](#tests-web)
+- [`evals.yml`](#evals-workflow)
 
 ### 🔒 Security & Quality
 - [`security_audit.yml`](#security-audit)
@@ -33,11 +32,29 @@ Our CI/CD pipeline uses **UV** for fast, reliable dependency management across a
 
 ## Testing Workflows
 
-### Tests Lithoscribe
+### Tests Tribos
 
-**File:** `tests_lithoscribe.yml`
+**File:** `tests_tribos.yml`
 
-**Purpose:** Comprehensive testing and quality checks for the Lithoscribe component
+**Purpose:** Comprehensive test suite execution and quality checks for the core Tribos package.
+
+### Tests Scientific Validation
+
+**File:** `tests_scientific_validation.yml`
+
+**Purpose:** Executes the scientific validation and regression test matrix across Python 3.12.
+
+### Tests Web
+
+**File:** `tests_web.yml`
+
+**Purpose:** Next.js web application linting, typechecking, and unit tests with KaTeX validation.
+
+### Evals Workflow
+
+**File:** `evals.yml`
+
+**Purpose:** Offline and online evaluation harness benchmarks for query routing and full answer rubric scoring.
 
 **Triggers:**
 - Pull requests to `main` with changes to:

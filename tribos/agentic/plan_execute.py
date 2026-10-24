@@ -23,14 +23,30 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 from .budget import BudgetExhausted
 from .config import AGENTIC, DEBATE, env_flag, env_float, env_int
 from .executor import PlanExecutor
 from .llm import AgentLLMUnavailable
-from .plan_graph import PlanGraph, PlanNode, drop_nodes, is_expensive_tool, parse_plan, validate_plan, validated_inputs
-from .planner import JOIN_PHASE, PLAN_PHASE, build_join_prompt, build_plan_prompt, observations, parse_join, select_tools
+from .plan_graph import (
+    PlanGraph,
+    PlanNode,
+    drop_nodes,
+    is_expensive_tool,
+    parse_plan,
+    validate_plan,
+    validated_inputs,
+)
+from .planner import (
+    JOIN_PHASE,
+    PLAN_PHASE,
+    build_join_prompt,
+    build_plan_prompt,
+    observations,
+    parse_join,
+    select_tools,
+)
 from .runtime import AgentPhase, PhaseOutcome, register_phase
 
 logger = logging.getLogger(__name__)
@@ -41,10 +57,10 @@ def plan_mode() -> str:
     return mode if mode in ("dag", "react") else "dag"
 
 
-def prior_calls(state: Any, nodes: Optional[List[PlanNode]] = None) -> List[Tuple[str, Dict[str, Any]]]:
+def prior_calls(state: Any, nodes: list[PlanNode] | None = None) -> list[tuple[str, dict[str, Any]]]:
     """(tool, validated inputs) of every call made this turn: the run recorder's log when one is active, plus
     the plan's own executed nodes (so a run without a recorder still never repeats a node)."""
-    out: List[Tuple[str, Dict[str, Any]]] = []
+    out: list[tuple[str, dict[str, Any]]] = []
     try:
         from ..provenance.run_manifest import current_recorder
 
@@ -64,11 +80,11 @@ def prior_calls(state: Any, nodes: Optional[List[PlanNode]] = None) -> List[Tupl
     return out
 
 
-def _dropped_ids(payload: Dict[str, Any], graph: PlanGraph) -> Set[str]:
+def _dropped_ids(payload: dict[str, Any], graph: PlanGraph) -> set[str]:
     """Node ids an edited approval payload removes: {"drop": [...]}, {"keep": [...]}, or an edited "nodes"
     list (entries with run/approved false or drop true are removed; ids missing from the list are removed)."""
     ids = set(graph.ids())
-    drop: Set[str] = set()
+    drop: set[str] = set()
     for key in ("drop", "dropped", "remove", "drop_nodes"):
         val = payload.get(key)
         if isinstance(val, (list, tuple, set)):
@@ -80,7 +96,7 @@ def _dropped_ids(payload: Dict[str, Any], graph: PlanGraph) -> Set[str]:
         drop |= ids - {str(v) for v in keep}
     nodes = payload.get("nodes")
     if isinstance(nodes, list) and nodes:
-        listed: Set[str] = set()
+        listed: set[str] = set()
         for n in nodes:
             if isinstance(n, dict) and n.get("id") is not None:
                 nid = str(n["id"])
@@ -93,7 +109,7 @@ def _dropped_ids(payload: Dict[str, Any], graph: PlanGraph) -> Set[str]:
     return drop & ids
 
 
-async def request_dag_approval(state: Any, graph: PlanGraph, round_no: int) -> Optional[Dict[str, Any]]:
+async def request_dag_approval(state: Any, graph: PlanGraph, round_no: int) -> dict[str, Any] | None:
     """Ask the researcher to approve the nodes before they run; returns the approval record or None."""
     control = state.control
     expensive = [n.id for n in graph.nodes if is_expensive_tool(n.tool)]
@@ -111,7 +127,7 @@ async def request_dag_approval(state: Any, graph: PlanGraph, round_no: int) -> O
         "edit": "set run: false on a node to drop it (its dependents are dropped too), or return {'drop': [node ids]}",
     }
     timeout = env_float("TRIBOS_AGENT_APPROVAL_TIMEOUT", 300.0, 5.0, 3600.0)
-    announced: Dict[str, Any] = {}
+    announced: dict[str, Any] = {}
 
     async def announce(approval_id: str) -> None:
         announced["approval_id"] = approval_id
@@ -129,7 +145,7 @@ async def request_dag_approval(state: Any, graph: PlanGraph, round_no: int) -> O
 
     decision = await control.request_approval("dag", payload, timeout_seconds=timeout, announce=announce)
     approval_id = announced.get("approval_id")
-    drop: Set[str] = _dropped_ids(decision.payload, graph) if isinstance(decision.payload, dict) else set()
+    drop: set[str] = _dropped_ids(decision.payload, graph) if isinstance(decision.payload, dict) else set()
     if not decision.approved:
         drop |= set(expensive) if expensive else set(graph.ids())
         # timeout / unattended / error refuse too (fail closed); the status says which.
@@ -168,22 +184,22 @@ class PlanExecutePhase(AgentPhase):
             return False
         return getattr(state.ctx, "scope", "research") == "research"
 
-    async def run(self, state: Any) -> Optional[PhaseOutcome]:
+    async def run(self, state: Any) -> PhaseOutcome | None:
         mode = plan_mode()
         budget = state.budget
-        artifact: Dict[str, Any] = {"planner": "llm", "mode": mode, "rationale": "", "replans": 0, "nodes": [], "rejected": []}
-        all_nodes: List[PlanNode] = []
-        results: Dict[str, Any] = {}
-        failed: Set[str] = set()
-        joins: List[Dict[str, Any]] = []
-        approvals: List[Dict[str, Any]] = []
+        artifact: dict[str, Any] = {"planner": "llm", "mode": mode, "rationale": "", "replans": 0, "nodes": [], "rejected": []}
+        all_nodes: list[PlanNode] = []
+        results: dict[str, Any] = {}
+        failed: set[str] = set()
+        joins: list[dict[str, Any]] = []
+        approvals: list[dict[str, Any]] = []
         await state.step("agent_plan", "Planning follow-up tool calls", "", status="running", agent="Planner")
         try:
             tools = select_tools(state, state.sub_questions)
             artifact["tools_offered"] = [e.name for e in tools]
             react_steps = env_int("TRIBOS_AGENT_REACT_STEPS", 4, 1, 12)
             round_no = 0
-            missing: Optional[List[str]] = None
+            missing: list[str] | None = None
             while True:
                 state.control.checkpoint()
                 room = budget.max_plan_nodes - len(all_nodes)

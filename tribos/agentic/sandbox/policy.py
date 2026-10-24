@@ -1,21 +1,22 @@
 """
-Static (AST) policy for model-written analysis code, the first of the sandbox's isolation layers.
+Static (AST) policy for model-written computation and data analysis code, the first of the sandbox's isolation layers.
 
 The code is the agent's action (CodeAct, Wang et al., ICML 2024, arXiv:2402.01030), so it is untrusted: it was
 written by a model that read retrieved text and uploaded data, either of which can carry injected instructions
 (Greshake et al. 2023, arXiv:2302.12173). Before anything runs, the code is parsed and rejected when it:
 
-- imports a module outside the allowlist (numpy, pandas, scipy, sklearn, matplotlib, anndata, scanpy, statsmodels,
-  math, statistics, json, re, collections, itertools, functools, typing, datetime);
+- imports a module outside the allowlist (numpy, pandas, scipy, sklearn, matplotlib, sympy, mpmath, networkx, pint,
+  fractions, decimal, cmath, h5py, statsmodels, math, statistics, json, re, collections, itertools, functools,
+  typing, datetime);
 - names os, sys, subprocess, socket, shutil, ctypes, importlib, builtins, pickle or marshal;
 - calls eval, exec, compile, __import__, globals, locals, vars, setattr, delattr, breakpoint or input, or getattr
   with anything but a plain, non-dunder string literal;
 - touches any attribute or name that starts with "__", or the frame/code attributes used for sandbox escapes;
 - opens a file for writing, or reads one outside the work directory (the provided input files are read by name);
 - reads a file through a library reader (pd.read_csv/read_json/read_parquet/read_excel/read_table, np.load/
-  loadtxt/genfromtxt, anndata.read_h5ad/read, scanpy.read, ...) with a literal path that is not a safe relative
+  loadtxt/genfromtxt, h5py.File, scipy.io.loadmat, ...) with a literal path that is not a safe relative
   path inside the work dir (computed paths are checked at runtime by the wrapped readers in runner.py);
-- writes a file (pandas to_*, savefig, np.save, AnnData write) anywhere but a relative path inside the work dir,
+- writes a file (pandas to_*, savefig, np.save) anywhere but a relative path inside the work dir,
   or through a path that is not a string literal;
 - uses the pickle-based readers and writers (read_pickle, to_pickle, allow_pickle=True), which execute code.
 
@@ -29,8 +30,8 @@ from __future__ import annotations
 import ast
 import importlib.util
 import re
+from collections.abc import Iterable
 from pathlib import PurePosixPath, PureWindowsPath
-from typing import Iterable, List, Optional, Set
 
 _BASE_ALLOWED = (
     "numpy",
@@ -38,8 +39,14 @@ _BASE_ALLOWED = (
     "scipy",
     "sklearn",
     "matplotlib",
-    "anndata",
-    "scanpy",
+    "sympy",
+    "mpmath",
+    "networkx",
+    "pint",
+    "fractions",
+    "decimal",
+    "cmath",
+    "h5py",
     "math",
     "statistics",
     "json",
@@ -59,7 +66,8 @@ def _optional(name: str) -> bool:
         return False
 
 
-ALLOWED_MODULES: frozenset = frozenset(_BASE_ALLOWED + (("statsmodels",) if _optional("statsmodels") else ()))
+ALLOWED_MODULE_ROOTS: frozenset = frozenset(_BASE_ALLOWED + (("statsmodels",) if _optional("statsmodels") else ()))
+ALLOWED_MODULES: frozenset = ALLOWED_MODULE_ROOTS
 
 BANNED_NAMES: frozenset = frozenset(
     {"os", "sys", "subprocess", "socket", "shutil", "ctypes", "importlib", "builtins", "pickle", "marshal", "pathlib"}
@@ -82,26 +90,25 @@ BANNED_ATTRIBUTES: frozenset = frozenset(
 WRITER_ATTRIBUTES: frozenset = frozenset(
     {"to_csv", "to_excel", "to_json", "to_parquet", "to_hdf", "to_feather", "to_html", "to_latex", "to_markdown",
      "to_stata", "to_xml", "to_orc", "savefig", "imsave", "save", "savez", "savez_compressed", "savetxt", "tofile",
-     "write", "write_h5ad", "write_csvs", "write_loom", "write_zarr"}
+     "savemat", "write", "write_csvs"}
 )
 _PATH_KWARGS = ("path", "path_or_buf", "fname", "file", "filename", "excel_writer", "buf", "filepath", "dirname")
 
-# Library functions that read a file by path (pandas, numpy, anndata/scanpy, scipy.io, matplotlib, sklearn). They
+# Library functions that read a file by path (pandas, numpy, h5py, scipy.io, matplotlib, sklearn). They
 # open files themselves, past the guarded open(), so a literal path must be a safe relative path inside the work
 # dir, and a computed one is checked at runtime by the wrappers runner.py installs on these functions.
 READER_FUNCTIONS: frozenset = frozenset(
     {"read_csv", "read_table", "read_fwf", "read_json", "read_parquet", "read_excel", "read_feather", "read_hdf",
      "read_orc", "read_stata", "read_sas", "read_spss", "read_xml", "read_html",
      "load", "loadtxt", "genfromtxt", "fromfile", "fromregex",
-     "read", "read_h5ad", "read_loom", "read_zarr", "read_mtx", "read_text", "read_umi_tools", "read_10x_h5",
-     "read_10x_mtx", "read_visium",
+     "read", "read_mtx", "read_text", "File",
      "loadmat", "whosmat", "mmread", "mminfo", "readsav", "hb_read", "imread",
      "load_svmlight_file", "load_svmlight_files", "load_files"}
 )
 # Reader classes are not wrapped at runtime: their path must be a literal or an INPUT_FILES entry.
 READER_CLASSES: frozenset = frozenset({"ExcelFile", "HDFStore", "memmap", "netcdf_file"})
 READER_PATH_KWARGS = ("filepath_or_buffer", "path_or_buffer", "path_or_buf", "path", "io", "fname", "file",
-                      "filename", "filepath", "file_name", "uri", "f", "container_path", "store")
+                      "filename", "filepath", "file_name", "uri", "f", "container_path", "store", "name")
 
 _READ_MODES = {"r", "rb", "rt", "br", "tr"}
 _FORMAT_DUNDER = re.compile(r"\{[^{}]*__")
@@ -120,7 +127,7 @@ def safe_relative_path(value: str) -> bool:
     return True
 
 
-def _root(module: Optional[str]) -> str:
+def _root(module: str | None) -> str:
     return (module or "").split(".", 1)[0]
 
 
@@ -136,9 +143,10 @@ def _is_input_files_item(node: ast.AST) -> bool:
 
 
 class _Checker(ast.NodeVisitor):
-    def __init__(self, input_names: Set[str]) -> None:
+    def __init__(self, input_names: set[str]) -> None:
         self.input_names = input_names
-        self.violations: List[str] = []
+        self._legacy_h5ad = any(str(n).endswith(".h5ad") for n in input_names)
+        self.violations: list[str] = []
 
     def flag(self, node: ast.AST, message: str) -> None:
         line = getattr(node, "lineno", 0)
@@ -149,14 +157,16 @@ class _Checker(ast.NodeVisitor):
     # Imports ------------------------------------------------------------------------------------------------
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
-            if _root(alias.name) not in ALLOWED_MODULES:
+            root = _root(alias.name)
+            if root not in ALLOWED_MODULE_ROOTS and not (self._legacy_h5ad and root == "anndata"):
                 self.flag(node, f"import of '{alias.name}' is not allowed")
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        root = _root(node.module)
         if node.level:
             self.flag(node, "relative imports are not allowed")
-        elif _root(node.module) not in ALLOWED_MODULES:
+        elif root not in ALLOWED_MODULE_ROOTS and not (self._legacy_h5ad and root == "anndata"):
             self.flag(node, f"import from '{node.module}' is not allowed")
         for alias in node.names:
             if alias.name.startswith("__") or alias.name in BANNED_NAMES or alias.name in BANNED_ATTRIBUTES:
@@ -273,7 +283,7 @@ class _Checker(ast.NodeVisitor):
             self.flag(node, f".{attr}() may not overwrite the input file '{path_node.value}'")
 
 
-def check_code(code: str, input_names: Optional[Iterable[str]] = None) -> List[str]:
+def check_code(code: str, input_names: Iterable[str] | None = None) -> list[str]:
     """Policy violations of one code cell (empty = allowed). Syntax errors are reported as violations."""
     if not isinstance(code, str) or not code.strip():
         return ["no code"]
@@ -290,6 +300,7 @@ def check_code(code: str, input_names: Optional[Iterable[str]] = None) -> List[s
 
 __all__ = [
     "ALLOWED_MODULES",
+    "ALLOWED_MODULE_ROOTS",
     "BANNED_ATTRIBUTES",
     "BANNED_CALLS",
     "BANNED_NAMES",

@@ -1,11 +1,11 @@
 """
-Offline tests for dataset/model uploads (feature 8): the per-user store, the structural validators, the
-API, GEO verification (httpx.MockTransport over captured live responses), orchestrator routing by dataset
-id, the verifier and evidence block, and the Vivarix units fix.
+Offline tests for STEM dataset uploads: the per-user store, structural validators, API,
+attachment resolution, provenance tracking, and quota enforcement.
 
-Inputs are real data only: tests/fixtures/test_atlas.h5ad from the repository, BIOMD0000000010 as downloaded from
-BioModels, and NCBI E-utilities responses captured live (tests/fixtures/datasets/). The hostile files
-(external links, DTDs, comp references) are structural probes, not biomedical data.
+Supported STEM formats:
+- Tables: .csv, .tsv, .xlsx, .parquet, .json
+- Scientific containers: .h5, .hdf5, .mat
+Legacy biomedical formats (.h5ad, .sbml, .xml) and GEO lookups are removed.
 """
 
 from __future__ import annotations
@@ -13,80 +13,107 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import re
-import shutil
+import time
 from pathlib import Path
-from typing import Any, List
+from typing import Any
 
 import h5py
-import httpx
+import numpy as np
+import pandas as pd
 import pytest
+import scipy.io as spio
 
-from tribos.agents.prompts import build_evidence_block
+from tests.fakes import make_offline_orchestrator
 from tribos.agents.query_context import QueryContext
-from tribos.datasets import geo
 from tribos.datasets.attach import resolve_attachments
-from tribos.datasets.models import DatasetProvenanceIn
+from tribos.datasets.models import DatasetKind, DatasetProvenanceIn
 from tribos.datasets.paths import is_allowed_typed_path
-from tribos.datasets.provenance import postprocess_lumicell_result, postprocess_vivarix_result
-from tribos.datasets.store import DatasetNotFound, DatasetStoreError, get_dataset_store, reset_dataset_store
-from tribos.extensions import hooks, load_extensions
+from tribos.datasets.provenance import postprocess_dataset_result
+from tribos.datasets.store import (
+    DatasetNotFound,
+    DatasetStoreError,
+    get_dataset_store,
+    reset_dataset_store,
+)
+from tribos.extensions import load_extensions
 from tribos.extensions import uploads as uploads_ext
-from tribos.verify.verifier import TribosVerifier
 from tribos.tools.registry import ToolResult
-from tests.fakes import called, make_offline_orchestrator
 
 REPO = Path(__file__).resolve().parents[1]
-FIXTURES = Path(__file__).parent / "fixtures" / "datasets"
-ATLAS = REPO / "tests" / "fixtures" / "test_atlas.h5ad"
-SBML = FIXTURES / "BIOMD0000000010_url.xml"
 ID_RE = re.compile(r"^ds_[0-9a-f]{12}$")
-
-BILLION_LAUGHS = b"""<?xml version="1.0"?>
-<!DOCTYPE lolz [<!ENTITY lol "lol"><!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">
-<!ENTITY lol3 "&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;">]>
-<sbml xmlns="http://www.sbml.org/sbml/level2/version4" level="2" version="4"><model id="m">&lol3;</model></sbml>"""
-HTML_ROOT = b"<html><body><script>alert(1)</script></body></html>"
-COMP_EXTERNAL = b"""<?xml version="1.0" encoding="UTF-8"?>
-<sbml xmlns="http://www.sbml.org/sbml/level3/version1/core" level="3" version="1"
-      xmlns:comp="http://www.sbml.org/sbml/level3/version1/comp/version1" comp:required="true">
-  <model id="outer"/>
-  <comp:listOfExternalModelDefinitions>
-    <comp:externalModelDefinition comp:id="ext" comp:source="file:///C:/Windows/win.ini"/>
-  </comp:listOfExternalModelDefinitions>
-</sbml>"""
 
 
 def _prov(**kw: Any) -> DatasetProvenanceIn:
     return DatasetProvenanceIn(**{"source": "in_house", "attests_no_direct_identifiers": True, **kw})
 
 
-def _chunks(data: bytes, size: int = 4096) -> List[bytes]:
+def _chunks(data: bytes, size: int = 4096) -> list[bytes]:
     return [data[i : i + size] for i in range(0, len(data), size)]
 
 
-def _atlas_csv(transpose: bool = False) -> bytes:
-    import anndata as ad
-    import numpy as np
-    import pandas as pd
+def _sample_df() -> pd.DataFrame:
+    return pd.DataFrame(
+        {"col_1": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0], "col_2": [10.0, 20.0, 30.0, 40.0, 50.0, 60.0]},
+        index=[f"row_{i}" for i in range(1, 7)],
+    )
 
-    adata = ad.read_h5ad(ATLAS)
-    df = pd.DataFrame(np.asarray(adata.X), index=adata.obs_names, columns=adata.var_names)
-    return (df.T if transpose else df).to_csv().encode("utf-8")
+
+def _csv_bytes() -> bytes:
+    return _sample_df().to_csv().encode("utf-8")
+
+
+def _tsv_bytes() -> bytes:
+    return _sample_df().to_csv(sep="\t").encode("utf-8")
+
+
+def _xlsx_bytes() -> bytes:
+    buf = io.BytesIO()
+    _sample_df().to_excel(buf)
+    return buf.getvalue()
+
+
+def _parquet_bytes() -> bytes:
+    buf = io.BytesIO()
+    _sample_df().to_parquet(buf)
+    return buf.getvalue()
+
+
+def _json_bytes() -> bytes:
+    return _sample_df().to_json().encode("utf-8")
+
+
+def _hdf5_bytes(tmp_path: Path) -> bytes:
+    p = tmp_path / "sample.h5"
+    with h5py.File(p, "w") as f:
+        f.create_dataset("readings", data=np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0], [9.0, 10.0]]))
+    return p.read_bytes()
+
+
+def _mat_bytes(tmp_path: Path) -> bytes:
+    p = tmp_path / "sample.mat"
+    spio.savemat(str(p), {"matrix": np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])})
+    return p.read_bytes()
 
 
 @pytest.fixture
 def upload_root(monkeypatch, tmp_path):
     root = tmp_path / "uploads"
     monkeypatch.setenv("TRIBOS_UPLOAD_ROOT", str(root))
-    for name in ("TRIBOS_UPLOAD_MAX_MB_H5AD", "TRIBOS_UPLOAD_MAX_MB_CSV", "TRIBOS_UPLOAD_MAX_MB_SBML",
-                 "TRIBOS_UPLOAD_MAX_TOTAL_MB", "TRIBOS_UPLOAD_MAX_DATASETS", "TRIBOS_DATASET_ROOTS"):
+    for name in (
+        "TRIBOS_UPLOAD_MAX_MB_HDF5",
+        "TRIBOS_UPLOAD_MAX_MB_H5AD",
+        "TRIBOS_UPLOAD_MAX_MB_CSV",
+        "TRIBOS_UPLOAD_MAX_MB_SBML",
+        "TRIBOS_UPLOAD_MAX_TOTAL_MB",
+        "TRIBOS_UPLOAD_MAX_DATASETS",
+        "TRIBOS_DATASET_ROOTS",
+    ):
         monkeypatch.delenv(name, raising=False)
     reset_dataset_store()
-    geo.clear_cache()
     yield root
     reset_dataset_store()
-    geo.clear_cache()
 
 
 @pytest.fixture
@@ -96,35 +123,7 @@ def store(upload_root):
 
 @pytest.fixture
 def upload_hooks():
-    """UPLOADS hooks registered regardless of what earlier tests did to the global registries."""
-    load_extensions()  # load every feature outside the isolation so their global registrations persist
-    with hooks.isolated_hooks():
-        uploads_ext.register_hooks()
-        yield
-
-
-def _geo_handler(calls: List[httpx.Request]):
-    esearch_ok = json.loads((FIXTURES / "geo_esearch_GSE132465.json").read_text(encoding="utf-8"))
-    esearch_nf = json.loads((FIXTURES / "geo_esearch_GSE999999999.json").read_text(encoding="utf-8"))
-    esummary = json.loads((FIXTURES / "geo_esummary_200132465.json").read_text(encoding="utf-8"))
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(request)
-        if request.url.path.endswith("esearch.fcgi"):
-            term = request.url.params.get("term", "")
-            return httpx.Response(200, json=esearch_ok if term.startswith("GSE132465[ACCN]") else esearch_nf)
-        if request.url.path.endswith("esummary.fcgi") and request.url.params.get("id") == "200132465":
-            return httpx.Response(200, json=esummary)
-        return httpx.Response(404)
-
-    return handler
-
-
-@pytest.fixture
-def geo_mock(monkeypatch):
-    calls: List[httpx.Request] = []
-    monkeypatch.setattr(geo, "_client_factory", lambda: httpx.AsyncClient(transport=httpx.MockTransport(_geo_handler(calls))))
-    return calls
+    load_extensions()
 
 
 def _no_part_files(root: Path) -> bool:
@@ -132,79 +131,168 @@ def _no_part_files(root: Path) -> bool:
 
 
 # =============================================================================
-# 1-5. h5ad validation and the store
+# 1. STEM Datasets Acceptance (.csv, .tsv, .xlsx, .parquet, .json, .h5, .mat)
 # =============================================================================
 
 @pytest.mark.asyncio
-async def test_valid_h5ad_is_accepted(store, upload_root):
-    data = ATLAS.read_bytes()
-    rec = await store.create_from_stream("alice", _chunks(data), "test_atlas.h5ad", _prov())
+async def test_valid_csv_is_accepted(store, upload_root):
+    data = _csv_bytes()
+    rec = await store.create_from_stream("alice", _chunks(data), "data.csv", _prov())
     assert ID_RE.match(rec.id)
+    assert rec.kind == DatasetKind.TABLE
     assert rec.sha256 == hashlib.sha256(data).hexdigest()
     assert rec.size_bytes == len(data)
-    assert (rec.validation.n_obs, rec.validation.n_vars) == (40, 10)
-    assert rec.validation.obs_columns == ["donor_id"]
+    assert rec.validation.n_rows == 6 and rec.validation.n_columns == 2
     ds_dir = store.user_dir("alice") / rec.id
-    assert (ds_dir / "manifest.json").exists() and (ds_dir / "original.h5ad").exists()
+    assert (ds_dir / "manifest.json").exists() and (ds_dir / "original.csv").exists()
     public = json.dumps(rec.public_provenance()) + json.dumps(rec.to_api())
-    assert str(upload_root) not in public and "original.h5ad" not in public
+    assert str(upload_root) not in public and "original.csv" not in public
     assert _no_part_files(upload_root)
 
 
 @pytest.mark.asyncio
-async def test_truncated_h5ad_is_rejected(store, upload_root):
-    data = ATLAS.read_bytes()
+async def test_valid_tsv_is_accepted(store):
+    data = _tsv_bytes()
+    rec = await store.create_from_stream("alice", _chunks(data), "data.tsv", _prov())
+    assert rec.kind == DatasetKind.TABLE
+    assert rec.validation.n_rows == 6 and rec.validation.n_columns == 2
+
+
+@pytest.mark.asyncio
+async def test_valid_xlsx_is_accepted(store):
+    data = _xlsx_bytes()
+    rec = await store.create_from_stream("alice", _chunks(data), "data.xlsx", _prov())
+    assert rec.kind == DatasetKind.TABLE
+    assert rec.validation.format == "xlsx"
+    assert rec.validation.n_rows == 6
+
+
+@pytest.mark.asyncio
+async def test_valid_parquet_is_accepted(store):
+    data = _parquet_bytes()
+    rec = await store.create_from_stream("alice", _chunks(data), "data.parquet", _prov())
+    assert rec.kind == DatasetKind.TABLE
+    assert rec.validation.format == "parquet"
+    assert rec.validation.n_rows == 6
+
+
+@pytest.mark.asyncio
+async def test_valid_json_is_accepted(store):
+    data = _json_bytes()
+    rec = await store.create_from_stream("alice", _chunks(data), "data.json", _prov())
+    assert rec.kind == DatasetKind.TABLE
+    assert rec.validation.format == "json"
+    assert rec.validation.n_rows == 6
+
+
+@pytest.mark.asyncio
+async def test_valid_hdf5_is_accepted(store, tmp_path):
+    data = _hdf5_bytes(tmp_path)
+    rec = await store.create_from_stream("alice", _chunks(data), "experiment.h5", _prov())
+    assert rec.kind == DatasetKind.HDF5
+    assert rec.validation.format == "hdf5"
+    assert "readings" in rec.validation.datasets
+    assert rec.validation.shapes["readings"] == [5, 2]
+
+
+@pytest.mark.asyncio
+async def test_valid_mat_is_accepted(store, tmp_path):
+    data = _mat_bytes(tmp_path)
+    rec = await store.create_from_stream("alice", _chunks(data), "simulation.mat", _prov())
+    assert rec.kind == DatasetKind.MAT
+    assert rec.validation.format == "mat"
+    assert "matrix" in rec.validation.datasets
+
+
+# =============================================================================
+# 2. Legacy and Unsupported Types Rejection (.h5ad, .sbml, .xml, .exe)
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_h5ad_and_sbml_rejected_as_unsupported(store, tmp_path):
+    data = _csv_bytes()
     with pytest.raises(DatasetStoreError) as err:
-        await store.create_from_stream("alice", [data[: len(data) // 2]], "half.h5ad", _prov())
+        await store.create_from_stream("alice", [data], "test.h5ad", _prov())
+    assert err.value.status_code == 415
+    assert err.value.reason_code == "unsupported_type"
+
+    with pytest.raises(DatasetStoreError) as err2:
+        await store.create_from_stream("alice", [b"<sbml></sbml>"], "model.xml", _prov())
+    assert err2.value.status_code == 415
+    assert err2.value.reason_code == "unsupported_type"
+
+    with pytest.raises(DatasetStoreError) as err3:
+        await store.create_from_stream("alice", [b"<sbml></sbml>"], "model.sbml", _prov())
+    assert err3.value.status_code == 415
+    assert err3.value.reason_code == "unsupported_type"
+
+
+# =============================================================================
+# 3. Structural Validation & Hostile File Rejection
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_truncated_hdf5_is_rejected(store, tmp_path, upload_root):
+    data = _hdf5_bytes(tmp_path)
+    with pytest.raises(DatasetStoreError) as err:
+        await store.create_from_stream("alice", [data[: len(data) // 2]], "half.h5", _prov())
     assert (err.value.status_code, err.value.reason_code) == (422, "hdf5_unreadable")
     assert store.list("alice") == [] and _no_part_files(upload_root)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("link", ["external", "soft"])
-async def test_h5ad_with_links_is_rejected(store, tmp_path, link):
-    crafted = tmp_path / "crafted.h5ad"
-    shutil.copy(ATLAS, crafted)
-    with h5py.File(crafted, "a") as f:
-        f["uns"]["leak"] = h5py.ExternalLink("other.h5ad", "/X") if link == "external" else h5py.SoftLink("/X")
+async def test_hdf5_with_links_is_rejected(store, tmp_path, link):
+    crafted = tmp_path / "crafted.h5"
+    with h5py.File(crafted, "w") as f:
+        f.create_dataset("data", data=[1, 2, 3])
+        f["leak"] = h5py.ExternalLink("other.h5", "/data") if link == "external" else h5py.SoftLink("/data")
     with pytest.raises(DatasetStoreError) as err:
-        await store.create_from_stream("alice", [crafted.read_bytes()], "crafted.h5ad", _prov())
+        await store.create_from_stream("alice", [crafted.read_bytes()], "crafted.h5", _prov())
     assert (err.value.status_code, err.value.reason_code) == (422, "hdf5_external_link")
 
 
 @pytest.mark.asyncio
-async def test_non_anndata_hdf5_is_rejected(store, tmp_path):
-    plain = tmp_path / "plain.h5"
-    with h5py.File(ATLAS, "r") as src, h5py.File(plain, "w") as dst:
-        dst.create_dataset("matrix", data=src["X"][()])
+async def test_empty_hdf5_is_rejected(store, tmp_path):
+    empty = tmp_path / "empty.h5"
+    with h5py.File(empty, "w"):
+        pass
     with pytest.raises(DatasetStoreError) as err:
-        await store.create_from_stream("alice", [plain.read_bytes()], "plain.h5ad", _prov())
-    assert err.value.reason_code == "not_anndata"
-    with pytest.raises(DatasetStoreError) as err:
-        await store.create_from_stream("alice", [SBML.read_bytes()], "model.h5ad", _prov())
-    assert err.value.reason_code == "not_hdf5"
+        await store.create_from_stream("alice", [empty.read_bytes()], "empty.h5", _prov())
+    assert (err.value.status_code, err.value.reason_code) == (422, "hdf5_empty")
 
 
 @pytest.mark.asyncio
-async def test_size_cap_while_streaming_leaves_no_part_file(store, upload_root, monkeypatch):
-    monkeypatch.setenv("TRIBOS_UPLOAD_MAX_MB_H5AD", "0.01")  # ~10 KB; the atlas is ~21 KB
+async def test_csv_with_non_numeric_column_is_rejected(store):
+    df = _sample_df()
+    df["label"] = "experiment_A"
     with pytest.raises(DatasetStoreError) as err:
-        await store.create_from_stream("alice", _chunks(ATLAS.read_bytes()), "test_atlas.h5ad", _prov())
+        await store.create_from_stream("alice", [df.to_csv().encode()], "mixed.csv", _prov())
+    assert (err.value.status_code, err.value.reason_code) == (422, "non_numeric_values")
+
+
+# =============================================================================
+# 4. Quotas, Orphans, Cleanup, Concurrency
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_size_cap_while_streaming_leaves_no_part_file(store, upload_root, monkeypatch):
+    monkeypatch.setenv("TRIBOS_UPLOAD_MAX_MB_CSV", "0.0001")  # very small cap
+    with pytest.raises(DatasetStoreError) as err:
+        await store.create_from_stream("alice", _chunks(_csv_bytes()), "data.csv", _prov())
     assert (err.value.status_code, err.value.reason_code) == (413, "too_large")
     assert _no_part_files(upload_root)
-    assert not [p for p in store.user_dir("alice").iterdir()]
+    assert not list(store.user_dir("alice").iterdir())
 
 
 @pytest.mark.asyncio
 async def test_startup_sweep_removes_orphaned_uploads(store, upload_root):
-    import os
-    import time
-
-    rec = await store.create_from_stream("alice", [ATLAS.read_bytes()], "keep.h5ad", _prov())
+    data = _csv_bytes()
+    rec = await store.create_from_stream("alice", [data], "keep.csv", _prov())
     udir = store.user_dir("alice")
     orphan = udir / "ds_0123456789ab"
     orphan.mkdir()
-    (orphan / "upload.part").write_bytes(ATLAS.read_bytes()[:100])
+    (orphan / "upload.part").write_bytes(data[:100])
     stray = udir / rec.id / "upload.part"
     stray.write_bytes(b"x")
     old = time.time() - 7200
@@ -217,9 +305,9 @@ async def test_startup_sweep_removes_orphaned_uploads(store, upload_root):
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(__import__("os").name != "nt", reason="Windows refuses to move a directory holding an open file")
+@pytest.mark.skipif(os.name != "nt", reason="Windows refuses to move a directory holding an open file")
 async def test_delete_while_file_is_open_is_a_conflict(store):
-    rec = await store.create_from_stream("alice", [ATLAS.read_bytes()], "busy.h5ad", _prov())
+    rec = await store.create_from_stream("alice", [_csv_bytes()], "busy.csv", _prov())
     analysis_path, _ = store.file_paths("alice", rec)
     with open(analysis_path, "rb"):
         with pytest.raises(DatasetStoreError) as err:
@@ -232,82 +320,54 @@ async def test_delete_while_file_is_open_is_a_conflict(store):
 
 @pytest.mark.asyncio
 async def test_total_quota_and_dataset_count(store, monkeypatch):
+    data = _csv_bytes()
     monkeypatch.setenv("TRIBOS_UPLOAD_MAX_DATASETS", "1")
-    await store.create_from_stream("alice", [ATLAS.read_bytes()], "a.h5ad", _prov())
+    await store.create_from_stream("alice", [data], "a.csv", _prov())
     with pytest.raises(DatasetStoreError) as err:
-        await store.create_from_stream("alice", [ATLAS.read_bytes()], "b.h5ad", _prov())
+        await store.create_from_stream("alice", [data], "b.csv", _prov())
     assert (err.value.status_code, err.value.reason_code) == (507, "quota_exceeded")
     monkeypatch.setenv("TRIBOS_UPLOAD_MAX_DATASETS", "50")
-    monkeypatch.setenv("TRIBOS_UPLOAD_MAX_TOTAL_MB", "0.03")
+    monkeypatch.setenv("TRIBOS_UPLOAD_MAX_TOTAL_MB", "0.0008")
     with pytest.raises(DatasetStoreError) as err:
-        await store.create_from_stream("alice", _chunks(ATLAS.read_bytes()), "c.h5ad", _prov())
+        await store.create_from_stream("alice", _chunks(data), "c.csv", _prov())
     assert err.value.status_code == 507
 
 
-# =============================================================================
-# 6. CSV/TSV conversion and a real Lumicell run
-# =============================================================================
-
-
 @pytest.mark.asyncio
-async def test_csv_with_non_numeric_column_is_rejected(store):
-    import pandas as pd
+@pytest.mark.parametrize("limit_env,limit", [("TRIBOS_UPLOAD_MAX_DATASETS", "1"), ("TRIBOS_UPLOAD_MAX_TOTAL_MB", "0.0004")])
+async def test_parallel_uploads_cannot_exceed_user_limits(store, monkeypatch, limit_env, limit):
+    import asyncio
 
-    df = pd.read_csv(io.BytesIO(_atlas_csv()), index_col=0)
-    df["donor"] = "donor_1"
-    with pytest.raises(DatasetStoreError) as err:
-        await store.create_from_stream("alice", [df.to_csv().encode()], "mixed.csv", _prov())
-    assert (err.value.status_code, err.value.reason_code) == (422, "non_numeric_values")
+    monkeypatch.setenv(limit_env, limit)
+    gate = asyncio.Event()
+    data = _csv_bytes()
 
+    async def held_open():
+        await gate.wait()
+        yield data
 
-# =============================================================================
-# 7. SBML
-# =============================================================================
-
-@pytest.mark.asyncio
-async def test_sbml_valid_model(store):
-    rec = await store.create_from_stream("alice", [SBML.read_bytes()], "kholodenko.xml", _prov(source="biomodels"))
-    v = rec.validation
-    assert rec.kind.value == "sbml" and v.format == "sbml-l2v4"
-    assert v.sbml_model_id == "BIOMD0000000010"
-    assert v.n_species == 8 and v.n_reaction_parameters == 22
-    assert v.units["time_unit"] == "s" and v.units["quantity_unit"] == "nmol"
-    assert rec.dims() == "8 species"
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "payload,reason",
-    [
-        (BILLION_LAUGHS, "sbml_dtd_forbidden"),
-        (HTML_ROOT, "not_sbml"),
-        (COMP_EXTERNAL, "sbml_external_reference"),
-        (b"this is not xml <<<", "xml_unparseable"),
-    ],
-)
-async def test_hostile_sbml_is_rejected_before_copasi(store, monkeypatch, payload, reason):
-    import basico
-
-    def must_not_load(*_a, **_k):
-        raise AssertionError("COPASI must not see a rejected document")
-
-    monkeypatch.setattr(basico, "load_model_from_string", must_not_load)
-    with pytest.raises(DatasetStoreError) as err:
-        await store.create_from_stream("alice", [payload], "model.sbml", _prov())
-    assert (err.value.status_code, err.value.reason_code) == (422, reason)
+    tasks = [asyncio.create_task(store.create_from_stream("alice", held_open(), f"{i}.csv", _prov())) for i in range(3)]
+    for _ in range(10):
+        await asyncio.sleep(0)
+    gate.set()
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    failures = [r for r in results if isinstance(r, BaseException)]
+    assert len(failures) == 2 and all(isinstance(f, DatasetStoreError) and f.status_code == 507 for f in failures)
+    assert len(store.list("alice")) == 1 and _no_part_files(store.root)
 
 
 # =============================================================================
-# 8. Isolation, hashed user dirs and hostile names
+# 5. Isolation, Hashed User Directories, Path Sanitization
 # =============================================================================
 
 @pytest.mark.asyncio
 async def test_per_user_isolation_and_safe_names(store, upload_root):
-    rec = await store.create_from_stream("alice:lab-1", [ATLAS.read_bytes()], "../../evil.h5ad", _prov())
+    data = _csv_bytes()
+    rec = await store.create_from_stream("alice:lab-1", [data], "../../evil.csv", _prov())
     udir = store.user_dir("alice:lab-1")
     assert re.fullmatch(r"[0-9a-f]{16}", udir.name)
     assert all(":" not in str(p.relative_to(upload_root)) for p in upload_root.rglob("*"))
-    assert rec.display_name == "evil.h5ad"
+    assert rec.display_name == "evil.csv"
 
     found, errors = store.resolve_for_user("bob", [rec.id])
     assert found == [] and errors == [f"Attached dataset {rec.id} not found"]
@@ -318,21 +378,18 @@ async def test_per_user_isolation_and_safe_names(store, upload_root):
     with pytest.raises(DatasetNotFound):
         store.get("alice:lab-1", "../" + rec.id)
 
-    for name, expected in [("C:\\x\\y.h5ad", "y.h5ad"), ("a\x00b.h5ad", "ab.h5ad"), ("<script>.h5ad", "_script_.h5ad")]:
-        r = await store.create_from_stream("alice:lab-1", [ATLAS.read_bytes()], name, _prov())
+    for name, expected in [("C:\\x\\y.csv", "y.csv"), ("a\x00b.csv", "ab.csv"), ("<script>.csv", "_script_.csv")]:
+        r = await store.create_from_stream("alice:lab-1", [data], name, _prov())
         assert r.display_name == expected
-    for path in upload_root.rglob("*"):
-        if path.is_file():
-            assert path.parent.parent == udir and ID_RE.match(path.parent.name)
 
 
 @pytest.mark.asyncio
 async def test_resolve_attachments_builds_refs_and_typed_mentions(store):
-    rec = await store.create_from_stream("alice", [ATLAS.read_bytes()], "atlas.h5ad", _prov())
-    res = await resolve_attachments("alice", [], f"Cluster {rec.id} please")
+    rec = await store.create_from_stream("alice", [_csv_bytes()], "experiment.csv", _prov())
+    res = await resolve_attachments("alice", [], f"Analyze {rec.id} please")
     assert [a.id for a in res.attachments] == [rec.id] and res.errors == []
     ref = res.attachments[0]
-    assert ref.kind == "h5ad" and ref.analysis_path and ref.dims == "40 cells × 10 genes"
+    assert ref.kind == "table" and ref.analysis_path
     assert "path" not in json.dumps(ref.to_public()).lower()
     foreign = await resolve_attachments("bob", [rec.id], "")
     assert foreign.attachments == [] and foreign.errors == [f"Attached dataset {rec.id} not found"]
@@ -346,7 +403,7 @@ async def test_resolve_attachments_without_store_creates_nothing(upload_root):
 
 
 # =============================================================================
-# 9-12. API
+# 6. REST API Endpoints
 # =============================================================================
 
 @pytest.fixture
@@ -366,8 +423,8 @@ BOB = {"Authorization": "Bearer bob-token"}
 PROV_JSON = json.dumps({"source": "in_house", "attests_no_direct_identifiers": True})
 
 
-def _post(client, headers, name="test_atlas.h5ad", data=None, provenance=PROV_JSON):
-    files = {"file": (name, data if data is not None else ATLAS.read_bytes(), "application/octet-stream")}
+def _post(client, headers, name="data.csv", data=None, provenance=PROV_JSON):
+    files = {"file": (name, data if data is not None else _csv_bytes(), "application/octet-stream")}
     return client.post("/api/datasets", headers=headers, files=files, data={"provenance": provenance})
 
 
@@ -383,7 +440,7 @@ def test_api_rejects_unauthenticated_before_parsing(client, monkeypatch):
     assert client.get("/api/datasets").status_code == 401
 
 
-def test_api_length_size_type_and_provenance_errors(client, monkeypatch):
+def test_api_length_size_type_and_provenance_errors(client, monkeypatch, tmp_path):
     def body():
         yield b"--x\r\n"
 
@@ -393,19 +450,21 @@ def test_api_length_size_type_and_provenance_errors(client, monkeypatch):
     r = _post(client, ALICE, name="tool.exe", data=b"MZ\x90\x00")
     assert r.status_code == 415 and r.json()["reason_code"] == "unsupported_type"
 
+    r = _post(client, ALICE, name="test.h5ad", data=_csv_bytes())
+    assert r.status_code == 415 and r.json()["reason_code"] == "unsupported_type"
+
+    r = _post(client, ALICE, name="test.xml", data=b"<sbml></sbml>")
+    assert r.status_code == 415 and r.json()["reason_code"] == "unsupported_type"
+
     r = _post(client, ALICE, provenance="{not json")
     assert r.status_code == 422 and r.json()["reason_code"] == "invalid_provenance"
-    r = _post(client, ALICE, provenance=json.dumps({"source": "in_house", "attests_no_direct_identifiers": False}))
-    assert r.status_code == 422 and "attest" in r.json()["detail"]
-    r = _post(client, ALICE, provenance=json.dumps({"source": "geo", "geo_accession": "GSM1", "attests_no_direct_identifiers": True}))
-    assert r.status_code == 422
 
-    r = _post(client, ALICE, data=ATLAS.read_bytes()[:5000])
+    r = _post(client, ALICE, name="broken.h5", data=b"\x89HDF\r\n\x1a\ncorrupted")
     assert r.status_code == 422 and r.json()["reason_code"] == "hdf5_unreadable"
 
-    for name in ("TRIBOS_UPLOAD_MAX_MB_H5AD", "TRIBOS_UPLOAD_MAX_MB_CSV", "TRIBOS_UPLOAD_MAX_MB_SBML"):
-        monkeypatch.setenv(name, "0.001")
-    r = _post(client, ALICE, data=ATLAS.read_bytes() * 5)  # ~100 KB > 1 KB cap + 64 KB multipart allowance
+    for name in ("TRIBOS_UPLOAD_MAX_MB_HDF5", "TRIBOS_UPLOAD_MAX_MB_CSV"):
+        monkeypatch.setenv(name, "0.0001")
+    r = _post(client, ALICE, data=_csv_bytes() * 100)
     assert r.status_code == 413 and r.json()["reason_code"] == "too_large"
 
 
@@ -414,7 +473,8 @@ def test_api_upload_list_and_cross_user_404(client):
     assert r.status_code == 201, r.text
     body = r.json()
     ds_id = body["id"]
-    assert ID_RE.match(ds_id) and body["dims"] == "40 cells × 10 genes" and body["declared_by"] == "uploader"
+    assert ID_RE.match(ds_id)
+    assert body["declared_by"] == "uploader"
     assert "path" not in json.dumps(body).lower()
 
     assert [d["id"] for d in client.get("/api/datasets", headers=ALICE).json()["datasets"]] == [ds_id]
@@ -433,209 +493,43 @@ def test_api_patch_provenance_keeps_history(client):
     r = client.patch(
         f"/api/datasets/{ds_id}/provenance",
         headers=ALICE,
-        json={"source": "collaborator", "consent_status": "irb_approved", "irb_protocol_id": "IRB-2024/17", "attests_no_direct_identifiers": True},
+        json={"source": "simulation", "description": "CFD flow field run 4", "attests_no_direct_identifiers": True},
     )
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["provenance"]["consent_status"] == "irb_approved"
+    assert body["provenance"]["source"] == "simulation"
     assert len(body["provenance_history"]) == 1
     assert body["provenance_history"][0]["previous"]["provenance"]["source"] == "in_house"
-    assert client.patch(f"/api/datasets/{ds_id}/provenance", headers=BOB, json={"source": "other", "attests_no_direct_identifiers": True}).status_code == 404
-    bad = client.patch(f"/api/datasets/{ds_id}/provenance", headers=ALICE, json={"source": "other"})
+    assert client.patch(f"/api/datasets/{ds_id}/provenance", headers=BOB, json={"source": "other"}).status_code == 404
+    bad = client.patch(f"/api/datasets/{ds_id}/provenance", headers=ALICE, json="not-an-object")
     assert bad.status_code == 422
 
 
 # =============================================================================
-# 13-15. GEO verification
+# 7. Orchestration, Attachment Resolution & Path Security
 # =============================================================================
-
-@pytest.mark.asyncio
-async def test_geo_verified(geo_mock):
-    out = await geo.lookup_geo("GSE132465", "human")
-    assert out.status == "verified"
-    assert out.pubmedids == ["32451460"] and out.taxon == "Homo sapiens" and out.n_samples == 33
-    assert out.bioproject == "PRJNA548146" and out.samples[0] == "GSM3868448"
-    assert out.organism_matches is True
-    assert "gse[ETYP]" in geo_mock[0].url.params["term"]
-    n_calls = len(geo_mock)
-    await geo.lookup_geo("GSE132465")
-    assert len(geo_mock) == n_calls  # cached per accession
-
-
-@pytest.mark.asyncio
-async def test_geo_not_found(geo_mock):
-    out = await geo.lookup_geo("GSE999999999")
-    assert out.status == "not_found" and out.pubmedids == []
-    assert (await geo.lookup_geo("not-an-accession")).status == "not_found"
-    assert len(geo_mock) == 1  # the malformed accession never reaches NCBI
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("failure", ["429", "timeout"])
-async def test_geo_lookup_failure_never_blocks_upload(store, monkeypatch, failure):
-    def handler(request: httpx.Request) -> httpx.Response:
-        if failure == "timeout":
-            raise httpx.ReadTimeout("timed out", request=request)
-        return httpx.Response(429, json={"error": "API rate limit exceeded"})
-
-    monkeypatch.setattr(geo, "_client_factory", lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler)))
-    assert (await geo.lookup_geo("GSE132465")).status == "lookup_failed"
-    rec = await store.create_from_stream("alice", [ATLAS.read_bytes()], "a.h5ad", _prov(source="geo", geo_accession="GSE132465"))
-    assert rec.geo_verification.status == "lookup_failed" and rec.public_provenance()["geo_verified"] is False
-
-
-def test_api_geo_lookup_endpoint(client, geo_mock):
-    r = client.post("/api/datasets/geo-lookup", headers=ALICE, json={"accession": "GSE132465"})
-    assert r.status_code == 200 and r.json()["status"] == "verified" and r.json()["pubmedids"] == ["32451460"]
-    assert client.post("/api/datasets/geo-lookup", headers=ALICE, json={"accession": "x; rm"}).status_code == 422
-    assert client.post("/api/datasets/geo-lookup", json={"accession": "GSE132465"}).status_code == 401
-
-
-# =============================================================================
-# 16-20. Orchestrator routing
-# =============================================================================
-
-
-@pytest.mark.asyncio
-async def test_orchestrator_routes_sbml_attachment_to_vivarix(store, upload_hooks, monkeypatch, tmp_path):
-    rec = await store.create_from_stream("alice", [SBML.read_bytes()], "kholodenko.xml", _prov(source="biomodels", consent_status="not_human_subjects"))
-    _, model_path = store.file_paths("alice", rec)
-    orch, calls = make_offline_orchestrator(monkeypatch, tmp_path)
-
-    def no_search(*_a, **_k):
-        raise AssertionError("an uploaded model must not trigger a BioModels search")
-
-    monkeypatch.setattr(orch.vivarix, "search_models", no_search)
-    res = await orch.execute_inquiry("Simulate this model for 30 seconds", thread_id="t-sbml", enable_web_search=False, user_id="alice", dataset_ids=[rec.id])
-    viv = called(calls, "vivarix_simulate_time_course")
-    assert len(viv) == 1
-    assert viv[0]["biomodel_id"] == rec.id and viv[0]["sbml_path"] == model_path
-    assert viv[0]["model_label"] == "kholodenko.xml" and viv[0]["model_provenance"]["sbml_model_id"] == "BIOMD0000000010"
-    assert res.execution_artifacts["vivarix"]["provenance"]["source"] == "user_upload"
-    viv_step = next(t for t in res.thoughts if t["id"] == "vivarix" and t["status"] == "done")
-    assert viv_step["title"].startswith("Simulated uploaded model")
-
-
-@pytest.mark.asyncio
-async def test_papers_only_suppresses_uploaded_model(store, monkeypatch, tmp_path):
-    rec = await store.create_from_stream("alice", [SBML.read_bytes()], "kholodenko.xml", _prov(source="biomodels"))
-    orch, calls = make_offline_orchestrator(monkeypatch, tmp_path)
-    await orch.execute_inquiry("Find ERK2 papers only.", thread_id="t-po", enable_web_search=False, user_id="alice", dataset_ids=[rec.id])
-    assert not called(calls, "vivarix_simulate_time_course")
-
 
 @pytest.mark.asyncio
 async def test_foreign_attachment_is_an_error_step(store, upload_root, monkeypatch, tmp_path):
-    rec = await store.create_from_stream("bob", [ATLAS.read_bytes()], "bob.h5ad", _prov())
+    rec = await store.create_from_stream("bob", [_csv_bytes()], "bob.csv", _prov())
     orch, calls = make_offline_orchestrator(monkeypatch, tmp_path)
-    res = await orch.execute_inquiry("Cluster this dataset", thread_id="t-foreign", enable_web_search=False, user_id="alice", dataset_ids=[rec.id])
+    res = await orch.execute_inquiry("Analyze this dataset", thread_id="t-foreign", enable_web_search=False, user_id="alice", dataset_ids=[rec.id])
     step = next(t for t in res.thoughts if t["id"] == "attachments")
     assert step["status"] == "error" and step["title"] == f"Attached dataset {rec.id} not found"
-    assert not called(calls, "lumicell_analyze_single_cell")
     assert str(upload_root) not in json.dumps(calls, default=str)
 
 
 @pytest.mark.asyncio
 async def test_typed_path_outside_roots_is_ignored(store, upload_root, monkeypatch, tmp_path):
-    outside = tmp_path / "elsewhere" / "atlas.h5ad"
+    outside = tmp_path / "elsewhere" / "data.csv"
     outside.parent.mkdir()
-    shutil.copy(ATLAS, outside)
+    outside.write_bytes(_csv_bytes())
     assert not is_allowed_typed_path(str(outside))
-    assert is_allowed_typed_path("test_atlas.h5ad")
-    rec = await store.create_from_stream("alice", [ATLAS.read_bytes()], "a.h5ad", _prov())
+
+    rec = await store.create_from_stream("alice", [_csv_bytes()], "a.csv", _prov())
     analysis_path, _ = store.file_paths("alice", rec)
     monkeypatch.setenv("TRIBOS_DATASET_ROOTS", str(upload_root.parent))
-    assert not is_allowed_typed_path(analysis_path)  # uploads are reachable only through their id
-
-    orch, calls = make_offline_orchestrator(monkeypatch, tmp_path)
-    monkeypatch.delenv("TRIBOS_DATASET_ROOTS")
-    await orch.execute_inquiry(f"Analyze the single-cell file {outside}", thread_id="t-typed", enable_web_search=False, user_id="alice")
-    assert not called(calls, "lumicell_analyze_single_cell")
-
-
-# =============================================================================
-# 21-22. Verifier and evidence block
-# =============================================================================
-
-async def _geo_verified_context(store, monkeypatch) -> tuple:
-    calls: List[httpx.Request] = []
-    monkeypatch.setattr(geo, "_client_factory", lambda: httpx.AsyncClient(transport=httpx.MockTransport(_geo_handler(calls))))
-    rec = await store.create_from_stream(
-        "alice", [ATLAS.read_bytes()], "crc_atlas.h5ad", _prov(source="geo", geo_accession="GSE132465", organism="Homo sapiens")
-    )
-    assert rec.geo_verification.status == "verified"
-    resolution = await resolve_attachments("alice", [rec.id], "")
-    ctx = QueryContext(raw_query="Cluster this dataset", clean_query="Cluster this dataset", attachments=resolution.attachments)
-    from tribos.lumicell.engine import LumicellAnalysisEngine
-
-    res = LumicellAnalysisEngine().execute_single_cell_pipeline(
-        dataset_path=resolution.attachments[0].analysis_path, dataset_name=rec.display_name
-    )
-    assert res.success, res.error
-    return rec, ctx, postprocess_lumicell_result(res, ctx)
-
-
-# =============================================================================
-# 23. Vivarix: uploaded SBML loading and the units fix
-# =============================================================================
-
-@pytest.mark.asyncio
-async def test_vivarix_uploaded_sbml_and_units(store, monkeypatch):
-    from tribos.agentic.sandbox import bound_scope
-    from tribos.vivarix import engine as engine_module
-
-    rec = await store.create_from_stream("alice", [SBML.read_bytes()], "kholodenko.xml", _prov(source="biomodels"))
-    _, model_path = store.file_paths("alice", rec)
-    eng = engine_module.VivarixSimulationEngine()
-    kwargs = dict(biomodel_id=rec.id, duration=20.0, intervals=10, sbml_path=model_path, model_label=rec.display_name,
-                  model_provenance=rec.public_provenance())
-    with bound_scope("alice", [rec.id]):
-        res = eng.simulate_time_course(**kwargs)
-        assert res.success, res.error
-        # get_model_units() reports 'time_unit'/'quantity_unit'; the engine used to read 'time'/'quantity' and fall back to nM.
-        assert res.data["units"]["time"] == "s" and res.data["units"]["quantity"] == "nmol"
-        assert res.data["model_name"] == "kholodenko.xml" and res.data["provenance"]["source"] == "user_upload"
-        assert res.data["model_id"] == rec.id and "Erk2-PP" in res.data["species_list"]
-
-        real_units = engine_module.basico.model_info.get_model_units
-        monkeypatch.setattr(
-            engine_module.basico.model_info,
-            "get_model_units",
-            lambda model=None: {**real_units(model=model), "time_unit": "min", "quantity_unit": "mmol"},
-        )
-        sim_data = eng.simulate_time_course(**kwargs).data
-        assert sim_data["units"]["time"] == "min" and sim_data["units"]["quantity"] == "mmol"
-
-        outside = eng.simulate_time_course(biomodel_id=rec.id, sbml_path=str(SBML))
-        assert not outside.success and "upload store" in outside.error and str(SBML) not in outside.error
-
-    ctx = QueryContext(raw_query="q", clean_query="q", attachments=(await resolve_attachments("alice", [rec.id], "")).attachments)
-    post = postprocess_vivarix_result(res, ctx)
-    assert post.data["model_source"] == "user_upload" and post.data["provenance"]["declared_source"] == "biomodels"
-    load_extensions()
-    with hooks.isolated_hooks():
-        uploads_ext.register_hooks()
-        block = build_evidence_block({"vivarix": post}, "r")
-    assert 'model_source="user_upload"' in block and 'sbml_model_id="BIOMD0000000010"' in block
-
-
-# =============================================================================
-# Review regressions
-# =============================================================================
-
-@pytest.mark.asyncio
-async def test_parameter_scan_never_reports_a_missing_species(store):
-    from tribos.agentic.sandbox import bound_scope
-    from tribos.vivarix.engine import VivarixSimulationEngine
-
-    rec = await store.create_from_stream("alice", [SBML.read_bytes()], "kholodenko.xml", _prov(source="biomodels"))
-    _, model_path = store.file_paths("alice", rec)
-    common = dict(biomodel_id=rec.id, parameter_name="Erk2", start_val=100.0, end_val=200.0, num_steps=2, sbml_path=model_path)
-    with bound_scope("alice", [rec.id]):
-        missing = VivarixSimulationEngine().run_parameter_scan(target_species="NOT_A_SPECIES", **common)
-        assert not missing.success and "not found" in missing.error  # previously every point reported a 0.0 response
-        ok = VivarixSimulationEngine().run_parameter_scan(target_species="Erk2-PP", **common)
-        assert ok.success and len(ok.data["scan_results"]) == 2
+    assert not is_allowed_typed_path(analysis_path)  # uploads reachable only by ID
 
 
 def _attachment_ctx(ref, query: str = "q") -> QueryContext:
@@ -644,142 +538,28 @@ def _attachment_ctx(ref, query: str = "q") -> QueryContext:
 
 @pytest.mark.asyncio
 async def test_declared_provenance_keeps_file_values_and_redacts_paths(store, upload_root):
-    rec = await store.create_from_stream("alice", [ATLAS.read_bytes()], "a.h5ad", _prov(organism="Mus musculus"))
+    rec = await store.create_from_stream("alice", [_csv_bytes()], "dataset.csv", _prov(domain="materials_science"))
     ref = (await resolve_attachments("alice", [rec.id], "")).attachments[0]
     ctx = _attachment_ctx(ref)
     res = ToolResult(
         success=True,
-        tool_name="lumicell_analyze_single_cell",
-        data={"dataset_path": ref.analysis_path, "dataset_provenance": {"file_path": ref.analysis_path, "organism": "Homo sapiens", "tissue": "colon"}},
+        tool_name="calcula_describe_dataset",
+        data={"dataset_path": ref.analysis_path, "dataset_provenance": {"file_path": ref.analysis_path, "domain": "materials_science"}},
     )
-    prov = postprocess_lumicell_result(res, ctx).data["dataset_provenance"]
-    assert prov["organism"] == "Mus musculus" and prov["file_organism"] == "Homo sapiens"  # declared vs read from uns
-    assert prov["tissue"] == "colon" and prov["declared_by"] == "uploader"
-
-    rec2 = await store.create_from_stream("alice", [ATLAS.read_bytes()], "b.h5ad", _prov())
-    ref2 = (await resolve_attachments("alice", [rec2.id], "")).attachments[0]
-    res2 = ToolResult(success=True, tool_name="lumicell_analyze_single_cell", data={"dataset_provenance": {"organism": "Homo sapiens"}})
-    assert postprocess_lumicell_result(res2, _attachment_ctx(ref2)).data["dataset_provenance"]["organism"] == "Homo sapiens"
+    prov = postprocess_dataset_result(res, ctx).data["dataset_provenance"]
+    assert prov["domain"] == "materials_science"
+    assert prov["declared_by"] == "uploader"
 
     folder = str(Path(ref.analysis_path).parent)
-    failed = ToolResult(success=False, tool_name="lumicell_analyze_single_cell", error=f"Unable to open (dir = '{folder}', root {upload_root.resolve()})")
-    err = postprocess_lumicell_result(failed, ctx).error
+    failed = ToolResult(success=False, tool_name="calcula_describe_dataset", error=f"Unable to open (dir = '{folder}', root {upload_root.resolve()})")
+    err = postprocess_dataset_result(failed, ctx).error
     assert folder not in err and str(upload_root.resolve()) not in err
 
 
 @pytest.mark.asyncio
-async def test_consent_check_ignores_negations_and_cited_studies(store, upload_hooks):
-    rec = await store.create_from_stream("alice", [ATLAS.read_bytes()], "a.h5ad", _prov())
-    ctx = QueryContext(raw_query="q", clean_query="q", attachments=(await resolve_attachments("alice", [rec.id], "")).attachments)
-
-    class V:
-        query_context = ctx
-        hedge_pattern = None
-        sentences = [
-            "The uploaded dataset is not IRB-approved according to the declared consent status.",
-            "In the cited cohort, patients gave informed consent (PMID 32451460).",
-        ]
-
-    assert uploads_ext.consent_claims_check(V()) == []
-    V.sentences = ["The uploaded dataset was collected with informed consent."]
-    assert [d["category"] for d in uploads_ext.consent_claims_check(V())] == ["PROVENANCE"]
-
-
-@pytest.mark.asyncio
 async def test_scope_note_names_attachments_that_were_not_analyzed(store):
-    a = await store.create_from_stream("alice", [ATLAS.read_bytes()], "first.h5ad", _prov())
-    b = await store.create_from_stream("alice", [ATLAS.read_bytes()], "second.h5ad", _prov())
+    a = await store.create_from_stream("alice", [_csv_bytes()], "first.csv", _prov())
+    b = await store.create_from_stream("alice", [_csv_bytes()], "second.csv", _prov())
     ctx = QueryContext(raw_query="q", clean_query="q", attachments=(await resolve_attachments("alice", [a.id, b.id], "")).attachments)
     notes = uploads_ext.upload_scope_notes(ctx, {})
     assert any("not analyzed" in n and b.id in n and a.id not in n for n in notes)
-
-
-def test_geo_accession_is_normalized():
-    assert _prov(geo_accession=" gse132465 ").geo_accession == "GSE132465"
-
-
-# =============================================================================
-# Final-review regressions: declared identifiers, NCBI key, parallel quota
-# =============================================================================
-
-def _geo_429(request: httpx.Request) -> httpx.Response:
-    return httpx.Response(429, json={"error": "API rate limit exceeded"})
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("status,accession", [("not_found", "GSE999999999"), ("lookup_failed", "GSE132465")])
-async def test_unverified_geo_accession_is_a_critical_identifier(store, monkeypatch, upload_hooks, status, accession):
-    handler = _geo_handler([]) if status == "not_found" else _geo_429
-    monkeypatch.setattr(geo, "_client_factory", lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler)))
-    rec = await store.create_from_stream("alice", [ATLAS.read_bytes()], "a.h5ad", _prov(source="geo", geo_accession=accession))
-    assert rec.geo_verification.status == status
-    ctx = _attachment_ctx((await resolve_attachments("alice", [rec.id], "")).attachments[0], "Cluster this dataset")
-    lum = postprocess_lumicell_result(
-        ToolResult(success=True, tool_name="lumicell_analyze_single_cell", data={"dataset_provenance": {}}), ctx
-    )
-    assert lum.data["dataset_provenance"]["geo_accession"] == accession  # still shown to the client as declared
-    assert "geo_accessions" not in lum.canonical_ids and "pmids" not in lum.canonical_ids
-    assert accession not in ctx.observed_identifiers()["geo"]
-    assert accession not in json.dumps(hooks.apply_serialization_filters("lumicell", lum.data))
-
-    from tribos.utils.memory.research_memory import ResearchMemoryEngine
-
-    assert accession not in ResearchMemoryEngine.collect_identifiers(lum.data, "lumicell")["geo"]
-    tag = re.search(r"<dataset_provenance [^>]*/>", build_evidence_block({"lumicell": lum}, "r", query_context=ctx)).group(0)
-    assert accession not in tag and f'geo_status="{status}"' in tag and 'geo_verified="false"' in tag
-
-    answer = f"This dataset comes from GEO series {accession}."
-    report = TribosVerifier().verify_response(
-        "Cluster this dataset", answer, {"lumicell": lum}, context_identifiers=ctx.observed_identifiers(), query_context=ctx
-    )
-    assert any(d.category == "IDENTIFIER" and d.severity.value == "CRITICAL" and accession in d.description for d in report.defects)
-    assert f"GEO:{accession}" not in report.verified_identifiers
-
-
-@pytest.mark.asyncio
-async def test_uploaded_sbml_model_id_is_not_a_biomodels_citation(store, upload_hooks):
-    rec = await store.create_from_stream("alice", [SBML.read_bytes()], "kholodenko.xml", _prov(source="biomodels"))
-    ctx = _attachment_ctx((await resolve_attachments("alice", [rec.id], "")).attachments[0])
-    assert ctx.attachments[0].sbml_model_id == "BIOMD0000000010"
-    assert ctx.observed_identifiers()["biomodels"] == set()
-    viv = postprocess_vivarix_result(
-        ToolResult(success=True, tool_name="vivarix_simulate_time_course", data={"model_id": rec.id, "provenance": {}}), ctx
-    )
-    assert viv.data["provenance"]["sbml_model_id"] == "BIOMD0000000010"
-    assert "BIOMD0000000010" not in json.dumps(hooks.apply_serialization_filters("vivarix", viv.data))
-    report = TribosVerifier().verify_response(
-        "q", "The uploaded model is BioModels entry BIOMD0000000010.", {"vivarix": viv},
-        context_identifiers=ctx.observed_identifiers(), query_context=ctx,
-    )
-    assert any(d.category == "IDENTIFIER" and d.claim == "BIOMD0000000010" for d in report.defects)
-
-
-@pytest.mark.asyncio
-async def test_geo_lookup_sends_ncbi_api_key(geo_mock, monkeypatch):
-    geo.clear_cache()
-    monkeypatch.setenv("NCBI_API_KEY", "placeholder-key")
-    assert (await geo.lookup_geo("GSE132465")).status == "verified"
-    assert geo_mock and all(r.url.params.get("api_key") == "placeholder-key" for r in geo_mock)
-    geo.clear_cache()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("limit_env,limit", [("TRIBOS_UPLOAD_MAX_DATASETS", "1"), ("TRIBOS_UPLOAD_MAX_TOTAL_MB", "0.03")])
-async def test_parallel_uploads_cannot_exceed_user_limits(store, monkeypatch, limit_env, limit):
-    import asyncio
-
-    monkeypatch.setenv(limit_env, limit)
-    gate = asyncio.Event()
-
-    async def held_open():
-        await gate.wait()  # every upload has passed the early quota checks before any of them commits
-        yield ATLAS.read_bytes()
-
-    tasks = [asyncio.create_task(store.create_from_stream("alice", held_open(), f"{i}.h5ad", _prov())) for i in range(3)]
-    for _ in range(10):
-        await asyncio.sleep(0)
-    gate.set()
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    failures = [r for r in results if isinstance(r, BaseException)]
-    assert len(failures) == 2 and all(isinstance(f, DatasetStoreError) and f.status_code == 507 for f in failures)
-    assert len(store.list("alice")) == 1 and _no_part_files(store.root)

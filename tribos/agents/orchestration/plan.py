@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import json
-import re
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from ...agentic import config as agent_config
 from ...utils.memory.research_memory import MemoryContextPackage
@@ -14,7 +13,7 @@ from ..query_context import SourceDecision, TaskOutcome
 from .context import RunContext, logger, orchestrator_module
 
 
-async def start(run: RunContext) -> Optional[Any]:
+async def start(run: RunContext) -> Any | None:
     """Announce an agentic run and answer a greeting directly. Returns the result when the run ends here."""
     ao = orchestrator_module()
     if run.control is not None:
@@ -49,7 +48,7 @@ async def start(run: RunContext) -> Optional[Any]:
     return None
 
 
-async def read_question(run: RunContext) -> Optional[Any]:
+async def read_question(run: RunContext) -> Any | None:
     """Build the query context, recall memory and run the agentic pre-evidence phases.
 
     Returns the result when the run ends here (a clarification request or a non-research message)."""
@@ -167,7 +166,7 @@ async def _choose_framework(run: RunContext) -> None:
                        extra={"framework": decision.framework, "rule": decision.rule})
 
 
-async def _agentic_preflight(run: RunContext) -> Optional[Any]:
+async def _agentic_preflight(run: RunContext) -> Any | None:
     ao = orchestrator_module()
     control, agent_options, framework = run.control, run.agent_options, run.framework
     ctx, model_name, api_key = run.ctx, run.model_name, run.api_key
@@ -289,8 +288,8 @@ async def route_sources(run: RunContext) -> None:
     except Exception as exc:  # noqa: BLE001
         logger.warning("Evidence sources unavailable: %s", exc)
         all_sources = []
-    evaluated_sources: List[Any] = []
-    active_sources: List[Any] = []
+    evaluated_sources: list[Any] = []
+    active_sources: list[Any] = []
     for src in all_sources:
         if any(registry.get_entry(t) is None for t in src.required_tools):
             ctx.decisions[src.key] = SourceDecision(run=False, reason="tool not available")
@@ -313,7 +312,7 @@ async def route_sources(run: RunContext) -> None:
             active_sources.append(src)
 
     # Report what was actually parsed from the question and recalled, so routing is inspectable.
-    plan_facts: List[str] = list(ctx.plan_facts())
+    plan_facts: list[str] = list(ctx.plan_facts())
     for src in active_sources:
         try:
             fact = src.plan_fact(ctx)
@@ -350,7 +349,7 @@ async def route_sources(run: RunContext) -> None:
         active_sources = [s for s in active_sources if ctx.decisions.get(s.key, SourceDecision(run=True)).run]
 
     run.evaluated_sources, run.active_sources = evaluated_sources, active_sources
-    title_ctx: Dict[str, Any] = {
+    title_ctx: dict[str, Any] = {
         "target": ctx.primary_display,
         "model": ctx.biomodel_id or (ctx.model_attachment.display_name if ctx.model_attachment else None),
         "dataset": ctx.dataset_attachment.display_name if ctx.dataset_attachment else ctx.dataset_path,

@@ -1,9 +1,9 @@
 # Tribos: Scientific Validation, Multi-Agent Architecture & Benchmark Report
 
-> **Tribos** — Biomedical Research Assistant  
+> **Tribos Engineering & Scientific R&D Assistant**  
 > **Made by ChronoStrider Engineering**
 
-This document specifies the architecture, paper-to-feature mapping, and empirical validation results for the upgraded **Tribos Biomedical Research Assistant**, engineered by **ChronoStrider Engineering** (**ChronoStrider Engineering**).
+This document specifies the architecture, paper-to-feature mapping, and empirical validation results for the upgraded **Tribos Engineering & Scientific R&D Assistant**, engineered by **ChronoStrider Engineering**.
 
 ---
 

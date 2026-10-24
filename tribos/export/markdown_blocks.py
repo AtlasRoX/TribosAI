@@ -10,8 +10,9 @@ from __future__ import annotations
 import functools
 import os
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Iterable, List, Optional, Set
+from typing import Any
 
 from markdown_it import MarkdownIt
 from markdown_it.common.utils import escapeHtml
@@ -42,28 +43,28 @@ class Run:
     italic: bool = False
     code: bool = False
     strike: bool = False
-    link: Optional[str] = None
+    link: str | None = None
 
 
 @dataclass
 class Block:
     type: str  # heading | paragraph | table | code | hr
     level: int = 0
-    runs: List[Run] = field(default_factory=list)
-    list_kind: Optional[str] = None  # bullet | ordered (paragraph inside a list item)
+    runs: list[Run] = field(default_factory=list)
+    list_kind: str | None = None  # bullet | ordered (paragraph inside a list item)
     depth: int = 0  # list nesting depth, 1-based when list_kind is set
     first_in_item: bool = True
     quote: bool = False
-    header: List[List[Run]] = field(default_factory=list)
-    rows: List[List[List[Run]]] = field(default_factory=list)
+    header: list[list[Run]] = field(default_factory=list)
+    rows: list[list[list[Run]]] = field(default_factory=list)
     text: str = ""
     lang: str = ""
 
 
-def inline_runs(token: Any) -> List[Run]:
-    runs: List[Run] = []
+def inline_runs(token: Any) -> list[Run]:
+    runs: list[Run] = []
     bold = italic = strike = False
-    link: Optional[str] = None
+    link: str | None = None
     link_text_start = 0
     for ch in getattr(token, "children", None) or []:
         t = ch.type
@@ -99,14 +100,14 @@ def inline_runs(token: Any) -> List[Run]:
     return runs
 
 
-def parse_blocks(text: str) -> List[Block]:
+def parse_blocks(text: str) -> list[Block]:
     tokens = markdown_parser().parse(text or "")
-    blocks: List[Block] = []
-    lists: List[str] = []
+    blocks: list[Block] = []
+    lists: list[str] = []
     quote_depth = 0
-    item_fresh: List[bool] = []
-    table: Optional[Block] = None
-    row: Optional[List[List[Run]]] = None
+    item_fresh: list[bool] = []
+    table: Block | None = None
+    row: list[list[Run]] | None = None
     in_head = False
     i = 0
     while i < len(tokens):
@@ -193,14 +194,14 @@ REPORT_FONTS = {
 }
 
 
-def report_font_path(key: str) -> Optional[str]:
+def report_font_path(key: str) -> str | None:
     path = os.path.join(REPORT_FONT_DIR, REPORT_FONTS[key])
     return path if os.path.isfile(path) else None
 
 
-def report_cmap() -> Optional[Set[int]]:
+def report_cmap() -> set[int] | None:
     """Code points the report fonts can draw: Google Sans plus the DejaVu fallback."""
-    covered: Set[int] = set()
+    covered: set[int] = set()
     regular = report_font_path("regular")
     try:
         if regular:
@@ -211,7 +212,7 @@ def report_cmap() -> Optional[Set[int]]:
     return covered or None
 
 
-def dejavu_font_dir() -> Optional[str]:
+def dejavu_font_dir() -> str | None:
     try:
         import matplotlib
     except ImportError:
@@ -231,7 +232,7 @@ def font_cmap(font_path: str) -> frozenset:
         font.close()
 
 
-def default_cmap() -> Optional[Set[int]]:
+def default_cmap() -> set[int] | None:
     folder = dejavu_font_dir()
     if not folder:
         return None
@@ -244,7 +245,7 @@ def default_cmap() -> Optional[Set[int]]:
 _SPACE_BEFORE_CLOSE = re.compile(r"([(\[]) +| +([)\]])")
 
 
-def strip_unsupported_glyphs(text: str, cmap: Optional[Iterable[int]] = None) -> str:
+def strip_unsupported_glyphs(text: str, cmap: Iterable[int] | None = None) -> str:
     """Drop characters the font cannot draw (astral emoji, variation selectors); keeps ⚠ ≥ ± µ × → and Greek."""
     covered = set(cmap) if cmap is not None else default_cmap()
     out = []

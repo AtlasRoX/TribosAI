@@ -11,7 +11,7 @@ hide:
 > **Version** 1.0<br>
 
 1. [Overview](#overview)
-2. [GitHub Repo Types](#github-repo-types)
+2. [GitHub Repo Organization](#github-repo-organization)
 3. [GitHub templates for PRs, features and bugs](#github-templates-for-prs-features-and-bugs)
 4. [Coding practices](#coding-practices)
 5. [Testing locally](#testing-locally)

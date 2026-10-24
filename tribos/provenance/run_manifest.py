@@ -24,9 +24,9 @@ import sys
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -79,21 +79,21 @@ _ENV_PACKAGES = (
 class ToolCallRecord(BaseModel):
     seq: int
     tool_name: str
-    adapter: Optional[str] = None
-    timeout_seconds: Optional[float] = None
-    inputs: Dict[str, Any] = Field(default_factory=dict)
-    raw_inputs: Optional[Dict[str, Any]] = None  # only when validation failed (inputs is then empty)
+    adapter: str | None = None
+    timeout_seconds: float | None = None
+    inputs: dict[str, Any] = Field(default_factory=dict)
+    raw_inputs: dict[str, Any] | None = None  # only when validation failed (inputs is then empty)
     started_at: str
     elapsed_seconds: float
     success: bool
-    error_type: Optional[str] = None
-    error: Optional[str] = None
-    canonical_ids: Dict[str, str] = Field(default_factory=dict)
-    output_sha256: Optional[str] = None
-    output_digest: Dict[str, Any] = Field(default_factory=dict)
+    error_type: str | None = None
+    error: str | None = None
+    canonical_ids: dict[str, str] = Field(default_factory=dict)
+    output_sha256: str | None = None
+    output_digest: dict[str, Any] = Field(default_factory=dict)
     # Reliability-layer facts about how the output was obtained (PRV-003): cache "hit"/"miss" and the cached
     # answer's age, a fallback tool that answered instead, retries, and arguments the registry repaired.
-    reliability: Dict[str, Any] = Field(default_factory=dict)
+    reliability: dict[str, Any] = Field(default_factory=dict)
 
 
 class LLMCallRecord(BaseModel):
@@ -103,37 +103,37 @@ class LLMCallRecord(BaseModel):
     requested_model: str
     served_model: str
     provider: str
-    base_url: Optional[str] = None
+    base_url: str | None = None
     fallback: bool = False
-    fallback_reason: Optional[str] = None
+    fallback_reason: str | None = None
     key_source: Literal["caller", "server"] = "server"
-    temperature: Optional[float] = None
-    max_tokens: Optional[int] = None
+    temperature: float | None = None
+    max_tokens: int | None = None
 
 
 class StepNote(BaseModel):
     step: str
-    inputs: Dict[str, Any] = Field(default_factory=dict)
-    outputs: Dict[str, Any] = Field(default_factory=dict)
+    inputs: dict[str, Any] = Field(default_factory=dict)
+    outputs: dict[str, Any] = Field(default_factory=dict)
     at: str
 
 
 class BioModelPin(BaseModel):
     accession: str
-    latest_revision: Optional[int] = None
-    main_file: Optional[str] = None
-    main_file_sha256: Optional[str] = None
-    local_cache_sha256: Optional[str] = None
+    latest_revision: int | None = None
+    main_file: str | None = None
+    main_file_sha256: str | None = None
+    local_cache_sha256: str | None = None
     resolved_at: str
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class DatasetPin(BaseModel):
     path_basename: str
     kind: Literal["h5ad", "zarr", "other"]
-    size_bytes: Optional[int] = None
-    sha256: Optional[str] = None
-    note: Optional[str] = None
+    size_bytes: int | None = None
+    sha256: str | None = None
+    note: str | None = None
 
 
 class EnvironmentInfo(BaseModel):
@@ -142,12 +142,12 @@ class EnvironmentInfo(BaseModel):
     # sha256 over tribos/** and app/backend/** code and config (py, yaml, toml, json, jsonl, txt), pyproject.toml
     # and uv.lock (PRV-007: the earlier fingerprint missed routers, configs and the lock file).
     source_fingerprint: str
-    git_commit: Optional[str] = None  # HEAD commit when the deployment is a git checkout with commits
-    lockfile_sha256: Optional[str] = None  # uv.lock: the resolved dependency set
-    config_fingerprint: Optional[str] = None  # non-Python config and data files only (yaml/toml/json/jsonl/txt)
+    git_commit: str | None = None  # HEAD commit when the deployment is a git checkout with commits
+    lockfile_sha256: str | None = None  # uv.lock: the resolved dependency set
+    config_fingerprint: str | None = None  # non-Python config and data files only (yaml/toml/json/jsonl/txt)
     python: str
     platform: str
-    packages: Dict[str, str] = Field(default_factory=dict)
+    packages: dict[str, str] = Field(default_factory=dict)
 
 
 class RunManifest(BaseModel):
@@ -158,29 +158,29 @@ class RunManifest(BaseModel):
     query: str
     query_sha256: str
     model_id: str
-    llm_params: Dict[str, Any] = Field(default_factory=dict)
+    llm_params: dict[str, Any] = Field(default_factory=dict)
     framework: str
     enable_web_search: bool
     started_at: str
     finished_at: str
     duration_seconds: float
-    routing: Dict[str, Any] = Field(default_factory=dict)
-    memory_context: Dict[str, Any] = Field(default_factory=dict)
-    tool_calls: List[ToolCallRecord] = Field(default_factory=list)
-    steps: List[StepNote] = Field(default_factory=list)
-    biomodels: List[BioModelPin] = Field(default_factory=list)
-    datasets: List[DatasetPin] = Field(default_factory=list)
-    source_versions: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
-    synthesis: Dict[str, Any] = Field(default_factory=dict)
-    verification: Dict[str, Any] = Field(default_factory=dict)
-    task_status: Dict[str, Any] = Field(default_factory=dict)  # query_context.TaskOutcome
+    routing: dict[str, Any] = Field(default_factory=dict)
+    memory_context: dict[str, Any] = Field(default_factory=dict)
+    tool_calls: list[ToolCallRecord] = Field(default_factory=list)
+    steps: list[StepNote] = Field(default_factory=list)
+    biomodels: list[BioModelPin] = Field(default_factory=list)
+    datasets: list[DatasetPin] = Field(default_factory=list)
+    source_versions: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    synthesis: dict[str, Any] = Field(default_factory=dict)
+    verification: dict[str, Any] = Field(default_factory=dict)
+    task_status: dict[str, Any] = Field(default_factory=dict)  # query_context.TaskOutcome
     response_sha256: str
     environment: EnvironmentInfo
     # The request configuration a full re-run needs to reproduce the run (PRV-004): requested framework, agent
     # options, project memory, interactivity, memory recall/persistence and attached dataset ids.
-    request: Dict[str, Any] = Field(default_factory=dict)
+    request: dict[str, Any] = Field(default_factory=dict)
     # Every chat-model client the run instantiated, with the model that actually served it (PRV-002).
-    llm_calls: List[LLMCallRecord] = Field(default_factory=list)
+    llm_calls: list[LLMCallRecord] = Field(default_factory=list)
 
 
 # -----------------------------------------------------------------------------
@@ -188,7 +188,7 @@ class RunManifest(BaseModel):
 # -----------------------------------------------------------------------------
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def sha256_text(text: str) -> str:
@@ -223,7 +223,7 @@ def _basename(path: Any) -> str:
     return os.path.basename(text.replace("\\", "/")) or text
 
 
-def _sorted_unique(values: Any, limit: int = 50) -> List[str]:
+def _sorted_unique(values: Any, limit: int = 50) -> list[str]:
     return sorted({str(v) for v in values if v not in (None, "")})[:limit]
 
 
@@ -231,9 +231,9 @@ def _sorted_unique(values: Any, limit: int = 50) -> List[str]:
 # Per-tool output digests (key fields only; never passages or plots)
 # -----------------------------------------------------------------------------
 
-def _digest_vivarix(data: Dict[str, Any]) -> Dict[str, Any]:
-    out: Dict[str, Any] = {}
-    for key in ("model_id", "simulation_type", "units", "final_concentrations", "steady_state_concentrations"):
+def _digest_vivarix(data: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key in ("model_id", "simulation_type", "units", "final_concentrations", "steady_state_concentrations", "summary"):
         if data.get(key) not in (None, {}, []):
             out[key] = data[key]
     convergence = (data.get("diagnostics") or {}).get("convergence_status")
@@ -242,34 +242,35 @@ def _digest_vivarix(data: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def _digest_lithoscribe(data: Dict[str, Any]) -> Dict[str, Any]:
+def _digest_lithoscribe(data: dict[str, Any]) -> dict[str, Any]:
     passages = [p for p in data.get("ranked_passages") or [] if isinstance(p, dict)]
     return {
         "pmids": _sorted_unique(p.get("pmid") for p in passages),
+        "arxiv_ids": _sorted_unique(p.get("arxiv_id") or p.get("arxiv") for p in passages),
         "dois": _sorted_unique(str(p.get("doi") or "").lower() for p in passages),
         "n_passages": len(passages),
         "evidence_sufficiency": data.get("evidence_sufficiency"),
     }
 
 
-def _digest_synapta_search(data: Dict[str, Any]) -> Dict[str, Any]:
+def _digest_synapta_search(data: dict[str, Any]) -> dict[str, Any]:
     hits = [h for h in data.get("results") or [] if isinstance(h, dict)]
     return {"ensembl_ids": [str(h.get("id")) for h in hits[:10] if h.get("id")]}
 
 
-def _digest_synapta_associations(data: Dict[str, Any]) -> Dict[str, Any]:
-    scores: Dict[str, Any] = {}
+def _digest_synapta_associations(data: dict[str, Any]) -> dict[str, Any]:
+    scores: dict[str, Any] = {}
     for a in (data.get("associations") or [])[:15]:
         if isinstance(a, dict) and a.get("disease_name"):
             scores[str(a["disease_name"])] = a.get("overall_association_score", a.get("score"))
     return {"association_scores": scores}
 
 
-def _digest_kegg(data: Dict[str, Any]) -> Dict[str, Any]:
+def _digest_kegg(data: dict[str, Any]) -> dict[str, Any]:
     return {"kegg_ids": _sorted_unique(r.get("id") for r in data.get("results") or [] if isinstance(r, dict))}
 
 
-def _digest_websurfer(data: Dict[str, Any]) -> Dict[str, Any]:
+def _digest_websurfer(data: dict[str, Any]) -> dict[str, Any]:
     urls = [r.get("url") for r in data.get("results") or [] if isinstance(r, dict)]
     top = data.get("top_page") if isinstance(data.get("top_page"), dict) else {}
     if top.get("url"):
@@ -277,8 +278,8 @@ def _digest_websurfer(data: Dict[str, Any]) -> Dict[str, Any]:
     return {"urls": _sorted_unique(urls)}
 
 
-def _digest_lumicell(data: Dict[str, Any]) -> Dict[str, Any]:
-    markers: Dict[str, List[str]] = {}
+def _digest_lumicell(data: dict[str, Any]) -> dict[str, Any]:
+    markers: dict[str, list[str]] = {}
     for cluster, rows in sorted((data.get("top_markers_by_cluster") or {}).items(), key=lambda kv: str(kv[0]))[:20]:
         markers[str(cluster)] = [str(r.get("gene")) for r in (rows or [])[:3] if isinstance(r, dict) and r.get("gene")]
     out = {
@@ -291,7 +292,7 @@ def _digest_lumicell(data: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def _digest_clinical_trials(data: Dict[str, Any]) -> Dict[str, Any]:
+def _digest_clinical_trials(data: dict[str, Any]) -> dict[str, Any]:
     """The trial set with phase and status, and which trials carry posted results; not totals or edit dates."""
     trials = [t for t in data.get("trials") or [] if isinstance(t, dict)]
     return {
@@ -304,7 +305,7 @@ def _digest_clinical_trials(data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _digest_chembl_resolve(data: Dict[str, Any]) -> Dict[str, Any]:
+def _digest_chembl_resolve(data: dict[str, Any]) -> dict[str, Any]:
     return {
         "drugs": _sorted_unique(d.get("chembl_id") for d in data.get("drugs") or [] if isinstance(d, dict)),
         "target": ((data.get("target") or {}).get("target_chembl_id")) if isinstance(data.get("target"), dict) else None,
@@ -312,8 +313,8 @@ def _digest_chembl_resolve(data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _digest_chembl_profile(data: Dict[str, Any]) -> Dict[str, Any]:
-    potency: Dict[str, Any] = {}
+def _digest_chembl_profile(data: dict[str, Any]) -> dict[str, Any]:
+    potency: dict[str, Any] = {}
     for d in data.get("drugs") or []:
         if not isinstance(d, dict):
             continue
@@ -329,7 +330,7 @@ def _digest_chembl_profile(data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _digest_openfda(data: Dict[str, Any]) -> Dict[str, Any]:
+def _digest_openfda(data: dict[str, Any]) -> dict[str, Any]:
     label = data.get("label") if isinstance(data.get("label"), dict) else {}
     return {
         "total_reports": data.get("total_reports"),
@@ -340,7 +341,7 @@ def _digest_openfda(data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _digest_variant(data: Dict[str, Any]) -> Dict[str, Any]:
+def _digest_variant(data: dict[str, Any]) -> dict[str, Any]:
     return {
         "clinvar": {
             str(c.get("accession")): c.get("germline_classification") or c.get("somatic_clinical_impact")
@@ -355,7 +356,7 @@ def _digest_variant(data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _digest_disease_targets(data: Dict[str, Any]) -> Dict[str, Any]:
+def _digest_disease_targets(data: dict[str, Any]) -> dict[str, Any]:
     return {
         "disease": (data.get("disease") or {}).get("id") if isinstance(data.get("disease"), dict) else None,
         "targets": [str(t.get("symbol")) for t in (data.get("targets") or [])[:15] if isinstance(t, dict)],
@@ -363,7 +364,7 @@ def _digest_disease_targets(data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _digest_primekg(data: Dict[str, Any]) -> Dict[str, Any]:
+def _digest_primekg(data: dict[str, Any]) -> dict[str, Any]:
     prov = data.get("provenance") or {}
     analyses = [a for a in data.get("analyses") or [] if isinstance(a, dict)]
     return {
@@ -379,7 +380,11 @@ def _digest_primekg(data: Dict[str, Any]) -> Dict[str, Any]:
 _DIGESTERS = {
     "vivarix_simulate_time_course": _digest_vivarix,
     "vivarix_compute_steady_state": _digest_vivarix,
+    "dynamis_simulate_ode": _digest_vivarix,
+    "dynamis_parameter_scan": _digest_vivarix,
+    "dynamis_find_equilibrium": _digest_vivarix,
     "lithoscribe_literature_synthesis": _digest_lithoscribe,
+    "archivon_literature_search": _digest_lithoscribe,
     "synapta_opentargets_search": _digest_synapta_search,
     "synapta_opentargets_associations": _digest_synapta_associations,
     "synapta_kegg_pathways": _digest_kegg,
@@ -395,7 +400,7 @@ _DIGESTERS = {
 }
 
 
-def output_digest(tool_name: str, data: Any) -> Dict[str, Any]:
+def output_digest(tool_name: str, data: Any) -> dict[str, Any]:
     """Domain key fields for diffs; plugin tools rely on the generic output hash and get {}."""
     fn = _DIGESTERS.get(tool_name)
     if fn is None or not isinstance(data, dict):
@@ -435,7 +440,7 @@ def hash_dataset_path(path: str, max_bytes: int = DATASET_HASH_MAX_BYTES) -> Dat
             tree = hashlib.sha256()
             for f in files:
                 rel = f.relative_to(p).as_posix()
-                tree.update(f"{rel}\0{f.stat().st_size}\0{_file_sha256(f)}\n".encode("utf-8"))
+                tree.update(f"{rel}\0{f.stat().st_size}\0{_file_sha256(f)}\n".encode())
             return DatasetPin(path_basename=name, kind=kind, size_bytes=total, sha256=tree.hexdigest(), note="tree_hash")
         if p.is_file():
             size = p.stat().st_size
@@ -476,8 +481,8 @@ _FINGERPRINT_SKIP_PARTS = {"__pycache__", "tests", ".pytest_cache", "node_module
 _FINGERPRINT_MAX_FILE = 64 * 1024 * 1024  # a stray large data file is fingerprinted by size, not read
 
 
-def _fingerprint_files(root: Path, suffixes: tuple) -> List[Path]:
-    files: List[Path] = []
+def _fingerprint_files(root: Path, suffixes: tuple) -> list[Path]:
+    files: list[Path] = []
     for rel in _FINGERPRINT_DIRS:
         base = root / rel
         if not base.is_dir():
@@ -488,7 +493,7 @@ def _fingerprint_files(root: Path, suffixes: tuple) -> List[Path]:
     return files
 
 
-def _hash_files(root: Path, files: List[Path]) -> str:
+def _hash_files(root: Path, files: list[Path]) -> str:
     h = hashlib.sha256()
     for f in sorted(set(files), key=lambda f: f.relative_to(root).as_posix()):
         try:
@@ -527,7 +532,7 @@ def config_fingerprint() -> str:
 
 
 @functools.lru_cache(maxsize=1)
-def lockfile_sha256() -> Optional[str]:
+def lockfile_sha256() -> str | None:
     lock = _REPO_ROOT / "uv.lock"
     try:
         return hashlib.sha256(lock.read_bytes()).hexdigest() if lock.is_file() else None
@@ -535,7 +540,7 @@ def lockfile_sha256() -> Optional[str]:
         return None
 
 
-def read_git_commit(root: Path) -> Optional[str]:
+def read_git_commit(root: Path) -> str | None:
     """HEAD's commit id read from .git (no subprocess); None without a repository or without commits."""
     git = root / ".git"
     try:
@@ -568,14 +573,14 @@ def read_git_commit(root: Path) -> Optional[str]:
 
 
 @functools.lru_cache(maxsize=1)
-def git_commit() -> Optional[str]:
+def git_commit() -> str | None:
     return read_git_commit(_REPO_ROOT)
 
 
 # The user id is hashed with a deployment salt (TRIBOS_USER_HASH_SALT, else a random salt kept next to the run
 # store) so a shared bundle's hash cannot be reversed by hashing candidate e-mail addresses (PRV-007).
 _SALT_FILE = ".user_hash_salt"
-_salt_cache: Dict[str, str] = {}
+_salt_cache: dict[str, str] = {}
 _salt_lock = threading.Lock()
 
 
@@ -622,10 +627,10 @@ def user_id_hash(user_id: str) -> str:
 
 
 @functools.lru_cache(maxsize=1)
-def _package_versions() -> Dict[str, str]:
+def _package_versions() -> dict[str, str]:
     from importlib import metadata
 
-    versions: Dict[str, str] = {}
+    versions: dict[str, str] = {}
     for name in _ENV_PACKAGES:
         try:
             versions[name] = metadata.version(name)
@@ -657,7 +662,7 @@ def environment_info() -> EnvironmentInfo:
 # Client view
 # -----------------------------------------------------------------------------
 
-def client_view(manifest: Dict[str, Any]) -> Dict[str, Any]:
+def client_view(manifest: dict[str, Any]) -> dict[str, Any]:
     """The manifest as sent to browsers: server file paths in tool inputs reduced to their basename."""
     from ..datasets.paths import is_allowed_typed_path
 
@@ -668,7 +673,7 @@ def client_view(manifest: Dict[str, Any]) -> Dict[str, Any]:
     for call in calls:
         if not isinstance(call, dict):
             continue
-        hidden: Dict[str, str] = {}
+        hidden: dict[str, str] = {}
         for bucket in ("inputs", "raw_inputs"):
             values = call.get(bucket)
             if not isinstance(values, dict):
@@ -706,8 +711,8 @@ def _compact_claims(report: Any) -> Any:
     if not isinstance(report, dict) or not isinstance(report.get("claims"), list):
         return report
     out = {k: v for k, v in report.items() if k != "claims"}
-    counts: Dict[str, int] = {}
-    failing: List[str] = []
+    counts: dict[str, int] = {}
+    failing: list[str] = []
     for c in report["claims"]:
         if not isinstance(c, dict):
             continue
@@ -740,21 +745,21 @@ class RunRecorder:
         self.started_at = utc_now()
         self._t0 = time.perf_counter()
         self.persist = True  # rerun replays set False: they are diffed, not stored as runs
-        self.routing: Dict[str, Any] = {}
-        self.memory_context: Dict[str, Any] = {}
-        self.synthesis: Dict[str, Any] = {}
-        self.verification: Dict[str, Any] = {}
-        self.task_status: Dict[str, Any] = {}
-        self.request: Dict[str, Any] = {}
-        self._llm_calls: List[LLMCallRecord] = []
-        self._calls: List[ToolCallRecord] = []
+        self.routing: dict[str, Any] = {}
+        self.memory_context: dict[str, Any] = {}
+        self.synthesis: dict[str, Any] = {}
+        self.verification: dict[str, Any] = {}
+        self.task_status: dict[str, Any] = {}
+        self.request: dict[str, Any] = {}
+        self._llm_calls: list[LLMCallRecord] = []
+        self._calls: list[ToolCallRecord] = []
         self._order = itertools.count(1)
-        self._steps: List[StepNote] = []
-        self._biomodels: Dict[str, Optional[BioModelPin]] = {}
-        self._datasets: List[DatasetPin] = []
-        self._tasks: List["asyncio.Task[Any]"] = []
-        self._source_versions: Optional[Dict[str, Dict[str, Any]]] = None
-        self.full_manifest: Optional[Dict[str, Any]] = None
+        self._steps: list[StepNote] = []
+        self._biomodels: dict[str, BioModelPin | None] = {}
+        self._datasets: list[DatasetPin] = []
+        self._tasks: list[asyncio.Task[Any]] = []
+        self._source_versions: dict[str, dict[str, Any]] | None = None
+        self.full_manifest: dict[str, Any] | None = None
         self._spawn(self._probe_source_versions())
 
     # --- background work -----------------------------------------------------------
@@ -806,7 +811,7 @@ class RunRecorder:
             "memory_summary_sha256": sha256_text(memory_summary or ""),
         }
 
-    def note_step(self, step: str, inputs: Optional[dict] = None, outputs: Optional[dict] = None) -> None:
+    def note_step(self, step: str, inputs: dict | None = None, outputs: dict | None = None) -> None:
         self._steps.append(StepNote(step=step, inputs=json_safe(inputs or {}), outputs=json_safe(outputs or {}), at=utc_now()))
 
     def start_biomodel_resolution(self, accession: str) -> None:
@@ -836,7 +841,7 @@ class RunRecorder:
         self.synthesis.update(json_safe(fields))
 
     def set_verification(
-        self, *, first_pass: dict, final: dict, correction_attempted: bool, correction_error: Optional[str]
+        self, *, first_pass: dict, final: dict, correction_attempted: bool, correction_error: str | None
     ) -> None:
         self.verification = json_safe({
             "first_pass": _compact_claims(first_pass),
@@ -856,14 +861,14 @@ class RunRecorder:
     def set_request_config(
         self,
         *,
-        requested_framework: Optional[str] = None,
-        framework: Optional[str] = None,
-        agent_options: Optional[Dict[str, Any]] = None,
-        project_id: Optional[str] = None,
-        interactive: Optional[bool] = None,
-        recall_memory: Optional[bool] = None,
-        persist_memory: Optional[bool] = None,
-        dataset_ids: Optional[List[str]] = None,
+        requested_framework: str | None = None,
+        framework: str | None = None,
+        agent_options: dict[str, Any] | None = None,
+        project_id: str | None = None,
+        interactive: bool | None = None,
+        recall_memory: bool | None = None,
+        persist_memory: bool | None = None,
+        dataset_ids: list[str] | None = None,
     ) -> None:
         """The request configuration a full re-run must reproduce (PRV-004). Never holds keys or secrets."""
         self.request = json_safe({
@@ -877,7 +882,7 @@ class RunRecorder:
             "dataset_ids": [str(d) for d in dataset_ids or [] if d],
         })
 
-    def record_llm_client(self, record: "LLMCallRecord") -> None:
+    def record_llm_client(self, record: LLMCallRecord) -> None:
         """One chat-model client the run created. Identical clients (same role, requested and served model,
         provider) are recorded once."""
         key = (record.role, record.requested_model, record.served_model, record.provider, record.fallback)
@@ -886,7 +891,7 @@ class RunRecorder:
         if len(self._llm_calls) < 50:
             self._llm_calls.append(record)
 
-    def served_models(self) -> List[str]:
+    def served_models(self) -> list[str]:
         return list(dict.fromkeys(r.served_model for r in self._llm_calls))
 
     def add_tool_call(self, record: ToolCallRecord) -> None:
@@ -896,14 +901,14 @@ class RunRecorder:
         return next(self._order)
 
     # --- finalize ------------------------------------------------------------------
-    def _ordered_calls(self) -> List[ToolCallRecord]:
+    def _ordered_calls(self) -> list[ToolCallRecord]:
         # seq follows call start (started_at), with recording order breaking ties.
         ordered = sorted(self._calls, key=lambda c: (c.started_at, c.seq))
         return [c.model_copy(update={"seq": i}) for i, c in enumerate(ordered, start=1)]
 
     async def finalize(
         self, *, response: str, duration: float, framework: str = "authoritative-react-compiler"
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         pending = [t for t in self._tasks if not t.done()]
         if pending:
             # A fixed greeting returns at once; it does not wait for version probes.
@@ -985,7 +990,7 @@ class RunRecorder:
         return client_view(full)
 
 
-_CURRENT: "contextvars.ContextVar[Optional[RunRecorder]]" = contextvars.ContextVar("tribos_run_recorder", default=None)
+_CURRENT: contextvars.ContextVar[RunRecorder | None] = contextvars.ContextVar("tribos_run_recorder", default=None)
 
 
 def activate_recorder(rec: RunRecorder) -> contextvars.Token:
@@ -996,12 +1001,12 @@ def reset_recorder(token: contextvars.Token) -> None:
     _CURRENT.reset(token)
 
 
-def current_recorder() -> Optional[RunRecorder]:
+def current_recorder() -> RunRecorder | None:
     return _CURRENT.get()
 
 
 # Replays must contact the upstreams again (PRV-003): while set, the tool cache is not read (results are still stored).
-_CACHE_BYPASS: "contextvars.ContextVar[bool]" = contextvars.ContextVar("tribos_tool_cache_bypass", default=False)
+_CACHE_BYPASS: contextvars.ContextVar[bool] = contextvars.ContextVar("tribos_tool_cache_bypass", default=False)
 
 
 def cache_reads_disabled() -> bool:
@@ -1021,12 +1026,12 @@ def record_llm_client(
     requested_model: str,
     served_model: str,
     provider: str,
-    base_url: Optional[str] = None,
+    base_url: str | None = None,
     fallback: bool = False,
-    fallback_reason: Optional[str] = None,
+    fallback_reason: str | None = None,
     key_source: str = "server",
-    temperature: Optional[float] = None,
-    max_tokens: Optional[int] = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
     role: str = "llm",
 ) -> None:
     """Record a chat-model client on the active recorder (called by the LLM factory). Must never raise."""
@@ -1053,7 +1058,7 @@ def record_llm_client(
 _RELIABILITY_KEYS = ("cache", "cache_age_s", "fallback_from", "arguments_adjusted", "retries", "breaker", "failure_class")
 
 
-def _reliability_meta(result: Any) -> Dict[str, Any]:
+def _reliability_meta(result: Any) -> dict[str, Any]:
     meta = getattr(result, "metadata", None)
     if not isinstance(meta, dict):
         return {}
@@ -1064,7 +1069,7 @@ def record_tool_call(
     *,
     tool_name: str,
     entry: Any,
-    inputs: Optional[dict],
+    inputs: dict | None,
     raw_inputs: dict,
     result: Any,
     started_at: str,

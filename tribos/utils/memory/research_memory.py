@@ -23,8 +23,10 @@ import re
 import sqlite3
 import time
 import uuid
+from collections.abc import Iterator, Sequence
 from enum import Enum
-from typing import Any, Dict, Iterator, List, Optional, Sequence, Set, Tuple
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from ...extensions.hooks import apply_serialization_filters
@@ -84,7 +86,7 @@ _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?;])\s+|\n+")
 _LEGACY_GOAL_PREFIX = "Research Goal: "
 
 # Contradiction detection: opposite polarity about the same entity, in sentences that share their context.
-_OPPOSING_TERMS: Tuple[Tuple[str, str], ...] = (
+_OPPOSING_TERMS: tuple[tuple[str, str], ...] = (
     ("sensitive", "resistant"),
     ("responsive", "resistant"),
     ("curative", "refractory"),
@@ -101,7 +103,7 @@ _CONTEXT_OVERLAP_MIN = 0.6
 _SKIP_SUMMARY_KEY_RE = re.compile(r"(plot|base64|png|svg|html|path|raw)", re.IGNORECASE)
 
 
-def _require_user(user_id: Optional[str]) -> str:
+def _require_user(user_id: str | None) -> str:
     """Every memory read, delete and clear is scoped to one user; there is no global fallback."""
     if not isinstance(user_id, str) or not user_id.strip():
         raise ValueError("user_id is required for memory access")
@@ -132,12 +134,12 @@ class MemoryNode(BaseModel):
     user_id: str = DEFAULT_USER_ID
     memory_type: MemoryType
     content: str
-    entity_refs: List[str] = Field(default_factory=list)
-    sources: Dict[str, Any] = Field(default_factory=dict)
+    entity_refs: list[str] = Field(default_factory=list)
+    sources: dict[str, Any] = Field(default_factory=dict)
     verification_status: VerificationStatus
     confidence: float = 1.0
     is_contradicted: bool = False
-    contradiction_notes: Optional[str] = None
+    contradiction_notes: str | None = None
     created_at: float
     updated_at: float
 
@@ -145,15 +147,15 @@ class MemoryNode(BaseModel):
 class MemoryContextPackage(BaseModel):
     """Context bundle retrieved at the start of each investigation turn."""
     thread_id: str
-    resolved_subject: Optional[str] = None
-    active_subject: Dict[str, str] = Field(default_factory=dict)
-    user_instructions: List[str] = Field(default_factory=list)  # explicitly scoped (investigation/profile) only
-    query_history: List[str] = Field(default_factory=list)      # earlier questions, oldest first
-    active_hypotheses: List[str] = Field(default_factory=list)
-    verified_evidence: List[str] = Field(default_factory=list)
-    computed_artifacts: List[str] = Field(default_factory=list)
-    failure_lessons: List[str] = Field(default_factory=list)
-    recent_dialogue_turns: List[Dict[str, str]] = Field(default_factory=list)
+    resolved_subject: str | None = None
+    active_subject: dict[str, str] = Field(default_factory=dict)
+    user_instructions: list[str] = Field(default_factory=list)  # explicitly scoped (investigation/profile) only
+    query_history: list[str] = Field(default_factory=list)      # earlier questions, oldest first
+    active_hypotheses: list[str] = Field(default_factory=list)
+    verified_evidence: list[str] = Field(default_factory=list)
+    computed_artifacts: list[str] = Field(default_factory=list)
+    failure_lessons: list[str] = Field(default_factory=list)
+    recent_dialogue_turns: list[dict[str, str]] = Field(default_factory=list)
 
     def to_system_prompt_injection(self) -> str:
         """Format clean memory context string for supervisor LLM."""
@@ -180,7 +182,7 @@ class MemoryContextPackage(BaseModel):
         if self.computed_artifacts:
             sections.append("### Prior Computational Artifacts (Vivarix/Lumicell):\n" + "\n".join(f"- {a}" for a in self.computed_artifacts[:MAX_COMPUTED]))
         if self.failure_lessons:
-            sections.append("### Audit Warnings (Avoid Prior Defects):\n" + "\n".join(f"- ⚠️ {l}" for l in self.failure_lessons[:MAX_LESSONS]))
+            sections.append("### Audit Warnings (Avoid Prior Defects):\n" + "\n".join(f"- ⚠️ {lesson}" for lesson in self.failure_lessons[:MAX_LESSONS]))
 
         if not sections:
             return "No prior investigation history recorded for this thread."
@@ -191,9 +193,9 @@ class MemoryContextPackage(BaseModel):
 MemoryRecallResult = MemoryContextPackage
 
 
-def classify_instructions(query: str) -> List[Tuple[str, str]]:
+def classify_instructions(query: str) -> list[tuple[str, str]]:
     """Split a question into (instruction sentence, scope) pairs. Sentences without a directive are not instructions."""
-    out: List[Tuple[str, str]] = []
+    out: list[tuple[str, str]] = []
     for sentence in _SENTENCE_SPLIT_RE.split(query or ""):
         s = sentence.strip()
         if not s:
@@ -235,7 +237,7 @@ def summarize_tool_data(data: Any, tool_key: str = "") -> str:
         return " ".join(data.split())[:_SUMMARY_MAX]
     if not isinstance(data, dict):
         return " ".join(str(data).split())[:_SUMMARY_MAX]
-    parts: List[str] = []
+    parts: list[str] = []
     for key, value in data.items():
         if _SKIP_SUMMARY_KEY_RE.search(str(key)) or value in (None, "", [], {}):
             continue
@@ -275,7 +277,7 @@ def _has_term(sentence: str, term: str) -> bool:
     return False
 
 
-def _context_tokens(sentence: str) -> Set[str]:
+def _context_tokens(sentence: str) -> set[str]:
     return {
         w.lower()
         for w in re.findall(r"[A-Za-z0-9]+", sentence)
@@ -283,7 +285,7 @@ def _context_tokens(sentence: str) -> Set[str]:
     }
 
 
-def _sentences_about(text: str, entity: str) -> List[str]:
+def _sentences_about(text: str, entity: str) -> list[str]:
     pattern = re.compile(rf"\b{re.escape(entity)}\b")
     return [s for s in _SENTENCE_SPLIT_RE.split(text or "") if pattern.search(s)]
 
@@ -311,7 +313,7 @@ def _strip_label(content: str) -> str:
     return body if sep else content or ""
 
 
-def _clean_subject(subject: Optional[Dict[str, Any]]) -> Dict[str, str]:
+def _clean_subject(subject: dict[str, Any] | None) -> dict[str, str]:
     if not isinstance(subject, dict):
         return {}
     return {
@@ -331,7 +333,7 @@ def _count(value: Any) -> int:
     return 0
 
 
-def unresolved_claim_count(verification: Optional[Dict[str, Any]]) -> Optional[int]:
+def unresolved_claim_count(verification: dict[str, Any] | None) -> int | None:
     """Unsupported + contradicted + unchecked claims in a verification report (or its counts); None when unknown."""
     if not isinstance(verification, dict):
         return None
@@ -341,7 +343,7 @@ def unresolved_claim_count(verification: Optional[Dict[str, Any]]) -> Optional[i
     return sum(_count(verification.get(k)) for k in keys)
 
 
-def turn_fully_verified(is_turn_verified: bool, verification: Optional[Dict[str, Any]] = None) -> bool:
+def turn_fully_verified(is_turn_verified: bool, verification: dict[str, Any] | None = None) -> bool:
     """Whether a turn's tool evidence may be stored as verified: the turn passed AND, when its report is given, it
     left no unsupported, contradicted or unchecked claims (a report's ``passed`` alone tolerates unsupported claims)."""
     if not is_turn_verified:
@@ -354,7 +356,7 @@ def turn_fully_verified(is_turn_verified: bool, verification: Optional[Dict[str,
     return not unresolved
 
 
-def _sources_of(row: sqlite3.Row) -> Dict[str, Any]:
+def _sources_of(row: sqlite3.Row) -> dict[str, Any]:
     try:
         value = json.loads(row["sources_json"] or "{}")
     except (TypeError, ValueError):
@@ -370,7 +372,7 @@ class ResearchMemoryEngine:
     coroutines run them via asyncio.to_thread so event-loop callers do not block on SQLite.
     """
 
-    def __init__(self, storage_dir: Optional[str] = None) -> None:
+    def __init__(self, storage_dir: str | None = None) -> None:
         if storage_dir is None:
             storage_dir = os.getenv("TRIBOS_MEMORY_DIR") or None
         if storage_dir is None:
@@ -462,8 +464,8 @@ class ResearchMemoryEngine:
     # ENTITY EXTRACTION
     # -------------------------------------------------------------------------
     @staticmethod
-    def extract_entities(text: str) -> Dict[str, List[str]]:
-        entities: Dict[str, List[str]] = {
+    def extract_entities(text: str) -> dict[str, list[str]]:
+        entities: dict[str, list[str]] = {
             "targets": [],
             "biomodels": [],
             "diseases": [],
@@ -485,7 +487,7 @@ class ResearchMemoryEngine:
     # -------------------------------------------------------------------------
     # PROBABILISTIC BM25 EVALUATION RETRIEVAL (No Keyword Counting Mock)
     # -------------------------------------------------------------------------
-    def _bm25_score(self, query_terms: List[str], doc_tokens: List[str], df_counts: Dict[str, int], total_docs: int, avg_doc_len: float) -> float:
+    def _bm25_score(self, query_terms: list[str], doc_tokens: list[str], df_counts: dict[str, int], total_docs: int, avg_doc_len: float) -> float:
         """
         True Okapi BM25 scoring with document length normalization and inverse document frequency.
         """
@@ -507,16 +509,16 @@ class ResearchMemoryEngine:
         return score
 
     @staticmethod
-    def _query_terms(query: str) -> List[str]:
+    def _query_terms(query: str) -> list[str]:
         return [w.lower() for w in re.split(r"\W+", query or "") if len(w) > 2]
 
-    def _rank_rows(self, rows: Sequence[sqlite3.Row], query_terms: List[str]) -> Dict[str, float]:
+    def _rank_rows(self, rows: Sequence[sqlite3.Row], query_terms: list[str]) -> dict[str, float]:
         """BM25 score (with entity and verification boosts) for each row id."""
         total_docs = len(rows)
         if not total_docs or not query_terms:
             return {}
-        doc_token_map: Dict[str, List[str]] = {}
-        df_counts: Dict[str, int] = {}
+        doc_token_map: dict[str, list[str]] = {}
+        df_counts: dict[str, int] = {}
         total_len = 0
         for r in rows:
             tokens = [t.lower() for t in re.split(r"\W+", r["content"]) if len(t) > 2]
@@ -527,7 +529,7 @@ class ResearchMemoryEngine:
         avg_doc_len = total_len / max(1, total_docs)
         lowered_terms = {q.lower() for q in query_terms}
 
-        scores: Dict[str, float] = {}
+        scores: dict[str, float] = {}
         for r in rows:
             score = self._bm25_score(query_terms, doc_token_map[r["id"]], df_counts, total_docs, avg_doc_len)
             try:
@@ -544,11 +546,11 @@ class ResearchMemoryEngine:
     def search_memory(
         self,
         query: str,
-        thread_id: Optional[str] = None,
+        thread_id: str | None = None,
         user_id: str = DEFAULT_USER_ID,
-        memory_types: Optional[List[MemoryType]] = None,
+        memory_types: list[MemoryType] | None = None,
         top_k: int = 5,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Search one user's memory nodes using Okapi BM25 ranking, optionally within one thread.
         """
@@ -559,7 +561,7 @@ class ResearchMemoryEngine:
         top_k = max(1, min(int(top_k or 5), 50))
 
         query_parts = ["is_contradicted = 0", "user_id = ?"]
-        params: List[Any] = [user_id]
+        params: list[Any] = [user_id]
         if thread_id:
             query_parts.append("thread_id = ?")
             params.append(thread_id)
@@ -603,7 +605,7 @@ class ResearchMemoryEngine:
         new_assertion: str,
         conn: sqlite3.Connection,
         user_id: str = DEFAULT_USER_ID,
-    ) -> Optional[str]:
+    ) -> str | None:
         """
         Audit this user's prior evidence about the same entity in this thread. A prior node is demoted only when
         a sentence about the entity takes the opposite polarity in a sentence that shares its context.
@@ -672,8 +674,8 @@ class ResearchMemoryEngine:
         user_id: str,
         memory_type: MemoryType,
         content: str,
-        entity_refs: List[str],
-        sources: Dict[str, Any],
+        entity_refs: list[str],
+        sources: dict[str, Any],
         status: VerificationStatus,
         confidence: float,
         now: float,
@@ -705,13 +707,13 @@ class ResearchMemoryEngine:
         thread_id: str,
         query: str,
         response: str,
-        tool_results: Dict[str, Any],
-        failure_lesson: Optional[str] = None,
+        tool_results: dict[str, Any],
+        failure_lesson: str | None = None,
         user_id: str = DEFAULT_USER_ID,
         is_turn_verified: bool = False,
-        active_subject: Optional[Dict[str, Any]] = None,
-        verification: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        active_subject: dict[str, Any] | None = None,
+        verification: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """
         Selectively consolidate investigation turn into structured memory nodes.
         Never promotes unverified model markdown text or unvalidated tool runs to verified empirical evidence.
@@ -723,7 +725,7 @@ class ResearchMemoryEngine:
         turn_verified = turn_fully_verified(is_turn_verified, verification)
         now = time.time()
         nodes_created = 0
-        entities_updated: List[str] = []
+        entities_updated: list[str] = []
         turn_id = uuid.uuid4().hex[:12]
 
         with self._connect() as conn:
@@ -830,13 +832,13 @@ class ResearchMemoryEngine:
         thread_id: str,
         query: str,
         response: str,
-        tool_results: Dict[str, Any],
-        failure_lesson: Optional[str] = None,
+        tool_results: dict[str, Any],
+        failure_lesson: str | None = None,
         user_id: str = DEFAULT_USER_ID,
         is_turn_verified: bool = False,
-        active_subject: Optional[Dict[str, Any]] = None,
-        verification: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        active_subject: dict[str, Any] | None = None,
+        verification: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Async consolidation: SQLite work runs in a worker thread so the event loop is not blocked."""
         _require_user(user_id)
         try:
@@ -862,7 +864,7 @@ class ResearchMemoryEngine:
     # ACTIVE SUBJECT (follow-up resolution)
     # -------------------------------------------------------------------------
     @staticmethod
-    def _write_active_subject(conn: sqlite3.Connection, user_id: str, thread_id: str, subject: Dict[str, str], now: float) -> None:
+    def _write_active_subject(conn: sqlite3.Connection, user_id: str, thread_id: str, subject: dict[str, str], now: float) -> None:
         # The latest turn's subject replaces the previous one: a switch from KRAS to BRAF does not keep KRAS.
         conn.execute(
             """
@@ -873,7 +875,7 @@ class ResearchMemoryEngine:
         )
 
     @staticmethod
-    def _read_active_subject(conn: sqlite3.Connection, user_id: str, thread_id: str) -> Optional[Dict[str, str]]:
+    def _read_active_subject(conn: sqlite3.Connection, user_id: str, thread_id: str) -> dict[str, str] | None:
         row = conn.execute(
             "SELECT subject_json FROM active_subjects WHERE user_id = ? AND thread_id = ?", (user_id, thread_id)
         ).fetchone()
@@ -885,7 +887,7 @@ class ResearchMemoryEngine:
             return None
         return subject or None
 
-    def record_active_subject(self, user_id: str, thread_id: str, subject: Optional[Dict[str, Any]]) -> Optional[Dict[str, str]]:
+    def record_active_subject(self, user_id: str, thread_id: str, subject: dict[str, Any] | None) -> dict[str, str] | None:
         """Store the subject (gene/drug/disease/biomodel_id) of the latest turn. Empty subjects are ignored."""
         user_id = _require_user(user_id)
         clean = _clean_subject(subject)
@@ -895,20 +897,20 @@ class ResearchMemoryEngine:
             self._write_active_subject(conn, user_id, thread_id, clean, time.time())
         return clean
 
-    def get_active_subject(self, user_id: str, thread_id: str) -> Optional[Dict[str, str]]:
+    def get_active_subject(self, user_id: str, thread_id: str) -> dict[str, str] | None:
         """The subject a follow-up such as "What about its safety?" refers to, or None."""
         user_id = _require_user(user_id)
         with self._connect() as conn:
             return self._read_active_subject(conn, user_id, thread_id)
 
-    async def aget_active_subject(self, user_id: str, thread_id: str) -> Optional[Dict[str, str]]:
+    async def aget_active_subject(self, user_id: str, thread_id: str) -> dict[str, str] | None:
         return await asyncio.to_thread(self.get_active_subject, user_id, thread_id)
 
     # -------------------------------------------------------------------------
     # CONTEXT EXTRACTION & CLEANUP
     # -------------------------------------------------------------------------
     def get_context_package(
-        self, thread_id: str, user_id: str = DEFAULT_USER_ID, query: Optional[str] = None
+        self, thread_id: str, user_id: str = DEFAULT_USER_ID, query: str | None = None
     ) -> MemoryContextPackage:
         """
         Extract a bounded memory package for one user and thread. With `query`, evidence is ranked by BM25
@@ -940,9 +942,9 @@ class ResearchMemoryEngine:
             pkg.active_subject = subject
             pkg.resolved_subject = next((subject[k] for k in SUBJECT_KEYS if subject.get(k)), None)
 
-        instructions: List[str] = []
-        history: List[str] = []
-        evidence_rows: List[sqlite3.Row] = []
+        instructions: list[str] = []
+        history: list[str] = []
+        evidence_rows: list[sqlite3.Row] = []
         for r in rows:
             m_type = r["memory_type"]
             sources = _sources_of(r)
@@ -991,7 +993,7 @@ class ResearchMemoryEngine:
                     pkg.active_hypotheses.append(content)
         return pkg
 
-    async def arecall(self, thread_id: str, user_id: str = DEFAULT_USER_ID, query: Optional[str] = None) -> MemoryContextPackage:
+    async def arecall(self, thread_id: str, user_id: str = DEFAULT_USER_ID, query: str | None = None) -> MemoryContextPackage:
         return await asyncio.to_thread(self.get_context_package, thread_id, user_id, query)
 
     def clear_thread_memory(self, thread_id: str, user_id: str = DEFAULT_USER_ID) -> None:
@@ -1017,7 +1019,7 @@ class ResearchMemoryEngine:
             conn.execute("DELETE FROM memory_nodes WHERE user_id = ?", (user_id,))
             conn.execute("DELETE FROM active_subjects WHERE user_id = ?", (user_id,))
 
-    def get_memory_stats(self, user_id: str = DEFAULT_USER_ID) -> Dict[str, Any]:
+    def get_memory_stats(self, user_id: str = DEFAULT_USER_ID) -> dict[str, Any]:
         """Return memory vault metrics for one user."""
         user_id = _require_user(user_id)
         with self._connect() as conn:
@@ -1048,7 +1050,7 @@ class ResearchMemoryEngine:
             "total_contradictions_resolved": total_contras,
         }
 
-    def get_conversation_history(self, thread_id: str, user_id: str = DEFAULT_USER_ID) -> List[Dict[str, Any]]:
+    def get_conversation_history(self, thread_id: str, user_id: str = DEFAULT_USER_ID) -> list[dict[str, Any]]:
         """Return one user's conversational history (questions, instructions, answers) for a thread."""
         user_id = _require_user(user_id)
         with self._connect() as conn:
@@ -1065,20 +1067,20 @@ class ResearchMemoryEngine:
             ).fetchall()
             return [dict(r) for r in rows]
 
-    async def aget_conversation_history(self, thread_id: str, user_id: str = DEFAULT_USER_ID) -> List[Dict[str, Any]]:
+    async def aget_conversation_history(self, thread_id: str, user_id: str = DEFAULT_USER_ID) -> list[dict[str, Any]]:
         return await asyncio.to_thread(self.get_conversation_history, thread_id, user_id)
 
     async def asearch_memory(
         self,
         query: str,
-        thread_id: Optional[str] = None,
+        thread_id: str | None = None,
         user_id: str = DEFAULT_USER_ID,
-        memory_types: Optional[List[MemoryType]] = None,
+        memory_types: list[MemoryType] | None = None,
         top_k: int = 5,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         return await asyncio.to_thread(self.search_memory, query, thread_id, user_id, memory_types, top_k)
 
-    def get_entity_vault(self, user_id: str = DEFAULT_USER_ID) -> List[Dict[str, Any]]:
+    def get_entity_vault(self, user_id: str = DEFAULT_USER_ID) -> list[dict[str, Any]]:
         """Return entity assertions aggregated from one user's memory nodes."""
         user_id = _require_user(user_id)
         with self._connect() as conn:
@@ -1086,7 +1088,7 @@ class ResearchMemoryEngine:
                 "SELECT entity_refs_json, created_at FROM memory_nodes WHERE user_id = ? AND is_contradicted = 0",
                 (user_id,),
             ).fetchall()
-        agg: Dict[str, Dict[str, Any]] = {}
+        agg: dict[str, dict[str, Any]] = {}
         for r in rows:
             try:
                 refs = json.loads(r["entity_refs_json"] or "[]")
@@ -1100,13 +1102,13 @@ class ResearchMemoryEngine:
         return sorted(agg.values(), key=lambda x: x["mention_count"], reverse=True)
 
     @staticmethod
-    def collect_identifiers(data: Any, tool_key: str = "") -> Dict[str, List[str]]:
+    def collect_identifiers(data: Any, tool_key: str = "") -> dict[str, list[str]]:
         """
         Extract canonical identifiers from a tool output: BioModels, PMIDs, DOIs, Ensembl and UniProt, plus
         every identifier family (NCT, ChEMBL, HGNC, ...). Registered serialization filters run first.
         """
         data = apply_serialization_filters(tool_key, data)
-        ids: Dict[str, Set[str]] = {k: set() for k in (*_LEGACY_ID_KEYS, *family_names())}
+        ids: dict[str, set[str]] = {k: set() for k in (*_LEGACY_ID_KEYS, *family_names())}
         if isinstance(data, dict):
             if data.get("model_id"):
                 ids["biomodels"].add(str(data["model_id"]))
@@ -1124,13 +1126,13 @@ class ResearchMemoryEngine:
             ids[name].update(found)
         return {k: sorted(v) for k, v in ids.items()}
 
-    def get_verified_identifiers(self, thread_id: str, user_id: str = DEFAULT_USER_ID) -> Dict[str, Set[str]]:
+    def get_verified_identifiers(self, thread_id: str, user_id: str = DEFAULT_USER_ID) -> dict[str, set[str]]:
         """Identifiers observed by tools in this user's earlier verified turns of this thread (for the verifier).
 
         A kinetic model's output is stored provisional (it is model output, not clinical evidence), but the model id
         a verified turn observed is still an observed identifier: its node records turn_verified."""
         user_id = _require_user(user_id)
-        result: Dict[str, Set[str]] = {k: set() for k in (*_LEGACY_ID_KEYS, *family_names())}
+        result: dict[str, set[str]] = {k: set() for k in (*_LEGACY_ID_KEYS, *family_names())}
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT content, sources_json, verification_status FROM memory_nodes WHERE thread_id = ? AND user_id = ? "
@@ -1156,11 +1158,11 @@ class ResearchMemoryEngine:
             result["biomodels"].update(KNOWN_BIOMODEL_PATTERN.findall(r["content"] or ""))
         return result
 
-    async def aget_verified_identifiers(self, thread_id: str, user_id: str = DEFAULT_USER_ID) -> Dict[str, Set[str]]:
+    async def aget_verified_identifiers(self, thread_id: str, user_id: str = DEFAULT_USER_ID) -> dict[str, set[str]]:
         return await asyncio.to_thread(self.get_verified_identifiers, thread_id, user_id)
 
 
-_GLOBAL_RESEARCH_MEMORY: Optional[ResearchMemoryEngine] = None
+_GLOBAL_RESEARCH_MEMORY: ResearchMemoryEngine | None = None
 
 
 def get_research_memory_engine() -> ResearchMemoryEngine:

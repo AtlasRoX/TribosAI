@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import io
-from typing import Any, List
+from typing import Any
 
 from .markdown_blocks import Block, Run, parse_blocks
 from .pdf_renderer import BRAND_MARK, BRAND_WORDMARK
 from .report_model import (
-    ReportModel, citation_line, fmt_number, question_is_title, report_headline, report_kind, task_lines,
+    ReportModel,
+    citation_line,
+    fmt_number,
+    question_is_title,
+    report_headline,
+    report_kind,
+    task_lines,
     verification_lines,
 )
 
@@ -21,22 +27,56 @@ _NAVY = (0x18, 0x1E, 0x48)
 _MUTED = (0x5F, 0x63, 0x68)
 
 
-def _add_runs(par: Any, runs: List[Run], *, force_bold: bool = False) -> None:
+def _add_runs(par: Any, runs: list[Run], *, force_bold: bool = False) -> None:
+    import io
+
     from docx.shared import Pt
+    from PIL import Image
+
+    from .equation_renderer import MATH_TOKEN_RE, render_latex_to_png
 
     for r in runs:
         if not r.text:
             continue
-        run = par.add_run(r.text)
-        run.bold = r.bold or force_bold or None
-        run.italic = r.italic or None
-        if r.strike:
-            run.font.strike = True
         if r.code:
+            run = par.add_run(r.text)
+            run.bold = r.bold or force_bold or None
+            run.italic = r.italic or None
+            if r.strike:
+                run.font.strike = True
             run.font.name = _CODE_FONT
             run.font.size = Pt(9)
-        if r.link:
-            run.underline = True
+            if r.link:
+                run.underline = True
+            continue
+
+        pieces = MATH_TOKEN_RE.split(r.text)
+        for piece in pieces:
+            if not piece:
+                continue
+            is_math = (piece.startswith("$$") and piece.endswith("$$") and len(piece) >= 4) or (
+                piece.startswith("$") and piece.endswith("$") and len(piece) >= 2
+            )
+            if is_math:
+                png = render_latex_to_png(piece)
+                if png:
+                    try:
+                        with Image.open(io.BytesIO(png)) as img:
+                            w_px, h_px = img.size
+                        h_pt = max(6.0, h_px * 72.0 / 180.0)
+                        w_pt = max(6.0, min(w_px * 72.0 / 180.0, 480.0))
+                        sub_run = par.add_run()
+                        sub_run.add_picture(io.BytesIO(png), width=Pt(w_pt), height=Pt(h_pt))
+                        continue
+                    except Exception:
+                        pass
+            sub_run = par.add_run(piece)
+            sub_run.bold = r.bold or force_bold or None
+            sub_run.italic = r.italic or None
+            if r.strike:
+                sub_run.font.strike = True
+            if r.link:
+                sub_run.underline = True
 
 
 def _list_style(block: Block) -> str:
@@ -44,7 +84,7 @@ def _list_style(block: Block) -> str:
     return base if block.depth <= 1 else f"{base} {min(block.depth, 3)}"
 
 
-def _add_table(doc: Any, header: List[Any], rows: List[List[Any]], *, runs_mode: bool) -> None:
+def _add_table(doc: Any, header: list[Any], rows: list[list[Any]], *, runs_mode: bool) -> None:
     from docx.shared import Pt
 
     spacer = doc.add_paragraph()  # tables take no space before them; keep them off the text above
@@ -111,6 +151,29 @@ def add_markdown(doc: Any, text: str, *, base_level: int = 2) -> None:
             par = doc.add_heading("", level=min(base_level + (b.level - top), 4))
             _add_runs(par, b.runs)
         elif b.type == "paragraph":
+            plain = "".join(r.text for r in b.runs).strip()
+            if plain.startswith("$$") and plain.endswith("$$") and len(plain) >= 4:
+                from .equation_renderer import render_latex_to_png
+                png = render_latex_to_png(plain)
+                if png:
+                    try:
+                        import io
+
+                        from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+                        from PIL import Image
+                        with Image.open(io.BytesIO(png)) as img:
+                            w_px, h_px = img.size
+                        h_pt = max(10.0, h_px * 72.0 / 180.0)
+                        w_pt = max(10.0, min(w_px * 72.0 / 180.0, 480.0))
+                        eq_par = doc.add_paragraph()
+                        eq_par.paragraph_format.space_before = Pt(4)
+                        eq_par.paragraph_format.space_after = Pt(4)
+                        eq_par.paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                        r = eq_par.add_run()
+                        r.add_picture(io.BytesIO(png), width=Pt(w_pt), height=Pt(h_pt))
+                        continue
+                    except Exception:
+                        pass
             if b.list_kind:
                 style = _list_style(b) if b.first_in_item else None
                 par = doc.add_paragraph(style=style)
@@ -269,7 +332,7 @@ def _title_block(doc: Any, report: ReportModel) -> None:
     grid = doc.add_table(rows=0, cols=cols)
     for start in range(0, len(facts), cols):
         cells = grid.add_row().cells
-        for cell, (label, value) in zip(cells, facts[start:start + cols]):
+        for cell, (label, value) in zip(cells, facts[start:start + cols], strict=False):
             label_par = cell.paragraphs[0]
             label_par.paragraph_format.space_after = Pt(0)
             label_run = label_par.add_run(label.upper())

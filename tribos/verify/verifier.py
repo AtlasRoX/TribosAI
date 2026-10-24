@@ -17,8 +17,10 @@ import html
 import json
 import logging
 import re
+from collections.abc import Callable, Iterable
 from enum import Enum
-from typing import Any, Callable, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple
+from typing import Any, NamedTuple
+
 from pydantic import BaseModel, Field
 
 from ..extensions.hooks import (
@@ -30,9 +32,16 @@ from ..extensions.hooks import (
 )
 from ..extensions.id_families import FAMILIES, extract_family_ids, normalize_ids
 from ..tools.registry import ToolResult
+
 # sentence_spans lives in utils.text and is re-exported here (citations, the orchestrator and tests import it).
 from ..utils.source_authority import URL_FIELDS, is_fda_url, is_regulatory_url, record_url
-from ..utils.text import TYPOGRAPHY_FOLD, _TABLE_LINE_RE, find_folded, fold_typography, sentence_spans  # noqa: F401
+from ..utils.text import (  # noqa: F401
+    _TABLE_LINE_RE,
+    TYPOGRAPHY_FOLD,
+    find_folded,
+    fold_typography,
+    sentence_spans,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,15 +69,15 @@ class DefectItem(BaseModel):
     severity: DefectSeverity
     description: str
     suggested_correction: str
-    claim: Optional[str] = None
+    claim: str | None = None
     # The answer sentence (or table row) exactly as written, for claim-audit defects; lets a caller remove it.
-    sentence: Optional[str] = None
+    sentence: str | None = None
 
 
 class ClaimEvidence(BaseModel):
     source_key: str
     passage: str = ""  # excerpt the judgment rests on, for reviewers
-    passage_id: Optional[str] = None
+    passage_id: str | None = None
 
 
 class ClaimRecord(BaseModel):
@@ -77,29 +86,29 @@ class ClaimRecord(BaseModel):
     claim_id: str
     claim_type: str  # clinical | mechanistic | computational | absence | operational (a tool or lookup outcome)
     claim_text: str
-    evidence: List[ClaimEvidence] = Field(default_factory=list)
+    evidence: list[ClaimEvidence] = Field(default_factory=list)
     status: str
     reason: str = ""
     # For a claim that cites PMID/DOI sources whose retrieved text was checked: False when the support comes from a
     # different document than the one cited (the cited source did not back it). None when nothing was cited or the
     # cited text was not retrieved.
-    cited_source_supported: Optional[bool] = None
+    cited_source_supported: bool | None = None
 
 
 class VerificationReport(BaseModel):
     passed: bool
     verification_score: float  # 0.0 to 1.0; not a probability of correctness
-    defects: List[DefectItem] = Field(default_factory=list)
-    verified_identifiers: List[str] = Field(default_factory=list)
+    defects: list[DefectItem] = Field(default_factory=list)
+    verified_identifiers: list[str] = Field(default_factory=list)
     numerical_checks_passed: int = 0
     numerical_checks_failed: int = 0
-    failure_lesson: Optional[str] = None
+    failure_lesson: str | None = None
     # Clinical sentences the claim audit grounded: {"sentence", "evidence_key", "passage_id"}
-    claim_support: List[Dict[str, Any]] = Field(default_factory=list)
+    claim_support: list[dict[str, Any]] = Field(default_factory=list)
     # Identifiers excluded by registered vetoes (e.g. retracted articles), as "PMID:<id>", "DOI:<doi>", "<LABEL>:<id>"
-    vetoed_identifiers: List[str] = Field(default_factory=list)
+    vetoed_identifiers: list[str] = Field(default_factory=list)
     # Claim-level audit: every material claim with its evidence and status
-    claims: List[ClaimRecord] = Field(default_factory=list)
+    claims: list[ClaimRecord] = Field(default_factory=list)
     contradicted_claims: int = 0
     unsupported_claims: int = 0
     unchecked_claims: int = 0
@@ -199,7 +208,7 @@ def is_regulatory_claim(text: str) -> bool:
     return bool(_REGULATORY_CLAIM_RE.search(text or ""))
 
 
-def _key_has(key: str, names: Tuple[str, ...]) -> bool:
+def _key_has(key: str, names: tuple[str, ...]) -> bool:
     k = (key or "").lower()
     return k.startswith("tool:") and any(n in k for n in names)
 
@@ -207,7 +216,7 @@ def _key_has(key: str, names: Tuple[str, ...]) -> bool:
 _FDA_CLAIM_RE = re.compile(r"\bfda\b|drugs@fda|\b(?:nda|bla)\s*\d{5,6}\b", re.IGNORECASE)
 
 
-def is_regulatory_doc(doc: "_Doc", claim: str = "") -> bool:
+def is_regulatory_doc(doc: _Doc, claim: str = "") -> bool:
     """A regulatory record: an openFDA/Drugs@FDA tool record, or a web page whose own recorded URL (final URL after
     redirects) is on a regulator's host; an FDA claim (or no claim given) needs fda.gov or one of its subdomains. A URL
     quoted in a page's text is a citation, not the page's origin, and origin alone never establishes that the record
@@ -221,7 +230,7 @@ def is_regulatory_doc(doc: "_Doc", claim: str = "") -> bool:
     return is_regulatory_url(doc.url)
 
 
-def is_non_clinical_doc(doc: "_Doc") -> bool:
+def is_non_clinical_doc(doc: _Doc) -> bool:
     return _key_has(doc.key, _NON_CLINICAL_SOURCE_KEYS)
 
 
@@ -261,10 +270,10 @@ def _binding_label(text: str, start: int, end: int) -> str:
     return " ".join(window.split()[-4:])
 
 
-def sample_size_bindings(text: str) -> List[Tuple[int, Set[str]]]:
+def sample_size_bindings(text: str) -> list[tuple[int, set[str]]]:
     """(count, words naming what it counts) for each sample size in `text` (lowercased)."""
     low = text.lower()
-    out: List[Tuple[int, Set[str]]] = []
+    out: list[tuple[int, set[str]]] = []
     for m in _N_EQ_RE.finditer(low):
         words = set(re.findall(r"[a-z0-9][a-z0-9\-+]*", _binding_label(low, m.start(), m.end())))
         out.append((int(m.group(1)), words))
@@ -278,17 +287,17 @@ def sample_size_bindings(text: str) -> List[Tuple[int, Set[str]]]:
     return out
 
 
-def extract_drug_mentions(text: str) -> List[str]:
+def extract_drug_mentions(text: str) -> list[str]:
     """Drug-name extraction was part of the removed biomedical layer; no names are recognised."""
     return []
 
 
-def _distinctive(words: Set[str], drugs: Set[str]) -> Set[str]:
+def _distinctive(words: set[str], drugs: set[str]) -> set[str]:
     """The words of a binding label that single out a subgroup or arm: a protein change (G12C) or a drug name."""
     return {w for w in words if _PROTEIN_CHANGE_RE.match(w) or w in drugs}
 
 
-def denominator_mismatch(claim: str, doc_text: str) -> Optional[str]:
+def denominator_mismatch(claim: str, doc_text: str) -> str | None:
     """'n=45 counts <another group> in the source; KRAS G12C is n=16' when the claim gives a subgroup or arm a sample
     size that the source binds to a different group, while the source gives that subgroup or arm its own size."""
 
@@ -314,7 +323,7 @@ def denominator_mismatch(claim: str, doc_text: str) -> Optional[str]:
     return None
 
 
-def judge_relation_error(verdict: Dict[str, Any]) -> Optional[str]:
+def judge_relation_error(verdict: dict[str, Any]) -> str | None:
     """The judge's concrete scope error (wrong subgroup, arm, denominator, endpoint or time point), or None for an
     inconclusive verdict. A structured ``relation_error`` field is taken as is."""
     explicit = verdict.get("relation_error") or verdict.get("error_type")
@@ -360,7 +369,7 @@ def is_operational_claim(text: str) -> bool:
     return bool(_OPERATIONAL_RE.search(text or ""))
 
 
-def regimen_mismatch(text: str) -> Optional[str]:
+def regimen_mismatch(text: str) -> str | None:
     """'<A> + <B> is a combination, not monotherapy' when the text calls a regimen monotherapy (or single-agent) and,
     next to that word with no comparator between, names two drugs joined as a combination ("ifebemtinib plus
     garsorasib monotherapy"). "Sotorasib monotherapy versus sotorasib plus panitumumab" compares two regimens and
@@ -370,7 +379,7 @@ def regimen_mismatch(text: str) -> Optional[str]:
     names = [n for n in extract_drug_mentions(text or "") if not n.upper().startswith("CHEMBL")]
     spots = sorted((m.start(), m.end(), n) for n in names for m in re.finditer(rf"\b{re.escape(n)}\b", low))
     pairs = [
-        (a, b) for a, b in zip(spots, spots[1:])
+        (a, b) for a, b in zip(spots, spots[1:], strict=False)
         if a[2] != b[2] and _COMBINATION_JOIN_RE.fullmatch(low[a[1]:b[0]])
     ]
     for mono in _MONOTHERAPY_RE.finditer(low):
@@ -406,14 +415,14 @@ def in_non_simulation_table(text: str, pos: int) -> bool:
     return not _SIM_TABLE_HEADER_RE.search(header)
 
 
-def article_unions(docs: List["_Doc"]) -> List["_Doc"]:
+def article_unions(docs: list[_Doc]) -> list[_Doc]:
     """One extra document per article (PMID/DOI key) with several retrieved passages: their joined text. A paper's
     figures are often spread over its abstract and a results chunk; each passage alone lacks some of them."""
-    by_key: Dict[str, List["_Doc"]] = {}
+    by_key: dict[str, list[_Doc]] = {}
     for d in docs:
         if d.key.startswith(("PMID:", "DOI:")):
             by_key.setdefault(d.key, []).append(d)
-    out: List["_Doc"] = []
+    out: list[_Doc] = []
     for key, parts in by_key.items():
         texts = list(dict.fromkeys(p.text for p in parts))
         if len(texts) > 1:
@@ -483,7 +492,7 @@ _FUNCTION_WORDS = {
 
 # Clinical endpoints a figure can belong to. Earlier patterns win where spans overlap
 # ("progression-free survival" is PFS, not OS).
-_ENDPOINT_PATTERNS: Tuple[Tuple[str, re.Pattern], ...] = (
+_ENDPOINT_PATTERNS: tuple[tuple[str, re.Pattern], ...] = (
     ("pfs", re.compile(r"(?:radiographic\s+|immune[\s\-]*related\s+)?progression[\s\-]*free(?:\s+survival)?|\b(?:r?pfs|irpfs)\b", re.IGNORECASE)),
     ("efs", re.compile(r"(?:event|disease|relapse|recurrence|metastasis)[\s\-]*free(?:\s+survival)?|\b(?:efs|dfs|rfs|mfs)\b", re.IGNORECASE)),
     ("dor", re.compile(r"duration\s+of\s+(?:the\s+)?response|\bdor\b", re.IGNORECASE)),
@@ -535,7 +544,7 @@ _UNIT_FAMILY = {"%": "%", "percent": "%", "per cent": "%", "month": "months", "m
 
 # Predicates whose polarity can be compared between a claim and a passage. Verb forms only, so nouns such as
 # "KRAS inhibitors" are not read as statements.
-_PREDICATE_GROUPS: Tuple[Tuple[str, re.Pattern], ...] = (
+_PREDICATE_GROUPS: tuple[tuple[str, re.Pattern], ...] = (
     ("improve", re.compile(r"\b(?:improv(?:e|es|ed|ing|ement|ements)|prolong(?:s|ed|ing)?|extend(?:s|ed|ing)?|"
                            r"benefit(?:s|ed|ted)?|superior|outperform(?:s|ed)?)\b", re.IGNORECASE)),
     ("increase", re.compile(r"\b(?:increas(?:e|es|ed|ing)|elevat(?:e|es|ed|ing)|upregulat(?:e|es|ed|ing|ion)|enhanc(?:e|es|ed|ing))\b", re.IGNORECASE)),
@@ -562,12 +571,12 @@ RELATION_MISMATCH_PREFIX = "numeric relation mismatch:"
 class _Doc(NamedTuple):
     key: str  # 'PMID:<id>', 'DOI:<doi>', 'passage:<id>', 'NCT:<id>', 'tool:<name>'
     text: str  # lowercased
-    passage_id: Optional[str]
+    passage_id: str | None
     section: str
     # The record's own address (final URL after redirects, else canonical/requested), never a link quoted in its text.
-    url: Optional[str] = None
+    url: str | None = None
     # The population a typed record is about (a CIViC item's disease, a label's indications, a trial's conditions).
-    context: Optional[str] = None
+    context: str | None = None
 
 
 def _fold_thousands(text: str) -> str:
@@ -595,7 +604,7 @@ _CONTEXT_FIELDS = (
 )
 
 
-def _record_context(record: Any) -> Optional[str]:
+def _record_context(record: Any) -> str | None:
     if not isinstance(record, dict):
         return None
     parts = [_leaf_text(record.get(f)) for f in _CONTEXT_FIELDS if record.get(f)]
@@ -603,15 +612,15 @@ def _record_context(record: Any) -> Optional[str]:
     return text.lower() if text else None
 
 
-def _record_items(data: Any, max_records: int = 200) -> List[Tuple[str, Optional[Dict[str, Any]]]]:
+def _record_items(data: Any, max_records: int = 200) -> list[tuple[str, dict[str, Any] | None]]:
     """(lowercased document, the record it came from) per tool record (each item of a list of dicts), per nested
     section of a record, per nested page with its own URL (a web search's fetched top page), plus one for the scalar
     fields; a claim must be grounded in a single record rather than in terms scattered across a whole output."""
     if not isinstance(data, dict):
         text = _leaf_text(data)
         return [(text.lower(), None)] if text else []
-    docs: List[Tuple[str, Optional[Dict[str, Any]]]] = []
-    header: Dict[str, Any] = {}
+    docs: list[tuple[str, dict[str, Any] | None]] = []
+    header: dict[str, Any] = {}
     for k, v in data.items():
         if k == "plot_base64_png":
             continue
@@ -646,14 +655,14 @@ def _record_items(data: Any, max_records: int = 200) -> List[Tuple[str, Optional
     return docs
 
 
-def _record_documents(data: Any, max_records: int = 200) -> List[str]:
+def _record_documents(data: Any, max_records: int = 200) -> list[str]:
     return [text for text, _rec in _record_items(data, max_records)]
 
 
 # A claim that names its source ("PrimeKG ranks…", "FAERS shows 237 reports", "DGIdb lists…") is checked against
 # that source's output first; otherwise the first document sharing two terms (often OpenTargets) is judged, and a
 # true statement about another source is marked unsupported.
-_SOURCE_NAME_KEYS: Tuple[Tuple[re.Pattern, Tuple[str, ...]], ...] = (
+_SOURCE_NAME_KEYS: tuple[tuple[re.Pattern, tuple[str, ...]], ...] = (
     (re.compile(r"\bprimekg\b", re.I), ("primekg",)),
     (re.compile(r"\b(?:faers|openfda|drugs@fda|nda\s*\d|bla\s*\d|nda/bla|fda\s+label|boxed\s+warning)", re.I), ("openfda", "drug_safety")),
     (re.compile(r"\bdgidb\b", re.I), ("dgidb",)),
@@ -673,7 +682,7 @@ _SOURCE_NAME_KEYS: Tuple[Tuple[re.Pattern, Tuple[str, ...]], ...] = (
 _ID_TOKEN_RE = re.compile(r"\b(?:nda|bla|anda)\s*(\d{5,6})\b|\b((?:19|20)\d{2}-\d{2}-\d{2})\b", re.I)
 
 
-def claim_id_tokens(text: str) -> List[str]:
+def claim_id_tokens(text: str) -> list[str]:
     """Application numbers and ISO dates a claim states ("NDA 214665", "2021-05-28"), as they appear in records."""
     return list(dict.fromkeys((m.group(1) or m.group(2)).lower() for m in _ID_TOKEN_RE.finditer(text or "")))
 
@@ -702,7 +711,7 @@ _ID_GENERIC_TERMS = {"approval", "approved", "fda", "fda-approved", "first", "nd
                      "inhibitor", "inhibitors", "label", "openfda", "application"}
 
 
-def _tool_docs_naming(cited: Set[str], docs: List["_Doc"]) -> List["_Doc"]:
+def _tool_docs_naming(cited: set[str], docs: list[_Doc]) -> list[_Doc]:
     """Tool records that carry a cited identifier themselves (a SynLethDB pair with its PMID, a DGIdb interaction
     with its publications): when the paper's text was not retrieved, the record that cites it is the evidence."""
     ids = [str(c).split(":", 1)[-1].strip().lower() for c in cited if str(c).split(":", 1)[-1].strip()]
@@ -711,7 +720,7 @@ def _tool_docs_naming(cited: Set[str], docs: List["_Doc"]) -> List["_Doc"]:
     return [d for d in docs if d.key.startswith("tool:") and any(re.search(rf"(?<!\d){re.escape(i)}(?!\d)", d.text) for i in ids)]
 
 
-def prefer_named_sources(text: str, docs: List["_Doc"]) -> List["_Doc"]:
+def prefer_named_sources(text: str, docs: list[_Doc]) -> list[_Doc]:
     """docs with those from the sources the claim names moved to the front (stable otherwise)."""
     wanted = [k for pat, keys in _SOURCE_NAME_KEYS if pat.search(text or "") for k in keys]
     if not wanted:
@@ -735,10 +744,10 @@ def _trial_pattern(name: str) -> re.Pattern:
     return re.compile(rf"(?<![a-z0-9]){re.escape(stem.lower())}[\s\-]?{re.escape(num.lower())}(?![a-z0-9])")
 
 
-def _literature_records(tool_results: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+def _literature_records(tool_results: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """PMID -> {"text" (title + every retrieved passage, lowercased), "study_type", "pub_types", "passage"} for the
     retrieved literature, in ranking order."""
-    out: Dict[str, Dict[str, Any]] = {}
+    out: dict[str, dict[str, Any]] = {}
     for res in (tool_results or {}).values():
         data = getattr(res, "data", None) if getattr(res, "success", False) else None
         if not isinstance(data, dict) or not isinstance(data.get("ranked_passages"), list):
@@ -759,13 +768,13 @@ def _literature_records(tool_results: Dict[str, Any]) -> Dict[str, Dict[str, Any
     return out
 
 
-def _is_review(rec: Dict[str, Any]) -> bool:
+def _is_review(rec: dict[str, Any]) -> bool:
     if rec["study_type"] in _REVIEW_STUDY_TYPES:
         return True
     return not rec["study_type"] and any(t.lower() in ("review", "systematic review", "editorial") for t in rec["pub_types"])
 
 
-def _is_primary_trial_report(rec: Dict[str, Any]) -> bool:
+def _is_primary_trial_report(rec: dict[str, Any]) -> bool:
     if rec["study_type"] in _PRIMARY_STUDY_TYPES:
         return True
     return rec["study_type"] in ("", "unclassified") and any(
@@ -773,7 +782,7 @@ def _is_primary_trial_report(rec: Dict[str, Any]) -> bool:
     )
 
 
-def prefer_primary_trial_reports(text: str, tool_results: Dict[str, Any]) -> Tuple[str, List[Dict[str, str]]]:
+def prefer_primary_trial_reports(text: str, tool_results: dict[str, Any]) -> tuple[str, list[dict[str, str]]]:
     """The answer with a named trial's primary report cited next to a review that is cited for the trial's results.
 
     A sentence qualifies when it names a trial ("SOLO-1"), cites a retrieved review (PMID) and not the primary
@@ -785,8 +794,8 @@ def prefer_primary_trial_reports(text: str, tool_results: Dict[str, Any]) -> Tup
     records = _literature_records(tool_results)
     if not records:
         return text, []
-    edits: List[Tuple[int, int, str]] = []
-    changes: List[Dict[str, str]] = []
+    edits: list[tuple[int, int, str]] = []
+    changes: list[dict[str, str]] = []
     for s, e in sentence_spans(text):
         sentence = text[s:e]
         trials = [n for n in dict.fromkeys(_TRIAL_NAME_RE.findall(sentence)) if n.rsplit("-", 1)[0].lower() not in _NOT_TRIAL_NAMES]
@@ -840,7 +849,7 @@ def _fold(word: str) -> str:
     return word[:-1] if len(word) > 4 and word.endswith("s") and not word.endswith("ss") else word
 
 
-def _tokens(text: str) -> Set[str]:
+def _tokens(text: str) -> set[str]:
     """Word tokens with a light plural fold, for word-boundary term matching."""
     return {_fold(w) for w in re.findall(r"[a-z0-9][a-z0-9\-]{2,}", text.lower())}
 
@@ -849,7 +858,7 @@ class _Metric(NamedTuple):
     kind: str  # pct_time | hr | ci | p | n
     value: float
     unit: str  # %, months, weeks, years, or ""
-    endpoint: Optional[str]  # orr, os, pfs, ... (pct_time only)
+    endpoint: str | None  # orr, os, pfs, ... (pct_time only)
     label: str
 
 
@@ -902,7 +911,7 @@ def unescape_entities(text: Any) -> str:
     if "&" not in s:
         return s
 
-    def repl(m: "re.Match[str]") -> str:
+    def repl(m: re.Match[str]) -> str:
         decoded = html.unescape(m.group(0))
         nxt = s[m.end():m.end() + 1]
         if decoded == "<" and (nxt.isalpha() or nxt in "/!?"):
@@ -937,7 +946,7 @@ _PASSAGE_NEGATION_RE = re.compile(
 _BARE_DECIMAL_RE = re.compile(r"(?<![\w.])(\d+\.\d+|\d{2,})(?![\w.]|\.\d)")
 
 
-def _table_cells(line: str) -> List[str]:
+def _table_cells(line: str) -> list[str]:
     stripped = line.strip()
     if stripped.startswith("|"):
         stripped = stripped[1:]
@@ -950,12 +959,12 @@ def _is_table_separator(line: str) -> bool:
     return bool(_TABLE_SEPARATOR_RE.match(line)) and "-" in line and "|" in line
 
 
-def _row_claim(cells: List[str], headers: List[str], first: str) -> Optional[str]:
+def _row_claim(cells: list[str], headers: list[str], first: str) -> str | None:
     """A claim sentence for a table data row with a figure: "<first cell> — <labels>: <header> <value>; ...",
     keeping identifiers from the row; None when the row has no number."""
-    labels: List[str] = []
-    figures: List[str] = []
-    ids: List[str] = []
+    labels: list[str] = []
+    figures: list[str] = []
+    ids: list[str] = []
     for i, cell in enumerate(cells[1:], 1):
         if not cell or cell in ("-", "—", "–", "NA", "N/A", "n/a"):
             continue
@@ -985,21 +994,21 @@ def _row_claim(cells: List[str], headers: List[str], first: str) -> Optional[str
     return text
 
 
-def markdown_claim_units(text: str) -> List[Tuple[str, str, bool]]:
+def markdown_claim_units(text: str) -> list[tuple[str, str, bool]]:
     """(raw sentence, claim text, from_table) for the checkable sentences of a markdown answer. Headings, rules,
     bold label lines, code blocks, table header and separator rows, and table rows without a figure are skipped;
     list and blockquote markers are stripped; a table data row becomes one sentence that carries its row context
     (the last non-empty first-column value, e.g. the trial, and the column headers). The raw sentence is the
     answer text exactly as sentence_spans cuts it, so claim_support lines up with the citation map."""
-    units: List[Tuple[str, str, bool]] = []
+    units: list[tuple[str, str, bool]] = []
     lines = text.split("\n")
-    headers: List[str] = []
+    headers: list[str] = []
     first_value = ""
     in_table = False
     in_code = False
     in_limitations = False
     offset = 0
-    line_offsets: List[int] = []
+    line_offsets: list[int] = []
     for line in lines:
         line_offsets.append(offset)
         offset += len(line) + 1
@@ -1007,7 +1016,7 @@ def markdown_claim_units(text: str) -> List[Tuple[str, str, bool]]:
     span_idx = 0
     for li, line in enumerate(lines):
         lstart, lend = line_offsets[li], line_offsets[li] + len(line)
-        line_spans: List[Tuple[int, int]] = []
+        line_spans: list[tuple[int, int]] = []
         while span_idx < len(spans) and spans[span_idx][0] < lend + 1:
             if spans[span_idx][0] >= lstart:
                 line_spans.append(spans[span_idx])
@@ -1057,14 +1066,14 @@ def markdown_claim_units(text: str) -> List[Tuple[str, str, bool]]:
     return units
 
 
-def bare_numbers(text: str) -> List[float]:
+def bare_numbers(text: str) -> list[float]:
     """Decimal figures (and numbers of two or more digits) in a table-derived claim, minus identifiers and years."""
     cleaned = _CALENDAR_DATE_RE.sub(" ", _ROW_ID_RE.sub(" ", text))
     cleaned = re.sub(
         r"\b\d{2}\s*%\s*(?:ci|confidence\s+intervals?)\b|\b(?:phase|grade|stage|cycle|arm|cohort|part)\s*[0-9IVX]+[ab]?(?:\s*/\s*[0-9IVX]+)?\b",
         " ", cleaned, flags=re.IGNORECASE,
     )
-    out: List[float] = []
+    out: list[float] = []
     for m in _BARE_DECIMAL_RE.finditer(cleaned):
         raw = m.group(1)
         if "." not in raw and 1900 <= int(raw) <= 2100:
@@ -1077,7 +1086,7 @@ def bare_numbers(text: str) -> List[float]:
 
 # Disease families for the population check: canonical name -> patterns. Only clear disease head phrases, so the
 # check stays conservative (a doc must name one of these and none of the question's).
-_DISEASE_LEXICON: Tuple[Tuple[str, re.Pattern], ...] = tuple(
+_DISEASE_LEXICON: tuple[tuple[str, re.Pattern], ...] = tuple(
     (name, re.compile(pat, re.IGNORECASE))
     for name, pat in (
         ("melanoma", r"\bmelanomas?\b"),
@@ -1107,7 +1116,7 @@ _DISEASE_LEXICON: Tuple[Tuple[str, re.Pattern], ...] = tuple(
 )
 
 
-DEFECT_LABELS: Dict[str, str] = {
+DEFECT_LABELS: dict[str, str] = {
     "CLAIM_CONTRADICTED": "Contradicted by a source",
     "CLINICAL_CLAIM": "Clinical claim not found in the evidence",
     "POPULATION_MISMATCH": "Population mismatch",
@@ -1211,7 +1220,7 @@ _LEVEL_WORDS = {"high": "high", "moderate": "moderate", "medium": "moderate", "l
 COMPUTED_CONFIDENCE_NOTE = "(computed from claim support)"
 
 
-def reconcile_confidence_line(text: str, computed_band: Optional[str]) -> str:
+def reconcile_confidence_line(text: str, computed_band: str | None) -> str:
     """The answer with its stated confidence level ("Confidence: high (...)") set to the computed band (high,
     medium -> "moderate", low) when they differ, keeping the model's reason and adding "(computed from claim
     support)". Only the first rating (the bottom line's) is reconciled; without a computed band, or when the
@@ -1252,7 +1261,7 @@ def _norm_ws(text: str) -> str:
     return " ".join(str(text or "").split())
 
 
-def removable_defects(report: Any) -> List[Any]:
+def removable_defects(report: Any) -> list[Any]:
     """Claim-audit defects whose sentence must not stay in the answer: contradicted claims and population
     mismatches that carry the answer sentence they came from."""
     return [
@@ -1269,12 +1278,12 @@ def _limitation_line(defect: Any) -> str:
     return f'- Removed "{claim}" because a retrieved source contradicts it.'
 
 
-def remove_flagged_sentences(response: str, defects: Iterable[Any]) -> Tuple[str, List[Any]]:
+def remove_flagged_sentences(response: str, defects: Iterable[Any]) -> tuple[str, list[Any]]:
     """The answer without the sentences (or table rows) of the given defects, plus one line per removal under an
     "Evidence limitations" heading (created when missing). Returns (new text, defects actually removed)."""
     text = response
-    removed: List[Any] = []
-    seen: Set[str] = set()
+    removed: list[Any] = []
+    seen: set[str] = set()
     for d in defects:
         sentence = str(getattr(d, "sentence", "") or "").strip()
         key = _norm_ws(sentence)
@@ -1315,7 +1324,7 @@ def remove_flagged_sentences(response: str, defects: Iterable[Any]) -> Tuple[str
     return text, removed
 
 
-def disease_families(text: str) -> Set[str]:
+def disease_families(text: str) -> set[str]:
     """Canonical disease names (from a small lexicon of cancer types) named in `text`."""
     t = str(text or "")
     return {name for name, pat in _DISEASE_LEXICON if pat.search(t)}
@@ -1335,7 +1344,7 @@ class TribosVerifier:
     MIN_SHARED_CLAIM_TERMS = 2
 
     @staticmethod
-    def _extract_identifiers(text: str) -> Dict[str, List[str]]:
+    def _extract_identifiers(text: str) -> dict[str, list[str]]:
         return {
             "biomodels": sorted(set(re.findall(r"\bBIOMD\d{10}\b", text))),
             "uniprot": sorted(set(re.findall(
@@ -1343,11 +1352,11 @@ class TribosVerifier:
             ))),
             "ensembl": sorted(set(re.findall(r"\bENS(?:[A-Z]{3})?[GTP]\d{11}\b", text))),
             "pmids": sorted(set(re.findall(r"\bPMID:?\s*(\d{1,9})\b", text, re.IGNORECASE))),
-            "dois": sorted(set(d.rstrip(".,;)") for d in re.findall(r"\b10\.\d{4,9}/[-._;()/:A-Za-z0-9]+\b", text))),
+            "dois": sorted({d.rstrip(".,;)") for d in re.findall(r"\b10\.\d{4,9}/[-._;()/:A-Za-z0-9]+\b", text)}),
         }
 
     @staticmethod
-    def _split_sentences(text: str) -> List[str]:
+    def _split_sentences(text: str) -> list[str]:
         """Sentences and lines of `text` (see sentence_spans: abbreviations such as "et al." do not end a sentence
         and a table row stays whole). Not markdown-aware: claim checking uses markdown_claim_units."""
         return [text[s:e].strip() for s, e in sentence_spans(text)]
@@ -1368,7 +1377,7 @@ class TribosVerifier:
         return re.compile(rf"(?<![\w\-+]){re.escape(sp_name)}(?![\w\-+]|\)[\w\-+])", re.IGNORECASE)
 
     @staticmethod
-    def _model_molar_scale(quantity_unit: Optional[str]) -> Optional[float]:
+    def _model_molar_scale(quantity_unit: str | None) -> float | None:
         """Return the molar scale of model concentrations (e.g. 'nmol' or 'nM' -> 1e-9), None if not molar."""
         if not quantity_unit:
             return None
@@ -1385,8 +1394,8 @@ class TribosVerifier:
     )
 
     def _iter_numeric_claims(
-        self, text: str, sp_name: str, other_species: List[re.Pattern], model_scale: Optional[float]
-    ) -> Iterable[Tuple[float, str]]:
+        self, text: str, sp_name: str, other_species: list[re.Pattern], model_scale: float | None
+    ) -> Iterable[tuple[float, str]]:
         """Yield (value in model units, raw text) for concentration values asserted for a species."""
         for m in self._species_pattern(sp_name).finditer(text):
             line_end = text.find("\n", m.end())
@@ -1422,7 +1431,7 @@ class TribosVerifier:
         return expected != 0 and abs_err / abs(expected) <= self.RELATIVE_NUMERICAL_TOLERANCE
 
     @staticmethod
-    def _salient_terms(text: str) -> Set[str]:
+    def _salient_terms(text: str) -> set[str]:
         return {
             w for w in re.findall(r"[a-z0-9][a-z0-9\-]{2,}", text.lower())
             if w not in _STOPWORDS and not re.fullmatch(r"[\d.\-]+", w)
@@ -1432,11 +1441,11 @@ class TribosVerifier:
         self,
         query: str,
         response_markdown: str,
-        tool_results: Dict[str, ToolResult],
-        historical_identifiers: Optional[Dict[str, Iterable[str]]] = None,
-        context_identifiers: Optional[Dict[str, Iterable[str]]] = None,
+        tool_results: dict[str, ToolResult],
+        historical_identifiers: dict[str, Iterable[str]] | None = None,
+        context_identifiers: dict[str, Iterable[str]] | None = None,
         query_context: Any = None,
-        entailment_judge: Optional[Callable[[str, List[Dict[str, str]]], Optional[Dict[str, Any]]]] = None,
+        entailment_judge: Callable[[str, list[dict[str, str]]], dict[str, Any] | None] | None = None,
     ) -> VerificationReport:
         """
         Audit candidate response against observed tool evidence, numerical outputs, and identifiers.
@@ -1456,31 +1465,31 @@ class TribosVerifier:
             logger.warning("Extensions unavailable for verification: %s", exc)
 
         response_markdown = self._normalize_typography(response_markdown)
-        defects: List[DefectItem] = []
-        verified_ids: List[str] = []
-        claim_support: List[Dict[str, Any]] = []
+        defects: list[DefectItem] = []
+        verified_ids: list[str] = []
+        claim_support: list[dict[str, Any]] = []
         num_passed = 0
         num_failed = 0
 
         # Collect observed identifiers and artifacts strictly from successful tool executions
-        observed_biomodels: Set[str] = set()
-        observed_pmids: Set[str] = set()
-        observed_dois: Set[str] = set()
-        observed_ensembl: Set[str] = set()
-        observed_uniprot: Set[str] = set()
-        observed_family: Dict[str, Set[str]] = {f.name: set() for f in FAMILIES}
-        observed_passages: List[str] = []
-        passage_docs: List[Tuple[str, str, Optional[str]]] = []  # (evidence_key, lowercased text, passage_id)
-        evidence_documents: List[str] = []  # lowercased passages + serialized tool outputs for claim grounding
-        evidence_keys: List[str] = []  # parallel to evidence_documents: 'tool:<name>', 'PMID:<id>', 'DOI:<doi>', ...
-        evidence_doc_passage_ids: List[Optional[str]] = []
+        observed_biomodels: set[str] = set()
+        observed_pmids: set[str] = set()
+        observed_dois: set[str] = set()
+        observed_ensembl: set[str] = set()
+        observed_uniprot: set[str] = set()
+        observed_family: dict[str, set[str]] = {f.name: set() for f in FAMILIES}
+        observed_passages: list[str] = []
+        passage_docs: list[tuple[str, str, str | None]] = []  # (evidence_key, lowercased text, passage_id)
+        evidence_documents: list[str] = []  # lowercased passages + serialized tool outputs for claim grounding
+        evidence_keys: list[str] = []  # parallel to evidence_documents: 'tool:<name>', 'PMID:<id>', 'DOI:<doi>', ...
+        evidence_doc_passage_ids: list[str | None] = []
         # Structured documents for the built-in claim audit: passages with their section, provider documents and
         # one document per tool record, never a whole serialized tool output.
-        grounding: List[_Doc] = []
+        grounding: list[_Doc] = []
         doc_providers = get_evidence_doc_providers()
 
         # What tools did in this run, for sentences about the run itself (a failed or empty lookup).
-        tool_events: List[Tuple[str, str]] = []
+        tool_events: list[tuple[str, str]] = []
         for t_name, t_res in tool_results.items():
             if t_res is not None and not t_res.success:
                 tool_events.append((str(t_name), f"{t_name} {getattr(t_res, 'tool_name', '') or ''}: {t_res.error or 'failed'}".lower()))
@@ -1526,8 +1535,8 @@ class TribosVerifier:
 
             # Literature DOIs, PMIDs, and passages
             has_passages = isinstance(data, dict) and "ranked_passages" in data
-            tool_passages: List[Tuple[str, str, Optional[str]]] = []
-            tool_grounding: List[_Doc] = []
+            tool_passages: list[tuple[str, str, str | None]] = []
+            tool_grounding: list[_Doc] = []
             if has_passages:
                 for p in data["ranked_passages"] or []:
                     if isinstance(p, dict):
@@ -1572,7 +1581,7 @@ class TribosVerifier:
                         observed_family[fam.name] |= normalize_ids(fam.name, t_res.canonical_ids[ck])
 
             # A registered provider may replace this tool's default evidence documents with finer-grained ones.
-            provided: Optional[List[Tuple[str, str]]] = None
+            provided: list[tuple[str, str]] | None = None
             for provider in doc_providers:
                 try:
                     out = provider(t_name, t_res)
@@ -1634,7 +1643,7 @@ class TribosVerifier:
         observed_uniprot |= historical.get("uniprot", set())
 
         # Identifiers the query context and evidence sources legitimately know about
-        context: Dict[str, Set[str]] = {}
+        context: dict[str, set[str]] = {}
         for k, v in (context_identifiers or {}).items():
             context[k] = normalize_ids(k, v) if k in observed_family else {str(x) for x in (v or []) if x}
         observed_biomodels |= context.get("biomodels", set())
@@ -1650,7 +1659,7 @@ class TribosVerifier:
             observed_family[fam.name] |= query_family_ids[fam.name]
 
         # Registered vetoes (e.g. retracted articles) override every other source of trust.
-        vetoed: Dict[str, Dict[str, str]] = {}
+        vetoed: dict[str, dict[str, str]] = {}
         for veto in get_identifier_vetoes():
             try:
                 result = veto(tool_results) or {}
@@ -1793,7 +1802,7 @@ class TribosVerifier:
         # -------------------------------------------------------------
         # 2. SUBSTANTIVE CLINICAL & SCIENTIFIC CLAIM AUDIT (sentence-level grounding)
         # -------------------------------------------------------------
-        claims: List[ClaimRecord] = []
+        claims: list[ClaimRecord] = []
         claim_defects, claim_support = self._audit_claims(
             response_markdown, grounding, claims, entailment_judge, self._question_diseases(query, query_context),
             tool_events=tool_events,
@@ -1819,17 +1828,17 @@ class TribosVerifier:
         steady_res = tool_results.get("vivarix_steady_state") or tool_results.get("vivarix_compute_steady_state")
         if vivarix_res and vivarix_res.success and isinstance(vivarix_res.data, dict):
             v_data = vivarix_res.data
-            final_concs: Dict[str, Any] = v_data.get("final_concentrations", {}) or {}
-            initial_concs: Dict[str, Any] = v_data.get("initial_concentrations", {}) or {}
-            series: Dict[str, Any] = v_data.get("time_series_sample", {}) or {}
-            ss_concs: Dict[str, Any] = {}
+            final_concs: dict[str, Any] = v_data.get("final_concentrations", {}) or {}
+            initial_concs: dict[str, Any] = v_data.get("initial_concentrations", {}) or {}
+            series: dict[str, Any] = v_data.get("time_series_sample", {}) or {}
+            ss_concs: dict[str, Any] = {}
             if steady_res and steady_res.success and isinstance(steady_res.data, dict):
                 ss_concs = steady_res.data.get("steady_state_concentrations", {}) or {}
             model_scale = self._model_molar_scale((v_data.get("units") or {}).get("quantity"))
 
             species_names = [sp for sp in final_concs.keys() if sp]
             species_patterns = {sp: self._species_pattern(sp) for sp in species_names}
-            reported: Set[Tuple[str, float]] = set()
+            reported: set[tuple[str, float]] = set()
 
             for sp_name in species_names:
                 observed_vals = [
@@ -1930,7 +1939,7 @@ class TribosVerifier:
         # -------------------------------------------------------------
         checks = get_verification_checks()
         if checks:
-            observed_all: Dict[str, Set[str]] = {
+            observed_all: dict[str, set[str]] = {
                 "biomodels": set(observed_biomodels),
                 "pmids": set(observed_pmids),
                 "dois": set(observed_dois),
@@ -1956,7 +1965,7 @@ class TribosVerifier:
             )
             # One claim is flagged once per category: a registered check's more specific defect replaces the
             # generic sentence-grounding one, and two registered checks never both count it.
-            flagged: Set[Tuple[str, str]] = set()
+            flagged: set[tuple[str, str]] = set()
             builtin = {(d.category, d.claim): d for d in defects if d.claim}
             for check_key, check in checks:
                 try:
@@ -2023,7 +2032,7 @@ class TribosVerifier:
         )
 
     @staticmethod
-    def _question_diseases(query: str, query_context: Any = None) -> Set[str]:
+    def _question_diseases(query: str, query_context: Any = None) -> set[str]:
         """Disease families the question is about: named in the query text or resolved by the query context."""
         found = disease_families(query or "")
         try:
@@ -2034,7 +2043,7 @@ class TribosVerifier:
         return found
 
     @staticmethod
-    def _table_rows(text: str) -> List[str]:
+    def _table_rows(text: str) -> list[str]:
         """Markdown table rows (header and body), excluding |---|---| separator rows."""
         rows = []
         for line in text.splitlines():
@@ -2044,7 +2053,7 @@ class TribosVerifier:
         return rows
 
     @staticmethod
-    def _defect_from_dict(item: Any) -> Optional[DefectItem]:
+    def _defect_from_dict(item: Any) -> DefectItem | None:
         if isinstance(item, DefectItem):
             return item
         if not isinstance(item, dict):
@@ -2061,13 +2070,13 @@ class TribosVerifier:
             claim=item.get("claim"),
         )
 
-    def _unsupported_clinical_reason(self, sentence_lower: str, evidence_documents: List[str]) -> Optional[str]:
+    def _unsupported_clinical_reason(self, sentence_lower: str, evidence_documents: list[str]) -> str | None:
         """Return why a clinical sentence is unsupported, or None if some evidence document grounds it."""
         return self._find_clinical_support(sentence_lower, evidence_documents)[1]
 
     def _find_clinical_support(
-        self, sentence_lower: str, evidence_documents: List[str]
-    ) -> Tuple[Optional[int], Optional[str]]:
+        self, sentence_lower: str, evidence_documents: list[str]
+    ) -> tuple[int | None, str | None]:
         """
         Return (index of the first grounding evidence document, None), or (None, reason it is unsupported).
         A supporting document must contain every cited trial identifier, every quantitative figure bound to the
@@ -2085,18 +2094,18 @@ class TribosVerifier:
     # ------------------------------------------------------------------
     @staticmethod
     def _add_claim(
-        claims: List[ClaimRecord],
+        claims: list[ClaimRecord],
         claim_type: str,
         text: str,
         status: str,
         reason: str,
-        source_key: Optional[str] = None,
+        source_key: str | None = None,
         passage: str = "",
-        passage_id: Optional[str] = None,
-        extra_evidence: Optional[List[ClaimEvidence]] = None,
-        cited_source_supported: Optional[bool] = None,
+        passage_id: str | None = None,
+        extra_evidence: list[ClaimEvidence] | None = None,
+        cited_source_supported: bool | None = None,
     ) -> ClaimRecord:
-        ev: List[ClaimEvidence] = []
+        ev: list[ClaimEvidence] = []
         if source_key:
             ev.append(ClaimEvidence(source_key=source_key, passage=truncate_words(passage, 300), passage_id=passage_id))
         if extra_evidence:
@@ -2118,7 +2127,7 @@ class TribosVerifier:
         return record
 
     @staticmethod
-    def _excerpt(doc: Optional[_Doc], pos: Optional[int] = None) -> str:
+    def _excerpt(doc: _Doc | None, pos: int | None = None) -> str:
         if doc is None:
             return ""
         if pos is None or pos < 0:
@@ -2126,7 +2135,7 @@ class TribosVerifier:
         return doc.text[max(0, pos - 140): pos + 160]
 
     @classmethod
-    def _assertive_text(cls, sentence: str) -> Optional[str]:
+    def _assertive_text(cls, sentence: str) -> str | None:
         """The sentence minus clauses that only state uncertainty; None when nothing checkable remains."""
         if _DISCLOSED_GAP_RE.search(sentence) and not _CITED_KEY_RE.search(sentence):
             # "… (established background), but the dates were not present in the retrieved evidence": the answer
@@ -2149,7 +2158,7 @@ class TribosVerifier:
         return None
 
     @staticmethod
-    def _classify_claim(text: str) -> Optional[str]:
+    def _classify_claim(text: str) -> str | None:
         if _ABSENCE_PATTERN.search(text):
             return "absence"
         low = text.lower()
@@ -2160,8 +2169,8 @@ class TribosVerifier:
         return None
 
     @staticmethod
-    def _cited_keys(text: str) -> Set[str]:
-        keys: Set[str] = set()
+    def _cited_keys(text: str) -> set[str]:
+        keys: set[str] = set()
         for pmid, doi in _CITED_KEY_RE.findall(text):
             if pmid:
                 keys.add(f"PMID:{pmid}")
@@ -2170,8 +2179,8 @@ class TribosVerifier:
         return keys
 
     @staticmethod
-    def _endpoint_spans(text: str) -> List[Tuple[int, int, str]]:
-        taken: List[Tuple[int, int, str]] = []
+    def _endpoint_spans(text: str) -> list[tuple[int, int, str]]:
+        taken: list[tuple[int, int, str]] = []
         for name, pat in _ENDPOINT_PATTERNS:
             for m in pat.finditer(text):
                 if not any(m.start() < e and s < m.end() for s, e, _ in taken):
@@ -2180,8 +2189,8 @@ class TribosVerifier:
 
     @classmethod
     def _endpoint_near(
-        cls, text: str, start: int, end: int, spans: Optional[List[Tuple[int, int, str]]] = None
-    ) -> Optional[str]:
+        cls, text: str, start: int, end: int, spans: list[tuple[int, int, str]] | None = None
+    ) -> str | None:
         """The endpoint a figure belongs to: the nearest one before it in the same clause, else just after it."""
         spans = cls._endpoint_spans(text) if spans is None else spans
         window_start = max(0, start - 70)
@@ -2196,15 +2205,15 @@ class TribosVerifier:
         return after[0][2] if after else None
 
     @classmethod
-    def _claim_metrics(cls, text: str) -> List[_Metric]:
+    def _claim_metrics(cls, text: str) -> list[_Metric]:
         """Quantitative figures in a claim: percentages and durations bound to an endpoint, HR, CI, p and n."""
         t = attach_units(_fold_thousands(text))
         t = re.sub(
             r"\bPMID:?\s*\d+|\b10\.\d{4,9}/\S+|\b(?:phase|grade|stage|cycle)\s*[0-9IVX]+[ab]?\b|\bnct\d{8}\b",
             " ", t, flags=re.IGNORECASE,
         )
-        out: List[_Metric] = []
-        ci_spans: List[Tuple[int, int]] = []
+        out: list[_Metric] = []
+        ci_spans: list[tuple[int, int]] = []
         for m in _CI_RE.finditer(t):
             ci_spans.append(m.span())
             out.append(_Metric("ci", float(m.group(1)), "", None, m.group(1)))
@@ -2285,7 +2294,7 @@ class TribosVerifier:
 
     @classmethod
     def _metric_in_doc(
-        cls, metric: _Metric, doc_text: str, spans: List[Tuple[int, int, str]], structured: bool = False
+        cls, metric: _Metric, doc_text: str, spans: list[tuple[int, int, str]], structured: bool = False
     ) -> bool:
         """The figure appears in the document with the same unit and endpoint. Structured records (registry and
         tool outputs) keep value, unit and measure title in separate fields, so they are matched within a record
@@ -2314,7 +2323,7 @@ class TribosVerifier:
         return False
 
     @classmethod
-    def _metric_adjacent(cls, metric: _Metric, doc_text: str, spans: List[Tuple[int, int, str]]) -> bool:
+    def _metric_adjacent(cls, metric: _Metric, doc_text: str, spans: list[tuple[int, int, str]]) -> bool:
         if metric.kind == "pct_time":
             for dm in _PCT_TIME_RE.finditer(doc_text):
                 val_str = dm.group(1).replace("−", "-").replace("+", "")
@@ -2354,9 +2363,9 @@ class TribosVerifier:
         return False
 
     @staticmethod
-    def _polarity(text: str) -> List[Tuple[str, Set[str], bool, int]]:
+    def _polarity(text: str) -> list[tuple[str, set[str], bool, int]]:
         """(predicate group, object terms, negated, position) for each comparable predicate in the text."""
-        out: List[Tuple[str, Set[str], bool, int]] = []
+        out: list[tuple[str, set[str], bool, int]] = []
         for group, pat in _PREDICATE_GROUPS:
             for m in pat.finditer(text):
                 before = text[max(0, m.start() - 60): m.start()]
@@ -2379,15 +2388,15 @@ class TribosVerifier:
 
     @classmethod
     def _polarity_conflict(
-        cls, claim_polarity: List[Tuple[str, Set[str], bool, int]], doc_text: str
-    ) -> Optional[Tuple[str, int]]:
+        cls, claim_polarity: list[tuple[str, set[str], bool, int]], doc_text: str
+    ) -> tuple[str, int] | None:
         """(reason, position in doc) when the document states the opposite of a claim predicate and never the same."""
         if not claim_polarity:
             return None
         doc_polarity = cls._polarity(doc_text)
         for group, objects, negated, _ in claim_polarity:
             same = False
-            opposite: Optional[int] = None
+            opposite: int | None = None
             for d_group, d_objects, d_negated, d_pos in doc_polarity:
                 if d_group != group or not (objects & d_objects):
                     continue
@@ -2403,8 +2412,8 @@ class TribosVerifier:
         return None
 
     def _clinical_verdict(
-        self, text: str, cited: Set[str], docs: List[_Doc], table: bool = False, split: bool = True
-    ) -> Tuple[str, str, Optional[_Doc]]:
+        self, text: str, cited: set[str], docs: list[_Doc], table: bool = False, split: bool = True
+    ) -> tuple[str, str, _Doc | None]:
         if not docs:
             return "unsupported", "no literature passages or tool outputs were retrieved", None
         parts = [p.strip() for p in re.split(r";\s+", text) if p.strip()]
@@ -2454,12 +2463,12 @@ class TribosVerifier:
 
         # The reason names the closest miss: a document with the trial ids but not the figures beats one without the ids.
         best_reason, best_rank = "no passage shares the claim's drug, target, or indication", 0
-        contradiction: Optional[Tuple[_Doc, str]] = None
+        contradiction: tuple[_Doc, str] | None = None
         id_tokens = claim_id_tokens(text)
         if len(id_tokens) > 1 and not any(all(t in re.sub(r"\s+", "", d.text) for t in id_tokens) for d in ordered):
             # "olaparib (first approved 2014-12-19) and niraparib (2017-03-27)": each date sits in its own drug's
             # record. Supported when every identifier is in a record that also shares a term with the claim (the drug).
-            backing: List[_Doc] = []
+            backing: list[_Doc] = []
             for tok in id_tokens:
                 # The words just before the identifier name its subject ("niraparib (first approved 2017-03-27)").
                 at = s_lower.find(tok)
@@ -2523,7 +2532,7 @@ class TribosVerifier:
         return "unsupported", best_reason, None
 
     @staticmethod
-    def _eligible_docs(text: str, docs: List[_Doc]) -> Tuple[List[_Doc], str]:
+    def _eligible_docs(text: str, docs: list[_Doc]) -> tuple[list[_Doc], str]:
         """(documents that may support this clinical claim, reason when none may). An approval or label claim needs
         a regulatory record; a patient-outcome claim cannot rest on a simulation or a target-association score."""
         if is_regulatory_claim(text):
@@ -2536,7 +2545,7 @@ class TribosVerifier:
             )
         return list(docs), ""
 
-    def _mechanistic_verdict(self, text: str, cited: Set[str], docs: List[_Doc]) -> Tuple[str, str, Optional[_Doc]]:
+    def _mechanistic_verdict(self, text: str, cited: set[str], docs: list[_Doc]) -> tuple[str, str, _Doc | None]:
         cited_docs = [d for d in docs if d.key in cited] or _tool_docs_naming(cited, docs)
         if not cited_docs:
             return "not_checked", "the cited source's text was not retrieved in this run", None
@@ -2544,7 +2553,7 @@ class TribosVerifier:
         terms = {_fold(t) for t in self._salient_terms(_CITED_KEY_RE.sub(" ", s_lower))}
         needed = min(self.MIN_SHARED_CLAIM_TERMS, len(terms))
         polarity = self._polarity(s_lower)
-        contradiction: Optional[Tuple[_Doc, str]] = None
+        contradiction: tuple[_Doc, str] | None = None
         for doc in cited_docs:
             conflict = self._polarity_conflict(polarity, doc.text)
             if conflict is not None:
@@ -2557,7 +2566,7 @@ class TribosVerifier:
         return "unsupported", "the cited passage does not discuss the claim's key terms", cited_docs[0]
 
     @staticmethod
-    def _absence_hit(words: List[str], doc_text: str) -> Optional[Tuple[str, int]]:
+    def _absence_hit(words: list[str], doc_text: str) -> tuple[str, int] | None:
         """(sentence, position) of the first doc sentence holding every word that is not itself negated or
         hedged ("the role of X remains unknown" does not show that the source discusses X)."""
         folded = [_fold(w) for w in words]
@@ -2569,8 +2578,8 @@ class TribosVerifier:
         return None
 
     def _absence_verdict(
-        self, text: str, cited: Set[str], lit_docs: List[_Doc], docs: List[_Doc]
-    ) -> Tuple[str, str, Optional[_Doc], Optional[int]]:
+        self, text: str, cited: set[str], lit_docs: list[_Doc], docs: list[_Doc]
+    ) -> tuple[str, str, _Doc | None, int | None]:
         m = _ABSENCE_PATTERN.search(text)
         if m is None:
             return "not_checked", "no absence statement found", None, None
@@ -2605,7 +2614,7 @@ class TribosVerifier:
                 if len(cues) >= 2:
                     return "contradicted", f"the retrieved passage describes a mechanism ({', '.join(cues[:4])})", d, found[0].start()
         elif words:
-            scattered: Optional[_Doc] = None
+            scattered: _Doc | None = None
             for d in targets:
                 toks = _tokens(d.text)
                 if not all(_fold(w) in toks for w in words):
@@ -2646,7 +2655,7 @@ class TribosVerifier:
             None,
         )
 
-    def _population_mismatch(self, text: str, doc: Optional[_Doc], question_diseases: Set[str]) -> Optional[str]:
+    def _population_mismatch(self, text: str, doc: _Doc | None, question_diseases: set[str]) -> str | None:
         """The human message when a figure is supported only by a source about another disease than the question's:
         the doc names a disease from the lexicon, none of the question's, and the claim does not name the source's
         population itself. Only claims carrying a figure are checked, so prose mentions of other cancers pass.
@@ -2686,7 +2695,7 @@ class TribosVerifier:
         asked = " or ".join(sorted(question_diseases))
         return f"This figure comes from a {other} study, not {asked}"
 
-    def _operational_claim(self, claims: List[ClaimRecord], text: str, events: List[Tuple[str, str]]) -> None:
+    def _operational_claim(self, claims: list[ClaimRecord], text: str, events: list[tuple[str, str]]) -> None:
         """Record a sentence about the run (a lookup failed, a record was not retrieved) against the run's tool
         outcomes: supported by the matching failed or empty tool call (evidence key "trace:<tool>"), else not checked.
         It never takes a scientific citation as support and never enters the citation map."""
@@ -2704,7 +2713,7 @@ class TribosVerifier:
         )
 
     @staticmethod
-    def _record_population_mismatch(text: str, doc: _Doc) -> Optional[str]:
+    def _record_population_mismatch(text: str, doc: _Doc) -> str | None:
         """A typed clinical record (a CIViC evidence item, a cBioPortal study, a label's indication, a registry
         trial's conditions) states the population its fact is about: a claim naming another disease cannot rest on
         it. Only the record's own population fields count, so a label that warns about leukaemia, or a registry entry
@@ -2723,15 +2732,15 @@ class TribosVerifier:
     def _audit_claims(
         self,
         response: str,
-        docs: List[_Doc],
-        claims: List[ClaimRecord],
-        judge: Optional[Callable[[str, List[Dict[str, str]]], Optional[Dict[str, Any]]]] = None,
-        question_diseases: Optional[Set[str]] = None,
-        tool_events: Optional[List[Tuple[str, str]]] = None,
-    ) -> Tuple[List[DefectItem], List[Dict[str, Any]]]:
+        docs: list[_Doc],
+        claims: list[ClaimRecord],
+        judge: Callable[[str, list[dict[str, str]]], dict[str, Any] | None] | None = None,
+        question_diseases: set[str] | None = None,
+        tool_events: list[tuple[str, str]] | None = None,
+    ) -> tuple[list[DefectItem], list[dict[str, Any]]]:
         """Classify, check and record each material claim; return (defects, claim_support)."""
-        defects: List[DefectItem] = []
-        support: List[Dict[str, Any]] = []
+        defects: list[DefectItem] = []
+        support: list[dict[str, Any]] = []
         lit_docs = [d for d in docs if d.key.startswith(("PMID:", "DOI:", "passage:"))]
         # Figure checks may read a whole article (its passages joined), not only one passage of it.
         clinical_docs = docs + article_unions(docs)
@@ -2765,7 +2774,7 @@ class TribosVerifier:
             if kind is None:
                 continue
             cited = self._cited_keys(sentence) | self._cited_keys(text)
-            pos: Optional[int] = None
+            pos: int | None = None
             if kind == "absence":
                 status, reason, doc, pos = self._absence_verdict(text, cited, lit_docs, docs)
             elif kind == "clinical":
@@ -2812,7 +2821,7 @@ class TribosVerifier:
             if mismatch:
                 status, reason = "unsupported", f"population mismatch: {mismatch}"
 
-            extra_docs: List[_Doc] = []
+            extra_docs: list[_Doc] = []
             if from_table and status == "supported":
                 parts = [p.strip() for p in re.split(r";\s+", text) if p.strip()]
                 if len(parts) > 1:
@@ -2827,8 +2836,8 @@ class TribosVerifier:
 
             # A claim citing a retrieved paper that is backed only by another document: true elsewhere, but the
             # attached citation does not support it. Recorded, never silently re-attributed.
-            cited_ok: Optional[bool] = None
-            cited_mismatch: Optional[str] = None
+            cited_ok: bool | None = None
+            cited_mismatch: str | None = None
             if kind == "clinical" and status == "supported" and doc is not None and any(d.key in cited for d in docs):
                 cited_ok = doc.key in cited or any(ed.key in cited for ed in extra_docs)
                 if not cited_ok:

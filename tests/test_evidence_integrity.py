@@ -8,21 +8,21 @@ tests/test_verifier_grounding.py.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any
 
-from tribos.verify import verifier as vmod
-from tribos.verify.verifier import ClaimRecord, TribosVerifier, VerificationReport
 from tribos.tools.registry import ToolResult
 from tribos.utils.text import fold_typography, fold_typography_with_map
+from tribos.verify import verifier as vmod
+from tribos.verify.verifier import ClaimRecord, TribosVerifier, VerificationReport
 
 Q = "KRAS G12C inhibitors in NSCLC and colorectal cancer: FDA-approved indications and clinical evidence"
 
 
-def lit(passages: List[Dict[str, Any]]) -> ToolResult:
+def lit(passages: list[dict[str, Any]]) -> ToolResult:
     return ToolResult(success=True, tool_name="lithoscribe_literature_synthesis", data={"ranked_passages": passages})
 
 
-def tool(name: str, data: Dict[str, Any]) -> ToolResult:
+def tool(name: str, data: dict[str, Any]) -> ToolResult:
     return ToolResult(success=True, tool_name=name, data=data)
 
 
@@ -30,7 +30,7 @@ def claim_for(report: VerificationReport, needle: str) -> ClaimRecord:
     return next(c for c in report.claims if needle in c.claim_text)
 
 
-def categories(report: VerificationReport) -> List[str]:
+def categories(report: VerificationReport) -> list[str]:
     return [d.category for d in report.defects]
 
 

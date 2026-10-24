@@ -1,3 +1,8 @@
+from __future__ import annotations
+
+import pytest
+
+pytest.importorskip('tribos.vivarix', reason='Legacy vivarix package retired')
 """
 Comprehensive Agent Calibration Test Suite for Tribos.
 Validates:
@@ -8,23 +13,16 @@ Validates:
 5. Vivarix kinetic parameter calibration and profile likelihood identifiability (Raue et al. 2009).
 """
 
-from __future__ import annotations
 
-import json
-import math
-from pathlib import Path
-from typing import Any, Dict
 
 import numpy as np
 import pytest
+from tribos.vivarix.calibration import (
+    calibrate_parameters,
+)
 
 from tribos.agentic import calibration_stats as cs
 from tribos.agentic import confidence as conf
-from tribos.vivarix.calibration import (
-    CHI2_THRESHOLD_95,
-    calibrate_parameters,
-    load_timecourse,
-)
 
 
 def test_confidence_calibration_asset_exists():

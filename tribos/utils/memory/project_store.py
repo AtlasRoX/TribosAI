@@ -34,8 +34,9 @@ import tempfile
 import threading
 import time
 import uuid
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple
+from typing import Any
 
 PROJECT_ID_RE = re.compile(r"^prj_[A-Za-z0-9]{6,40}$")
 FACT_ID_RE = re.compile(r"^fct_[0-9a-f]{16}$")
@@ -74,17 +75,17 @@ def norm(text: Any) -> str:
     return re.sub(r"\s+", " ", str(text or "")).strip().lower()
 
 
-def tokens(text: str) -> Set[str]:
+def tokens(text: str) -> set[str]:
     return {t.lower() for t in _TOKEN_RE.findall(text or "") if t.lower() not in _STOP}
 
 
-def _iso(ts: Optional[float]) -> Optional[str]:
+def _iso(ts: float | None) -> str | None:
     if ts is None:
         return None
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(float(ts)))
 
 
-def _require_user(user_id: Optional[str]) -> str:
+def _require_user(user_id: str | None) -> str:
     if not isinstance(user_id, str) or not user_id.strip():
         raise ProjectStoreError("user_id is required")
     return user_id
@@ -95,14 +96,14 @@ class FactInput:
     subject: str
     relation: str
     object: str
-    value: Optional[str] = None
+    value: str | None = None
     confidence: float = 0.7
     verified: bool = False
-    source: Optional[Dict[str, Any]] = None
-    tags: Optional[List[str]] = None
-    valid_from: Optional[float] = None
+    source: dict[str, Any] | None = None
+    tags: list[str] | None = None
+    valid_from: float | None = None
 
-    def clean(self) -> "FactInput":
+    def clean(self) -> FactInput:
         self.subject = str(self.subject or "").strip()[:MAX_TEXT]
         self.relation = re.sub(r"[^a-z0-9_]+", "_", str(self.relation or "").strip().lower())[:64].strip("_")
         self.object = str(self.object or "").strip()[:MAX_TEXT]
@@ -113,7 +114,7 @@ class FactInput:
 
 
 class ProjectStore:
-    def __init__(self, storage_dir: Optional[str] = None) -> None:
+    def __init__(self, storage_dir: str | None = None) -> None:
         self.storage_dir = storage_dir or default_projects_dir()
         os.makedirs(self.storage_dir, exist_ok=True)
         self.db_path = os.path.join(self.storage_dir, "projects.db")
@@ -174,7 +175,7 @@ class ProjectStore:
 
     # Projects ------------------------------------------------------------------------------------------------
     @staticmethod
-    def _project_dict(row: sqlite3.Row, counts: Optional[Tuple[int, int]] = None) -> Dict[str, Any]:
+    def _project_dict(row: sqlite3.Row, counts: tuple[int, int] | None = None) -> dict[str, Any]:
         out = {
             "id": row["id"],
             "name": row["name"],
@@ -186,7 +187,7 @@ class ProjectStore:
             out["facts"] = {"valid": counts[0], "invalidated": counts[1]}
         return out
 
-    def create_project(self, user_id: str, name: str, description: str = "") -> Dict[str, Any]:
+    def create_project(self, user_id: str, name: str, description: str = "") -> dict[str, Any]:
         user_id = _require_user(user_id)
         name = str(name or "").strip()[:200]
         if not name:
@@ -200,7 +201,7 @@ class ProjectStore:
             )
         return self.get_project(pid, user_id) or {}
 
-    def _counts(self, conn: sqlite3.Connection, project_id: str, user_id: str) -> Tuple[int, int]:
+    def _counts(self, conn: sqlite3.Connection, project_id: str, user_id: str) -> tuple[int, int]:
         row = conn.execute(
             "SELECT SUM(CASE WHEN invalid_at IS NULL THEN 1 ELSE 0 END) AS v, SUM(CASE WHEN invalid_at IS NULL THEN 0 ELSE 1 END) AS i "
             "FROM facts WHERE project_id = ? AND user_id = ?",
@@ -208,7 +209,7 @@ class ProjectStore:
         ).fetchone()
         return int(row["v"] or 0), int(row["i"] or 0)
 
-    def get_project(self, project_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+    def get_project(self, project_id: str, user_id: str) -> dict[str, Any] | None:
         user_id = _require_user(user_id)
         if not PROJECT_ID_RE.match(project_id or ""):
             return None
@@ -218,13 +219,13 @@ class ProjectStore:
                 return None
             return self._project_dict(row, self._counts(conn, project_id, user_id))
 
-    def owns(self, project_id: Optional[str], user_id: Optional[str]) -> bool:
+    def owns(self, project_id: str | None, user_id: str | None) -> bool:
         if not project_id or not user_id or not PROJECT_ID_RE.match(project_id):
             return False
         with self._connect() as conn:
             return conn.execute("SELECT 1 FROM projects WHERE id = ? AND user_id = ?", (project_id, user_id)).fetchone() is not None
 
-    def list_projects(self, user_id: str, limit: int = 100) -> List[Dict[str, Any]]:
+    def list_projects(self, user_id: str, limit: int = 100) -> list[dict[str, Any]]:
         user_id = _require_user(user_id)
         with self._connect() as conn:
             rows = conn.execute(
@@ -232,7 +233,7 @@ class ProjectStore:
             ).fetchall()
             return [self._project_dict(r, self._counts(conn, r["id"], user_id)) for r in rows]
 
-    def update_project(self, project_id: str, user_id: str, name: Optional[str] = None, description: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def update_project(self, project_id: str, user_id: str, name: str | None = None, description: str | None = None) -> dict[str, Any] | None:
         if not self.owns(project_id, user_id):
             return None
         sets, args = ["updated_at = ?"], [time.time()]
@@ -262,7 +263,7 @@ class ProjectStore:
 
     # Facts ---------------------------------------------------------------------------------------------------
     @staticmethod
-    def _fact_dict(row: sqlite3.Row) -> Dict[str, Any]:
+    def _fact_dict(row: sqlite3.Row) -> dict[str, Any]:
         try:
             source = json.loads(row["source_json"] or "{}")
         except ValueError:
@@ -289,7 +290,7 @@ class ProjectStore:
             "invalidation_reason": row["invalidation_reason"],
         }
 
-    def get_fact(self, project_id: str, fact_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+    def get_fact(self, project_id: str, fact_id: str, user_id: str) -> dict[str, Any] | None:
         if not FACT_ID_RE.match(fact_id or "") or not self.owns(project_id, user_id):
             return None
         with self._connect() as conn:
@@ -298,7 +299,7 @@ class ProjectStore:
             ).fetchone()
         return self._fact_dict(row) if row is not None else None
 
-    def list_facts(self, project_id: str, user_id: str, include_invalid: bool = False, limit: int = 200) -> List[Dict[str, Any]]:
+    def list_facts(self, project_id: str, user_id: str, include_invalid: bool = False, limit: int = 200) -> list[dict[str, Any]]:
         if not self.owns(project_id, user_id):
             return []
         where = "" if include_invalid else " AND invalid_at IS NULL"
@@ -327,13 +328,13 @@ class ProjectStore:
         return fid
 
     @staticmethod
-    def _invalidate(conn: sqlite3.Connection, fact_id: str, now: float, superseded_by: Optional[str], reason: str) -> None:
+    def _invalidate(conn: sqlite3.Connection, fact_id: str, now: float, superseded_by: str | None, reason: str) -> None:
         conn.execute(
             "UPDATE facts SET invalid_at = ?, superseded_by = ?, invalidation_reason = ? WHERE id = ? AND invalid_at IS NULL",
             (now, superseded_by, reason[:300], fact_id),
         )
 
-    def upsert_facts(self, project_id: str, user_id: str, facts: Sequence[FactInput]) -> Dict[str, Any]:
+    def upsert_facts(self, project_id: str, user_id: str, facts: Sequence[FactInput]) -> dict[str, Any]:
         """Mem0-style deterministic update of the fact graph with one batch of extracted facts.
 
         Per fact, against the currently valid facts with the same subject and relation:
@@ -347,8 +348,8 @@ class ProjectStore:
         if not self.owns(project_id, user_id):
             raise ProjectStoreError("Project not found")
         now = time.time()
-        ops: List[Dict[str, Any]] = []
-        batch_keys: Dict[Tuple[str, str], Set[str]] = {}
+        ops: list[dict[str, Any]] = []
+        batch_keys: dict[tuple[str, str], set[str]] = {}
         cleaned = [f.clean() for f in facts if f.subject and f.relation and f.object]
         cleaned = [f for f in cleaned if f.subject and f.relation and f.object]
         for f in cleaned:
@@ -392,7 +393,7 @@ class ProjectStore:
                     else:
                         ops.append({"op": "NOOP", "fact_id": row["id"]})
                     continue
-                contradicted: List[sqlite3.Row] = []
+                contradicted: list[sqlite3.Row] = []
                 if f.relation in SINGLE_VALUED_RELATIONS:
                     in_batch = batch_keys.get((s_norm, f.relation), set())
                     contradicted = [r for r in existing if r["object_norm"] not in in_batch and float(r["recorded_at"]) < now]
@@ -408,7 +409,7 @@ class ProjectStore:
                 self.touch_project(conn, project_id, user_id)
         return {"written": written, "invalidated": invalidated, "ops": ops}
 
-    def invalidate_fact(self, project_id: str, fact_id: str, user_id: str, reason: str = "invalidated by the researcher") -> Optional[Dict[str, Any]]:
+    def invalidate_fact(self, project_id: str, fact_id: str, user_id: str, reason: str = "invalidated by the researcher") -> dict[str, Any] | None:
         if self.get_fact(project_id, fact_id, user_id) is None:
             return None
         with self._connect() as conn:
@@ -421,12 +422,12 @@ class ProjectStore:
         fact_id: str,
         user_id: str,
         *,
-        object: Optional[str] = None,  # noqa: A002 - the fact's field name
-        value: Optional[str] = None,
-        confidence: Optional[float] = None,
-        verified: Optional[bool] = None,
-        tags: Optional[List[str]] = None,
-    ) -> Optional[Dict[str, Any]]:
+        object: str | None = None,  # noqa: A002 - the fact's field name
+        value: str | None = None,
+        confidence: float | None = None,
+        verified: bool | None = None,
+        tags: list[str] | None = None,
+    ) -> dict[str, Any] | None:
         """Edit a fact. A changed object or value is a new version (old one invalidated, Zep-style)."""
         old = self.get_fact(project_id, fact_id, user_id)
         if old is None:
@@ -481,7 +482,7 @@ class ProjectStore:
         entities: Iterable[str] = (),
         k: int = DEFAULT_RECALL_K,
         touch: bool = True,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Top-k valid facts by Personalized PageRank relevance combined with recency and importance."""
         if not self.owns(project_id, user_id):
             return []
@@ -510,16 +511,16 @@ class ProjectStore:
 # ---------------------------------------------------------------------------------------------------------
 
 def personalized_pagerank(
-    edges: Sequence[Tuple[str, str, float]],
-    seeds: Dict[str, float],
+    edges: Sequence[tuple[str, str, float]],
+    seeds: dict[str, float],
     damping: float = 0.85,
     iterations: int = 40,
     tol: float = 1e-8,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """PPR over an undirected weighted graph; the restart distribution is the normalised seed weights.
 
     With no seed in the graph the restart distribution is uniform (plain PageRank)."""
-    adj: Dict[str, Dict[str, float]] = {}
+    adj: dict[str, dict[str, float]] = {}
     for a, b, w in edges:
         if a == b:
             continue
@@ -552,7 +553,7 @@ def personalized_pagerank(
     return rank
 
 
-def _minmax(values: List[float]) -> List[float]:
+def _minmax(values: list[float]) -> list[float]:
     if not values:
         return []
     lo, hi = min(values), max(values)
@@ -561,13 +562,13 @@ def _minmax(values: List[float]) -> List[float]:
     return [(v - lo) / (hi - lo) for v in values]
 
 
-def rank_facts(rows: Sequence[Any], query: str, entities: Iterable[str] = ()) -> List[Tuple[Any, float]]:
+def rank_facts(rows: Sequence[Any], query: str, entities: Iterable[str] = ()) -> list[tuple[Any, float]]:
     """(row, score) sorted best first. Rows need subject/object/confidence/verified/recorded_at/last_accessed."""
     q_tokens = tokens(query)
     ent_norms = {norm(e) for e in entities if norm(e)}
     edges = [(norm(r["subject"]), norm(r["object"]), float(r["confidence"] or 0.5)) for r in rows]
     node_names = {n for a, b, _ in edges for n in (a, b)}
-    seeds: Dict[str, float] = {}
+    seeds: dict[str, float] = {}
     for n in node_names:
         weight = 0.0
         if n in ent_norms:
@@ -619,11 +620,11 @@ def default_projects_dir() -> str:
     return os.path.join(workspace_root, ".tribos_memory")
 
 
-_STORES: Dict[str, ProjectStore] = {}
+_STORES: dict[str, ProjectStore] = {}
 _STORES_LOCK = threading.Lock()
 
 
-def get_project_store(storage_dir: Optional[str] = None) -> ProjectStore:
+def get_project_store(storage_dir: str | None = None) -> ProjectStore:
     """Process-wide store per directory; the directory is re-read on each call (tests point it at tmp_path)."""
     path = os.path.abspath(storage_dir or default_projects_dir())
     with _STORES_LOCK:

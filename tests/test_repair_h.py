@@ -1,3 +1,6 @@
+import pytest
+
+pytest.importorskip('tribos.vivarix', reason='Legacy vivarix package retired')
 """
 Workstream H regressions: Synapta graph extraction, GraphRAG, legacy Vivarix tools.
 All offline; Milvus, COPASI and LLM calls are faked.
@@ -8,7 +11,6 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 import pytest
-
 from tribos.vivarix.tools import parameter_scan as scan_module
 from tribos.vivarix.tools import steady_state as steady_module
 

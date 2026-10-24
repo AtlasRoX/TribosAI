@@ -9,15 +9,22 @@ phases fall back to their deterministic paths.
 from __future__ import annotations
 
 import asyncio
-import os
 import json
 import logging
+import os
 import re
-from typing import Any, Callable, Optional, Type, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from .budget import Allocation, BudgetExhausted, RunBudget, RunDeadlineExceeded, estimate_tokens  # noqa: F401
+from .budget import (  # noqa: F401
+    Allocation,
+    BudgetExhausted,
+    RunBudget,
+    RunDeadlineExceeded,
+    estimate_tokens,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +150,7 @@ def _env_output_cap() -> int:
     return max(0, value)
 
 
-def provider_usage(reply: Any) -> Optional[tuple]:
+def provider_usage(reply: Any) -> tuple | None:
     """(input_tokens, output_tokens) the provider reported for one reply, or None.
 
     Reads LangChain's `usage_metadata` (input/output tokens; reasoning tokens are part of output_tokens) and
@@ -200,11 +207,11 @@ class AgentLLM:
 
     def __init__(
         self,
-        factory: Optional[Callable[..., Any]],
+        factory: Callable[..., Any] | None,
         model_name: str,
-        api_key: Optional[str],
+        api_key: str | None,
         budget: RunBudget,
-        timeout_seconds: Optional[float] = None,
+        timeout_seconds: float | None = None,
     ) -> None:
         self._factory = factory
         self.model_name = model_name
@@ -214,7 +221,7 @@ class AgentLLM:
         # long planning prompt was hitting the old 90 s cap.
         self.timeout_seconds = timeout_seconds or float(os.getenv("TRIBOS_AGENT_CALL_TIMEOUT", "180"))
         self._llm: Any = None
-        self._unavailable: Optional[str] = None if factory is not None else "no model factory"
+        self._unavailable: str | None = None if factory is not None else "no model factory"
 
     @property
     def available(self) -> bool:
@@ -254,8 +261,8 @@ class AgentLLM:
         user: str,
         *,
         phase: str = "agent",
-        timeout: Optional[float] = None,
-        max_output: Optional[int] = None,
+        timeout: float | None = None,
+        max_output: int | None = None,
     ) -> str:
         if not self.available:
             raise AgentLLMUnavailable(self._unavailable or "model unavailable")
@@ -276,7 +283,7 @@ class AgentLLM:
                 ),
                 timeout=wait,
             )
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             self.budget.settle(alloc, failed=True)
             if self.budget.time_limited and self.budget.remaining_seconds() <= 0:
                 self.budget.exhausted()  # records the time-budget reason
@@ -303,13 +310,13 @@ class AgentLLM:
         system: str,
         user: str,
         *,
-        schema: Optional[Type[T]] = None,
+        schema: type[T] | None = None,
         phase: str = "agent",
         retries: int = 1,
     ) -> Any:
         """A parsed JSON reply, validated against schema when given; one repair retry on a malformed reply."""
         prompt = user
-        last_err: Optional[Exception] = None
+        last_err: Exception | None = None
         for _ in range(retries + 1):
             text = await self.complete(system, prompt, phase=phase)
             try:

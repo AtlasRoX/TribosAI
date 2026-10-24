@@ -1,27 +1,22 @@
 import React from "react";
 import type { CitationMap } from "./citations";
 import type { DatasetPublic, MessageAttachment } from "./datasets";
-import type { DrugIntelArtifact } from "./drugs";
 import type { LiteratureArtifact } from "./literature";
 import type { RunManifest, SourceRecord } from "./runs";
-import type { DiseaseTargetsArtifact } from "./diseaseTargets";
-import type { PrimeKGArtifact } from "./primekg";
-import type { ClinicalTrialsArtifact } from "./trials";
-import type { VariantIntelArtifact } from "./variants";
 import type { AgenticArtifacts } from "./agentic";
 
 /** Structured outputs rendered beside an answer; features add keys here through their own type files. */
 export interface ExecutionArtifacts extends AgenticArtifacts {
-  vivarix?: any;
-  vivarix_scan?: any; // parameter scan, rendered by the same simulation card
-  lumicell?: any;
-  discovery?: any;
-  clinical_trials?: ClinicalTrialsArtifact;
-  drug_intel?: DrugIntelArtifact;
-  variant_intel?: VariantIntelArtifact;
-  disease_targets?: DiseaseTargetsArtifact;
-  primekg?: PrimeKGArtifact;
+  dynamis?: Record<string, any>;
+  dynamis_scan?: Record<string, any>;
+  vivarix?: Record<string, any>;
+  vivarix_scan?: Record<string, any>;
+  derivation?: Record<string, any>;
+  axiom?: Record<string, any>;
+  reference_data?: Record<string, any>;
+  physis?: Record<string, any>;
   literature?: LiteratureArtifact;
+  archivon?: LiteratureArtifact | Record<string, any>;
   datasets?: DatasetPublic[];
   sources?: SourceRecord[];
   [k: string]: any;
@@ -48,12 +43,12 @@ export type ClaimStatus = "supported" | "contradicted" | "unsupported" | "not_ch
 /** One checked claim from the verifier (audit F01). */
 export interface ClaimCheck {
   claim_id: string;
-  claim_type?: "clinical" | "mechanistic" | "computational" | "absence" | string;
+  claim_type?: "symbolic" | "numerical" | "dimensional" | "computational" | "theoretical" | "absence" | string;
   claim_text: string;
   evidence?: { source_key?: string; passage?: string; passage_id?: string }[];
   status: ClaimStatus;
   reason?: string;
-  /** false: the claim's cited PMID/DOI did not support it, another retrieved source did. */
+  /** false: the claim's cited identifier did not support it, another retrieved source did. */
   cited_source_supported?: boolean | null;
 }
 

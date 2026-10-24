@@ -5,11 +5,13 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import pytest
 from pydantic import BaseModel
 
+from tests.agentic_fakes import ScriptedLLM, collect_events, make_agentic_orchestrator
+from tests.fakes import build_recording_registry, called
 from tribos.agentic import config as agent_config
 from tribos.agentic.budget import RunBudget
 from tribos.agentic.control import ApprovalDecision, RunControl
@@ -30,8 +32,6 @@ from tribos.agentic.runtime import register_phase, restore_phases, snapshot_phas
 from tribos.agentic.state import AgentState, SubQuestion
 from tribos.agents.query_context import QueryContext
 from tribos.tools.registry import ErrorType, ToolResult
-from tests.agentic_fakes import ScriptedLLM, collect_events, make_agentic_orchestrator
-from tests.fakes import build_recording_registry, called
 
 KRAS_ENSG = "ENSG00000133703"  # what the recording registry's OpenTargets search fake returns
 
@@ -44,7 +44,7 @@ class _Q(BaseModel):
     query: str
 
 
-def _plan(*nodes: Dict[str, Any], rationale: str = "fill the gaps") -> str:
+def _plan(*nodes: dict[str, Any], rationale: str = "fill the gaps") -> str:
     return json.dumps({"rationale": rationale, "nodes": list(nodes)})
 
 
@@ -58,16 +58,16 @@ def _ctx(query: str = "What diseases is KRAS associated with?", **kw: Any) -> Qu
 def make_state(
     reg: Any,
     *,
-    ctx: Optional[QueryContext] = None,
-    llm: Optional[ScriptedLLM] = None,
+    ctx: QueryContext | None = None,
+    llm: ScriptedLLM | None = None,
     interactive: bool = False,
-    options: Optional[Dict[str, Any]] = None,
-    budget: Optional[RunBudget] = None,
+    options: dict[str, Any] | None = None,
+    budget: RunBudget | None = None,
 ) -> tuple:
     ctx = ctx or _ctx()
     budget = budget or RunBudget()
-    steps: List[Dict[str, Any]] = []
-    sent: List[Dict[str, Any]] = []
+    steps: list[dict[str, Any]] = []
+    sent: list[dict[str, Any]] = []
 
     async def emit(step_id, title, text="", status="done", agent=None, extra=None):
         steps.append({"id": step_id, "title": title, "text": text, "status": status, "extra": extra or {}})
@@ -160,7 +160,7 @@ def test_cycles_and_their_dependents_are_rejected():
     assert graph.ids() == ["n4"]
 
 
-def _plan_dict(*nodes: Dict[str, Any]) -> Dict[str, Any]:
+def _plan_dict(*nodes: dict[str, Any]) -> dict[str, Any]:
     return {"rationale": "", "nodes": list(nodes)}
 
 
@@ -378,7 +378,7 @@ def test_phase_replans_once_and_references_earlier_rounds():
             rationale="get the diseases",
         ),
     ]
-    plan_calls: List[str] = []
+    plan_calls: list[str] = []
 
     def planner(system: str, user: str) -> str:
         plan_calls.append(user)
@@ -659,7 +659,7 @@ def test_orchestrator_decomposes_compound_question(monkeypatch, tmp_path, planni
             ],
         }
     )
-    seen: List[str] = []
+    seen: list[str] = []
 
     def planner(system: str, user: str) -> str:
         seen.append(user)
@@ -706,7 +706,12 @@ def test_blank_drug_argument_is_filled_from_the_run_instead_of_rejected():
 
     from tribos.agentic.executor import PlanExecutor
 
-    from tribos.drugintel.schemas import OpenFdaSafetyInput
+    try:
+        from tribos.drugintel.schemas import OpenFdaSafetyInput
+    except ImportError:
+        class OpenFdaSafetyInput(BaseModel):
+            ingredient: str = ""
+
 
     reg, _ = build_recording_registry(extra_tools={"openfda_drug_safety": (OpenFdaSafetyInput, lambda kw: {})})
     graph = parse_plan(_plan_dict({"id": "n7", "tool": "openfda_drug_safety", "args": {"ingredient": ""}}))
@@ -723,11 +728,17 @@ def test_blank_drug_argument_is_filled_from_the_run_instead_of_rejected():
 
 def test_empty_target_reference_falls_back_to_synlethdb_partner_and_resolves_chembl_id():
     import asyncio
-    from types import SimpleNamespace
 
     from tribos.agentic.executor import PlanExecutor, run_known_genes
     from tribos.agentic.plan_graph import PlanNode
-    from tribos.drugintel.schemas import ChemblProfileInput, ChemblResolveInput
+    try:
+        from tribos.drugintel.schemas import ChemblProfileInput, ChemblResolveInput
+    except ImportError:
+        class ChemblProfileInput(BaseModel):
+            target_chembl_id: str = ""
+        class ChemblResolveInput(BaseModel):
+            target_symbol: str = ""
+
 
     calls = []
 

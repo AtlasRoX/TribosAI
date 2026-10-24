@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from html import escape
-from typing import Any, Dict, List
+from typing import Any
 
 from .guardrails import spotlight
 
@@ -40,14 +40,14 @@ def _compact(data: Any) -> str:
     return text
 
 
-def render_result(key: str, result: Any, label: Dict[str, str]) -> str:
+def render_result(key: str, result: Any, label: dict[str, str]) -> str:
     data = getattr(result, "data", None)
     tool = getattr(result, "tool_name", "")
     head = (
         f'<tool_output key="{_attr(key)}" tool="{_attr(tool)}" phase="{_attr(label.get("phase"))}" '
         f'purpose="{_attr(label.get("purpose"))}">'
     )
-    body: List[str] = []
+    body: list[str] = []
     if isinstance(data, dict) and isinstance(data.get("ranked_passages"), list):
         # Exact-identifier lookups and correction linkage (lithoscribe limitations): what was and was not retrieved.
         for note in (data.get("limitations") or [])[:6]:
@@ -65,7 +65,9 @@ def render_result(key: str, result: Any, label: Dict[str, str]) -> str:
             text = str(p.get("passage_text", ""))
             if len(text) > _PASSAGE_CHARS:
                 text = text[:_PASSAGE_CHARS].rsplit(" ", 1)[0] + " [...]"
-            from ..agents.prompts import level_attr  # the same "evidence_level" label the synthesis evidence carries
+            from ..agents.prompts import (
+                level_attr,  # the same "evidence_level" label the synthesis evidence carries
+            )
 
             level = level_attr(p).strip()
             pmid = str(p.get("pmid") or "")
@@ -95,15 +97,15 @@ def render_result(key: str, result: Any, label: Dict[str, str]) -> str:
     return "\n".join([head, *body, "</tool_output>"])
 
 
-def render_agent_evidence(tool_results: Dict[str, Any], labels: Dict[str, Dict[str, str]], sections: List[str]) -> List[str]:
+def render_agent_evidence(tool_results: dict[str, Any], labels: dict[str, dict[str, str]], sections: list[str]) -> list[str]:
     """XML sections for agentic results that succeeded, plus the phases' own sections."""
-    rendered: List[str] = []
+    rendered: list[str] = []
     for key, label in labels.items():
         res = tool_results.get(key)
         if res is None or not getattr(res, "success", False) or not label.get("render"):
             continue
         rendered.append(render_result(key, res, label))
-    out: List[str] = []
+    out: list[str] = []
     if rendered:
         out.append('<agent_evidence note="gathered by follow-up agent steps; the same grounding and citation rules apply">')
         out.extend(rendered)

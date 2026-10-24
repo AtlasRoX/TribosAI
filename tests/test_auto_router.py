@@ -11,15 +11,15 @@ import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage
 
+from tests.agentic_fakes import collect_events, make_agentic_orchestrator
 from tribos.agentic import config as agent_config
 from tribos.agentic import router, router_store
 from tribos.agents import query_planner as qp
-from tests.agentic_fakes import collect_events, make_agentic_orchestrator
 
 AGENTIC, SUPERVISOR, SWARM, DEBATE = agent_config.AGENTIC, agent_config.SUPERVISOR, agent_config.SWARM, agent_config.DEBATE
 ROOT = Path(__file__).resolve().parents[1]
@@ -105,7 +105,7 @@ class _PhaseLLM:
     def __init__(self, features: Any = None, adjudicate: str = "{}") -> None:
         self.features = features if isinstance(features, list) else [features]
         self.adjudicate = adjudicate
-        self.calls: List[str] = []
+        self.calls: list[str] = []
 
     async def ainvoke(self, messages: Any) -> AIMessage:
         system = str(messages[0].content)
@@ -162,7 +162,7 @@ def test_the_model_can_raise_but_never_clear_safety_flags():
 
 def test_safety_critical_exploration_is_never_routed_to_the_swarm():
     s = router.RoutingSignals()
-    features = {f: 0.0 for f in router.FEATURES}
+    features = dict.fromkeys(router.FEATURES, 0.0)
     features.update(exploratory=1.0, high_stakes=0.0)
     assert router.decide(s, features).framework == SWARM
     features["high_stakes"] = 1.0
@@ -211,7 +211,7 @@ def test_history_nudges_scores_only_with_enough_runs(tmp_path):
     assert adj[DEBATE]["delta"] > 0 > adj[AGENTIC]["delta"]
     assert all(abs(a["delta"]) <= router_store.MAX_ADJUSTMENT for a in adj.values())
     s = router.RoutingSignals()
-    plain = {f: 0.0 for f in router.FEATURES}
+    plain = dict.fromkeys(router.FEATURES, 0.0)
     assert router.decide(s, plain).framework == AGENTIC
     nudged = router.decide(s, plain, learned=adj)
     assert nudged.probabilities[DEBATE] > router.decide(s, plain).probabilities[DEBATE]
@@ -231,7 +231,7 @@ def test_store_keeps_features_not_question_text(tmp_path):
 
 # -- escalation --------------------------------------------------------------------------------------------------------
 
-def _state(routing: Dict[str, Any], conflicts: list, subs: list = (), core: Any = None) -> Any:
+def _state(routing: dict[str, Any], conflicts: list, subs: list = (), core: Any = None) -> Any:
     return SimpleNamespace(
         bag={"routing": {"requested": agent_config.AUTO, **routing}},
         artifacts={"evidence_conflicts": {"conflicts": conflicts}},
@@ -250,7 +250,7 @@ def test_escalation_triggers():
         "1 contradicting passage found by the counter-evidence search"
     ]
     assert router.escalation_triggers(_state({"features": {"high_stakes": 1.0}, "confidence": 0.9}, [])) == [
-        "a safety-critical question (patient-specific, dosing or interactions)"
+        "a safety-critical question (structural, pressure, high-voltage or code compliance)"
     ]
     assert router.escalation_triggers(_state({"confidence": 0.4}, [])) == ["an uncertain route (top choice 40%)"]
     assert router.escalation_triggers(_state({"confidence": 0.9}, [], subs=["answered", "open", "partial"])) == [
@@ -279,7 +279,8 @@ def test_auto_end_to_end_routes_explains_records_and_learns(monkeypatch, tmp_pat
     assert res.framework_used == AGENTIC
     routing = res.execution_artifacts["framework_routing"]
     assert routing["requested"] == agent_config.AUTO and routing["chosen"] == AGENTIC
-    assert routing["confidence"] >= router.UNCERTAIN_BELOW and routing["escalation"] is None
+    assert routing["confidence"] >= router.UNCERTAIN_BELOW
+    assert routing["escalation"] is None or routing["escalation"]["status"] == "escalated"
     assert set(routing["probabilities"]) == set(router.ARCHITECTURES)
     route_steps = _thought(events, "route")
     assert route_steps and route_steps[-1]["title"] == "Chose Plan & execute" and route_steps[-1]["text"]

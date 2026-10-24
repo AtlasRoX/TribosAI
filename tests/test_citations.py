@@ -8,10 +8,11 @@ import json
 import re
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 
+from tests.fakes import make_offline_orchestrator
 from tribos.agents import authoritative_orchestrator as orch_module
 from tribos.agents.citations import (
     MEMORY_NOTE,
@@ -19,26 +20,25 @@ from tribos.agents.citations import (
     scan_answer,
     scan_keys,
 )
-from tribos.verify.verifier import TribosVerifier, DefectItem, DefectSeverity, VerificationReport
 from tribos.sources.base import CitationRecord
 from tribos.tools.registry import ToolResult
-from tests.fakes import make_offline_orchestrator
+from tribos.verify.verifier import DefectItem, DefectSeverity, TribosVerifier, VerificationReport
 
 FIXTURES = Path(__file__).parent / "fixtures" / "citations"
 
 
-def _load(name: str) -> Dict[str, Any]:
+def _load(name: str) -> dict[str, Any]:
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
 
 
 LIVE = _load("live_samples.json")
 
 
-def _record(name: str) -> Dict[str, Any]:
+def _record(name: str) -> dict[str, Any]:
     return LIVE["europepmc_core"][name][0]
 
 
-def _passages(art: Dict[str, Any], start: int = 0, *, grading_fields: bool = True, pmid: Any = "auto") -> List[Dict[str, Any]]:
+def _passages(art: dict[str, Any], start: int = 0, *, grading_fields: bool = True, pmid: Any = "auto") -> list[dict[str, Any]]:
     """Lithoscribe-shaped passages from an EuropePMC core record (abstract chunked 2 sentences at a time,
     as LiteratureSynthesisEngine does). grading_fields adds the fields the grading feature passes through."""
     sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", art["abstractText"]) if len(s.strip()) > 30]
@@ -63,7 +63,7 @@ def _passages(art: Dict[str, Any], start: int = 0, *, grading_fields: bool = Tru
     return out
 
 
-def _lit(passages: List[Dict[str, Any]], **extra: Any) -> Dict[str, ToolResult]:
+def _lit(passages: list[dict[str, Any]], **extra: Any) -> dict[str, ToolResult]:
     return {
         "lithoscribe": ToolResult(
             success=True, tool_name="lithoscribe_literature_synthesis", data={"ranked_passages": passages, **extra}

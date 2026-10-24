@@ -8,23 +8,22 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 
 from tribos.agents.query_planner import build_query_context
 from tribos.export.report_model import ExportMessage, build_report_model, citation_line
 from tribos.extensions import hooks
+from tribos.tools.registry import ToolResult
 from tribos.verify.verifier import TribosVerifier
-from tribos.tools.registry import ErrorType, ToolResult
-from tests.fakes import called, make_offline_orchestrator
 
 FIXTURES = Path(__file__).parent / "fixtures"
 TRIPLE_QUERY = "osimertinib trials and adverse events in EGFR L858R NSCLC"
 
 
 async def _ask(orch, query: str):
-    events: List[Dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
 
     async def cb(ev):
         events.append(ev)

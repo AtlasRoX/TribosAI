@@ -17,40 +17,42 @@ export interface DisclosureInput {
 
 /** Domain artifacts open only when the question asks for that kind of evidence or analysis. */
 const TOPICS: Record<string, RegExp> = {
-  drug_intel:
-    /\b(?:fda|approv\w*|labels?|labell?ing|indicat\w*|regulat\w*|drugs?@fda|safety|adverse|faers|boxed\s+warnings?|contraindicat\w*|pharmacovigil\w*|toxicit\w*)\b/i,
-  clinical_trials: /\b(?:trials?|nct\d{8}|recruit\w*|enrol\w*|clinicaltrials(?:\.gov)?)\b/i,
-  variant_intel: /\b(?:variants?|mutations?|mutant|alleles?|clinvar|civic|gnomad|pathogenic\w*|g12[a-z]|v600e)\b/i,
-  disease_targets: /\b(?:targets?|druggab\w*|open\s*targets|target[\s-]+disease|associations?)\b/i,
-  primekg: /\b(?:knowledge\s+graph|primekg|repurpos\w*|graph|network\s+medicine)\b/i,
-  structure_intel: /\b(?:structures?|structural|pdb|alphafold|docking|binding\s+(?:site|pocket)|pockets?|ligands?)\b/i,
-  omics_intel:
-    /\b(?:omics|expression|gtex|depmap|gwas|transcriptom\w*|proteom\w*|co-?expression|string\s+network|reactome|essentiality)\b/i,
-  lumicell: /\b(?:single[\s-]?cell|scrna(?:-seq)?|snrna(?:-seq)?|h5ad|cell\s+types?|clusters?|marker\s+genes?)\b/i,
-  vivarix: /\b(?:simulat\w*|time[\s-]?courses?|steady[\s-]?states?|kinetic\w*|odes?|biomodels?|sbml|parameter\s+(?:scans?|sweeps?))\b/i,
-  hypotheses: /\b(?:hypothes[ie]s|hypothesi[sz]\w*|testable|propose\s+(?:a|two|three|new|novel))\b/i,
+  derivation:
+    /\b(?:deriv\w*|prove|proof|simplif\w*|solve|symbolic\w*|integrat\w*|differentiat\w*|taylor|series|eigenval\w*|eigenvec\w*|jacobian|laplace|fourier|dsolve|sympy|closed[\s-]?form|exact)\b/i,
+  dynamis:
+    /\b(?:simulat\w*|trajector\w*|time[\s-]?courses?|steady[\s-]?states?|equilibri\w*|odes?|daes?|bvps?|phase\s+portrait|bifurcat\w*|stability|parameter\s+(?:scans?|sweeps?)|rk45|radau|bdf|lsoda|scipy)\b/i,
+  reference_data:
+    /\b(?:constants?|codata|nist|units?|conver(?:t|sion)|dimension\w*|oeis|sequences?|materials?\s+project|band\s*gap|crystal\s+structure|mp-\d+|a\d{6})\b/i,
+  literature:
+    /\b(?:papers?|preprints?|literature|citations?|arxiv|zbmath|mathscinet|openalex|semantic\s+scholar|ads|bibliography|references?|survey|review\s+of)\b/i,
+  hypotheses: /\b(?:hypothes[ie]s|hypothesi[sz]\w*|conjectur\w*|testable|propose\s+(?:a|two|three|new|novel))\b/i,
 };
-TOPICS.vivarix_scan = TOPICS.vivarix;
+TOPICS.axiom = TOPICS.derivation;
+TOPICS.dynamis_scan = TOPICS.dynamis;
+TOPICS.vivarix = TOPICS.dynamis;
+TOPICS.vivarix_scan = TOPICS.dynamis;
+TOPICS.physis = TOPICS.reference_data;
+TOPICS.archivon = TOPICS.literature;
 
-/** Words naming each topic inside an exclusion clause ("No FDA sweep, simulation or omics is needed"). */
+/** Words naming each topic inside an exclusion clause ("No numerical simulation or literature search is needed"). */
 const EXCLUSION_WORDS: Record<string, RegExp> = {
-  drug_intel: /\b(?:fda|regulat\w*|drug\s+safety|safety|label\w*|faers)\b/i,
-  clinical_trials: /\btrials?\b/i,
-  variant_intel: /\b(?:variants?|mutations?|clinvar)\b/i,
-  disease_targets: /\btargets?\b/i,
-  primekg: /\b(?:knowledge\s+graph|graph|primekg|repurpos\w*)\b/i,
-  structure_intel: /\b(?:structures?|structural|docking|pdb|alphafold)\b/i,
-  omics_intel: /\bomics\b|\b(?:expression|gtex|depmap|gwas)\b/i,
-  lumicell: /\b(?:single[\s-]?cell|scrna\w*|snrna\w*)\b/i,
-  vivarix: /\b(?:simulat\w*|time[\s-]?courses?|kinetic\w*|model(?:l?ing)?)\b/i,
-  hypotheses: /\b(?:hypothes[ie]s|hypothesi[sz]\w*)\b/i,
+  derivation: /\b(?:symbolic\w*|derivation|proof|sympy)\b/i,
+  dynamis: /\b(?:simulat\w*|trajector\w*|time[\s-]?courses?|numerical\s+integration|model(?:l?ing)?)\b/i,
+  reference_data: /\b(?:constants?|codata|unit\s+conversion|oeis|materials?\s+project)\b/i,
+  literature: /\b(?:literature|papers?|preprints?|arxiv|citations?)\b/i,
+  hypotheses: /\b(?:hypothes[ie]s|hypothesi[sz]\w*|conjectur\w*)\b/i,
 };
-EXCLUSION_WORDS.vivarix_scan = EXCLUSION_WORDS.vivarix;
+EXCLUSION_WORDS.axiom = EXCLUSION_WORDS.derivation;
+EXCLUSION_WORDS.dynamis_scan = EXCLUSION_WORDS.dynamis;
+EXCLUSION_WORDS.vivarix = EXCLUSION_WORDS.dynamis;
+EXCLUSION_WORDS.vivarix_scan = EXCLUSION_WORDS.dynamis;
+EXCLUSION_WORDS.physis = EXCLUSION_WORDS.reference_data;
+EXCLUSION_WORDS.archivon = EXCLUSION_WORDS.literature;
 
 const NEEDED = /\b(?:needed|required|necessary|wanted|requested)\b/i;
 
 /**
- * The parts of the question that exclude work: sentences or clauses such as "No simulation or single-cell analysis
+ * The parts of the question that exclude work: sentences or clauses such as "No simulation or literature search
  * needed.", "without running simulations", "do not run a debate", "Simulation is not needed". A plain "no" in other
  * wording ("if no exact lookup works") is only an exclusion when it opens a sentence or the clause says "needed".
  */
@@ -146,6 +148,7 @@ export function artifactDisclosure(input: DisclosureInput): Record<string, boole
     switch (key) {
       case "plan_approval":
       case "literature":
+      case "archivon":
       case "sandbox_analysis":
       case "model_calibration":
         out[key] = true;

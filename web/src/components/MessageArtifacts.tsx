@@ -3,26 +3,21 @@
 import React from "react";
 import type { ExecutionArtifacts, TaskOutcome } from "@/types/chat";
 import { artifactDisclosure } from "@/lib/artifactDisclosure";
+import { DerivationArtifact } from "@/components/DerivationArtifact";
 import { ArtifactRenderFallback, ErrorBoundary } from "@/components/ErrorBoundary";
-import { DiseaseTargetsArtifact } from "@/components/DiseaseTargetsArtifact";
-import { DrugSafetyArtifact } from "@/components/DrugSafetyArtifact";
 import { EvidenceSources } from "@/components/EvidenceSources";
-import { PrimeKGArtifact } from "@/components/PrimeKGArtifact";
+import { LiteratureArtifact } from "@/components/LiteratureArtifact";
+import { ReferenceDataArtifact } from "@/components/ReferenceDataArtifact";
 import { SimulationArtifact } from "@/components/SimulationArtifact";
-import { SingleCellArtifact } from "@/components/SingleCellArtifact";
-import { TrialLandscapeArtifact } from "@/components/TrialLandscapeArtifact";
-import { VariantArtifact } from "@/components/VariantArtifact";
 import { AgentDialogueArtifact } from "@/components/agentic/AgentDialogueArtifact";
 import { AgentRunPanel } from "@/components/agentic/AgentRunPanel";
 import { CalibrationArtifact } from "@/components/agentic/CalibrationArtifact";
 import { ClaimConfidenceArtifact } from "@/components/agentic/ClaimConfidenceArtifact";
 import { EvidenceConflictsArtifact } from "@/components/agentic/EvidenceConflictsArtifact";
 import { HypothesesArtifact } from "@/components/agentic/HypothesesArtifact";
-import { OmicsArtifact } from "@/components/agentic/OmicsArtifact";
 import { PlanGraphArtifact } from "@/components/agentic/PlanGraphArtifact";
 import { PlanApprovalArtifact, ProjectMemoryArtifact } from "@/components/agentic/ProjectMemoryArtifact";
 import { SandboxAnalysisArtifact } from "@/components/agentic/SandboxAnalysisArtifact";
-import { StructureArtifact } from "@/components/agentic/StructureArtifact";
 import { CardDisclosureContext } from "@/components/agentic/ui";
 
 /**
@@ -49,8 +44,8 @@ function ArtifactBoundary({
 }
 
 /**
- * Structured result cards shown under an answer: decisions first, then evidence, analyses, trust checks, and the run
- * itself. Which cards start open comes from the question, the task outcome and each artifact's state (artifactDisclosure).
+ * Structured result cards shown under an answer: decisions first, then symbolic derivations, physical reference data,
+ * scholarly literature, numerical simulations, sandboxed computations, trust checks, and the run itself.
  */
 export function MessageArtifacts({
   artifacts,
@@ -63,6 +58,21 @@ export function MessageArtifacts({
 }) {
   if (!artifacts) return null;
   const open = artifactDisclosure({ question, taskStatus, artifacts });
+  const derivationData = artifacts.derivation ?? artifacts.axiom;
+  const derivationKey = artifacts.derivation ? "derivation" : "axiom";
+  const referenceData = artifacts.reference_data ?? artifacts.physis;
+  const referenceKey = artifacts.reference_data ? "reference_data" : "physis";
+  const simData = artifacts.dynamis ?? artifacts.vivarix;
+  const simScan = artifacts.dynamis_scan ?? artifacts.vivarix_scan;
+  const simKey = artifacts.dynamis ? "dynamis" : artifacts.vivarix ? "vivarix" : artifacts.dynamis_scan ? "dynamis_scan" : "vivarix_scan";
+
+  const hasGradedLiterature = Boolean(
+    artifacts.literature &&
+      ((Array.isArray(artifacts.literature.graded_articles) && artifacts.literature.graded_articles.length > 0) ||
+        (Array.isArray(artifacts.literature.excluded_articles) && artifacts.literature.excluded_articles.length > 0))
+  );
+  const archivonData = artifacts.archivon ?? (!hasGradedLiterature ? artifacts.literature : undefined);
+
   return (
     <>
       {/* Needs the reader's decision */}
@@ -71,61 +81,31 @@ export function MessageArtifacts({
           <PlanApprovalArtifact data={artifacts.plan_approval} />
         </ArtifactBoundary>
       )}
-      {/* Evidence the answer rests on */}
-      {artifacts.clinical_trials && (
-        <ArtifactBoundary name="clinical_trials" open={open["clinical_trials"]} data={artifacts.clinical_trials}>
-          <TrialLandscapeArtifact data={artifacts.clinical_trials} />
+      {/* Symbolic derivations, physical constants & reference data, and scholarly literature */}
+      {derivationData && (
+        <ArtifactBoundary name={derivationKey} open={open[derivationKey]} data={derivationData}>
+          <DerivationArtifact data={derivationData} />
         </ArtifactBoundary>
       )}
-      {artifacts.drug_intel && (
-        <ArtifactBoundary name="drug_intel" open={open["drug_intel"]} data={artifacts.drug_intel}>
-          <DrugSafetyArtifact data={artifacts.drug_intel} />
+      {referenceData && (
+        <ArtifactBoundary name={referenceKey} open={open[referenceKey]} data={referenceData}>
+          <ReferenceDataArtifact data={referenceData} />
         </ArtifactBoundary>
       )}
-      {artifacts.variant_intel && (
-        <ArtifactBoundary name="variant_intel" open={open["variant_intel"]} data={artifacts.variant_intel}>
-          <VariantArtifact data={artifacts.variant_intel} />
-        </ArtifactBoundary>
-      )}
-      {artifacts.disease_targets && (
-        <ArtifactBoundary name="disease_targets" open={open["disease_targets"]} data={artifacts.disease_targets}>
-          <DiseaseTargetsArtifact data={artifacts.disease_targets} />
-        </ArtifactBoundary>
-      )}
-      {artifacts.primekg && (
-        <ArtifactBoundary name="primekg" open={open["primekg"]} data={artifacts.primekg}>
-          <PrimeKGArtifact data={artifacts.primekg} />
-        </ArtifactBoundary>
-      )}
-      {artifacts.literature && (
+      {hasGradedLiterature && artifacts.literature && (
         <ArtifactBoundary name="literature" open={open["literature"]} data={artifacts.literature}>
           <EvidenceSources data={artifacts.literature} />
         </ArtifactBoundary>
       )}
-      {/* Analyses run for this question */}
-      {artifacts.vivarix && (
-        <ArtifactBoundary name="vivarix" open={open["vivarix"]} data={artifacts.vivarix}>
-          <SimulationArtifact data={artifacts.vivarix} />
+      {archivonData && (
+        <ArtifactBoundary name="archivon" open={open["archivon"] ?? open["literature"]} data={archivonData}>
+          <LiteratureArtifact data={archivonData} />
         </ArtifactBoundary>
       )}
-      {artifacts.vivarix_scan && (
-        <ArtifactBoundary name="vivarix_scan" open={open["vivarix_scan"]} data={artifacts.vivarix_scan}>
-          <SimulationArtifact data={artifacts.vivarix_scan} />
-        </ArtifactBoundary>
-      )}
-      {artifacts.structure_intel && (
-        <ArtifactBoundary name="structure_intel" open={open["structure_intel"]} data={artifacts.structure_intel}>
-          <StructureArtifact data={artifacts.structure_intel} />
-        </ArtifactBoundary>
-      )}
-      {artifacts.omics_intel && (
-        <ArtifactBoundary name="omics_intel" open={open["omics_intel"]} data={artifacts.omics_intel}>
-          <OmicsArtifact data={artifacts.omics_intel} />
-        </ArtifactBoundary>
-      )}
-      {artifacts.lumicell && (
-        <ArtifactBoundary name="lumicell" open={open["lumicell"]} data={artifacts.lumicell}>
-          <SingleCellArtifact data={artifacts.lumicell} datasets={artifacts.datasets} />
+      {/* Numerical simulation, sandboxed computation, and model calibration */}
+      {(simData || simScan) && (
+        <ArtifactBoundary name={simKey} open={open[simKey]} data={simData ?? simScan}>
+          <SimulationArtifact data={simData} scan={simScan} />
         </ArtifactBoundary>
       )}
       {artifacts.sandbox_analysis && (

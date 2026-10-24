@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any
 
 from .budget import BudgetExhausted, RunBudget
 from .config import AGENTIC, DEBATE, SUPERVISOR, SWARM
@@ -23,18 +24,18 @@ logger = logging.getLogger(__name__)
 EmitFn = Callable[..., Awaitable[None]]
 
 # The phase that IS each framework: when it does not run as asked, the run is reported as partial.
-CORE_PHASES: Dict[str, str] = {AGENTIC: "plan_execute", SUPERVISOR: "supervisor", SWARM: "swarm", DEBATE: "debate"}
-CORE_PHASE_LABELS: Dict[str, str] = {
+CORE_PHASES: dict[str, str] = {AGENTIC: "plan_execute", SUPERVISOR: "supervisor", SWARM: "swarm", DEBATE: "debate"}
+CORE_PHASE_LABELS: dict[str, str] = {
     "plan_execute": "Plan & execute",
     "supervisor": "Supervisor",
     "swarm": "Swarm",
     "debate": "Debate",
 }
-SendFn = Callable[[Dict[str, Any]], Awaitable[None]]
+SendFn = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 # What each agent phase is called next to the source it searched ("web search (counter-evidence)").
-_PHASE_LABELS: Dict[str, str] = {
+_PHASE_LABELS: dict[str, str] = {
     "gaps": "gap search",
     "plan_execute": "plan step",
     "plan_join": "plan step",
@@ -59,7 +60,7 @@ def source_label(short: str) -> str:
     return name or short.replace("_", " ")
 
 
-def evidence_key_label(key: str, round_no: Optional[int] = None) -> str:
+def evidence_key_label(key: str, round_no: int | None = None) -> str:
     """A reader's name for an evidence key: "agent.gaps.4.lithoscribe" -> "Europe PMC (gap search)", with
     round_no (0-based) -> "Europe PMC (gap round 1)"; "tool:chembl" / "synlethdb" -> "ChEMBL" / "SynLethDB"."""
     key = str(key or "").strip()
@@ -80,13 +81,13 @@ class SubQuestion:
     id: str
     text: str
     focus: str = ""  # literature | target | simulation | single_cell | clinical | drug | variant | structure | omics | general
-    depends_on: List[str] = field(default_factory=list)
+    depends_on: list[str] = field(default_factory=list)
     status: str = "open"  # open | answered | partial | unanswerable
-    evidence_keys: List[str] = field(default_factory=list)
+    evidence_keys: list[str] = field(default_factory=list)
     note: str = ""
     # Readable names of evidence keys set by the phase that added them ("Europe PMC (gap round 1)"); a key without
     # one is named from the key itself (evidence_key_label).
-    evidence_key_names: Dict[str, str] = field(default_factory=dict)
+    evidence_key_names: dict[str, str] = field(default_factory=dict)
 
     def add_evidence(self, key: str, label: str = "") -> None:
         if key not in self.evidence_keys:
@@ -94,7 +95,7 @@ class SubQuestion:
         if label:
             self.evidence_key_names[key] = label
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "text": self.text,
@@ -116,31 +117,31 @@ class AgentState:
     user_id: str
     thread_id: str
     model_name: str
-    api_key: Optional[str]
+    api_key: str | None
     framework: str
     budget: RunBudget
     control: RunControl
     llm: AgentLLM
-    tool_results: Dict[str, Any]
+    tool_results: dict[str, Any]
     emit: EmitFn
     send: SendFn
-    project_id: Optional[str] = None
-    options: Dict[str, Any] = field(default_factory=dict)
+    project_id: str | None = None
+    options: dict[str, Any] = field(default_factory=dict)
     memory_summary: str = ""
     project_memory: str = ""
-    sub_questions: List[SubQuestion] = field(default_factory=list)
-    evidence_labels: Dict[str, Dict[str, str]] = field(default_factory=dict)
-    evidence_sections: List[str] = field(default_factory=list)  # extra XML sections written by phases
-    brief_notes: List[str] = field(default_factory=list)  # lines for the <research_brief> in the synthesis request
-    scope_notes: List[str] = field(default_factory=list)
-    artifacts: Dict[str, Any] = field(default_factory=dict)
-    trace: List[Dict[str, Any]] = field(default_factory=list)
+    sub_questions: list[SubQuestion] = field(default_factory=list)
+    evidence_labels: dict[str, dict[str, str]] = field(default_factory=dict)
+    evidence_sections: list[str] = field(default_factory=list)  # extra XML sections written by phases
+    brief_notes: list[str] = field(default_factory=list)  # lines for the <research_brief> in the synthesis request
+    scope_notes: list[str] = field(default_factory=list)
+    artifacts: dict[str, Any] = field(default_factory=dict)
+    trace: list[dict[str, Any]] = field(default_factory=list)
     draft: str = ""
     draft_round: int = 0
     verification: Any = None
-    bag: Dict[str, Any] = field(default_factory=dict)
+    bag: dict[str, Any] = field(default_factory=dict)
     _counter: int = 0
-    _running_steps: Dict[str, Dict[str, str]] = field(default_factory=dict)  # step id -> {title, agent} still spinning
+    _running_steps: dict[str, dict[str, str]] = field(default_factory=dict)  # step id -> {title, agent} still spinning
 
     @property
     def effort_level(self) -> str:
@@ -159,7 +160,7 @@ class AgentState:
         *,
         phase: str,
         purpose: str,
-        key: Optional[str] = None,
+        key: str | None = None,
         store: bool = True,
         **kwargs: Any,
     ) -> Any:
@@ -208,7 +209,7 @@ class AgentState:
         self.evidence_labels[key] = {"phase": phase, "purpose": purpose[:240], "render": "1" if render else ""}
         return key
 
-    def agent_result_keys(self) -> List[str]:
+    def agent_result_keys(self) -> list[str]:
         return [k for k in self.tool_results if k in self.evidence_labels]
 
     # Steps ---------------------------------------------------------------------------------------------------
@@ -222,10 +223,10 @@ class AgentState:
         except Exception as exc:  # noqa: BLE001
             logger.debug("Agent step emit failed: %s", exc)
 
-    def running_step_ids(self) -> List[str]:
+    def running_step_ids(self) -> list[str]:
         return list(self._running_steps)
 
-    async def close_steps(self, step_ids: List[str], *, status: str, title_suffix: str = "", text: str = "") -> None:
+    async def close_steps(self, step_ids: list[str], *, status: str, title_suffix: str = "", text: str = "") -> None:
         """Resolve steps a phase left spinning, so a failed phase never leaves a forever-running step."""
         for sid in step_ids:
             info = self._running_steps.get(sid)
@@ -240,10 +241,10 @@ class AgentState:
         runtime records this status in phases_ran instead of "ok"."""
         self.bag.setdefault("_phase_marks", {})[key] = {"status": status, "reason": reason[:240]}
 
-    def pop_phase_mark(self, key: str) -> Optional[Dict[str, str]]:
+    def pop_phase_mark(self, key: str) -> dict[str, str] | None:
         return (self.bag.get("_phase_marks") or {}).pop(key, None)
 
-    def core_phase_status(self) -> Optional[Dict[str, str]]:
+    def core_phase_status(self) -> dict[str, str] | None:
         """{"phase", "label", "status", "reason"} of the framework's core phase; None for frameworks without one.
 
         status: ok | fallback | llm_unavailable | budget | error | skipped | not_run (the last run of the phase wins).
@@ -265,7 +266,7 @@ class AgentState:
         """The task-status reason when the framework's core phase did not run as asked ("" when it did)."""
         return core_phase_note(self.core_phase_status(), research=getattr(self.ctx, "scope", "research") == "research")
 
-    def incomplete_status(self) -> Dict[str, List[str]]:
+    def incomplete_status(self) -> dict[str, list[str]]:
         """Why the request is only partly done, beyond the core phase: {"incomplete_reasons": [...], "unresolved":
         [sub-question texts]}. Both empty when the run finished what it set out to do.
 
@@ -275,7 +276,7 @@ class AgentState:
           first): the answer then rests on the standard pipeline's evidence;
         - sub-questions the evidence answers only partly or not at all (and, after an early stop, those never
           checked)."""
-        reasons: List[str] = []
+        reasons: list[str] = []
         budget = self.budget
         # A sub-question still "open" was never checked; that counts only when something stopped the run early.
         stopped_early = bool(budget.exhausted_reason or budget.optional_exhausted_reason)
@@ -295,7 +296,7 @@ class AgentState:
 
     # Prompt pieces -------------------------------------------------------------------------------------------
     def research_brief(self) -> str:
-        lines: List[str] = []
+        lines: list[str] = []
         if self.sub_questions:
             lines.append("Address each sub-question explicitly; say which ones the evidence cannot answer:")
             lines.extend(f"- [{q.id}] {q.text}" + (f" (status: {q.status})" if q.status != "open" else "") for q in self.sub_questions)
@@ -306,7 +307,7 @@ class AgentState:
         lines.extend(self.brief_notes)
         return "\n".join(lines)
 
-    def summary(self) -> Dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
         return {
             "framework": self.framework,
             "run_id": self.control.run_id,
@@ -330,7 +331,7 @@ _CORE_FAILURE_WORDS = {
 }
 
 
-def core_phase_note(core: Optional[Dict[str, Any]], *, research: bool = True) -> str:
+def core_phase_note(core: dict[str, Any] | None, *, research: bool = True) -> str:
     """Why the framework's core phase did not run as asked, for the task status ("" when it ran normally).
 
     "not_run" counts only for research questions (other scopes never reach the agent phases)."""

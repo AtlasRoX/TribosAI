@@ -4,7 +4,6 @@ untouched text stays byte-identical, invalid replacements keep the original, and
 from __future__ import annotations
 
 import asyncio
-from typing import List, Tuple
 
 from tribos.agents.orchestration.section_repair import (
     AnswerVersion,
@@ -70,7 +69,7 @@ def test_one_quoted_claim_repairs_its_section_and_the_summary():
     assert any(r.startswith("summary restates") for r in d.sections["bottom-line"])
 
 
-def _fake_generate(rewrites, calls: List[Tuple[str, int]]):
+def _fake_generate(rewrites, calls: list[tuple[str, int]]):
     async def generate(system: str, user: str, max_tokens: int) -> str:
         section = user.split("<section>\n", 1)[1].split("\n</section>", 1)[0]
         calls.append((section.splitlines()[0], max_tokens))
@@ -82,7 +81,7 @@ def _fake_generate(rewrites, calls: List[Tuple[str, int]]):
 
 
 def test_repair_changes_only_affected_sections_byte_identically_elsewhere():
-    calls: List[Tuple[str, int]] = []
+    calls: list[tuple[str, int]] = []
     gen = _fake_generate([("30% response rate", "25% response rate"), ("drug B is under study", "drug B had a 25% response")], calls)
     fb = ['Claim: "Drug B showed a 30% response rate in a phase II study" - wrong value (evidence: PMID:22222222)']
     version = AnswerVersion.start(ANSWER, ["PMID:11111111", "PMID:22222222", "NCT:NCT00000001"])
@@ -91,7 +90,7 @@ def test_repair_changes_only_affected_sections_byte_identically_elsewhere():
     assert report.mode == "targeted" and sorted(report.applied) == ["bottom-line", "drug-b"]
     assert "25% response rate" in out and "drug B had a 25% response" in out
     before, after = split_sections(ANSWER), split_sections(out)
-    for b, a in zip(before, after):
+    for b, a in zip(before, after, strict=False):
         if b.id not in ("bottom-line", "drug-b"):
             assert a.text == b.text  # untouched sections are byte-identical
     assert calls[-1][0] == "**Bottom line**"  # the summary is rewritten last, after the body sections

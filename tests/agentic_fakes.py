@@ -10,20 +10,20 @@ Calls without a marker are the answer synthesis (or the Reflexion correction, wh
 from __future__ import annotations
 
 import re
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from collections.abc import Callable
+from typing import Any
 
 from langchain_core.messages import AIMessage
 
-from tribos.agents import authoritative_orchestrator as orch_module
 from tests.fakes import ExtraTools, make_offline_orchestrator
+from tribos.agents import authoritative_orchestrator as orch_module
 
-Responder = Union[str, Callable[[str, str], str]]
+Responder = str | Callable[[str, str], str]
 
 _PHASE_RE = re.compile(r"^\s*\[phase:([a-z0-9_]+)\]")
 
 DEFAULT_SYNTHESIS = (
-    "## Answer\n\nKRAS is associated with pancreatic carcinoma in the retrieved target-disease evidence. "
-    "The evidence available for this question is limited to the sources listed below."
+    "## Result\n\n$x = 2$\n\n## Derivation\n\nDerived from equation.\n\n## Verification\n\nVerified by computation.\n\n## References\n\n[Vaswani et al., 2017 | arXiv:1706.03762]"
 )
 
 
@@ -39,10 +39,10 @@ def phase_of(system: str, user: str = "") -> str:
 class ScriptedLLM:
     """Chat model stand-in: ainvoke only, so astream_with_reasoning uses its ainvoke fallback."""
 
-    def __init__(self, responses: Dict[str, Responder], default_synthesis: str = DEFAULT_SYNTHESIS) -> None:
+    def __init__(self, responses: dict[str, Responder], default_synthesis: str = DEFAULT_SYNTHESIS) -> None:
         self.responses = dict(responses)
         self.default_synthesis = default_synthesis
-        self.calls: List[Tuple[str, str, str]] = []  # (phase, system, user)
+        self.calls: list[tuple[str, str, str]] = []  # (phase, system, user)
         self.temperature = 0.0
 
     def respond(self, system: str, user: str) -> str:
@@ -60,20 +60,20 @@ class ScriptedLLM:
         user = str(getattr(messages[-1], "content", "")) if messages else ""
         return AIMessage(content=self.respond(system, user))
 
-    def phases(self) -> List[str]:
+    def phases(self) -> list[str]:
         return [c[0] for c in self.calls]
 
-    def prompts(self, phase: str) -> List[str]:
+    def prompts(self, phase: str) -> list[str]:
         return [c[2] for c in self.calls if c[0] == phase]
 
 
 def make_agentic_orchestrator(
     monkeypatch: Any,
     tmp_path: Any,
-    responses: Optional[Dict[str, Responder]] = None,
-    extra_tools: Optional[ExtraTools] = None,
+    responses: dict[str, Responder] | None = None,
+    extra_tools: ExtraTools | None = None,
     default_synthesis: str = DEFAULT_SYNTHESIS,
-) -> Tuple[Any, List[Tuple[str, Dict[str, Any]]], ScriptedLLM]:
+) -> tuple[Any, list[tuple[str, dict[str, Any]]], ScriptedLLM]:
     """Offline orchestrator whose model is a ScriptedLLM (use framework='agentic-plan-execute' etc.)."""
     orch, calls = make_offline_orchestrator(monkeypatch, tmp_path, extra_tools=extra_tools)
     llm = ScriptedLLM(responses or {}, default_synthesis=default_synthesis)
@@ -82,10 +82,10 @@ def make_agentic_orchestrator(
     return orch, calls, llm
 
 
-async def collect_events(orch: Any, **kwargs: Any) -> Tuple[Any, List[Dict[str, Any]]]:
-    events: List[Dict[str, Any]] = []
+async def collect_events(orch: Any, **kwargs: Any) -> tuple[Any, list[dict[str, Any]]]:
+    events: list[dict[str, Any]] = []
 
-    async def cb(ev: Dict[str, Any]) -> None:
+    async def cb(ev: dict[str, Any]) -> None:
         events.append(ev)
 
     res = await orch.execute_inquiry(event_callback=cb, **kwargs)

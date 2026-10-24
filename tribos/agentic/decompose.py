@@ -12,8 +12,7 @@ five ordered sub-questions that the planner (feature 1), the gap loop (feature 2
 - Least-to-Most (Zhou et al., ICLR 2023, arXiv:2205.10625): sub-questions are ordered simplest first and a
   later one may depend on earlier ones (depends_on), so their answers feed it.
 - Decomposed Prompting (Khot et al., ICLR 2023, arXiv:2210.02406): each sub-question gets a `focus` that
-  routes it to a specialist handler (literature, target, simulation, single_cell, clinical, drug, variant,
-  structure, omics, general).
+  routes it to a specialist handler (math, physics, engineering, computation, literature, data, general).
 
 The model call uses the prompt marker [phase:decompose] and returns
 {"complex": bool, "sub_questions": [{"id", "text", "focus", "depends_on"}]}. When the model is unavailable
@@ -26,7 +25,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from .budget import BudgetExhausted
 from .config import env_flag
@@ -37,18 +36,46 @@ from .state import SubQuestion
 logger = logging.getLogger(__name__)
 
 MAX_SUB_QUESTIONS = 5
-FOCI = ("literature", "target", "simulation", "single_cell", "clinical", "drug", "variant", "structure", "omics", "general")
+FOCI = ("math", "physics", "engineering", "computation", "literature", "data", "drug", "clinical", "variant", "target", "trials")
 
-_FOCUS_PATTERNS: List[Tuple[str, re.Pattern]] = [
-    ("simulation", re.compile(r"\b(simulat\w*|kinetic\w*|ode|time[- ]course|steady[- ]state|parameter scan|biomodel\w*|sbml|dynamics)\b", re.I)),
-    ("single_cell", re.compile(r"\b(single[- ]cell|scrna\w*|cell types?|clusters?|marker genes?|h5ad)\b", re.I)),
-    ("structure", re.compile(r"\b(structur\w*|alphafold|pdb|docking|dock|binding (?:site|pocket)|plddt|fold)\b", re.I)),
-    ("variant", re.compile(r"\b(mutation\w*|variant\w*|pathogenic\w*|rs\d+|clinvar|[A-Z]\d{1,4}[A-Z])\b")),
-    ("clinical", re.compile(r"\b(trials?|clinical\w*|patients?|phase [1-4i]+|recruit\w*|nct\d+)\b", re.I)),
-    ("drug", re.compile(r"\b(drugs?|inhibitors?|compounds?|mechanisms?(?: of action)?|potency|ic50|side effects?|adverse|safety|toxicity|dosing)\b", re.I)),
-    ("omics", re.compile(r"\b(gwas|expression|tissues?|gtex|interaction\w*|network|string|reactome|eqtl)\b", re.I)),
-    ("target", re.compile(r"\b(targets?|associat\w*|genes?|pathways?|druggab\w*|tractab\w*|signaling)\b", re.I)),
-    ("literature", re.compile(r"\b(papers?|literature|publications?|studies|study|evidence|reported|review)\b", re.I)),
+_FOCUS_PATTERNS: list[tuple[str, re.Pattern]] = [
+    ("computation", re.compile(
+        r"\b(simulat\w*|numerical\w*|ode|pde|ivp|bvp|time[- ]course|steady[- ]state|equilibri\w*|parameter scan|sweep"
+        r"|bifurcation|runge[- ]kutta|rk45|bdf|radau|solver|optimiz\w*|root[- ]find\w*|monte carlo|finite element|fdm|fem|cfd)\b",
+        re.I,
+    )),
+    ("data", re.compile(
+        r"\b(dataset\w*|csv|tsv|hdf5|h5|mat|parquet|xlsx|table|dataframe|regress\w*|curve fit\w*|fit parameters"
+        r"|calibrat\w*|time series|histogram|correlat\w*|pca|svd|residuals?)\b",
+        re.I,
+    )),
+    ("engineering", re.compile(
+        r"\b(design\w*|sizing|stress|strain|buckling|deflection|beam|truss|pressure vessel|heat exchanger|reynolds"
+        r"|nusselt|prandtl|mach|bernoulli|navier[- ]stokes|circuit|impedance|transfer function|bode|nyquist|pid"
+        r"|control system|stability margin|gain margin|phase margin|bandgap|crystal|material\w*|safety factor"
+        r"|asme|ieee|eurocode|fatigue|fracture|creep|yield strength|tensile)\b",
+        re.I,
+    )),
+    ("physics", re.compile(
+        r"\b(hamiltonian|lagrangian|schrodinger|schrödinger|maxwell|boltzmann|partition function|entropy|free energy"
+        r"|thermodynam\w*|quantum|relativ\w*|lorentz|electromagnet\w*|wavefunction|scattering|cross[- ]section"
+        r"|dispersion relation|phonon|photon|fermi|bose|planck|codata|constant\w*|dimensional|unit conversion|si units?)\b",
+        re.I,
+    )),
+    ("math", re.compile(
+        r"\b(prove|proof|theorem|lemma|corollary|conjecture|identit\w*|deriv\w*|integrat\w*|integral|differential"
+        r"|limit|series|taylor|laurent|fourier|laplace|eigenvalue\w*|eigenvector\w*|determinant|matrix|matrices"
+        r"|linear algebra|nullspace|rank|jord\w*|polynomial|roots?|galois|group|ring|field|topolog\w*|manifold"
+        r"|homolog\w*|cohomolog\w*|banach|hilbert|sobolev|measure|lebesgue|oeis|sequence|recurrence|asymptotic)\b",
+        re.I,
+    )),
+    ("clinical", re.compile(r"\b(trial\w*|patient\w*|clinical|phase [1234ivx]+|arm|cohort|safety|efficacy)\b", re.I)),
+    ("drug", re.compile(r"\b(drug\w*|inhibitor\w*|mechanism|small molecule|antibody|adc|target\w*|chembl|dosing)\b", re.I)),
+    ("literature", re.compile(
+        r"\b(papers?|literature|publications?|studies|study|evidence|reported|review|arxiv|doi|zbmath|citations?"
+        r"|preprints?|bibliography|survey|prior work|state of the art)\b",
+        re.I,
+    )),
 ]
 
 _QWORD = r"(?:what|how|which|whether|is|are|does|do|did|can|could|why|where|when|who|should|will)"
@@ -78,13 +105,13 @@ _META_SUBQ = re.compile(
     re.I)
 
 DECOMPOSE_SYSTEM = """[phase:decompose]
-You decompose biomedical research questions for a research agent. Today's date is given in the request; never write a sub-question about the date or about the answer's format, length or citation style.
-First decide: are follow-up questions needed here? A simple, single-topic question (one entity and one thing asked about it) is NOT complex: answer {"complex": false, "sub_questions": []}.
+You decompose mathematics, physics, and engineering research questions for a research agent. Today's date is given in the request; never write a sub-question about the date or about the answer's format, length or citation style.
+First decide: are follow-up questions needed here? A simple, single-topic question (one equation, theorem, system, or concept and one thing asked about it) is NOT complex: answer {"complex": false, "sub_questions": []}.
 If the question is compound or multi-hop, write 2 to 5 sub-questions:
 - order them from the simplest to the most dependent (least-to-most); a later sub-question may depend on earlier ones (depends_on lists their ids);
-- each must be answerable on its own by one kind of search, keep the user's entities verbatim, and together they must cover the whole question;
-- give each a focus from: literature, target, simulation, single_cell, clinical, drug, variant, structure, omics, general;
-- ANAPHORA & ENTITY INTEGRITY: Resolve anaphoric phrases ('this cascade', 'this pathway', 'this target', 'it', 'they') strictly to the antecedent named in the user question itself (e.g. resolve 'this cascade' to 'the MAPK/ERK pathway'). NEVER invent, substitute, or guess an unmentioned drug, gene, or compound (such as 'osimertinib', 'sotorasib', etc.) not present in the user question!
+- each must be answerable on its own by one kind of tool or search, keep the user's equations, symbols, and named entities verbatim, and together they must cover the whole question;
+- give each a focus from: math, physics, engineering, computation, literature, data;
+- ANAPHORA & ENTITY INTEGRITY: Resolve anaphoric phrases ('this equation', 'this operator', 'this system', 'this circuit', 'it', 'they') strictly to the antecedent named in the user question itself (e.g. resolve 'this system' to 'the damped harmonic oscillator' or 'the Euler-Bernoulli beam'). NEVER invent, substitute, or guess an unmentioned theorem, equation, material, or system not present in the user question!
 Reply with only JSON: {"complex": true|false, "sub_questions": [{"id": "q1", "text": "...", "focus": "...", "depends_on": []}]}"""
 
 
@@ -95,12 +122,12 @@ def infer_focus(text: str) -> str:
     return "general"
 
 
-def strip_output_instructions(query: str) -> Tuple[str, List[str]]:
+def strip_output_instructions(query: str) -> tuple[str, list[str]]:
     """(the research question, the output instructions removed from it). A "Formatting:" (or "Style:",
     "Instructions:") block is removed to the end of its line, then each remaining sentence that is only an output
     instruction (Markdown, word limits, "cite every claim", "state today's date") and names no research subject."""
     text = query or ""
-    removed: List[str] = []
+    removed: list[str] = []
     while True:
         m = _FORMAT_HEAD.search(text)
         if not m:
@@ -109,7 +136,7 @@ def strip_output_instructions(query: str) -> Tuple[str, List[str]]:
         end = len(text) if end < 0 else end
         removed.append(text[m.start():end].strip())
         text = (text[:m.start()] + text[end:]).strip()
-    kept: List[str] = []
+    kept: list[str] = []
     for line in text.split("\n"):
         out = []
         for sent in re.split(r"(?<=[.!?])\s+", line):
@@ -127,9 +154,9 @@ def is_meta_sub_question(text: str) -> bool:
     return bool(_META_SUBQ.search(text or "")) and infer_focus(_META_SUBQ.sub(" ", text or "")) == "general"
 
 
-def _entity_tokens(text: str) -> List[str]:
+def _entity_tokens(text: str) -> list[str]:
     """Upper-case names a sub-question uses (KRAS, SHP2), without trailing hyphens ("FDA-") or pure numbers."""
-    out: List[str] = []
+    out: list[str] = []
     for raw in re.findall(r"\b[A-Z][A-Z0-9\-]{3,}\b", text or ""):
         tok = raw.strip("-")
         if len(tok) >= 4 and not tok.isdigit() and tok not in out:
@@ -146,10 +173,10 @@ def _word_set(query: str) -> set:
     return words
 
 
-def complexity_signals(query: str, ctx: Any = None) -> List[str]:
+def complexity_signals(query: str, ctx: Any = None) -> list[str]:
     """Adaptive-RAG-style complexity cues; an empty list means a simple question."""
     q = (query or "").strip()
-    signals: List[str] = []
+    signals: list[str] = []
     questions = [p for p in re.split(r"\?", q) if len(p.split()) >= 2]
     if len(questions) >= 2:
         signals.append("several questions")
@@ -188,7 +215,7 @@ def _with_subject(item: str, subject: str) -> str:
     return f"{item} ({subject})"
 
 
-def _titled_enumeration(text: str, max_sub_questions: int) -> Optional[List[str]]:
+def _titled_enumeration(text: str, max_sub_questions: int) -> list[str] | None:
     """Sub-questions of "Title: subject. 1) ... 2) ... 3) ..." (or a bare "1) ... 2) ..."), the items split across
     question marks too; None when the text is not such an enumeration."""
     spaced = " " + text
@@ -199,7 +226,7 @@ def _titled_enumeration(text: str, max_sub_questions: int) -> Optional[List[str]
     if head and (not _is_title(head) or (len(head.split()) <= 6 and head.endswith(":"))):
         return None  # a question or a "Tell me:" lead-in; handled clause by clause
     subject = head.rstrip(" .:").split(":", 1)[-1].strip() if head else ""
-    out: List[str] = []
+    out: list[str] = []
     for i, m in enumerate(markers):
         end = markers[i + 1].start() if i + 1 < len(markers) else len(spaced)
         item = spaced[m.end():end].strip()
@@ -210,7 +237,7 @@ def _titled_enumeration(text: str, max_sub_questions: int) -> Optional[List[str]
     return out[:max_sub_questions]
 
 
-def heuristic_split(query: str, max_sub_questions: int = MAX_SUB_QUESTIONS) -> List[str]:
+def heuristic_split(query: str, max_sub_questions: int = MAX_SUB_QUESTIONS) -> list[str]:
     """Deterministic decomposition: question marks, ';', enumerations, and conjunctions joining question clauses."""
     text = re.sub(r"\s+", " ", (query or "").strip())
     if not text:
@@ -218,12 +245,12 @@ def heuristic_split(query: str, max_sub_questions: int = MAX_SUB_QUESTIONS) -> L
     titled = _titled_enumeration(text, max_sub_questions)
     if titled is not None:
         return titled
-    pieces: List[Tuple[str, bool]] = []
+    pieces: list[tuple[str, bool]] = []
     for m in re.finditer(r"[^?;]+[?;]?", text):
         chunk = m.group(0).strip()
         if chunk:
             pieces.append((chunk.rstrip("?;").strip(), chunk.endswith("?")))
-    parts: List[Tuple[str, bool]] = []
+    parts: list[tuple[str, bool]] = []
     for chunk, is_q in pieces:
         enum = [p for p in _ENUM_SPLIT.split(" " + chunk) if p and p.strip()]
         if len(enum) >= 2:
@@ -238,7 +265,7 @@ def heuristic_split(query: str, max_sub_questions: int = MAX_SUB_QUESTIONS) -> L
             continue
         clauses = [c for c in _CONJ_SPLIT.split(chunk) if c and c.strip()]
         parts.extend((c.strip(), is_q or len(clauses) > 1) for c in clauses)
-    out: List[str] = []
+    out: list[str] = []
     seen = set()
     for part, is_q in parts:
         part = _LEAD_JUNK.sub("", part).strip(" ,.:")
@@ -254,15 +281,15 @@ def heuristic_split(query: str, max_sub_questions: int = MAX_SUB_QUESTIONS) -> L
     return out[:max_sub_questions]
 
 
-def _from_texts(texts: List[str], max_sub_questions: int = MAX_SUB_QUESTIONS) -> List[SubQuestion]:
-    subs: List[SubQuestion] = []
+def _from_texts(texts: list[str], max_sub_questions: int = MAX_SUB_QUESTIONS) -> list[SubQuestion]:
+    subs: list[SubQuestion] = []
     for i, t in enumerate(texts[:max_sub_questions], 1):
         deps = [subs[-1].id] if subs and _ANAPHORA.search(t) else []
         subs.append(SubQuestion(id=f"q{i}", text=t[:400], focus=infer_focus(t), depends_on=deps))
     return subs
 
 
-def parse_decomposition(value: Any, query: Optional[str] = None, max_sub_questions: int = MAX_SUB_QUESTIONS) -> Tuple[Optional[bool], List[SubQuestion]]:
+def parse_decomposition(value: Any, query: str | None = None, max_sub_questions: int = MAX_SUB_QUESTIONS) -> tuple[bool | None, list[SubQuestion]]:
     """(complex, sub-questions) from the model reply; ids are renumbered q1.. and depends_on only points back."""
     if not isinstance(value, dict):
         return None, []
@@ -271,8 +298,8 @@ def parse_decomposition(value: Any, query: Optional[str] = None, max_sub_questio
     raw = value.get("sub_questions") or value.get("subquestions") or []
     if not isinstance(raw, list):
         return complex_flag, []
-    subs: List[SubQuestion] = []
-    id_map: Dict[str, str] = {}
+    subs: list[SubQuestion] = []
+    id_map: dict[str, str] = {}
     seen = set()
     query_words = _word_set(query) if query else set()
     for item in raw:
@@ -297,7 +324,7 @@ def parse_decomposition(value: Any, query: Optional[str] = None, max_sub_questio
         if item.get("id") is not None:
             id_map[str(item["id"]).strip()] = new_id
         focus = str(item.get("focus") or "").strip().lower().replace("-", "_").replace(" ", "_")
-        if focus not in FOCI:
+        if focus not in FOCI and focus != "general":
             focus = infer_focus(text)
         deps_raw = item.get("depends_on") or []
         if isinstance(deps_raw, (str, int)):
@@ -327,10 +354,10 @@ class DecomposePhase(AgentPhase):
             return False
         return getattr(state.ctx, "scope", "research") == "research"
 
-    async def run(self, state: Any) -> Optional[PhaseOutcome]:
+    async def run(self, state: Any) -> PhaseOutcome | None:
         query, instructions = strip_output_instructions(state.clean_query or state.query)
         signals = complexity_signals(query, state.ctx)
-        info: Dict[str, Any] = {"signals": signals, "method": "none", "complex": False}
+        info: dict[str, Any] = {"signals": signals, "method": "none", "complex": False}
         if instructions:
             info["output_instructions"] = [i[:200] for i in instructions[:6]]  # for the answer, never sub-questions
         mode = env_flag("TRIBOS_AGENT_DECOMPOSE", "auto")
@@ -344,8 +371,8 @@ class DecomposePhase(AgentPhase):
         profile = get_effort_profile(effort_level)
         max_sub = int(profile.get("max_subqueries", MAX_SUB_QUESTIONS))
 
-        subs: List[SubQuestion] = []
-        complex_flag: Optional[bool] = None
+        subs: list[SubQuestion] = []
+        complex_flag: bool | None = None
         used_model = False
         if state.llm.available:
             from ..agents.prompts import utc_date_line

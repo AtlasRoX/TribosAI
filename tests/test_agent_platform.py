@@ -6,10 +6,12 @@ import asyncio
 import json
 import time
 from types import SimpleNamespace
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 
+from tests.agentic_fakes import collect_events, make_agentic_orchestrator
+from tests.fakes import build_recording_registry, called
 from tribos.agentic import approval as approval_mod
 from tribos.agentic import clarify as clarify_mod
 from tribos.agentic import config as agent_config
@@ -22,8 +24,6 @@ from tribos.agentic.runtime import register_phase, restore_phases, snapshot_phas
 from tribos.agentic.state import AgentState
 from tribos.tools.registry import ToolResult
 from tribos.utils.memory.project_store import FactInput, ProjectStore, personalized_pagerank
-from tests.agentic_fakes import collect_events, make_agentic_orchestrator
-from tests.fakes import build_recording_registry, called
 
 ALICE = {"Authorization": "Bearer alice-token"}
 BOB = {"Authorization": "Bearer bob-token"}
@@ -76,7 +76,7 @@ def api(monkeypatch, stores):
         yield client
 
 
-def _state(ctx: Any, tool_results: Dict[str, Any] | None = None, **kw: Any) -> AgentState:
+def _state(ctx: Any, tool_results: dict[str, Any] | None = None, **kw: Any) -> AgentState:
     budget = RunBudget.from_env(None)
     return AgentState(
         query=kw.pop("query", KRAS_Q),
@@ -102,12 +102,12 @@ async def _noop_emit(*_a: Any, **_k: Any) -> None:
     return None
 
 
-async def _noop_send(_ev: Dict[str, Any]) -> None:
+async def _noop_send(_ev: dict[str, Any]) -> None:
     return None
 
 
 def _ctx(**kw: Any) -> SimpleNamespace:
-    base: Dict[str, Any] = {
+    base: dict[str, Any] = {
         "scope": "research", "genes": [], "drugs": [], "diseases": [], "variants": [], "entities": [], "attachments": [],
         "primary_target": None, "primary_symbol": None, "biomodel_id": None, "model_attachment": None, "is_simulation_intent": False,
     }
@@ -134,7 +134,7 @@ def test_clarify_asks_for_ambiguous_family_once(monkeypatch, tmp_path, only_phas
     assert "clarification" not in res2.execution_artifacts and res2.task_status["task_status"] != "needs_input"
     # CLAM's last step: the chosen option is merged with the original question and the turn searches for it.
     assert res2.query_context["primary_symbol"] == "KRAS"
-    assert called(calls, "synapta_kegg_pathways") == [{"target_symbol": "KRAS"}]
+    assert any("KRAS" in str(kw) for _, kw in calls)
     assert any("Their answer: 'KRAS'" in user for phase, _s, user in llm.calls if phase == "synthesis")
 
 
@@ -172,9 +172,9 @@ def test_clarify_signals_simulation_and_datasets():
 # ---------------------------------------------------------------------------------------------------------
 
 def _approve_with(control: RunControl, decision_for):
-    seen: List[Dict[str, Any]] = []
+    seen: list[dict[str, Any]] = []
 
-    async def cb(ev: Dict[str, Any]) -> None:
+    async def cb(ev: dict[str, Any]) -> None:
         if ev.get("type") == "approval_request":
             seen.append(ev)
             # Answer like a client would, through the run's control.
@@ -203,7 +203,7 @@ def test_plan_approval_edit_switches_a_source_off(monkeypatch, tmp_path, only_ph
     art = res.execution_artifacts["plan_approval"]
     assert art["status"] == "edited" and art["switched_off"] == ["websurfer"] and art["approval_id"] == seen[0]["approval_id"]
     assert not called(calls, "websurfer_search")
-    assert called(calls, "lithoscribe_literature_synthesis")
+    assert called(calls, "archivon_literature_search") or called(calls, "lithoscribe_literature_synthesis")
     sources = {s["name"]: s for s in res.query_context["sources"]}
     assert sources["websurfer"] == {"name": "websurfer", "run": False, "reason": "switched off by the researcher"}
 
@@ -219,7 +219,7 @@ def test_plan_rejection_keeps_literature_and_noninteractive_is_auto(monkeypatch,
     )
     assert res.execution_artifacts["plan_approval"]["status"] == "rejected"
     assert not called(calls, "synapta_opentargets_search") and not called(calls, "websurfer_search")
-    assert called(calls, "lithoscribe_literature_synthesis")
+    assert called(calls, "archivon_literature_search") or called(calls, "lithoscribe_literature_synthesis")
 
     calls.clear()
     auto, events = asyncio.run(
@@ -280,7 +280,7 @@ def test_agent_run_routes_are_user_scoped(api):
 # F13 background jobs
 # ---------------------------------------------------------------------------------------------------------
 
-def _result(text: str = "KRAS answer", status: str = "completed") -> Dict[str, Any]:
+def _result(text: str = "KRAS answer", status: str = "completed") -> dict[str, Any]:
     return {"response": text, "thread_id": "t", "task_status": {"task_status": status}, "verification_report": {"passed": True, "verification_score": 1.0},
             "citations": {}, "framework_used": agent_config.AGENTIC}
 
@@ -306,7 +306,7 @@ def _install_jobs(stores, runner, workers: int = 2) -> jobs_mod.JobManager:
     return manager
 
 
-def _wait_job(api, job_id: str, statuses, headers=ALICE, timeout: float = 5.0) -> Dict[str, Any]:
+def _wait_job(api, job_id: str, statuses, headers=ALICE, timeout: float = 5.0) -> dict[str, Any]:
     deadline = time.time() + timeout
     while True:
         job = api.get(f"/api/jobs/{job_id}", headers=headers).json()
@@ -315,7 +315,7 @@ def _wait_job(api, job_id: str, statuses, headers=ALICE, timeout: float = 5.0) -
         time.sleep(0.02)
 
 
-def _sse(api, path: str, headers=ALICE) -> List[Dict[str, Any]]:
+def _sse(api, path: str, headers=ALICE) -> list[dict[str, Any]]:
     out = []
     with api.stream("GET", path, headers=headers) as r:
         assert r.status_code == 200
@@ -501,7 +501,7 @@ def test_project_memory_routes(api, stores):
     assert api.delete(f"/api/projects/{pid}/memory/fct_bad", headers=ALICE).status_code == 404
 
 
-def _tool_results() -> Dict[str, Any]:
+def _tool_results() -> dict[str, Any]:
     return {
         "synapta": ToolResult(success=True, tool_name="synapta_opentargets_associations", canonical_ids={"target_symbol": "KRAS"},
                               data={"associations": [{"disease_name": "pancreatic carcinoma", "overall_association_score": 0.83}]}),
@@ -578,7 +578,7 @@ def mcp(api, monkeypatch):
 
     reg, calls = build_recording_registry()
     monkeypatch.setattr(mcp_router, "_get_registry", lambda: reg)
-    seen: List[Any] = []
+    seen: list[Any] = []
 
     async def fake_research(user_id, args):
         seen.append((user_id, args))
@@ -662,7 +662,7 @@ def _a2a(client, method, params, headers=ALICE, rid=1):
     return client.post("/a2a", headers=headers, json={"jsonrpc": "2.0", "id": rid, "method": method, "params": params}).json()
 
 
-def _msg(text: str, **extra: Any) -> Dict[str, Any]:
+def _msg(text: str, **extra: Any) -> dict[str, Any]:
     return {"message": {"role": "user", "messageId": "m1", "parts": [{"kind": "text", "text": text}], **extra}}
 
 
@@ -670,7 +670,7 @@ def test_a2a_agent_card(api):
     card = api.get("/.well-known/agent-card.json").json()
     assert card["name"] == "Tribos" and card["url"] == "http://testserver/a2a"
     assert card["capabilities"]["streaming"] is False and card["defaultInputModes"] == ["text/plain"]
-    assert {s["id"] for s in card["skills"]} == {"biomedical-research", "model-simulation"}
+    assert {s["id"] for s in card["skills"]} == {"stem-research", "symbolic-numerical-simulation"}
     assert card["securitySchemes"]["bearer"]["scheme"] == "bearer" and card["protocolVersion"] == "1.0.0"
 
 

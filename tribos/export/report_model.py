@@ -16,8 +16,8 @@ import io
 import json
 import os
 import re
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Literal, Optional
+from datetime import UTC, datetime
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -51,18 +51,18 @@ BANNER_RE = re.compile(r"^\s*> ⚠️ \*\*Scientific Verification Notice\*\*[\s\
 class ExportMessage(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    id: Optional[str] = None
+    id: str | None = None
     content: str = Field(default="", max_length=400_000)
-    agent: Optional[str] = None
-    model: Optional[str] = None
-    timestamp: Optional[str] = None
-    duration_seconds: Optional[float] = None
-    verification_report: Optional[Dict[str, Any]] = None
-    execution_artifacts: Optional[Dict[str, Any]] = None
-    citations: Optional[Dict[str, Any]] = None
-    run_manifest: Optional[Dict[str, Any]] = None
-    selected_agents: Optional[List[str]] = None
-    task_status: Optional[Dict[str, Any]] = None  # query_context.TaskOutcome: did the requested operation run
+    agent: str | None = None
+    model: str | None = None
+    timestamp: str | None = None
+    duration_seconds: float | None = None
+    verification_report: dict[str, Any] | None = None
+    execution_artifacts: dict[str, Any] | None = None
+    citations: dict[str, Any] | None = None
+    run_manifest: dict[str, Any] | None = None
+    selected_agents: list[str] | None = None
+    task_status: dict[str, Any] | None = None  # query_context.TaskOutcome: did the requested operation run
 
 
 class ExportRequest(BaseModel):
@@ -77,36 +77,36 @@ class ReportCitation(BaseModel):
     authors: str = ""
     journal: str = ""
     year: str = ""
-    pmid: Optional[str] = None
-    doi: Optional[str] = None
-    id: Optional[str] = None
-    id_type: Optional[str] = None
-    url: Optional[str] = None
+    pmid: str | None = None
+    doi: str | None = None
+    id: str | None = None
+    id_type: str | None = None
+    url: str | None = None
     tool: str = ""
     cited_in_answer: bool = False
-    retracted: Optional[bool] = None
+    retracted: bool | None = None
     grade: str = ""  # Lithoscribe study-design grade label, when the article was graded
     integrity: str = ""  # e.g. "expression_of_concern"; blank when none was reported
     # Who published a web source (utils.source_authority): regulatory | trial_registry | manufacturer | literature | web
     authority: str = ""
-    in_stored_run: Optional[bool] = None  # PRV-001: False when the stored run's tool outputs never returned this source
+    in_stored_run: bool | None = None  # PRV-001: False when the stored run's tool outputs never returned this source
 
 
 class SimulationRow(BaseModel):
     species: str
-    initial: Optional[float] = None
-    final: Optional[float] = None
-    steady_state: Optional[float] = None
+    initial: float | None = None
+    final: float | None = None
+    steady_state: float | None = None
 
 
 class SimulationSection(BaseModel):
     model_id: str = ""
     model_name: str = ""
-    duration: Optional[float] = None
+    duration: float | None = None
     time_unit: str = ""
     quantity_unit: str = ""
-    convergence_status: Optional[str] = None
-    rows: List[SimulationRow] = Field(default_factory=list)
+    convergence_status: str | None = None
+    rows: list[SimulationRow] = Field(default_factory=list)
 
 
 class DefectRow(BaseModel):
@@ -123,17 +123,17 @@ class ClaimRow(BaseModel):
     claim: str = ""
     reason: str = ""
     # False: the claim's cited source did not support it (another retrieved source did).
-    cited_source_supported: Optional[bool] = None
+    cited_source_supported: bool | None = None
 
 
 class VerificationSection(BaseModel):
-    passed: Optional[bool] = None
-    score: Optional[float] = None
-    defects: List[DefectRow] = Field(default_factory=list)
-    claims: List[ClaimRow] = Field(default_factory=list)
-    numerical_checks_passed: Optional[int] = None
-    numerical_checks_failed: Optional[int] = None
-    verified_identifiers: List[str] = Field(default_factory=list)
+    passed: bool | None = None
+    score: float | None = None
+    defects: list[DefectRow] = Field(default_factory=list)
+    claims: list[ClaimRow] = Field(default_factory=list)
+    numerical_checks_passed: int | None = None
+    numerical_checks_failed: int | None = None
+    verified_identifiers: list[str] = Field(default_factory=list)
 
 
 class TaskSection(BaseModel):
@@ -142,7 +142,7 @@ class TaskSection(BaseModel):
     status: str = ""  # completed|partial|needs_input|failed|cancelled
     requested_operation: str = ""
     executed_operation: str = ""
-    request_match: Optional[bool] = None
+    request_match: bool | None = None
     reason: str = ""
     grounding_status: str = ""
 
@@ -151,8 +151,8 @@ class DataTable(BaseModel):
     """A structured result table (trials, drugs, safety, variants) rendered the same way in every format."""
 
     title: str
-    header: List[str]
-    rows: List[List[str]] = Field(default_factory=list)
+    header: list[str]
+    rows: list[list[str]] = Field(default_factory=list)
     note: str = ""
 
 
@@ -170,24 +170,24 @@ class ReportModel(BaseModel):
     question: str = ""
     answer_markdown: str = ""
     provenance: Literal["server_store", "client_supplied"] = "client_supplied"
-    content_matches_run: Optional[bool] = None
-    notices: List[str] = Field(default_factory=list)
-    run_id: Optional[str] = None
+    content_matches_run: bool | None = None
+    notices: list[str] = Field(default_factory=list)
+    run_id: str | None = None
     model: str = ""
-    plot_png: Optional[bytes] = Field(default=None, exclude=True)
-    task: Optional[TaskSection] = None
-    simulation: Optional[SimulationSection] = None
-    data_tables: List[DataTable] = Field(default_factory=list)
-    citations: List[ReportCitation] = Field(default_factory=list)
-    verification: Optional[VerificationSection] = None
-    limitations: List[str] = Field(default_factory=list)
-    run_metadata: List[List[str]] = Field(default_factory=list)  # [label, value] rows
-    checked_against_run: List[str] = Field(default_factory=list)  # sections compared with the stored run (PRV-001)
-    not_checked: List[str] = Field(default_factory=list)  # browser-supplied sections the stored run cannot confirm
-    tool_calls: List[ToolCallRow] = Field(default_factory=list)
-    reproducibility: List[List[str]] = Field(default_factory=list)  # pins and versions, [label, value]
+    plot_png: bytes | None = Field(default=None, exclude=True)
+    task: TaskSection | None = None
+    simulation: SimulationSection | None = None
+    data_tables: list[DataTable] = Field(default_factory=list)
+    citations: list[ReportCitation] = Field(default_factory=list)
+    verification: VerificationSection | None = None
+    limitations: list[str] = Field(default_factory=list)
+    run_metadata: list[list[str]] = Field(default_factory=list)  # [label, value] rows
+    checked_against_run: list[str] = Field(default_factory=list)  # sections compared with the stored run (PRV-001)
+    not_checked: list[str] = Field(default_factory=list)  # browser-supplied sections the stored run cannot confirm
+    tool_calls: list[ToolCallRow] = Field(default_factory=list)
+    reproducibility: list[list[str]] = Field(default_factory=list)  # pins and versions, [label, value]
     footer: str = FOOTER_TEXT
-    manifest: Optional[Dict[str, Any]] = Field(default=None, exclude=True)
+    manifest: dict[str, Any] | None = Field(default=None, exclude=True)
 
     @property
     def has_plot(self) -> bool:
@@ -237,7 +237,7 @@ def _timestamp(value: Any) -> str:
     except ValueError:
         return text
     if moment.tzinfo is not None:
-        moment = moment.astimezone(timezone.utc)
+        moment = moment.astimezone(UTC)
     return moment.strftime("%Y-%m-%d %H:%M UTC")
 
 
@@ -269,13 +269,13 @@ def _basename(path: Any) -> str:
     return os.path.basename(text) or text
 
 
-def _num(value: Any) -> Optional[float]:
+def _num(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     return float(value)
 
 
-def decode_plot(b64: Any) -> Optional[bytes]:
+def decode_plot(b64: Any) -> bytes | None:
     if not isinstance(b64, str) or not b64:
         return None
     if b64.startswith("data:"):
@@ -314,7 +314,7 @@ def _clean_strings(value: Any) -> Any:
     return value
 
 
-def _simulation(viv: Any) -> Optional[SimulationSection]:
+def _simulation(viv: Any) -> SimulationSection | None:
     if not isinstance(viv, dict):
         return None
     initial = viv.get("initial_concentrations") if isinstance(viv.get("initial_concentrations"), dict) else {}
@@ -339,7 +339,7 @@ def _simulation(viv: Any) -> Optional[SimulationSection]:
     )
 
 
-def _answer_identifiers(answer: str) -> Dict[str, set]:
+def _answer_identifiers(answer: str) -> dict[str, set]:
     from tribos.extensions.id_families import extract_family_ids
     from tribos.verify.verifier import TribosVerifier
 
@@ -354,7 +354,7 @@ def _answer_identifiers(answer: str) -> Dict[str, set]:
     }
 
 
-def source_key(row: Dict[str, Any]) -> str:
+def source_key(row: dict[str, Any]) -> str:
     """One key per work: PMID, else DOI, else the typed id, else the URL ("" when there is none)."""
     if _text(row.get("pmid")):
         return f"pmid:{_text(row['pmid'])}"
@@ -365,13 +365,13 @@ def source_key(row: Dict[str, Any]) -> str:
     return f"url:{_text(row.get('url'))}" if _text(row.get("url")) else ""
 
 
-def _citations(artifacts: Dict[str, Any], citation_map: Any, answer: str) -> List[ReportCitation]:
+def _citations(artifacts: dict[str, Any], citation_map: Any, answer: str) -> list[ReportCitation]:
     cited = _answer_identifiers(answer)
     lowered_answer = answer.lower()
-    rows: List[Dict[str, Any]] = []
-    by_key: Dict[str, Dict[str, Any]] = {}
+    rows: list[dict[str, Any]] = []
+    by_key: dict[str, dict[str, Any]] = {}
 
-    def add(row: Dict[str, Any]) -> None:
+    def add(row: dict[str, Any]) -> None:
         key = source_key(row)
         if not key:
             return
@@ -428,7 +428,7 @@ def _citations(artifacts: Dict[str, Any], citation_map: Any, answer: str) -> Lis
         })
 
     grades = _literature_grades(artifacts)
-    out: List[ReportCitation] = []
+    out: list[ReportCitation] = []
     for n, row in enumerate(rows, start=1):
         hit = bool(
             (row.get("pmid") and row["pmid"] in cited["pmids"])
@@ -441,10 +441,10 @@ def _citations(artifacts: Dict[str, Any], citation_map: Any, answer: str) -> Lis
     return out
 
 
-def _literature_grades(artifacts: Dict[str, Any]) -> Dict[str, Dict[str, str]]:
+def _literature_grades(artifacts: dict[str, Any]) -> dict[str, dict[str, str]]:
     """source_key -> {grade, integrity} for each article in the literature artifact's graded list."""
     lit = artifacts.get("literature")
-    out: Dict[str, Dict[str, str]] = {}
+    out: dict[str, dict[str, str]] = {}
     for art in (lit.get("graded_articles") or []) if isinstance(lit, dict) else []:
         if not isinstance(art, dict):
             continue
@@ -460,7 +460,7 @@ def _literature_grades(artifacts: Dict[str, Any]) -> Dict[str, Dict[str, str]]:
     return out
 
 
-def _task(task: Any) -> Optional[TaskSection]:
+def _task(task: Any) -> TaskSection | None:
     if not isinstance(task, dict) or not _text(task.get("task_status")):
         return None
     match = task.get("request_match")
@@ -482,106 +482,249 @@ def _cell(value: Any, limit: int = 160) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def _trial_table(art: Any) -> Optional[DataTable]:
-    trials = [t for t in (art.get("trials") or []) if isinstance(t, dict)] if isinstance(art, dict) else []
-    if not trials:
+def _computation_table(artifacts: dict[str, Any]) -> DataTable | None:
+    """Builds a table of code executions and numerical calculations from Calcula/sandbox."""
+    if not isinstance(artifacts, dict):
         return None
+    art = artifacts.get("calcula") or artifacts.get("sandbox") or artifacts.get("sandbox_analysis")
+    if not art:
+        return None
+
+    items = []
+    if isinstance(art, list):
+        items = [x for x in art if isinstance(x, dict)]
+    elif isinstance(art, dict):
+        for key in ("computations", "executions", "calculations", "steps", "items"):
+            val = art.get(key)
+            if isinstance(val, list) and val and isinstance(val[0], dict):
+                items = val
+                break
+        if not items:
+            if any(k in art for k in ("code", "result", "stdout", "output", "status", "tool", "tool_name", "language", "kind")):
+                items = [art]
+
+    if not items:
+        return None
+
     rows = []
-    for t in trials[:MAX_TABLE_ROWS]:
-        enrol = _text(t.get("enrollment_count"))
-        if enrol and _text(t.get("enrollment_type")) == "ESTIMATED":
-            enrol += " est."
-        rows.append([
-            _text(t.get("nct_id")), _cell(t.get("brief_title"), 120), ", ".join(_text(p) for p in t.get("phases") or []),
-            _text(t.get("overall_status")), enrol, "yes" if t.get("has_results") else "no",
-        ])
-    total = art.get("total_count")
-    note = f"Showing {len(rows)} of {total} registered trials." if isinstance(total, int) and total > len(rows) else ""
-    return DataTable(title="Clinical trials (ClinicalTrials.gov)", header=["NCT ID", "Title", "Phase", "Status", "Enrollment", "Results posted"],
-                     rows=rows, note=note)
+    for it in items[:MAX_TABLE_ROWS]:
+        tool = _text(it.get("step") or it.get("tool") or it.get("tool_name") or it.get("name") or "calcula_run_python")
+        lang = _text(it.get("language") or it.get("kind") or it.get("type") or "Python")
+        code_summary = _cell(it.get("input") or it.get("code") or it.get("code_summary") or it.get("summary") or it.get("plan") or "")
+        res = it.get("output") or it.get("result") or it.get("stdout") or it.get("error") or ""
+        if isinstance(res, (dict, list)):
+            res_str = json.dumps(res, default=str)
+        else:
+            res_str = _text(res)
+        out_result = _cell(res_str)
+        status = _text(it.get("status") or ("ok" if it.get("success", True) else "error"))
+        rows.append([tool, lang, code_summary, out_result, status])
+
+    if not rows:
+        return None
+    return DataTable(
+        title="Computations (Calcula)",
+        header=["Step / Tool", "Language / Kind", "Input / Code Summary", "Output / Result", "Status"],
+        rows=rows,
+        note="Outputs generated via sandboxed computation environment.",
+    )
 
 
-def _drug_tables(art: Any) -> List[DataTable]:
-    if not isinstance(art, dict):
-        return []
-    out: List[DataTable] = []
-    chembl = art.get("chembl") if isinstance(art.get("chembl"), dict) else {}
-    drugs = [d for d in chembl.get("drugs") or [] if isinstance(d, dict)]
-    if drugs:
-        rows = []
-        for d in drugs[:MAX_TABLE_ROWS]:
-            moas = "; ".join(dict.fromkeys(_text(m.get("mechanism_of_action")) for m in d.get("mechanisms") or [] if isinstance(m, dict)))
-            acts = "; ".join(
-                f"{_text(b.get('standard_type'))} {_text(b.get('standard_relation'))}{_text(b.get('standard_value'))} "
-                f"{_text(b.get('standard_units'))} ({_text(b.get('assay_chembl_id'))})".replace("  ", " ")
-                for b in (d.get("bioactivities") or [])[:3] if isinstance(b, dict)
-            )
-            phase = d.get("max_phase")
-            rows.append([_text(d.get("pref_name") or d.get("query_name")), _text(d.get("chembl_id")),
-                         "" if phase is None else f"{phase:g}" if isinstance(phase, (int, float)) else _text(phase),
-                         _cell(moas), _cell(acts)])
-        out.append(DataTable(title="Drugs (ChEMBL)", header=["Drug", "ChEMBL ID", "Max phase", "Mechanism", "Bioactivities"], rows=rows,
-                             note="ChEMBL max phase 4 means approved by at least one regulator, not FDA approval."))
-    safety = [e for e in art.get("safety") or [] if isinstance(e, dict)]
-    if safety:
-        rows = []
-        for e in safety[:MAX_TABLE_ROWS]:
-            top = ", ".join(f"{_text(r.get('term'))} ({_text(r.get('count'))})" for r in (e.get("top_reactions") or [])[:3] if isinstance(r, dict))
-            label = e.get("label") if isinstance(e.get("label"), dict) else None
-            label_text = ""
-            if label:
-                product = _text(label.get("brand_name") or label.get("generic_name"))
-                app = _text(label.get("application_number"))
-                label_text = f"{product} {app}".strip() + ("; boxed warning" if label.get("boxed_warning") else "; no boxed warning")
-            rows.append([_text(e.get("ingredient")), _text(e.get("total_reports")), _text(e.get("serious_reports")), _cell(top), _cell(label_text)])
-        out.append(DataTable(title="Drug safety (openFDA FAERS and label)", header=["Ingredient", "FAERS reports", "Serious", "Top reactions", "FDA label"],
-                             rows=rows, note="FAERS counts are spontaneous reports; they show neither incidence nor causation."))
-    return out
+def _reference_table(artifacts: dict[str, Any]) -> DataTable | None:
+    """Builds a table of physical constants, units, OEIS sequences, or material properties from Physis."""
+    if not isinstance(artifacts, dict):
+        return None
+    art = artifacts.get("physis") or artifacts.get("reference_data")
+    if not art:
+        return None
+
+    items = []
+    if isinstance(art, list):
+        items = [x for x in art if isinstance(x, dict)]
+    elif isinstance(art, dict):
+        for key in ("constants", "materials", "sequences", "units", "properties", "items", "records", "data"):
+            val = art.get(key)
+            if isinstance(val, list) and val and isinstance(val[0], dict):
+                items = val
+                break
+        if not items:
+            if any(k in art for k in ("entity", "symbol", "name", "value", "unit")):
+                items = [art]
+
+    if not items:
+        return None
+
+    rows = []
+    for it in items[:MAX_TABLE_ROWS]:
+        name = _text(it.get("name") or it.get("entity"))
+        sym = _text(it.get("symbol") or it.get("id"))
+        if sym and name and sym != name:
+            entity = f"{name} ({sym})"
+        else:
+            entity = sym or name or _text(it.get("formula"))
+
+        cat = _text(it.get("category") or it.get("kind") or it.get("type") or "constant")
+        val = it.get("value") or it.get("terms") or it.get("expression")
+        if isinstance(val, float):
+            val_str = f"{int(val)}" if val.is_integer() and abs(val) < 1e15 else fmt_number(val)
+        elif isinstance(val, (dict, list)):
+            val_str = json.dumps(val, default=str)
+        else:
+            val_str = _text(val)
+
+        unc = it.get("uncertainty")
+        unit = it.get("unit")
+        unc_unit = it.get("uncertainty_unit")
+        if unc_unit:
+            u_str = _text(unc_unit)
+        elif unc is not None and unit:
+            unc_val = fmt_number(unc) if isinstance(unc, float) else _text(unc)
+            u_str = f"±{unc_val} {unit}" if unc_val and unc_val != "0" else _text(unit)
+        elif unc is not None:
+            unc_val = fmt_number(unc) if isinstance(unc, float) else _text(unc)
+            u_str = f"±{unc_val}" if unc_val and unc_val != "0" else "(exact)"
+        elif unit:
+            u_str = _text(unit)
+        else:
+            u_str = ""
+
+        src = _text(it.get("source") or it.get("reference") or it.get("citation") or "Physis")
+        rows.append([_cell(entity), _cell(cat), _cell(val_str), _cell(u_str), _cell(src)])
+
+    if not rows:
+        return None
+    return DataTable(
+        title="Reference data (Physis)",
+        header=["Entity / Symbol", "Category", "Value", "Uncertainty / Unit", "Source / Reference"],
+        rows=rows,
+        note="Physical constants, unit definitions, and material properties verified by Physis.",
+    )
 
 
-def _variant_tables(art: Any) -> List[DataTable]:
-    if not isinstance(art, dict):
-        return []
-    out: List[DataTable] = []
-    clinvar = [c for c in art.get("clinvar") or [] if isinstance(c, dict)]
-    if clinvar:
-        out.append(DataTable(
-            title=f"ClinVar ({_text(art.get('gene'))} {_text(art.get('protein_change'))})".replace(" )", ")"),
-            header=["Accession", "Title", "Germline classification", "Review status", "Somatic clinical impact"],
-            rows=[[_text(c.get("accession")), _cell(c.get("title"), 120), _text(c.get("germline_classification")),
-                   _text(c.get("germline_review_status")), _text(c.get("somatic_clinical_impact"))] for c in clinvar[:MAX_TABLE_ROWS]],
-        ))
-    cbio = [c for c in art.get("cbioportal") or [] if isinstance(c, dict)]
-    if cbio:
-        out.append(DataTable(
-            title="Prevalence (cBioPortal)",
-            header=["Study", "Mutated samples", "Profiled samples", "Prevalence %"],
-            rows=[[_cell(c.get("study_name") or c.get("study_id"), 100), _text(c.get("mutated_samples")), _text(c.get("profiled_samples")),
-                   _text(c.get("prevalence_percent"))] for c in cbio[:MAX_TABLE_ROWS]],
-            note="Per-study figures; they are not pooled across studies.",
-        ))
-    gnomad = art.get("gnomad") if isinstance(art.get("gnomad"), dict) else None
-    if gnomad:
-        out.append(DataTable(
-            title="Population frequency (gnomAD)",
-            header=["Variant", "Exome AF", "Genome AF", "FAF95 popmax"],
-            rows=[[_text(gnomad.get("variant_id")), _frequency(gnomad.get("exome_af")), _frequency(gnomad.get("genome_af")),
-                   _frequency(gnomad.get("faf95_popmax"))]],
-        ))
-    return out
+def _simulation_table(artifacts: dict[str, Any]) -> DataTable | None:
+    """Builds a table of Dynamis ODE simulations, fixed points, or parameter scans."""
+    if not isinstance(artifacts, dict):
+        return None
+    art = artifacts.get("dynamis") or artifacts.get("simulation")
+    if not art:
+        return None
+
+    rows = []
+    if isinstance(art, dict):
+        summary = art.get("summary")
+        model_name = _text(art.get("model_name") or art.get("model_id") or "")
+        if isinstance(summary, dict) and summary:
+            stability = _text(art.get("stability") or art.get("status") or "")
+            for var_name, stats in list(summary.items())[:MAX_TABLE_ROWS]:
+                if isinstance(stats, dict):
+                    init = fmt_number(stats.get("initial")) if _num(stats.get("initial")) is not None else _text(stats.get("initial"))
+                    final = fmt_number(stats.get("final")) if _num(stats.get("final")) is not None else _text(stats.get("final"))
+                    ss = _text(stats.get("steady_state") or stability)
+                    label = f"{model_name}: {var_name}" if model_name else str(var_name)
+                    rows.append([_cell(label), init, final, ss])
+        elif isinstance(art.get("fixed_point"), dict):
+            fp = art["fixed_point"]
+            stab = _text(art.get("stability") or "fixed_point")
+            guess = art.get("guess") if isinstance(art.get("guess"), dict) else {}
+            for var_name, val in list(fp.items())[:MAX_TABLE_ROWS]:
+                init = fmt_number(guess.get(var_name)) if _num(guess.get(var_name)) is not None else _text(guess.get(var_name))
+                final = fmt_number(val) if _num(val) is not None else _text(val)
+                label = f"{model_name}: {var_name}" if model_name else str(var_name)
+                rows.append([_cell(label), init, final, stab])
+        else:
+            items = None
+            for key in ("simulations", "variables", "rows", "items", "results"):
+                if isinstance(art.get(key), list):
+                    items = art[key]
+                    break
+            if items:
+                for it in items[:MAX_TABLE_ROWS]:
+                    if isinstance(it, dict):
+                        mv = _text(it.get("model") or it.get("variable") or it.get("species") or it.get("name"))
+                        init = fmt_number(it.get("initial")) if _num(it.get("initial")) is not None else _text(it.get("initial") or it.get("initial_value"))
+                        final = fmt_number(it.get("final")) if _num(it.get("final")) is not None else _text(it.get("final") or it.get("final_value"))
+                        ss = _text(it.get("steady_state") or it.get("stability") or "")
+                        rows.append([_cell(mv), init, final, ss])
+    elif isinstance(art, list):
+        for it in art[:MAX_TABLE_ROWS]:
+            if isinstance(it, dict):
+                mv = _text(it.get("model") or it.get("variable") or it.get("species") or it.get("name"))
+                init = fmt_number(it.get("initial")) if _num(it.get("initial")) is not None else _text(it.get("initial") or it.get("initial_value"))
+                final = fmt_number(it.get("final")) if _num(it.get("final")) is not None else _text(it.get("final") or it.get("final_value"))
+                ss = _text(it.get("steady_state") or it.get("stability") or "")
+                rows.append([_cell(mv), init, final, ss])
+
+    if not rows:
+        return None
+    return DataTable(
+        title="Simulations (Dynamis)",
+        header=["Model / Variable", "Initial Value", "Final Value", "Steady State / Stability"],
+        rows=rows,
+        note="Dynamical system ODE simulation and fixed-point analysis.",
+    )
 
 
-def _data_tables(artifacts: Dict[str, Any]) -> List[DataTable]:
-    tables: List[DataTable] = []
-    trial = _trial_table(artifacts.get("clinical_trials"))
-    if trial:
-        tables.append(trial)
-    tables += _drug_tables(artifacts.get("drug_intel"))
-    tables += _variant_tables(artifacts.get("variant_intel"))
+def _literature_table(artifacts: dict[str, Any]) -> DataTable | None:
+    """Builds a table of literature articles found by Archivon."""
+    if not isinstance(artifacts, dict):
+        return None
+    art = artifacts.get("archivon") or artifacts.get("literature")
+    if not art:
+        return None
+
+    items = []
+    if isinstance(art, list):
+        items = [x for x in art if isinstance(x, dict)]
+    elif isinstance(art, dict):
+        for key in ("articles", "ranked_passages", "graded_articles", "results", "items", "passages"):
+            val = art.get(key)
+            if isinstance(val, list) and val and isinstance(val[0], dict):
+                items = val
+                break
+        if not items:
+            if any(k in art for k in ("doi", "pmid", "id", "arxiv_id", "title")):
+                items = [art]
+
+    if not items:
+        return None
+
+    rows = []
+    for it in items[:MAX_TABLE_ROWS]:
+        lit_id = _text(it.get("doi") or it.get("id") or it.get("arxiv_id") or it.get("pmid"))
+        title = _cell(it.get("title") or it.get("passage_text") or "", 120)
+        authors = _cell(_short_authors(_text(it.get("authors") or it.get("author") or "")), 80)
+        year = _text(it.get("year") or it.get("pub_year") or it.get("pubYear"))
+        source = _text(it.get("source") or it.get("journal") or it.get("journalTitle") or it.get("venue") or "Archivon")
+        rows.append([lit_id, title, authors, year, source])
+
+    if not rows:
+        return None
+    return DataTable(
+        title="Literature (Archivon)",
+        header=["ID / DOI", "Title", "Authors", "Year", "Source"],
+        rows=rows,
+        note="Literature and preprint records retrieved by Archivon.",
+    )
+
+
+def _data_tables(artifacts: dict[str, Any]) -> list[DataTable]:
+    tables: list[DataTable] = []
+    comp = _computation_table(artifacts)
+    if comp:
+        tables.append(comp)
+    ref = _reference_table(artifacts)
+    if ref:
+        tables.append(ref)
+    sim = _simulation_table(artifacts)
+    if sim:
+        tables.append(sim)
+    lit = _literature_table(artifacts)
+    if lit:
+        tables.append(lit)
     return tables
 
 
-def _verification(report: Any) -> Optional[VerificationSection]:
+def _verification(report: Any) -> VerificationSection | None:
     if not isinstance(report, dict):
         return None
     defects = []
@@ -618,7 +761,7 @@ def _verification(report: Any) -> Optional[VerificationSection]:
     )
 
 
-def _short_inputs(inputs: Dict[str, Any], limit: int = 160) -> str:
+def _short_inputs(inputs: dict[str, Any], limit: int = 160) -> str:
     clean = {}
     for k, v in (inputs or {}).items():
         if v is None:
@@ -628,8 +771,8 @@ def _short_inputs(inputs: Dict[str, Any], limit: int = 160) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def _limitations(manifest: Dict[str, Any], artifacts: Dict[str, Any], verification: Optional[VerificationSection]) -> List[str]:
-    out: List[str] = []
+def _limitations(manifest: dict[str, Any], artifacts: dict[str, Any], verification: VerificationSection | None) -> list[str]:
+    out: list[str] = []
     for note in (manifest.get("synthesis") or {}).get("scope_notes") or []:
         if _text(note):
             out.append(_text(note))
@@ -673,7 +816,7 @@ def _limitations(manifest: Dict[str, Any], artifacts: Dict[str, Any], verificati
     return list(dict.fromkeys(out))
 
 
-def _run_metadata(manifest: Dict[str, Any], message: ExportMessage, provenance: str) -> List[List[str]]:
+def _run_metadata(manifest: dict[str, Any], message: ExportMessage, provenance: str) -> list[list[str]]:
     env = manifest.get("environment") or {}
     rows = [
         ["Run ID", _text(manifest.get("run_id")) or "not recorded"],
@@ -694,7 +837,7 @@ def _run_metadata(manifest: Dict[str, Any], message: ExportMessage, provenance: 
     return [r for r in rows if r[1]]
 
 
-def _model_label(manifest: Dict[str, Any], message: ExportMessage) -> str:
+def _model_label(manifest: dict[str, Any], message: ExportMessage) -> str:
     """The requested model, and the model(s) that actually answered when they differ (PRV-002)."""
     requested = _text(manifest.get("model_id") or message.model)
     params = manifest.get("llm_params") if isinstance(manifest.get("llm_params"), dict) else {}
@@ -708,8 +851,8 @@ def _model_label(manifest: Dict[str, Any], message: ExportMessage) -> str:
     return requested
 
 
-def _reproducibility(manifest: Dict[str, Any]) -> List[List[str]]:
-    rows: List[List[str]] = []
+def _reproducibility(manifest: dict[str, Any]) -> list[list[str]]:
+    rows: list[list[str]] = []
     for pin in manifest.get("biomodels") or []:
         if not isinstance(pin, dict):
             continue
@@ -739,9 +882,9 @@ def _reproducibility(manifest: Dict[str, Any]) -> List[List[str]]:
 
 def build_report_model(
     question: str,
-    message: ExportMessage | Dict[str, Any],
+    message: ExportMessage | dict[str, Any],
     *,
-    stored_manifest: Optional[Dict[str, Any]] = None,
+    stored_manifest: dict[str, Any] | None = None,
 ) -> ReportModel:
     msg = message if isinstance(message, ExportMessage) else ExportMessage.model_validate(message)
     provenance: Literal["server_store", "client_supplied"] = "server_store" if stored_manifest else "client_supplied"
@@ -754,8 +897,8 @@ def build_report_model(
     artifacts = msg.execution_artifacts if isinstance(msg.execution_artifacts, dict) else {}
     answer = strip_verification_banner(msg.content).strip()
 
-    notices: List[str] = []
-    matches: Optional[bool] = None
+    notices: list[str] = []
+    matches: bool | None = None
     expected = _text(manifest.get("response_sha256"))
     if expected:
         matches = content_sha256(msg.content) == expected
@@ -796,7 +939,7 @@ def build_report_model(
     if check is not None and check.unchecked:
         metadata.append(["Not checked against the stored run", ", ".join(check.unchecked)])
     report = ReportModel(
-        generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        generated_at=datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC"),
         question=shown_question,
         answer_markdown=answer,
         provenance=provenance,
@@ -835,7 +978,7 @@ def build_report_model(
     })
 
 
-def _footer(provenance: str, manifest: Dict[str, Any], notices: List[str], check: Any) -> str:
+def _footer(provenance: str, manifest: dict[str, Any], notices: list[str], check: Any) -> str:
     """The closing statement, true for this report's provenance (PRV-001)."""
     if provenance != "server_store":
         return FOOTER_CLIENT
@@ -849,10 +992,10 @@ def _footer(provenance: str, manifest: Dict[str, Any], notices: List[str], check
 
 
 def _stored_run_mismatches(
-    manifest: Dict[str, Any], verification: Optional[VerificationSection], viv: Any
-) -> List[str]:
+    manifest: dict[str, Any], verification: VerificationSection | None, viv: Any
+) -> list[str]:
     """The posted verification and simulation values are client data; check them against the stored run."""
-    out: List[str] = []
+    out: list[str] = []
     final = (manifest.get("verification") or {}).get("final") or {}
     if verification is not None and final:
         score_differs = (
@@ -874,7 +1017,7 @@ def _stored_run_mismatches(
         (
             (c.get("output_digest") or {}).get("final_concentrations")
             for c in manifest.get("tool_calls") or []
-            if isinstance(c, dict) and c.get("tool_name") == "vivarix_simulate_time_course" and c.get("success")
+            if isinstance(c, dict) and c.get("tool_name") in ("vivarix_simulate_time_course", "dynamis_simulate_ode") and c.get("success")
         ),
         None,
     )
@@ -901,7 +1044,7 @@ def _frequency(value: Any) -> str:
     return re.sub(r"e([+-])0*(\d)", lambda m: "e" + ("-" if m.group(1) == "-" else "") + m.group(2), text)
 
 
-def fmt_number(value: Optional[float]) -> str:
+def fmt_number(value: float | None) -> str:
     if value is None:
         return ""
     return f"{value:.6g}"
@@ -913,8 +1056,8 @@ TITLE_QUESTION_MAX = 220
 HEADLINE_FIELDS = ("Run started", "Duration", "Model", "Architecture", "Web search")
 
 
-def report_headline(report: ReportModel) -> List[List[str]]:
-    rows = dict((k, v) for k, v in report.run_metadata)
+def report_headline(report: ReportModel) -> list[list[str]]:
+    rows = dict(report.run_metadata)
     return [[k, rows[k]] for k in HEADLINE_FIELDS if rows.get(k)] + [["Generated", report.generated_at]]
 
 
@@ -928,13 +1071,13 @@ def question_is_title(report: ReportModel) -> bool:
     return 0 < len((report.question or "").strip()) <= TITLE_QUESTION_MAX
 
 
-def report_markdown(report: ReportModel, plot_path: Optional[str] = None) -> str:
+def report_markdown(report: ReportModel, plot_path: str | None = None) -> str:
     """The whole report as Markdown. plot_path names the simulation image next to it (the bundle's simulation.png);
     without one, the .md says where the plot is instead of linking a file that is not there."""
     question = (report.question or "").strip()
     in_title = question_is_title(report)
     title = (question[:1].upper() + question[1:]) if in_title else report.title
-    out: List[str] = [f"**Tribos** · {report_kind(report)}", "", f"# {_md_heading(title)}", ""]
+    out: list[str] = [f"**Tribos** · {report_kind(report)}", "", f"# {_md_heading(title)}", ""]
     headline = report_headline(report)
     out += ["| " + " | ".join(_md_cell(k) for k, _ in headline) + " |", "|" + " --- |" * len(headline)]
     out += ["| " + " | ".join(_md_cell(v) for _, v in headline) + " |", ""]
@@ -1019,7 +1162,7 @@ def _short_journal(journal: str) -> str:
     return re.sub(r"\s*\([^()]*\)\s*$", "", journal or "").strip()
 
 
-def citation_parts(c: ReportCitation) -> Dict[str, Any]:
+def citation_parts(c: ReportCitation) -> dict[str, Any]:
     """A citation's pieces, for renderers that style them (bold title, italic venue, muted link)."""
     ids = []
     if c.pmid:
@@ -1061,7 +1204,7 @@ def citation_line(c: ReportCitation) -> str:
     return text + (f" [{'; '.join(p['flags'])}]" if p["flags"] else "")
 
 
-def task_lines(t: TaskSection) -> List[str]:
+def task_lines(t: TaskSection) -> list[str]:
     lines = [f"Status: {t.status.replace('_', ' ')}"]
     if t.requested_operation:
         lines.append(f"Requested: {t.requested_operation.replace('_', ' ')}")
@@ -1076,7 +1219,7 @@ def task_lines(t: TaskSection) -> List[str]:
     return lines
 
 
-def verification_lines(v: Optional[VerificationSection]) -> List[str]:
+def verification_lines(v: VerificationSection | None) -> list[str]:
     if v is None:
         return ["No verification report accompanies this answer."]
     status = "passed" if v.passed else "did not pass" if v.passed is False else "unknown"
@@ -1087,7 +1230,7 @@ def verification_lines(v: Optional[VerificationSection]) -> List[str]:
     if v.verified_identifiers:
         lines.append(f"- Verified identifiers: {', '.join(v.verified_identifiers)}")
     if v.claims:
-        counts: Dict[str, int] = {}
+        counts: dict[str, int] = {}
         for c in v.claims:
             counts[c.status or "unknown"] = counts.get(c.status or "unknown", 0) + 1
         lines.append("- Claims: " + ", ".join(f"{n} {status.replace('_', ' ')}" for status, n in sorted(counts.items())))

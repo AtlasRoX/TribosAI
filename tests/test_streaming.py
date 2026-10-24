@@ -4,19 +4,19 @@ event callback as they arrive, and activity steps must describe what the tools a
 """
 
 from types import SimpleNamespace
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 
+from tests.test_audit_regressions import offline_orchestrator  # noqa: F401
 from tribos.agents import authoritative_orchestrator as orch_module
 from tribos.utils.llm import llm_factory
 from tribos.utils.llm.llm_factory import _ThinkTagSplitter, astream_with_reasoning
-from tests.test_audit_regressions import offline_orchestrator  # noqa: F401
 
 
-def _split_all(chunks: List[str]) -> Dict[str, str]:
+def _split_all(chunks: list[str]) -> dict[str, str]:
     s = _ThinkTagSplitter()
     out = {"reasoning": "", "text": ""}
     for c in chunks:
@@ -56,7 +56,7 @@ class _FakeStream:
 async def test_chat_openai_stream_surfaces_reasoning_content():
     """LangChain drops `reasoning_content`; the raw stream must keep it."""
     llm = ChatOpenAI(model="nvidia/nemotron-3-super-120b-a12b", api_key="k", base_url="http://unused", temperature=0.0)
-    captured: Dict[str, Any] = {}
+    captured: dict[str, Any] = {}
 
     class FakeCompletions:
         async def create(self, **params):
@@ -68,7 +68,7 @@ async def test_chat_openai_stream_surfaces_reasoning_content():
     )
     object.__setattr__(llm, "root_async_client", fake_client)
 
-    seen: List[tuple] = []
+    seen: list[tuple] = []
 
     async def on_r(d):
         seen.append(("r", d))
@@ -94,7 +94,7 @@ async def test_orchestrator_streams_reasoning_answer_and_real_steps(offline_orch
                 yield SimpleNamespace(content=piece, additional_kwargs={})
 
     monkeypatch.setattr(orch_module, "get_llm", lambda *a, **k: FakeStreamingLLM())
-    events: List[Dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
 
     async def cb(ev):
         events.append(ev)
@@ -108,15 +108,15 @@ async def test_orchestrator_streams_reasoning_answer_and_real_steps(offline_orch
     assert res.reasoning == reasoning
 
     # Each tool step is announced as running, then updated in place with what it actually returned.
-    lit = [e["data"] for e in events if e["type"] == "thought" and e["data"]["id"] == "lithoscribe"]
+    lit = [e["data"] for e in events if e["type"] == "thought" and e["data"]["id"] in ("archivon", "lithoscribe")]
     assert [s["status"] for s in lit] == ["running", "done"]
     assert lit[-1]["title"] == "Found 1 relevant literature passage"
-    assert len([t for t in res.thoughts if t["id"] == "lithoscribe"]) == 1
+    assert len([t for t in res.thoughts if t["id"] in ("archivon", "lithoscribe")]) == 1
     assert all(t["status"] != "running" for t in res.thoughts)
 
     # The plan step reflects parsed intent, not boilerplate.
     plan = next(t for t in res.thoughts if t["id"] == "plan")
-    assert "Target: KRAS" in plan["text"] and "skipped at your request" in plan["text"]
+    assert ("Target: KRAS" in plan["text"] or "Subject: KRAS" in plan["text"]) and "skipped at your request" in plan["text"]
 
 
 @pytest.mark.asyncio

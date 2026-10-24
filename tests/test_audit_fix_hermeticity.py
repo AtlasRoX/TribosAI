@@ -96,7 +96,7 @@ def test_offline_run_has_no_keys_and_no_registered_settings_from_the_developer_e
     # The scrub covers registered settings and any secret-looking name, but not pytest's own variables.
     fake_env = {"TRIBOS_AUTH_MODE": "disabled", "ANTHROPIC_API_KEY": "x", "SOME_SERVICE_TOKEN": "x",
                 "PYTEST_CURRENT_TEST": "t", "TRIBOS_LIVE_TESTS": "0", "PATH": "/bin"}
-    assert scrubbed(fake_env) == ["ANTHROPIC_API_KEY", "TRIBOS_AUTH_MODE", "SOME_SERVICE_TOKEN"]
+    assert set(scrubbed(fake_env)) == {"ANTHROPIC_API_KEY", "TRIBOS_AUTH_MODE", "SOME_SERVICE_TOKEN"}
 
 
 # Counts load_dotenv calls made by app/backend/main.py itself (third-party imports such as pymilvus.settings also

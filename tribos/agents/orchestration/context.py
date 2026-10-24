@@ -14,8 +14,9 @@ import logging
 import os
 import time
 from collections import defaultdict
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
-from typing import Any, Callable, Coroutine, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 from ...agentic import config as agent_config
 from ...agentic.control import RunCancelled, RunControl
@@ -24,7 +25,7 @@ from ...tools.registry import ErrorType, ToolResult
 # Log records keep the orchestrator's logger name, as before the split.
 logger = logging.getLogger("tribos.agents.authoritative_orchestrator")
 
-EventCallback = Callable[[Dict[str, Any]], Coroutine[Any, Any, None]]
+EventCallback = Callable[[dict[str, Any]], Coroutine[Any, Any, None]]
 
 
 def heartbeat_interval() -> float:
@@ -59,30 +60,30 @@ class RunContext:
     orch: Any  # the AuthoritativeOrchestrator running this inquiry
     rec: Any
     start_time: float
-    pending: Dict[str, Any]
+    pending: dict[str, Any]
     query: str
     thread_id: str
     model_name: str
     enable_web_search: bool
-    api_key: Optional[str]
-    event_callback: Optional[EventCallback]
+    api_key: str | None
+    event_callback: EventCallback | None
     user_id: str
-    dataset_ids: Optional[List[str]]
+    dataset_ids: list[str] | None
     persist_memory: bool
     recall_memory: bool
     framework: str = agent_config.CLASSIC
-    project_id: Optional[str] = None
-    agent_options: Optional[Dict[str, Any]] = None
-    control: Optional[RunControl] = None
+    project_id: str | None = None
+    agent_options: dict[str, Any] | None = None
+    control: RunControl | None = None
 
     # Accumulated over the run.
-    thoughts: List[Dict[str, Any]] = field(default_factory=list)
-    thought_index: Dict[str, Dict[str, Any]] = field(default_factory=dict)
-    reasoning_parts: List[str] = field(default_factory=list)
-    steps: List[Dict[str, Any]] = field(default_factory=list)
-    selected_agents: List[str] = field(default_factory=list)
-    tool_results: Dict[str, ToolResult] = field(default_factory=dict)
-    execution_artifacts: Dict[str, Any] = field(default_factory=dict)
+    thoughts: list[dict[str, Any]] = field(default_factory=list)
+    thought_index: dict[str, dict[str, Any]] = field(default_factory=dict)
+    reasoning_parts: list[str] = field(default_factory=list)
+    steps: list[dict[str, Any]] = field(default_factory=list)
+    selected_agents: list[str] = field(default_factory=list)
+    tool_results: dict[str, ToolResult] = field(default_factory=dict)
+    execution_artifacts: dict[str, Any] = field(default_factory=dict)
     client_gone: bool = False
     show_reasoning: bool = False
 
@@ -92,19 +93,19 @@ class RunContext:
     resolved_query: str = ""
     ctx: Any = None  # the QueryContext
     memory_pkg: Any = None
-    historical_identifiers: Dict[str, Any] = field(default_factory=dict)
+    historical_identifiers: dict[str, Any] = field(default_factory=dict)
     memory_summary: str = ""
     agent_rt: Any = None  # AgenticRuntime (agentic frameworks only)
     agent_state: Any = None  # AgentState (agentic frameworks only)
-    routing: Optional[Dict[str, Any]] = None  # Auto runs: the router's decision (execution_artifacts.framework_routing)
-    evaluated_sources: List[Any] = field(default_factory=list)
-    active_sources: List[Any] = field(default_factory=list)
-    title_ctx: Dict[str, Any] = field(default_factory=dict)
+    routing: dict[str, Any] | None = None  # Auto runs: the router's decision (execution_artifacts.framework_routing)
+    evaluated_sources: list[Any] = field(default_factory=list)
+    active_sources: list[Any] = field(default_factory=list)
+    title_ctx: dict[str, Any] = field(default_factory=dict)
 
     # gather
-    task_names: List[str] = field(default_factory=list)
+    task_names: list[str] = field(default_factory=list)
     requested_plan: Any = None  # the SimulationPlan as asked, kept for the task status even if rejected
-    successful_sources: List[Any] = field(default_factory=list)
+    successful_sources: list[Any] = field(default_factory=list)
     discovery_report: Any = None
 
     # draft
@@ -112,7 +113,7 @@ class RunContext:
     lumicell_summary: str = ""
     lithoscribe_summary: str = ""
     synapta_summary: str = ""
-    scope_notes: List[str] = field(default_factory=list)
+    scope_notes: list[str] = field(default_factory=list)
     synthesis_prompt: str = ""
     system_prompt: str = ""
     synthesis_model: str = ""
@@ -122,14 +123,14 @@ class RunContext:
 
     # verify
     entailment_judge: Any = None
-    context_identifiers: Dict[str, Set[str]] = field(default_factory=dict)
+    context_identifiers: dict[str, set[str]] = field(default_factory=dict)
     verification_report: Any = None
-    citation_map: Dict[str, Any] = field(default_factory=dict)
+    citation_map: dict[str, Any] = field(default_factory=dict)
 
     # progress: seconds since the run started of the last real progress (a step update or streamed text, not a
     # heartbeat), and the wall time of each pipeline stage ({phase, stage: "pipeline", status, seconds, at}).
     last_progress_s: float = 0.0
-    pipeline_phases: List[Dict[str, Any]] = field(default_factory=list)
+    pipeline_phases: list[dict[str, Any]] = field(default_factory=list)
 
     # ------------------------------------------------------------------ recording
 
@@ -142,7 +143,7 @@ class RunContext:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Run recorder %s failed: %s", method, exc)
 
-    async def finalize_manifest(self, response: str, duration: float, **kwargs: Any) -> Optional[Dict[str, Any]]:
+    async def finalize_manifest(self, response: str, duration: float, **kwargs: Any) -> dict[str, Any] | None:
         if self.rec is None:
             return None
         try:
@@ -153,7 +154,7 @@ class RunContext:
 
     # ------------------------------------------------------------------ events
 
-    async def send(self, event: Dict[str, Any]) -> None:
+    async def send(self, event: dict[str, Any]) -> None:
         # A failing callback (client disconnected) must not abort the run; cancellation still propagates.
         if not self.event_callback or self.client_gone:
             return
@@ -171,8 +172,8 @@ class RunContext:
         title: str,
         text: str = "",
         status: str = "done",
-        agent: Optional[str] = None,
-        extra: Optional[Dict[str, Any]] = None,
+        agent: str | None = None,
+        extra: dict[str, Any] | None = None,
     ) -> None:
         """Start or update one activity step. Re-emitting an id updates that step in place."""
         now_elapsed = round(time.perf_counter() - self.start_time, 2)
@@ -265,7 +266,7 @@ class RunContext:
             if not task.done():
                 task.cancel()
 
-    async def _abandon(self, task: "asyncio.Future[Any]", step_id: str, why: str) -> None:
+    async def _abandon(self, task: asyncio.Future[Any], step_id: str, why: str) -> None:
         """Cancel a call and wait for it a short grace period only: a provider that ignores cancellation must not
         hold the run."""
         task.cancel()
@@ -288,9 +289,9 @@ class RunContext:
             extra={"heartbeat": True, "last_progress_s": self.last_progress_s, "waiting_s": round(waiting, 1)},
         )
 
-    def note_pipeline_stage(self, name: str, seconds: float, status: str = "ok", at: Optional[float] = None) -> None:
+    def note_pipeline_stage(self, name: str, seconds: float, status: str = "ok", at: float | None = None) -> None:
         """Record one pipeline stage's wall time ({phase, stage: "pipeline", status, seconds, at})."""
-        entry: Dict[str, Any] = {"phase": name, "stage": "pipeline", "status": status, "seconds": round(max(0.0, seconds), 2)}
+        entry: dict[str, Any] = {"phase": name, "stage": "pipeline", "status": status, "seconds": round(max(0.0, seconds), 2)}
         if at is not None:
             entry["at"] = round(at, 2)
         self.pipeline_phases.append(entry)
@@ -328,8 +329,8 @@ class RunContext:
         name: str,
         agent: str,
         coro: Coroutine[Any, Any, ToolResult],
-        running_title: Optional[str] = None,
-        describer: Optional[Callable[[ToolResult], Tuple[str, str]]] = None,
+        running_title: str | None = None,
+        describer: Callable[[ToolResult], tuple[str, str]] | None = None,
     ) -> ToolResult:
         """Run one tool as a visible step: shown as running, then updated with what it returned."""
         ao = orchestrator_module()
@@ -349,7 +350,7 @@ class RunContext:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Step description for %s failed: %s", name, exc)
             title, detail = orch._describe_tool_result(name, res, title_ctx)
-        extra_parts: List[str] = []
+        extra_parts: list[str] = []
         for augment in ao.get_step_augmenters(name):
             try:
                 override, parts = augment(res, title_ctx)

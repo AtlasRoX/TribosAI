@@ -1,5 +1,5 @@
 """
-FastAPI Backend for Tribos Clinical R&D Multi-Agent Assistant.
+FastAPI Backend for Tribos Engineering & Scientific R&D Multi-Agent Assistant.
 Serves Next.js frontend with REST & Server-Sent Events (SSE) streaming.
 """
 
@@ -10,10 +10,9 @@ import json
 import logging
 import os
 import re
-import threading
-import time
 import uuid
-from typing import Any, AsyncGenerator, Callable, List, Optional
+from collections.abc import AsyncGenerator, Callable
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -27,28 +26,28 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 from starlette.background import BackgroundTask
+
+from app.backend.auth import auth_disabled, get_current_user
+from app.backend.limits import UserConcurrencyLimiter
+from app.backend.routers.datasets import router as datasets_router
+from app.backend.routers.export import router as export_router
+from app.backend.security import SecurityMiddleware, cors_origins, insecure_allowed
+from tribos.agentic import config as agent_config
 from tribos.agents.authoritative_orchestrator import (
     get_authoritative_orchestrator,
 )
+from tribos.config import get_bool, validate_environment
 from tribos.utils.llm.llm_factory import (
     DEFAULT_ORCHESTRATOR_MODEL,
     get_supported_models,
     is_allowed_model,
     usable_key,
 )
-from tribos.utils.biocontext import BioContextMCPClient
 from tribos.utils.memory import get_research_memory_engine
-
-from app.backend.auth import auth_disabled, get_current_user
-from app.backend.limits import UserConcurrencyLimiter
-from app.backend.security import SecurityMiddleware, cors_origins, insecure_allowed
-from app.backend.routers.datasets import router as datasets_router
-from app.backend.routers.export import router as export_router
-from tribos.agentic import config as agent_config
-from tribos.config import get_bool, validate_environment
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("tribos.backend")
+BioContextMCPClient: Any = None  # Legacy stub for test monkeypatches
 
 
 def _package_version(default: str = "1.0.0") -> str:
@@ -58,7 +57,7 @@ def _package_version(default: str = "1.0.0") -> str:
         return default
 
 
-def _check_config() -> List[str]:
+def _check_config() -> list[str]:
     """Log every configuration problem as a warning; TRIBOS_STRICT_CONFIG=1 turns them into a startup error.
 
     Weak bearer secrets (SEC-009) are reported by validate_environment too."""
@@ -92,8 +91,8 @@ async def _lifespan(_app: FastAPI):
 
 
 app = FastAPI(
-    title="Tribos Clinical R&D API",
-    description="Multi-Agent Orchestrator backend powered by NVIDIA NIM Nemotron and BioContext MCP",
+    title="Tribos Engineering R&D API",
+    description="Engineering, Mathematics & Scientific R&D Multi-Agent Assistant",
     version=_package_version(),
     lifespan=_lifespan,
 )
@@ -163,16 +162,16 @@ def _internal_error(request_id: str) -> str:
 
 class AgentBudgetOptions(BaseModel):
     """Per-request budget limits; they can only tighten the server's own limits."""
-    max_tool_calls: Optional[int] = Field(default=None, ge=1, le=200)
-    max_llm_calls: Optional[int] = Field(default=None, ge=1, le=120)
-    max_tokens: Optional[int] = Field(default=None, ge=1000, le=2_000_000)
-    max_seconds: Optional[float] = Field(default=None, ge=0, le=7200)  # 0 = no time limit
-    max_draft_rounds: Optional[int] = Field(default=None, ge=0, le=5)
+    max_tool_calls: int | None = Field(default=None, ge=1, le=200)
+    max_llm_calls: int | None = Field(default=None, ge=1, le=120)
+    max_tokens: int | None = Field(default=None, ge=1000, le=2_000_000)
+    max_seconds: float | None = Field(default=None, ge=0, le=7200)  # 0 = no time limit
+    max_draft_rounds: int | None = Field(default=None, ge=0, le=5)
 
 
 class AgentOptions(BaseModel):
     """Agentic settings for one request."""
-    effort_level: Optional[str] = Field(
+    effort_level: str | None = Field(
         default="medium",
         description="Reasoning & deliberation effort level: 'low', 'medium', 'high', 'ultra'",
     )
@@ -181,7 +180,7 @@ class AgentOptions(BaseModel):
     enable_counter_evidence: bool = True
     enable_hypotheses: bool = True
     enable_code_analysis: bool = True
-    budget: Optional[AgentBudgetOptions] = None
+    budget: AgentBudgetOptions | None = None
 
     def to_runtime(self) -> dict[str, Any]:
         data = self.model_dump()
@@ -192,46 +191,46 @@ class AgentOptions(BaseModel):
 
 class ChatRequest(BaseModel):
     """Chat request schema."""
-    message: str = Field(..., min_length=1, max_length=MAX_MESSAGE_CHARS, description="User query or clinical prompt")
-    thread_id: Optional[str] = Field(None, max_length=MAX_THREAD_ID_CHARS, description="Session thread identifier")
-    model: Optional[str] = Field(
+    message: str = Field(..., min_length=1, max_length=MAX_MESSAGE_CHARS, description="User query or prompt")
+    thread_id: str | None = Field(None, max_length=MAX_THREAD_ID_CHARS, description="Session thread identifier")
+    model: str | None = Field(
         DEFAULT_ORCHESTRATOR_MODEL,
         max_length=200,
         description="Model identifier, e.g. 'nvidia/nemotron-3-super-120b-a12b' or 'gpt-4o'",
     )
-    enable_web_search: Optional[bool] = Field(
+    enable_web_search: bool | None = Field(
         True,
         description="Enable free web search and URL surfing",
     )
-    api_key: Optional[str] = Field(None, max_length=500, description="Optional runtime API key")
-    dataset_ids: Optional[List[str]] = Field(
+    api_key: str | None = Field(None, max_length=500, description="Optional runtime API key")
+    dataset_ids: list[str] | None = Field(
         default=None, max_length=5, description="Uploaded dataset ids (ds_...) attached to this question"
     )
-    framework: Optional[str] = Field(
+    framework: str | None = Field(
         default=None,
         max_length=64,
         description="Orchestration framework id (see /api/frameworks); defaults to TRIBOS_DEFAULT_FRAMEWORK",
     )
-    project_id: Optional[str] = Field(default=None, max_length=64, description="Research project (prj_...) for project memory")
-    agent_options: Optional[AgentOptions] = Field(default=None, description="Per-request agentic settings")
+    project_id: str | None = Field(default=None, max_length=64, description="Research project (prj_...) for project memory")
+    agent_options: AgentOptions | None = Field(default=None, description="Per-request agentic settings")
 
     @field_validator("framework")
     @classmethod
-    def _check_framework(cls, value: Optional[str]) -> Optional[str]:
+    def _check_framework(cls, value: str | None) -> str | None:
         if value and value not in agent_config.ALL_FRAMEWORKS:
             raise ValueError(f"Unknown framework {value[:64]!r}; choose one listed by /api/frameworks")
         return value
 
     @field_validator("project_id")
     @classmethod
-    def _check_project_id(cls, value: Optional[str]) -> Optional[str]:
+    def _check_project_id(cls, value: str | None) -> str | None:
         if value and not re.fullmatch(r"prj_[A-Za-z0-9]{6,40}", value):
             raise ValueError("Invalid project id")
         return value
 
     @field_validator("dataset_ids")
     @classmethod
-    def _check_dataset_ids(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+    def _check_dataset_ids(cls, value: list[str] | None) -> list[str] | None:
         for item in value or []:
             if not _DATASET_ID_RE.fullmatch(item):
                 raise ValueError(f"Invalid dataset id: {item[:40]!r}")
@@ -239,7 +238,7 @@ class ChatRequest(BaseModel):
 
     @field_validator("api_key")
     @classmethod
-    def _check_api_key(cls, value: Optional[str]) -> Optional[str]:
+    def _check_api_key(cls, value: str | None) -> str | None:
         return check_caller_api_key(value)
 
     @model_validator(mode="after")
@@ -253,7 +252,7 @@ class ChatRequest(BaseModel):
         return self
 
 
-def check_caller_api_key(value: Optional[str]) -> Optional[str]:
+def check_caller_api_key(value: str | None) -> str | None:
     """A caller key that looks like a template value ('your-key', 'sk-...') is refused (422) instead of being
     silently replaced by the server's key (SEC-003). Blank means no key."""
     if value is None or not value.strip():
@@ -293,7 +292,7 @@ def _heuristic_title(text: str, max_chars: int = 50) -> str:
     clean = re.sub(r"https?://\S+", " ", clean)
     clean = re.sub(r"\s+", " ", clean).strip()
     if not clean:
-        return "Clinical Investigation"
+        return "New investigation"
 
     stripped = clean
     for _ in range(3):
@@ -313,7 +312,7 @@ def _heuristic_title(text: str, max_chars: int = 50) -> str:
     target = re.sub(r"^[\"\'`\s\-_=]+", "", target)
     target = re.sub(r"[?!:;.,\"\'`\s\-_=]+$", "", target).strip()
     if not target:
-        return "Clinical Investigation"
+        return "New investigation"
 
     words = target.split()
     formatted = []
@@ -351,12 +350,12 @@ def _heuristic_title(text: str, max_chars: int = 50) -> str:
 class TitleRequest(BaseModel):
     """Request schema for dynamic conversation title generation."""
     message: str = Field(..., min_length=1, max_length=MAX_MESSAGE_CHARS, description="User query or prompt")
-    model: Optional[str] = Field(None, max_length=200, description="Optional model identifier")
-    api_key: Optional[str] = Field(None, max_length=500, description="Optional runtime API key")
+    model: str | None = Field(None, max_length=200, description="Optional model identifier")
+    api_key: str | None = Field(None, max_length=500, description="Optional runtime API key")
 
     @field_validator("api_key")
     @classmethod
-    def _check_api_key(cls, value: Optional[str]) -> Optional[str]:
+    def _check_api_key(cls, value: str | None) -> str | None:
         return check_caller_api_key(value)
 
     @model_validator(mode="after")
@@ -385,24 +384,34 @@ _health_cache: dict[str, Any] = {"at": 0.0, "readiness": None}
 
 
 async def _service_readiness() -> dict[str, Any]:
-    cached = _health_cache["readiness"]
-    if isinstance(cached, dict) and time.monotonic() - float(_health_cache["at"]) < HEALTH_CACHE_SECONDS:
-        return dict(cached)
-    readiness = await BioContextMCPClient().async_check_service_readiness()
-    _health_cache.update(at=time.monotonic(), readiness=readiness)
-    return dict(readiness) if isinstance(readiness, dict) else {}
+    global _health_cache
+    cached = _health_cache.get("readiness")
+    if cached is not None:
+        return cached
+    if BioContextMCPClient is not None:
+        try:
+            client = BioContextMCPClient()
+            if hasattr(client, "async_check_service_readiness"):
+                res = await client.async_check_service_readiness()
+                _health_cache["readiness"] = res
+                return res
+        except Exception:
+            pass
+    res = {"status": "alive", "service": "Tribos Engineering R&D API", "mcp_remote_active": False, "direct_adapters": {}}
+    _health_cache["readiness"] = res
+    return res
 
 
 @app.get("/api/health/live")
 async def liveness_check() -> dict[str, Any]:
     """Cheap liveness probe: no upstream calls."""
-    return {"status": "alive", "service": "Tribos Clinical R&D API"}
+    return {"status": "alive", "service": "Tribos Engineering R&D API"}
 
 
 _URL_RE = re.compile(r"\b[a-z][a-z0-9+.-]*://[^\s'\"<>]+", re.I)
 
 
-def _redact_url(url: Any) -> Optional[str]:
+def _redact_url(url: Any) -> str | None:
     """scheme://host[:port]/path with user info, query and fragment removed (they can carry credentials)."""
     from urllib.parse import urlsplit, urlunsplit
 
@@ -457,7 +466,7 @@ async def health_check() -> dict[str, Any]:
     observed_readiness = await _service_readiness()
     return {
         "status": "healthy",
-        "service": "Tribos Clinical R&D API",
+        "service": "Tribos Engineering R&D API",
         "llm_providers": _provider_flags(),
         "mcp_connectivity": {
             "remote_mcp_active": bool(observed_readiness.get("mcp_remote_active", False)),
@@ -478,6 +487,7 @@ async def health_details(user_id: str = Depends(get_current_user)) -> dict[str, 
     observed_readiness = await _service_readiness()
     return {
         "status": "healthy",
+        "service": "Tribos Engineering R&D API",
         "llm_providers": {
             **{k: {**v} for k, v in _provider_flags().items()},
             "default_orchestrator": DEFAULT_ORCHESTRATOR_MODEL,
@@ -532,67 +542,78 @@ async def list_effort_levels() -> dict[str, Any]:
 
 @app.get("/api/agents")
 async def list_agents() -> dict[str, Any]:
-    """Return metadata and capabilities for all 4 clinical domain agents."""
+    """Return metadata and capabilities for all 5 STEM specialist agents."""
     return {
         "orchestrator": {
-            "name": "Clinical R&D Orchestrator",
+            "name": "Engineering R&D Orchestrator",
             "role": "Supervisor",
-            "description": "Deconstructs complex clinical inquiries and routes tasks across all 4 domain agents and BioContext MCP.",
+            "description": "Deconstructs complex engineering, mathematical, and scientific inquiries across literature, computer algebra, numerical simulation, data computation, and physical reference data.",
         },
         "agents": [
             {
-                "id": "t2kg",
-                "name": "Synapta",
-                "domain": "Knowledge Graphs & Disease Targets",
-                "description": "Queries the full PrimeKG knowledge graph locally (129k nodes, 4M edges): drug indications, contraindications, targets and side effects, disease genes and phenotypes, mechanism paths, network-proximity repurposing, phenotype-ranked differential diagnosis, polypharmacy and gene-set enrichment; normalizes entity names and provides ChEMBL drug data plus ClinVar classifications, CIViC evidence, cBioPortal per-study prevalence and gnomAD germline allele frequency.",
+                "id": "archivon",
+                "name": "Archivon",
+                "domain": "Scientific Literature & Citation Grounding",
+                "description": "Retrieves, extracts passages, and grounds citations across arXiv, zbMATH, Crossref, OpenAlex, NASA ADS, and Semantic Scholar.",
                 "tools": [
-                    "PrimeKG full-graph analytics (local)",
-                    "PrimeKG Multimodal Subgraph Extraction",
-                    "BioContext OpenTargets",
-                    "BioContext KEGG",
-                    "HGNC/OpenTargets entity normalization",
-                    "ChEMBL drug, mechanism and bioactivity",
-                    "ClinVar/CIViC/cBioPortal/gnomAD variant evidence",
+                    "archivon_literature_search",
+                    "archivon_paper_details",
+                    "archivon_recommend",
+                    "crossref_integrity",
+                    "zbmath_search",
                 ],
             },
             {
-                "id": "t2b",
-                "name": "Vivarix",
-                "domain": "Kinetic Modeling & Systems Biology",
-                "description": "Simulates kinetic ODE biological models, time-series parameter scans, SBML/SED-ML dynamics, and steady-state evaluations.",
+                "id": "axiom",
+                "name": "Axiom",
+                "domain": "Symbolic Mathematics & Computer Algebra",
+                "description": "Exact symbolic computer algebra with SymPy: equation solving, calculus, ODE dsolve, linear algebra, identity proofs, and LaTeX formatting.",
                 "tools": [
-                    "SimulateModelTool",
-                    "SearchModelsTool",
-                    "SteadyStateTool",
-                    "CustomPlotterTool",
-                    "BioContext UniProt",
-                    "Uploaded SBML models",
+                    "axiom_simplify",
+                    "axiom_solve",
+                    "axiom_calculus",
+                    "axiom_dsolve",
+                    "axiom_linalg",
+                    "axiom_verify_identity",
+                    "axiom_latex",
                 ],
             },
             {
-                "id": "scp",
-                "name": "Lumicell",
-                "domain": "Single-Cell Transcriptomics",
-                "description": "Analyzes Single Cell Portal (SCP) studies, AnnData expression matrices, cell clusters, and cellular biomarkers.",
+                "id": "dynamis",
+                "name": "Dynamis",
+                "domain": "Numerical Simulation & Optimization",
+                "description": "Simulates nonlinear ODE dynamical systems, evaluates fixed points and stability, scans parameters, fits calibration data, and optimizes with SciPy.",
                 "tools": [
-                    "search_studies",
-                    "display_studies",
-                    "BioContext PanglaoDB",
-                    "BioContext Ensembl",
-                    "Uploaded .h5ad/.csv datasets",
+                    "dynamis_simulate_ode",
+                    "dynamis_equilibrium",
+                    "dynamis_parameter_scan",
+                    "dynamis_optimize",
+                    "dynamis_fit_parameters",
+                    "dynamis_root_find",
                 ],
             },
             {
-                "id": "s2",
-                "name": "Lithoscribe",
-                "domain": "Biomedical Literature & Clinical Trials",
-                "description": "Retrieves and synthesizes research papers, PubMed/EuropePMC articles, Semantic Scholar citations, and clinical trial outcomes.",
+                "id": "calcula",
+                "name": "Calcula",
+                "domain": "Sandboxed Data Computation & Analysis",
+                "description": "Executes sandboxed Python scripts (NumPy, SciPy, SymPy, Pandas, Pint, Matplotlib) and inspects uploaded datasets (CSV, TSV, HDF5, MAT).",
                 "tools": [
-                    "search_tool",
-                    "get_single_paper_recommendations",
-                    "BioContext EuropePMC",
-                    "ClinicalTrials.gov v2 (registry + posted results)",
-                    "openFDA FAERS and labels",
+                    "calcula_run_python",
+                    "calcula_describe_dataset",
+                ],
+            },
+            {
+                "id": "physis",
+                "name": "Physis",
+                "domain": "Reference Data, Constants & Metrology",
+                "description": "Physical constants (CODATA 2022), Pint unit conversions and dimensional checks, integer sequences (OEIS), and crystal materials (Materials Project).",
+                "tools": [
+                    "physis_constants",
+                    "physis_units",
+                    "physis_oeis",
+                    "physis_materials",
+                    "physis_wolfram",
+                    "physis_encyclopedia",
                 ],
             },
         ],
@@ -601,8 +622,8 @@ async def list_agents() -> dict[str, Any]:
 
 class MemorySearchRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=2000)
-    thread_id: Optional[str] = Field(None, max_length=MAX_THREAD_ID_CHARS)
-    top_k: Optional[int] = Field(5, ge=1, le=50)
+    thread_id: str | None = Field(None, max_length=MAX_THREAD_ID_CHARS)
+    top_k: int | None = Field(5, ge=1, le=50)
 
 
 ThreadIdPath = Path(..., min_length=1, max_length=MAX_THREAD_ID_CHARS)
@@ -617,7 +638,7 @@ async def reset_session(req: ResetRequest, user_id: str = Depends(get_current_us
 
 @app.get("/api/memory/stats")
 async def memory_stats_endpoint(user_id: str = Depends(get_current_user)) -> dict[str, Any]:
-    """Return clinical memory metrics for the authenticated user."""
+    """Return research memory metrics for the authenticated user."""
     engine = get_research_memory_engine()
     return await asyncio.to_thread(engine.get_memory_stats, user_id)
 
@@ -659,7 +680,7 @@ async def clear_all_memory_endpoint(user_id: str = Depends(get_current_user)) ->
     """Clear all memories belonging to the authenticated user."""
     engine = get_research_memory_engine()
     await asyncio.to_thread(engine.clear_all_memory, user_id)
-    return {"success": True, "message": "All of your clinical memory was cleared"}
+    return {"success": True, "message": "All of your research memory was cleared"}
 
 
 @app.post("/api/chat/title")
@@ -673,7 +694,7 @@ async def generate_chat_title(
     """
     query = req.message.strip()
     if not query:
-        return TitleResponse(title="Clinical Investigation", method="heuristic")
+        return TitleResponse(title="New investigation", method="heuristic")
     # Per-user limit on model calls for titles (same limiter as chat, its own slots): over it, no model call.
     if not _title_slots.try_acquire(user_id):
         logger.info("Title requests over the per-user limit; returning the heuristic title")
@@ -687,17 +708,18 @@ async def generate_chat_title(
 async def _ai_or_heuristic_title(req: TitleRequest, query: str) -> TitleResponse:
     # Fast AI title generation attempt (timeout 4.5s)
     try:
-        from tribos.utils.llm.llm_factory import get_llm
         from langchain_core.messages import HumanMessage, SystemMessage
+
+        from tribos.utils.llm.llm_factory import get_llm
 
         model_id = req.model or DEFAULT_ORCHESTRATOR_MODEL
         llm = get_llm(model_name=model_id, api_key=req.api_key, temperature=0.0, max_tokens=30)
 
         system_prompt = (
-            "You are a clinical bioinformatics assistant. Given the user's prompt, generate an ultra-concise, "
-            "professional title of 3 to 6 words capturing the core scientific, therapeutic, or biological topic. "
+            "You are an engineering, mathematics, and scientific research assistant. Given the user's prompt, generate an ultra-concise, "
+            "professional title of 3 to 6 words capturing the core concept, equation, system, or scientific topic. "
             "Do NOT include conversational filler, quotes, punctuation marks, or prefixes like 'Discussion on' or 'Inquiry about'. "
-            "Preserve standard capitalization for biomedical entities (e.g. KRAS, EGFR, NSCLC, TP53, mRNA). "
+            "Preserve standard capitalization for acronyms and variables (e.g. Navier-Stokes, PDE, ODE, FFT, CODATA). "
             "Return ONLY the plain title text."
         )
 
@@ -763,7 +785,7 @@ async def sse_frames(queue: "asyncio.Queue[dict[str, Any]]", heartbeat_s: float)
     while True:
         try:
             ev = await asyncio.wait_for(queue.get(), timeout=heartbeat_s)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             yield ": ping\n\n"
             continue
         yield f"data: {json.dumps(ev)}\n\n"

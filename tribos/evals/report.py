@@ -14,37 +14,38 @@ import json
 import re
 import statistics
 from collections import defaultdict
+from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any
 
 from .schema import CaseResult
 from .scoring import GATES
 
 
-def _rate(passed: int, n: int) -> Optional[float]:
+def _rate(passed: int, n: int) -> float | None:
     return round(passed / n, 3) if n else None
 
 
-def _pct(values: Sequence[float], q: float) -> Optional[float]:
+def _pct(values: Sequence[float], q: float) -> float | None:
     if not values:
         return None
     s = sorted(values)
     return round(s[min(len(s) - 1, int(round(q * (len(s) - 1))))], 2)
 
 
-def _mean(values: Iterable[Any]) -> Optional[float]:
+def _mean(values: Iterable[Any]) -> float | None:
     vals = [float(v) for v in values if isinstance(v, (int, float)) and not isinstance(v, bool)]
     return round(statistics.mean(vals), 3) if vals else None
 
 
-def summarize(results: Sequence[CaseResult]) -> Dict[str, Any]:
-    levels: Dict[str, Any] = {}
-    by_level: Dict[str, List[CaseResult]] = defaultdict(list)
+def summarize(results: Sequence[CaseResult]) -> dict[str, Any]:
+    levels: dict[str, Any] = {}
+    by_level: dict[str, list[CaseResult]] = defaultdict(list)
     for r in results:
         by_level[r.level].append(r)
     for level, rs in by_level.items():
         scored = [r for r in rs if r.skipped is None]
-        groups: Dict[str, Dict[str, List[CaseResult]]] = {"by_suite": defaultdict(list), "by_category": defaultdict(list),
+        groups: dict[str, dict[str, list[CaseResult]]] = {"by_suite": defaultdict(list), "by_category": defaultdict(list),
                                                           "by_framework": defaultdict(list)}
         for r in scored:
             groups["by_suite"][r.suite].append(r)
@@ -52,12 +53,12 @@ def summarize(results: Sequence[CaseResult]) -> Dict[str, Any]:
             framework = r.observed.get("framework_requested") or r.observed.get("framework")
             if framework:
                 groups["by_framework"][str(framework)].append(r)
-        checks: Dict[str, List[int]] = defaultdict(lambda: [0, 0])
+        checks: dict[str, list[int]] = defaultdict(lambda: [0, 0])
         for r in scored:
             for c in r.checks:
                 checks[c.name][1] += 1
                 checks[c.name][0] += int(c.passed)
-        entry: Dict[str, Any] = {
+        entry: dict[str, Any] = {
             "n": len(rs),
             "scored": len(scored),
             "skipped": len(rs) - len(scored),
@@ -104,6 +105,8 @@ def summarize(results: Sequence[CaseResult]) -> Dict[str, Any]:
                 "label_precision": _rate(sum(m["correct"] for m in answered), len(answered)),
                 "label_coverage": _rate(len(answered), len(labelled)),
                 "factoid_accuracy": _rate(sum(m.get("factoid_correct") is True for m in metrics), sum("factoid_correct" in m for m in metrics)),
+                "numeric_accuracy": _rate(sum(m.get("numeric_correct") is True for m in metrics), sum("numeric_correct" in m for m in metrics)),
+                "symbolic_accuracy": _rate(sum(m.get("symbolic_correct") is True for m in metrics), sum("symbolic_correct" in m for m in metrics)),
                 "list_recall_mean": _mean(m.get("list_recall") for m in metrics),
                 "judge": {d: _mean(j.get(d) for j in judged) for d in ("overall", "correctness", "grounding", "completeness", "calibration", "clarity")} if judged else None,
                 "words_mean": _mean(m.get("length_words") for m in metrics),
@@ -128,9 +131,9 @@ def _gates_ok(r: CaseResult) -> bool:
     return _gated(r) and all(c.passed for c in r.checks if c.name in GATES)
 
 
-def gate_failures(results: Iterable[CaseResult]) -> Dict[str, int]:
+def gate_failures(results: Iterable[CaseResult]) -> dict[str, int]:
     """Hard-gate failures by gate (answer.citations_in_evidence, answer.no_internal_leak, answer.no_crash)."""
-    out = {g: 0 for g in GATES}
+    out = dict.fromkeys(GATES, 0)
     for r in results:
         for c in r.checks:
             if c.name in GATES and not c.passed:
@@ -150,11 +153,11 @@ def _fmt(v: Any) -> str:
     return str(v)
 
 
-def _failed_checks(r: CaseResult) -> List[str]:
+def _failed_checks(r: CaseResult) -> list[str]:
     return [f"{c.name}: {c.detail}" for c in r.checks if not c.passed and c.required]
 
 
-def markdown(meta: Dict[str, Any], summary: Dict[str, Any], results: Sequence[CaseResult]) -> str:
+def markdown(meta: dict[str, Any], summary: dict[str, Any], results: Sequence[CaseResult]) -> str:
     lines = [f"# Tribos evaluation {meta.get('run_id', '')}", ""]
     lines.append(f"Suites **{', '.join(meta.get('suites', []))}** · {meta.get('n_cases')} cases · model `{meta.get('model')}` · "
                  f"code `{meta.get('source_fingerprint')}` · started {meta.get('started_at')}")
@@ -212,7 +215,7 @@ input{padding:6px 8px;width:100%;max-width:360px;margin:8px 0;background:var(--c
 """
 
 
-def html_report(meta: Dict[str, Any], summary: Dict[str, Any], results: Sequence[CaseResult]) -> str:
+def html_report(meta: dict[str, Any], summary: dict[str, Any], results: Sequence[CaseResult]) -> str:
     esc = html.escape
     rows = "".join(
         f"<tr><td>{esc(level)}</td><td class='{'ok' if (e['pass_rate'] or 0) >= 0.8 else 'bad'}'>{_fmt(e['pass_rate'])}</td>"
@@ -252,7 +255,7 @@ def html_report(meta: Dict[str, Any], summary: Dict[str, Any], results: Sequence
     )
 
 
-def write_reports(run_dir: Path, meta: Dict[str, Any], results: Sequence[CaseResult]) -> Dict[str, Any]:
+def write_reports(run_dir: Path, meta: dict[str, Any], results: Sequence[CaseResult]) -> dict[str, Any]:
     summary = summarize(results)
     (run_dir / "summary.json").write_text(json.dumps({"meta": meta, **summary}, indent=1), encoding="utf-8")
     (run_dir / "report.md").write_text(markdown(meta, summary, results), encoding="utf-8")
@@ -264,7 +267,7 @@ def write_reports(run_dir: Path, meta: Dict[str, Any], results: Sequence[CaseRes
 # Comparison and gate
 # ---------------------------------------------------------------------------------------------------------------
 
-def _lookup(summary: Dict[str, Any], path: str) -> Optional[float]:
+def _lookup(summary: dict[str, Any], path: str) -> float | None:
     """'answer.pass_rate', 'retrieval.retrieval.hit_rate' or the short form 'retrieval.hit_rate'."""
     parts = path.split(".")
     node: Any = summary.get("levels", {})
@@ -278,7 +281,7 @@ def _lookup(summary: Dict[str, Any], path: str) -> Optional[float]:
     return float(node) if isinstance(node, (int, float)) and not isinstance(node, bool) else None
 
 
-def parse_thresholds(spec: Optional[str]) -> List[Tuple[str, float]]:
+def parse_thresholds(spec: str | None) -> list[tuple[str, float]]:
     out = []
     for part in re.split(r"[,\s]+", spec or ""):
         if part:
@@ -287,7 +290,7 @@ def parse_thresholds(spec: Optional[str]) -> List[Tuple[str, float]]:
     return out
 
 
-def gate(summary: Dict[str, Any], thresholds: Sequence[Tuple[str, float]]) -> List[str]:
+def gate(summary: dict[str, Any], thresholds: Sequence[tuple[str, float]]) -> list[str]:
     """Failures as messages; an empty list means the run passes every threshold."""
     failures = []
     for key, minimum in thresholds:

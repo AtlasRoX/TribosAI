@@ -1,8 +1,8 @@
 """
-Run one cell of model-written analysis code in a separate, constrained Python process.
+Run one cell of model-written computation or data analysis code in a separate, constrained Python process.
 
 Layers (after the AST policy in policy.py), following the CodeAct action loop (Wang et al., ICML 2024,
-arXiv:2402.01030) and the notebook-sandbox harness of BixBench (Mitchener et al. 2025, arXiv:2503.00096):
+arXiv:2402.01030):
 
 1. A fresh temporary directory per run: work/ (the child's cwd, holding read-only copies of the input files only),
    io/ (bootstrap, code, config, captured output) and tmp/ (TEMP for libraries). Everything is deleted afterwards.
@@ -35,10 +35,10 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 
 from .policy import (
-    ALLOWED_MODULES,
+    ALLOWED_MODULE_ROOTS,
     BANNED_ATTRIBUTES,
     BANNED_CALLS,
     BANNED_NAMES,
@@ -209,7 +209,7 @@ _READ_MODES = frozenset({"r", "rb", "rt", "br", "tr"})
 
 _READER_FUNCS = tuple(_CFG.get("reader_functions") or ())
 _READER_KWARGS = tuple(_CFG.get("reader_path_kwargs") or ())
-_READER_ROOTS = frozenset({"pandas", "numpy", "anndata", "scanpy", "scipy", "matplotlib", "sklearn"})
+_READER_ROOTS = frozenset({"pandas", "numpy", "scipy", "matplotlib", "sklearn", "h5py"})
 _READER_WRAPPERS = {}
 
 
@@ -310,6 +310,41 @@ def _guarded_hasattr(obj, name):
         return False
 
 
+def _load_dataset(name=None, **kwargs):
+    """Load a bound input dataset (.csv, .tsv, .xlsx, .parquet, .json, .h5/.hdf5, .mat) inside the sandbox."""
+    inputs = list(_CFG.get("inputs") or [])
+    if name is None:
+        if not inputs:
+            raise FileNotFoundError("No input dataset files are bound to this sandbox run")
+        name = inputs[0]
+    if not isinstance(name, str) or not _inside_work(name):
+        raise PermissionError("load_dataset() may only read files inside the work directory")
+    ext = _os.path.splitext(name)[1].lower()
+    if ext == ".csv":
+        pd = _guarded_import("pandas")
+        return pd.read_csv(name, **kwargs)
+    if ext == ".tsv":
+        pd = _guarded_import("pandas")
+        kwargs.setdefault("sep", "\t")
+        return pd.read_csv(name, **kwargs)
+    if ext == ".xlsx":
+        pd = _guarded_import("pandas")
+        return pd.read_excel(name, **kwargs)
+    if ext == ".parquet":
+        pd = _guarded_import("pandas")
+        return pd.read_parquet(name, **kwargs)
+    if ext == ".json":
+        pd = _guarded_import("pandas")
+        return pd.read_json(name, **kwargs)
+    if ext in (".h5", ".hdf5"):
+        h5py = _guarded_import("h5py")
+        return h5py.File(name, "r")
+    if ext == ".mat":
+        scipy_io = _guarded_import("scipy.io", fromlist=("loadmat",))
+        return scipy_io.loadmat(name, **kwargs)
+    raise ValueError(f"Unsupported dataset extension {ext!r}")
+
+
 def _restricted_builtins():
     banned = set(_CFG["banned_calls"]) | {"open", "getattr", "hasattr", "__import__", "__loader__", "__spec__"}
     safe = {k: v for k, v in vars(_builtins).items() if k not in banned}
@@ -389,7 +424,12 @@ def _main():
     with _real_open(_CFG["code_path"], encoding="utf-8") as fh:
         src = fh.read()
     lines = src.splitlines()
-    g = {"__builtins__": _restricted_builtins(), "__name__": "__analysis__", "INPUT_FILES": list(_CFG["inputs"])}
+    g = {
+        "__builtins__": _restricted_builtins(),
+        "__name__": "__analysis__",
+        "INPUT_FILES": list(_CFG["inputs"]),
+        "load_dataset": _load_dataset,
+    }
     status, error = "ok", None
     t0 = _time.perf_counter()
     try:
@@ -446,9 +486,9 @@ def sandbox_python() -> str:
     return sys.executable
 
 
-def _child_env(root: str, tmp: str) -> Dict[str, str]:
+def _child_env(root: str, tmp: str) -> dict[str, str]:
     """The child's whole environment: an allowlist, never API keys or tokens."""
-    env: Dict[str, str] = {}
+    env: dict[str, str] = {}
     for key in _ENV_ALLOWLIST:
         value = os.environ.get(key)
         if value:
@@ -484,13 +524,10 @@ def _rmtree(path: str) -> None:
         except OSError:
             pass
 
-    if sys.version_info >= (3, 12):
-        shutil.rmtree(path, onexc=onerror)
-    else:  # pragma: no cover
-        shutil.rmtree(path, onerror=onerror)
+    shutil.rmtree(path, onexc=onerror)
 
 
-def _kill_tree(proc: "subprocess.Popen[bytes]") -> None:
+def _kill_tree(proc: subprocess.Popen[bytes]) -> None:
     try:
         if os.name == "nt":
             subprocess.run(
@@ -531,8 +568,8 @@ def _read_capped(path: str, limit: int, tail: bool = False) -> str:
     return text
 
 
-def _empty(status: str, error: Optional[str], **extra: Any) -> Dict[str, Any]:
-    out: Dict[str, Any] = {
+def _empty(status: str, error: str | None, **extra: Any) -> dict[str, Any]:
+    out: dict[str, Any] = {
         "status": status,
         "stdout": "",
         "stderr": "",
@@ -550,17 +587,17 @@ def _empty(status: str, error: Optional[str], **extra: Any) -> Dict[str, Any]:
 
 def run_code(
     code: str,
-    input_files: Optional[Dict[str, str]] = None,
+    input_files: dict[str, str] | None = None,
     timeout_s: float = 60,
     max_output_kb: int = 256,
     memory_mb: int = 2048,
     *,
     max_figures: int = MAX_FIGURES,
     _unsafe_skip_policy: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
-    Execute one analysis cell. input_files maps the name the code reads (a plain file name) to a server path the
-    caller has already validated; each is copied read-only into the work dir. Returns
+    Execute one analysis/computation cell. input_files maps the name the code reads (a plain file name) to a server path
+    the caller has already validated; each is copied read-only into the work dir. Returns
     {status: ok|error|timeout|policy_violation|failed, stdout, stderr, result, figures[{name,png_base64}], tables,
     seconds, error, violations, limits}.
 
@@ -600,7 +637,7 @@ def run_code(
             fh.write(code)
         boot = _BOOTSTRAP
         if _unsafe_skip_policy:
-            boot = boot.replace('g = {"__builtins__": _restricted_builtins(),', 'g = {"__builtins__": _builtins,')
+            boot = boot.replace('"__builtins__": _restricted_builtins(),', '"__builtins__": _builtins,')
         with open(boot_path, "w", encoding="utf-8") as fh:
             fh.write(boot)
         cfg = {
@@ -615,7 +652,7 @@ def run_code(
             "max_figure_bytes": MAX_FIGURE_BYTES,
             "max_tables": MAX_TABLES,
             "max_table_rows": MAX_TABLE_ROWS,
-            "allowed_modules": sorted(ALLOWED_MODULES),
+            "allowed_modules": sorted(ALLOWED_MODULE_ROOTS),
             "banned_attributes": sorted(BANNED_ATTRIBUTES),
             "banned_names": sorted(BANNED_NAMES),
             "banned_calls": sorted(BANNED_CALLS),
@@ -626,7 +663,7 @@ def run_code(
             json.dump(cfg, fh)
 
         stdout_path, stderr_path = os.path.join(io_dir, "stdout.txt"), os.path.join(io_dir, "stderr.txt")
-        kwargs: Dict[str, Any] = {}
+        kwargs: dict[str, Any] = {}
         if os.name == "nt":
             kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | getattr(subprocess, "CREATE_NO_WINDOW", 0)
         else:

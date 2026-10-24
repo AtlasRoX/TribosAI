@@ -6,15 +6,21 @@ import asyncio
 
 import pytest
 
+from tests.agentic_fakes import collect_events, make_agentic_orchestrator
+from tests.fakes import build_recording_registry
 from tribos.agentic import config as agent_config
 from tribos.agentic.budget import BudgetExhausted, RunBudget
 from tribos.agentic.control import ApprovalDecision, RunControl, create_control, get_control
 from tribos.agentic.guardrails import neutralise, screen, spotlight
 from tribos.agentic.llm import extract_json
-from tribos.agentic.runtime import AgentPhase, PhaseOutcome, register_phase, restore_phases, snapshot_phases
+from tribos.agentic.runtime import (
+    AgentPhase,
+    PhaseOutcome,
+    register_phase,
+    restore_phases,
+    snapshot_phases,
+)
 from tribos.agentic.tool_retrieval import retrieve_tools, tool_card
-from tests.agentic_fakes import collect_events, make_agentic_orchestrator
-from tests.fakes import build_recording_registry
 
 
 @pytest.fixture

@@ -59,16 +59,23 @@ import logging
 import math
 import os
 import re
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
+from ..verify.verifier import truncate_words
 from .budget import BudgetExhausted
 from .calibration_stats import logistic
 from .config import env_flag
 from .guardrails import SPOTLIGHT_RULE, neutralise, spotlight
 from .llm import AgentLLMUnavailable
-from ..verify.verifier import truncate_words
-from .nli import claim_key, collect_documents, find_scores, score_texts, thresholds  # noqa: F401 - claim_key re-exported
+from .nli import (  # noqa: F401 - claim_key re-exported
+    claim_key,
+    collect_documents,
+    find_scores,
+    score_texts,
+    thresholds,
+)
 from .runtime import AgentPhase, PhaseOutcome, register_phase
 from .state import AgentState
 
@@ -93,7 +100,7 @@ CALIBRATED_LABEL = "Calibrated claim confidence"
 # one that also matches its source's identifier and figures exactly near 0.85, an NLI-entailed claim from several
 # sources above 0.9, and a contradicted or defective claim below 0.2. Override them with
 # "weights" in the calibration file after fitting on labelled claims.
-DEFAULT_WEIGHTS: Dict[str, float] = {
+DEFAULT_WEIGHTS: dict[str, float] = {
     "bias": -0.5,
     "nli_entailment": 3.0,  # applied to (entailment - 0.5); 0 when no NLI score
     "nli_contradiction": -3.0,
@@ -108,7 +115,7 @@ DEFAULT_WEIGHTS: Dict[str, float] = {
 # Below the high band: the most a claim without strong support (NLI entailment or an exact match) can score.
 WEAK_SUPPORT_CAP = 0.74
 
-CLAIM_TYPE_WEIGHTS: Dict[str, float] = {
+CLAIM_TYPE_WEIGHTS: dict[str, float] = {
     "clinical": 1.5,
     "mechanistic": 1.2,
     "computational": 1.0,
@@ -131,11 +138,11 @@ _UNGRADED = 0.25
 
 
 # Calibration settings ---------------------------------------------------------------------------------------
-def _num(v: Any) -> Optional[float]:
+def _num(v: Any) -> float | None:
     return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) else None
 
 
-def fitted_on_real_labels(data: Dict[str, Any]) -> bool:
+def fitted_on_real_labels(data: dict[str, Any]) -> bool:
     """True when a calibration file documents a fit on a real labelled claim set with held-out evaluation."""
     if not isinstance(data, dict) or data.get("status") != "fitted":
         return False
@@ -154,7 +161,7 @@ def fitted_on_real_labels(data: Dict[str, Any]) -> bool:
     )
 
 
-def conformal_validated(data: Dict[str, Any]) -> bool:
+def conformal_validated(data: dict[str, Any]) -> bool:
     """True when the file's back-off threshold was computed per answer and its held-out coverage was checked."""
     if not fitted_on_real_labels(data):
         return False
@@ -162,14 +169,14 @@ def conformal_validated(data: Dict[str, Any]) -> bool:
     return bool(conformal.get("grouped")) and bool(conformal.get("heldout_coverage_ok"))
 
 
-def load_calibration() -> Dict[str, Any]:
+def load_calibration() -> dict[str, Any]:
     """{"temperature", "conformal_threshold", "weights", "source", "status", "calibrated", "conformal_validated"}
     from env / the calibration file / defaults.
 
     status: "heuristic" (hand-set weights, nothing fitted), "fitted" (fitted on a real labelled set with held-out
     evaluation: the only status with calibrated=True) or "unverified" (a file that sets values without that
     provenance, or an operator-set TRIBOS_CONFIDENCE_T)."""
-    out: Dict[str, Any] = {
+    out: dict[str, Any] = {
         "temperature": 1.0,
         "conformal_threshold": None,
         "weights": dict(DEFAULT_WEIGHTS),
@@ -186,7 +193,7 @@ def load_calibration() -> Dict[str, Any]:
             path = str(default_file)
     if path:
         try:
-            with open(path, "r", encoding="utf-8") as fh:
+            with open(path, encoding="utf-8") as fh:
                 data = json.load(fh)
             if isinstance(data, dict):
                 t = data.get("temperature")
@@ -223,7 +230,7 @@ def load_calibration() -> Dict[str, Any]:
     return out
 
 
-def band(confidence: float, conformal_threshold: Optional[float] = None) -> str:
+def band(confidence: float, conformal_threshold: float | None = None) -> str:
     if conformal_threshold is not None and confidence <= conformal_threshold:
         return "low"
     if confidence >= HIGH_BAND:
@@ -233,12 +240,12 @@ def band(confidence: float, conformal_threshold: Optional[float] = None) -> str:
     return "low"
 
 
-def backoff_effective(tau: Optional[float]) -> bool:
+def backoff_effective(tau: float | None) -> bool:
     """A back-off threshold changes a band only when it reaches the medium band (scores <= tau below it are low anyway)."""
     return tau is not None and tau >= MEDIUM_BAND
 
 
-def method_tag(cal: Dict[str, Any], stated: bool = False) -> str:
+def method_tag(cal: dict[str, Any], stated: bool = False) -> str:
     """The artifact's method string: what was actually applied, and nothing that was not (AGT-001/002)."""
     parts = ["calibrated-logistic-features" if cal.get("calibrated") else "heuristic-logistic-features"]
     t = cal.get("temperature")
@@ -252,7 +259,7 @@ def method_tag(cal: Dict[str, Any], stated: bool = False) -> str:
     return "+".join(parts)
 
 
-def feature_vector(features: Dict[str, Any]) -> Dict[str, float]:
+def feature_vector(features: dict[str, Any]) -> dict[str, float]:
     """The numeric x the weights apply to (names match DEFAULT_WEIGHTS, without bias)."""
     e = features.get("nli_entailment")
     c = features.get("nli_contradiction")
@@ -269,7 +276,7 @@ def feature_vector(features: Dict[str, Any]) -> Dict[str, float]:
     }
 
 
-def strong_support(features: Dict[str, Any]) -> bool:
+def strong_support(features: dict[str, Any]) -> bool:
     """NLI entailment at or above the entailment threshold, or an exact identifier+figure match."""
     e = features.get("nli_entailment")
     if e is not None and float(e) >= thresholds()[0]:
@@ -277,18 +284,18 @@ def strong_support(features: Dict[str, Any]) -> bool:
     return bool(features.get("exact_match"))
 
 
-def cap_confidence(confidence: float, features: Dict[str, Any]) -> float:
+def cap_confidence(confidence: float, features: dict[str, Any]) -> float:
     """Keep a claim without strong support out of the high band."""
     return confidence if strong_support(features) else min(confidence, WEAK_SUPPORT_CAP)
 
 
-def raw_logit(features: Dict[str, Any], weights: Optional[Dict[str, float]] = None) -> float:
+def raw_logit(features: dict[str, Any], weights: dict[str, float] | None = None) -> float:
     w = weights or DEFAULT_WEIGHTS
     x = feature_vector(features)
     return float(w.get("bias", 0.0) + sum(w.get(k, 0.0) * v for k, v in x.items()))
 
 
-def score(features: Dict[str, Any], temperature: float = 1.0, weights: Optional[Dict[str, float]] = None) -> float:
+def score(features: dict[str, Any], temperature: float = 1.0, weights: dict[str, float] | None = None) -> float:
     return cap_confidence(float(logistic(raw_logit(features, weights) / max(temperature, 1e-6))), features)
 
 
@@ -310,9 +317,9 @@ def _overlap(a: str, b: str) -> float:
     return len(ta & tb) / len(ta | tb)
 
 
-def gather_claims(state: AgentState) -> List[Dict[str, Any]]:
+def gather_claims(state: AgentState) -> list[dict[str, Any]]:
     """[{claim_id, text, claim_type, status, evidence_keys}] from the verifier report, else answer sentences."""
-    out: List[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     for c in list(_get(state.verification, "claims", None) or [])[:MAX_CLAIMS]:
         text = str(_get(c, "claim_text", "") or "").strip()
         if not text or _get(c, "claim_type", "") == "operational":
@@ -340,7 +347,7 @@ def gather_claims(state: AgentState) -> List[Dict[str, Any]]:
     return out
 
 
-def _grade_weight(doc: Dict[str, Any]) -> float:
+def _grade_weight(doc: dict[str, Any]) -> float:
     w = doc.get("grade_weight")
     if isinstance(w, (int, float)):
         return float(w)
@@ -359,14 +366,14 @@ def _grade_weight(doc: Dict[str, Any]) -> float:
     return _UNGRADED
 
 
-def source_grades(tool_results: Dict[str, Any]) -> Dict[str, float]:
-    grades: Dict[str, float] = {}
+def source_grades(tool_results: dict[str, Any]) -> dict[str, float]:
+    grades: dict[str, float] = {}
     for d in collect_documents(tool_results):
         grades[d["source_key"]] = max(grades.get(d["source_key"], 0.0), _grade_weight(d))
     return grades
 
 
-def _key_grade(key: str, grades: Dict[str, float]) -> float:
+def _key_grade(key: str, grades: dict[str, float]) -> float:
     if key in grades:
         return grades[key]
     if key.startswith("tool:"):
@@ -376,7 +383,7 @@ def _key_grade(key: str, grades: Dict[str, float]) -> float:
     return _UNGRADED
 
 
-def _conflict_rows(state: AgentState) -> List[Dict[str, Any]]:
+def _conflict_rows(state: AgentState) -> list[dict[str, Any]]:
     """Contradicting counter-evidence rows from a model or NLI verdict. Rows rated by cue words only
     (classifier "heuristic") are left out (AGT-008): a lexical match is a possible conflict to check, not a
     verified contradiction, so it must not lower a claim's score as one (the escalation trigger excludes them too)."""
@@ -431,22 +438,22 @@ def exact_match(text: str, source_key: str, doc_text: str) -> bool:
     return all(_matches_any(f) for f in figures)
 
 
-def _defect_claims(state: AgentState) -> List[str]:
+def _defect_claims(state: AgentState) -> list[str]:
     return [str(_get(d, "claim", "") or "") for d in (_get(state.verification, "defects", None) or []) if _get(d, "claim", "")]
 
 
 def claim_features(
-    claim: Dict[str, Any],
-    nli: Optional[Dict[str, Any]],
-    grades: Dict[str, float],
-    conflicts: List[Dict[str, Any]],
-    defect_claims: List[str],
-    docs_by_key: Optional[Dict[str, str]] = None,
-) -> Dict[str, Any]:
+    claim: dict[str, Any],
+    nli: dict[str, Any] | None,
+    grades: dict[str, float],
+    conflicts: list[dict[str, Any]],
+    defect_claims: list[str],
+    docs_by_key: dict[str, str] | None = None,
+) -> dict[str, Any]:
     t_entail, _, _ = thresholds()
     text = claim["text"]
     status = claim.get("status") or "not_checked"
-    supporting: List[str] = []
+    supporting: list[str] = []
     if nli:
         supporting.extend(str(s) for s in nli.get("supporting_sources") or [])
         if not supporting and nli.get("best_source") and float(nli.get("entailment") or 0.0) >= t_entail:
@@ -506,7 +513,7 @@ def _elicit_allowed(state: AgentState) -> bool:
         return False
 
 
-async def stated_confidence(state: AgentState, rows: List[Dict[str, Any]], excerpts: Dict[str, str]) -> Dict[str, float]:
+async def stated_confidence(state: AgentState, rows: list[dict[str, Any]], excerpts: dict[str, str]) -> dict[str, float]:
     """One batched model call: claim id -> stated P(True). Empty on any failure."""
     lines = []
     for r in rows:
@@ -522,7 +529,7 @@ async def stated_confidence(state: AgentState, rows: List[Dict[str, Any]], excer
         logger.info("Stated confidence unavailable: %s", exc)
         return {}
     items = data.get("claims") if isinstance(data, dict) else data if isinstance(data, list) else None
-    out: Dict[str, float] = {}
+    out: dict[str, float] = {}
     ids = {r["claim_id"] for r in rows}
     for it in items or []:
         if not isinstance(it, dict):
@@ -539,8 +546,8 @@ async def stated_confidence(state: AgentState, rows: List[Dict[str, Any]], excer
 
 # Phase -------------------------------------------------------------------------------------------------------
 def _summarise(
-    rows: List[Dict[str, Any]], stated: Dict[str, float], cal: Dict[str, Any], method: str, nli_backend: str
-) -> Dict[str, Any]:
+    rows: list[dict[str, Any]], stated: dict[str, float], cal: dict[str, Any], method: str, nli_backend: str
+) -> dict[str, Any]:
     """The claim_confidence artifact from scored rows, blending in stated P(True) where present."""
     tau = cal["conformal_threshold"]
     t_entail, _, _ = thresholds()
@@ -548,7 +555,7 @@ def _summarise(
     acc = 0.0
     supported = 0
     backed_off = 0
-    out_rows: List[Dict[str, Any]] = []
+    out_rows: list[dict[str, Any]] = []
     for base in rows:
         r = {**base, "features": dict(base["features"])}
         conf = r["confidence"]
@@ -603,14 +610,14 @@ def _summarise(
 
 
 async def compute_claim_confidence(
-    state: AgentState, publish: Optional[Callable[[Dict[str, Any]], None]] = None
-) -> Dict[str, Any]:
+    state: AgentState, publish: Callable[[dict[str, Any]], None] | None = None
+) -> dict[str, Any]:
     """The claim_confidence artifact. `publish(artifact)` receives the deterministic-feature artifact before the
     optional stated-confidence model call, so a failed or slow call still leaves an artifact."""
     cal = load_calibration()
-    T, tau, weights = cal["temperature"], cal["conformal_threshold"], cal["weights"]
+    T, _tau, weights = cal["temperature"], cal["conformal_threshold"], cal["weights"]
     claims = gather_claims(state)
-    nli_scores: Dict[str, Any] = state.bag.get("nli_scores") or {}
+    nli_scores: dict[str, Any] = state.bag.get("nli_scores") or {}
     if claims and state.bag.get("_nli_store") is not None:
         try:
             await score_texts(state, [c["text"] for c in claims])  # cross-encoder fills sentences not judged yet
@@ -622,8 +629,8 @@ async def compute_claim_confidence(
     defects = _defect_claims(state)
     docs_by_key = {d["source_key"]: d["text"] for d in collect_documents(state.tool_results)}
 
-    rows: List[Dict[str, Any]] = []
-    excerpts: Dict[str, str] = {}
+    rows: list[dict[str, Any]] = []
+    excerpts: dict[str, str] = {}
     for c in claims[:MAX_CLAIMS]:
         nli = find_scores(nli_scores, c["text"])
         feats = claim_features(c, nli, grades, conflicts, defects, docs_by_key)
@@ -672,8 +679,8 @@ class ConfidencePhase(AgentPhase):
     def applies(self, state: AgentState) -> bool:
         return bool((state.draft or "").strip()) or state.verification is not None
 
-    async def run(self, state: AgentState) -> Optional[PhaseOutcome]:
-        def publish(art: Dict[str, Any]) -> None:
+    async def run(self, state: AgentState) -> PhaseOutcome | None:
+        def publish(art: dict[str, Any]) -> None:
             state.artifacts["claim_confidence"] = art
 
         # The deterministic artifact is stored before the optional model call, so a model failure still leaves it.

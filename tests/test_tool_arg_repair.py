@@ -8,18 +8,21 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
-import pytest
 from pydantic import BaseModel, ConfigDict, Field, constr
 
 from tribos.agentic.plan_graph import parse_plan, validate_plan, validated_inputs
 from tribos.agentic.specialists import SPECS_BY_NAME, Specialist
 from tribos.agentic.topologies import REUSED_PREFIX, call_step_status, run_specialist_tool
-from tribos.agents.query_context import QueryContext, ResolvedEntity
+from tribos.agents.query_context import QueryContext
 from tribos.tools.arg_repair import adjustment_text, repair_arguments
-from tribos.tools.registry import AdapterType, ToolRegistry, ErrorType, ToolResult, ToolUniverseEntry
-
+from tribos.tools.registry import (
+    AdapterType,
+    ErrorType,
+    ToolRegistry,
+    ToolUniverseEntry,
+)
 
 # Sample tool input schemas with the field shapes the repair has to handle: a patterned id, bounded integers,
 # capped lists of names and of patterned ids, and lists of strings an agent may send as objects.
@@ -29,14 +32,14 @@ MAX_RESOLVE_NAMES = 8
 
 
 class ChemblResolveInput(BaseModel):
-    names: List[DrugName] = Field(default_factory=list, max_length=MAX_RESOLVE_NAMES)
-    chembl_ids: List[ChemblId] = Field(default_factory=list, max_length=3)
-    target_symbol: Optional[constr(max_length=40)] = None
+    names: list[DrugName] = Field(default_factory=list, max_length=MAX_RESOLVE_NAMES)
+    chembl_ids: list[ChemblId] = Field(default_factory=list, max_length=3)
+    target_symbol: constr(max_length=40) | None = None
 
 
 class ChemblProfileInput(BaseModel):
-    parent_chembl_ids: List[ChemblId] = Field(default_factory=list, max_length=3)
-    target_chembl_id: Optional[str] = Field(default=None, pattern=r"^CHEMBL\d{1,9}$")
+    parent_chembl_ids: list[ChemblId] = Field(default_factory=list, max_length=3)
+    target_chembl_id: str | None = Field(default=None, pattern=r"^CHEMBL\d{1,9}$")
     activity_limit: int = Field(default=10, ge=1, le=50)
 
 
@@ -47,9 +50,9 @@ class OpenFdaSafetyInput(BaseModel):
 
 class PrimeKGInvestigateInput(BaseModel):
     query: str = Field(max_length=4000)
-    drugs: List[str] = Field(default_factory=list, max_length=8)
-    diseases: List[str] = Field(default_factory=list, max_length=4)
-    genes: List[str] = Field(default_factory=list, max_length=200)
+    drugs: list[str] = Field(default_factory=list, max_length=8)
+    diseases: list[str] = Field(default_factory=list, max_length=4)
+    genes: list[str] = Field(default_factory=list, max_length=200)
 
 
 def run(coro):
@@ -157,11 +160,11 @@ def test_adjustment_text():
 # Registry
 # -----------------------------------------------------------------------------
 
-def _registry(calls: List[Tuple[str, Dict[str, Any]]]) -> ToolRegistry:
+def _registry(calls: list[tuple[str, dict[str, Any]]]) -> ToolRegistry:
     reg = ToolRegistry()
 
     def add(name: str, schema: Any, domain: str = "synapta") -> None:
-        async def execute(**kwargs: Any) -> Dict[str, Any]:
+        async def execute(**kwargs: Any) -> dict[str, Any]:
             calls.append((name, kwargs))
             return {"echo": kwargs}
 
@@ -178,7 +181,7 @@ def _registry(calls: List[Tuple[str, Dict[str, Any]]]) -> ToolRegistry:
 
 
 def test_registry_repairs_and_records_the_adjustment():
-    calls: List[Tuple[str, Dict[str, Any]]] = []
+    calls: list[tuple[str, dict[str, Any]]] = []
     reg = _registry(calls)
     # Programmatic calls are validated strictly; agent-written calls opt in to repair.
     strict = run(reg.execute("chembl_drug_profile", target_chembl_id="CHEMBL203", activity_limit=100))
@@ -207,7 +210,7 @@ def _specialist_state(reg: ToolRegistry) -> SimpleNamespace:
         state.n += 1
         return f"agent.{phase}.{state.n}.{tool.split('_', 1)[0]}"
 
-    async def call_tool(tool: str, *, phase: str, purpose: str, key: Optional[str] = None, **kwargs: Any) -> Any:
+    async def call_tool(tool: str, *, phase: str, purpose: str, key: str | None = None, **kwargs: Any) -> Any:
         res = await reg.execute(tool, **kwargs)
         state.tool_results[key] = res
         return res
@@ -218,11 +221,12 @@ def _specialist_state(reg: ToolRegistry) -> SimpleNamespace:
 
 
 def _chemistry(reg: ToolRegistry) -> Specialist:
-    return Specialist(SPECS_BY_NAME["chemistry"], [reg.get_entry("chembl_drug_profile"), reg.get_entry("chembl_resolve_drugs")])
+    spec = next(iter(SPECS_BY_NAME.values()))
+    return Specialist(spec, [reg.get_entry("chembl_drug_profile"), reg.get_entry("chembl_resolve_drugs")])
 
 
 def test_specialist_call_with_repairable_arguments_runs():
-    calls: List[Tuple[str, Dict[str, Any]]] = []
+    calls: list[tuple[str, dict[str, Any]]] = []
     reg = _registry(calls)
     state = _specialist_state(reg)
     sp = _chemistry(reg)
@@ -235,7 +239,7 @@ def test_specialist_call_with_repairable_arguments_runs():
     assert calls[-1][1]["activity_limit"] == 50
     assert call_step_status(obs, executed) == "done"
 
-    target = Specialist(SPECS_BY_NAME["target"], [reg.get_entry("primekg_investigate")])
+    target = Specialist(next(iter(SPECS_BY_NAME.values())), [reg.get_entry("primekg_investigate")])
     obs, _, executed = run(run_specialist_tool(state, target, "primekg_investigate",
                                                {"query": "EGFR NSCLC", "diseases": [{"name": "NSCLC"}]},
                                                phase="supervisor", purpose="kg"))
@@ -253,7 +257,7 @@ def test_specialist_call_with_unrepairable_arguments_is_still_rejected():
 
 
 def test_repeated_identical_call_reuses_the_earlier_result_and_is_not_an_error():
-    calls: List[Tuple[str, Dict[str, Any]]] = []
+    calls: list[tuple[str, dict[str, Any]]] = []
     reg = _registry(calls)
     state = _specialist_state(reg)
     sp = _chemistry(reg)

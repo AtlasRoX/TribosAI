@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Optional
 
 from .base import CitationRecord, EvidenceSource, SourceRunState, share_source_run
 
-_SOURCES: Dict[str, EvidenceSource] = {}
+_SOURCES: dict[str, EvidenceSource] = {}
 
 
 def register_source(src: EvidenceSource) -> None:
@@ -17,7 +17,7 @@ def register_source(src: EvidenceSource) -> None:
     _SOURCES[src.key] = src
 
 
-def get_registered_source(key: str) -> Optional[EvidenceSource]:
+def get_registered_source(key: str) -> EvidenceSource | None:
     """The registered source with this key (extensions are not loaded here), or None."""
     return _SOURCES.get(key)
 
@@ -26,7 +26,7 @@ def unregister_source(key: str) -> None:
     _SOURCES.pop(key, None)
 
 
-def get_sources() -> List[EvidenceSource]:
+def get_sources() -> list[EvidenceSource]:
     """All registered sources sorted by (order, key); loads the feature extensions first."""
     from ..extensions import load_extensions
 

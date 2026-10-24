@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Google_Sans, Google_Sans_Code } from "next/font/google";
+import "katex/dist/katex.min.css";
 import "./globals.css";
 import { AgentationProvider } from "@/components/AgentationProvider";
 
@@ -33,9 +34,9 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "Tribos | Clinical R&D Assistant",
+  title: "Tribos | Engineering R&D Assistant",
   description:
-    "Tribos - Advanced Autonomous Clinical R&D Multi-Agent Intelligence System. Made by ChronoStrider Engineering.",
+    "Tribos — Engineering and Scientific R&D Multi-Agent Intelligence System. Made by ChronoStrider Engineering.",
   icons: {
     icon: "/icon-tight.png",
     shortcut: "/icon-tight.png",

@@ -13,16 +13,17 @@ import html
 import json
 import logging
 import re
-from typing import Any, Callable, Dict, Iterable, List, Literal, NamedTuple, Optional, Set, Tuple
+from collections.abc import Callable, Iterable
+from typing import Any, Literal, NamedTuple
 from urllib.parse import quote, unquote
 
 from pydantic import BaseModel, Field
 
-from ..verify.verifier import TribosVerifier, truncate_words
-from ..utils.source_authority import record_url, source_authority
 from ..sources.base import CitationRecord
 from ..tools.registry import ToolResult
+from ..utils.source_authority import record_url, source_authority
 from ..utils.text import sentence_spans
+from ..verify.verifier import TribosVerifier, truncate_words
 
 logger = logging.getLogger(__name__)
 
@@ -34,54 +35,54 @@ PassageKind = Literal["literature", "tool_output", "web_snippet", "mention"]
 
 
 class CitationPassage(BaseModel):
-    passage_id: Optional[str] = None
+    passage_id: str | None = None
     text: str  # exact excerpt from the tool output (markup stripped), at most 800 chars
-    section: Optional[str] = None
+    section: str | None = None
     has_full_text: bool = False
     kind: PassageKind = "literature"
-    highlight: Optional[str] = None  # exact substring of text, never offsets
+    highlight: str | None = None  # exact substring of text, never offsets
 
 
 class CitationEntry(BaseModel):
     key: str  # 'PMID:42511798' | 'DOI:10.3390/ijms27146455' | 'NCT:NCT03600883' | ...
     id: str
     type: CiteType
-    title: Optional[str] = None
+    title: str | None = None
     url: str
     source_agent: str
     source_tool: str
-    authors: Optional[str] = None
-    journal: Optional[str] = None
-    year: Optional[str] = None
-    pmcid: Optional[str] = None
-    pub_types: List[str] = Field(default_factory=list)
-    evidence_level: Optional[str] = None
+    authors: str | None = None
+    journal: str | None = None
+    year: str | None = None
+    pmcid: str | None = None
+    pub_types: list[str] = Field(default_factory=list)
+    evidence_level: str | None = None
     # Who published a URL source: regulatory | trial_registry | manufacturer | literature | web, from the record's own
     # final URL (utils.source_authority), never from links inside its text
-    source_authority: Optional[str] = None
-    retracted: Optional[bool] = None  # None = not checked; True only when a source said so
-    retraction_notice: Optional[str] = None
-    passages: List[CitationPassage] = Field(default_factory=list)
+    source_authority: str | None = None
+    retracted: bool | None = None  # None = not checked; True only when a source said so
+    retraction_notice: str | None = None
+    passages: list[CitationPassage] = Field(default_factory=list)
     verified: bool = False
-    note: Optional[str] = None
+    note: str | None = None
 
 
 class ClaimSupport(BaseModel):
     key: str
     occurrence: int  # nth occurrence of key in the answer (code blanked), 0-based
     sentence: str
-    passage_id: Optional[str] = None
-    highlight: Optional[str] = None
-    shared_terms: List[str] = Field(default_factory=list)
+    passage_id: str | None = None
+    highlight: str | None = None
+    shared_terms: list[str] = Field(default_factory=list)
     grounded_by_verifier: bool = False
 
 
 class CitationMap(BaseModel):
     version: int = 1
-    entries: Dict[str, CitationEntry] = Field(default_factory=dict)
-    aliases: Dict[str, str] = Field(default_factory=dict)
-    supports: List[ClaimSupport] = Field(default_factory=list)
-    unverified: List[str] = Field(default_factory=list)
+    entries: dict[str, CitationEntry] = Field(default_factory=dict)
+    aliases: dict[str, str] = Field(default_factory=dict)
+    supports: list[ClaimSupport] = Field(default_factory=list)
+    unverified: list[str] = Field(default_factory=list)
     truncated: bool = False
 
 
@@ -91,7 +92,7 @@ class CitationMap(BaseModel):
 
 class _KeySpec(NamedTuple):
     type: str
-    pattern: "re.Pattern[str]"
+    pattern: re.Pattern[str]
     normalize: Callable[[str], str]
     url: Callable[[str], str]
 
@@ -100,7 +101,7 @@ def _doi_url(doi: str) -> str:
     return "https://doi.org/" + quote(doi, safe="/:;()-._")
 
 
-_KEY_SPECS: Dict[str, _KeySpec] = {
+_KEY_SPECS: dict[str, _KeySpec] = {
     "PMID": _KeySpec("pmid", re.compile(r"\d{1,9}"), str, lambda i: f"https://pubmed.ncbi.nlm.nih.gov/{i}/"),
     "DOI": _KeySpec("doi", re.compile(r"10\.\d{4,9}/[-._;()/:a-z0-9]+"), str.lower, _doi_url),
     "NCT": _KeySpec("nct", re.compile(r"NCT\d{8}"), str.upper, lambda i: f"https://clinicaltrials.gov/study/{i}"),
@@ -135,7 +136,7 @@ def normalize_url(url: str) -> str:
     return re.sub(r"/+$", "", str(url).strip().split("#", 1)[0])
 
 
-def make_key(prefix: str, raw_id: Any) -> Optional[str]:
+def make_key(prefix: str, raw_id: Any) -> str | None:
     """Canonical 'PREFIX:id' key, or None when the id does not validate for that prefix."""
     if raw_id is None:
         return None
@@ -153,7 +154,7 @@ def make_key(prefix: str, raw_id: Any) -> Optional[str]:
     return f"{prefix}:{value}" if spec.pattern.fullmatch(value) else None
 
 
-def split_key(key: str) -> Tuple[str, str]:
+def split_key(key: str) -> tuple[str, str]:
     prefix, _, value = key.partition(":")
     return prefix, value
 
@@ -195,7 +196,7 @@ _GROUP_PREFIX = {
 }
 
 
-def _match_key(m: "re.Match[str]") -> Optional[str]:
+def _match_key(m: re.Match[str]) -> str | None:
     group = m.lastgroup
     if group == "civic":
         value = m.group("civic")
@@ -205,9 +206,9 @@ def _match_key(m: "re.Match[str]") -> Optional[str]:
     return make_key(_GROUP_PREFIX[group], m.group(group)) if group else None
 
 
-def scan_keys(text: str) -> List[Tuple[int, str]]:
+def scan_keys(text: str) -> list[tuple[int, str]]:
     """(position, key) for every identifier in text, in order."""
-    out: List[Tuple[int, str]] = []
+    out: list[tuple[int, str]] = []
     for m in _CITE_RE.finditer(text or ""):
         key = _match_key(m)
         if key:
@@ -215,7 +216,7 @@ def scan_keys(text: str) -> List[Tuple[int, str]]:
     return out
 
 
-_HREF_PATTERNS: List[Tuple["re.Pattern[str]", str]] = [
+_HREF_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"https?://pubmed\.ncbi\.nlm\.nih\.gov/(\d{1,9})/?(?:[?#].*)?$", re.I), "PMID"),
     (re.compile(r"https?://(?:dx\.)?doi\.org/(10\.[^?#]+)$", re.I), "DOI"),
     (re.compile(r"https?://(?:www\.)?clinicaltrials\.gov/(?:study|ct2/show)/(NCT\d{8})/?(?:[?#].*)?$", re.I), "NCT"),
@@ -225,7 +226,7 @@ _HREF_PATTERNS: List[Tuple["re.Pattern[str]", str]] = [
 ]
 
 
-def href_to_key(href: str) -> Optional[str]:
+def href_to_key(href: str) -> str | None:
     """Key for an answer link: a known database link-out maps to its identifier, anything else to URL:."""
     href = str(href or "").strip()
     for pattern, prefix in _HREF_PATTERNS:
@@ -265,19 +266,19 @@ def _trim_bare_url(url: str) -> str:
     return url
 
 
-def _blank(chars: List[str], start: int, end: int) -> None:
+def _blank(chars: list[str], start: int, end: int) -> None:
     for i in range(start, end):
         if chars[i] != "\n":
             chars[i] = " "
 
 
-def scan_answer(response: str) -> List[Tuple[int, str]]:
+def scan_answer(response: str) -> list[tuple[int, str]]:
     """(position, key) of every citable identifier the rendered answer shows outside code, in order.
     A link counts once, by its href; the text inside a link is not scanned (the frontend does the same)."""
     chars = list(response or "")
-    found: List[Tuple[int, str]] = []
+    found: list[tuple[int, str]] = []
 
-    def blank_all(pattern: "re.Pattern[str]") -> None:
+    def blank_all(pattern: re.Pattern[str]) -> None:
         for m in pattern.finditer("".join(chars)):
             _blank(chars, m.start(), m.end())
 
@@ -309,7 +310,7 @@ def scan_answer(response: str) -> List[Tuple[int, str]]:
     return found
 
 
-def _sentence_spans(text: str) -> List[Tuple[int, int]]:
+def _sentence_spans(text: str) -> list[tuple[int, int]]:
     """Spans of TribosVerifier._split_sentences(text) (the same splitter), so sentences compare with claim_support."""
     return sentence_spans(text)
 
@@ -333,7 +334,7 @@ def clean_text(value: Any) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def clean_title(value: Any) -> Optional[str]:
+def clean_title(value: Any) -> str | None:
     text = html.unescape(str(value or ""))
     text = re.sub(r"\s+", " ", _TAG_RE.sub("", text)).strip()
     return text or None
@@ -344,16 +345,16 @@ def _norm_sentence(text: str) -> str:
     return re.sub(r"\s+", " ", folded).strip()
 
 
-def _claim_terms(sentence: str) -> Set[str]:
+def _claim_terms(sentence: str) -> set[str]:
     stripped = _URL_RE.sub(" ", sentence)
     stripped = _CITE_RE.sub(" ", stripped)
     stripped = re.sub(r"\bPMID\b|\bDOI\b", " ", stripped, flags=re.IGNORECASE)
     return {t for t in TribosVerifier._salient_terms(stripped) if t not in _AGENT_TERMS}
 
 
-def _best_sentence(terms: Set[str], text: str, min_shared: int) -> Tuple[Optional[str], List[str]]:
-    best: Optional[str] = None
-    best_shared: List[str] = []
+def _best_sentence(terms: set[str], text: str, min_shared: int) -> tuple[str | None, list[str]]:
+    best: str | None = None
+    best_shared: list[str] = []
     for sentence in TribosVerifier._split_sentences(text):
         shared = sorted(terms & TribosVerifier._salient_terms(sentence))
         if len(shared) > len(best_shared):
@@ -363,7 +364,7 @@ def _best_sentence(terms: Set[str], text: str, min_shared: int) -> Tuple[Optiona
     return best, best_shared
 
 
-def trim_excerpt(text: str, limit: int, highlight: Optional[str] = None) -> str:
+def trim_excerpt(text: str, limit: int, highlight: str | None = None) -> str:
     """Cut text to at most `limit` chars at a word boundary (+ ' [...]'), keeping `highlight` when possible."""
     if len(text) <= limit:
         return text
@@ -384,7 +385,7 @@ def trim_excerpt(text: str, limit: int, highlight: Optional[str] = None) -> str:
     return prefix + cut.rstrip() + suffix
 
 
-def _sentence_with(text: str, needle: str) -> Optional[str]:
+def _sentence_with(text: str, needle: str) -> str | None:
     for sentence in TribosVerifier._split_sentences(text):
         if needle.lower() in sentence.lower():
             return sentence
@@ -418,7 +419,7 @@ _CLINICAL_TRIAL_PUBTYPES = frozenset({
 })
 
 
-def evidence_level_from_pub_types(pub_types: Iterable[str]) -> Optional[str]:
+def evidence_level_from_pub_types(pub_types: Iterable[str]) -> str | None:
     """Evidence level from EuropePMC pubTypeList values (exact matches); None when no publication type is known.
     Used only for records without an evidence grade."""
     types = [re.sub(r"[\s_-]+", " ", str(t).strip().lower()) for t in pub_types or [] if str(t).strip()]
@@ -447,7 +448,7 @@ def evidence_level_from_pub_types(pub_types: Iterable[str]) -> Optional[str]:
     return "research-article"
 
 
-def _as_list(value: Any) -> List[str]:
+def _as_list(value: Any) -> list[str]:
     if isinstance(value, (list, tuple)):
         return [str(v) for v in value if v]
     if isinstance(value, str) and value.strip():
@@ -487,18 +488,18 @@ VERIFIER_NOTE = "Found in this turn's tool data and confirmed by the Verifier; n
 
 
 class _Builder:
-    def __init__(self, source_agents: Dict[str, str]) -> None:
-        self.entries: Dict[str, CitationEntry] = {}
-        self.aliases: Dict[str, str] = {}
-        self.passage_owner: Dict[str, str] = {}
+    def __init__(self, source_agents: dict[str, str]) -> None:
+        self.entries: dict[str, CitationEntry] = {}
+        self.aliases: dict[str, str] = {}
+        self.passage_owner: dict[str, str] = {}
         # Every entry a passage id was added under. Ids from different tool calls may repeat (legacy "psg_000"
         # numbering, or another tool's own ids); an id claimed by two different entries is ambiguous and never
         # grounds a citation by itself (LIT-001).
-        self._passage_owners: Dict[str, Set[str]] = {}
+        self._passage_owners: dict[str, set[str]] = {}
         self.source_agents = source_agents
         self._passage_seq = 0
 
-    def owner_of(self, passage_id: Optional[str]) -> Optional[str]:
+    def owner_of(self, passage_id: str | None) -> str | None:
         """The single entry key a passage id belongs to, or None when unknown or ambiguous."""
         if not passage_id:
             return None
@@ -535,7 +536,7 @@ class _Builder:
         self.entries[key] = created
         return created
 
-    def alias(self, alias_key: Optional[str], primary_key: str) -> None:
+    def alias(self, alias_key: str | None, primary_key: str) -> None:
         if not alias_key or alias_key == primary_key:
             return
         if alias_key in self.entries and alias_key not in self.aliases:
@@ -568,11 +569,11 @@ class _Builder:
 
     # --- extractors -------------------------------------------------
 
-    def literature(self, tool_key: str, data: Dict[str, Any]) -> List[Tuple[CitationPassage, str]]:
+    def literature(self, tool_key: str, data: dict[str, Any]) -> list[tuple[CitationPassage, str]]:
         """PMID/DOI entries merged per article. Returns (passage, owner label) pairs for mention scanning."""
         agent = self.agent_for(tool_key, "Lithoscribe")
         integrity = _integrity_index(data)
-        texts: List[Tuple[CitationPassage, str]] = []
+        texts: list[tuple[CitationPassage, str]] = []
         for p in data.get("ranked_passages") or []:
             if not isinstance(p, dict):
                 continue
@@ -657,7 +658,7 @@ class _Builder:
                 text += f" Returned by the KEGG pathway lookup for {symbol}."
             self.add_passage(pw_key, CitationPassage(text=text, section="KEGG", kind="tool_output"))
 
-    def vivarix(self, tool_key: str, data: Dict[str, Any]) -> None:
+    def vivarix(self, tool_key: str, data: dict[str, Any]) -> None:
         key = make_key("BIOMD", data.get("model_id"))
         if not key:
             return
@@ -687,7 +688,7 @@ class _Builder:
                 text += f" Convergence status: {convergence}."
         self.add_passage(key, CitationPassage(text=text, section="Simulation", kind="tool_output"))
 
-    def websurfer(self, tool_key: str, data: Dict[str, Any]) -> None:
+    def websurfer(self, tool_key: str, data: dict[str, Any]) -> None:
         agent = self.agent_for(tool_key, "WebSurfer")
         items = [r for r in data.get("results") or [] if isinstance(r, dict)]
         top = data.get("top_page")
@@ -751,7 +752,7 @@ class _Builder:
             kind: PassageKind = "literature" if typ in ("pmid", "doi") else ("web_snippet" if typ == "url" else "tool_output")
             self.add_passage(key, CitationPassage(text=text, section=rec.section or None, kind=kind))
 
-    def mentions(self, tool_key: str, passages: List[Tuple[CitationPassage, str]]) -> None:
+    def mentions(self, tool_key: str, passages: list[tuple[CitationPassage, str]]) -> None:
         agent = self.agent_for(tool_key, "Lithoscribe")
         for passage, label in passages:
             for _, key in scan_keys(passage.text):
@@ -775,12 +776,12 @@ class _Builder:
                 self.add_passage(key, mention)
 
 
-def _literature_level(p: Dict[str, Any], pub_types: List[str]) -> Optional[str]:
+def _literature_level(p: dict[str, Any], pub_types: list[str]) -> str | None:
     """The article's evidence grade decides its level; raw publication types only for ungraded records, so the
     chip never contradicts the grade (a protocol is never shown as a clinical trial; LIT-010)."""
     grade = p.get("evidence_grade") if isinstance(p.get("evidence_grade"), dict) else {}
     if grade.get("study_type"):
-        level: Optional[str] = _EVIDENCE_BY_STUDY_TYPE.get(str(grade.get("study_type")).lower(), "research-article")
+        level: str | None = _EVIDENCE_BY_STUDY_TYPE.get(str(grade.get("study_type")).lower(), "research-article")
     else:
         level = evidence_level_from_pub_types(pub_types)
     if grade.get("is_preprint") and level in (None, "research-article"):
@@ -791,9 +792,9 @@ def _literature_level(p: Dict[str, Any], pub_types: List[str]) -> Optional[str]:
     return level
 
 
-def _integrity_index(data: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+def _integrity_index(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Graded/excluded articles (grading feature) indexed by PMID: / DOI: / article_key."""
-    index: Dict[str, Dict[str, Any]] = {}
+    index: dict[str, dict[str, Any]] = {}
     for art in [*(data.get("graded_articles") or []), *(data.get("excluded_articles") or [])]:
         if not isinstance(art, dict):
             continue
@@ -804,14 +805,14 @@ def _integrity_index(data: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
 
 
 def _literature_retraction(
-    p: Dict[str, Any], pub_types: List[str], integrity: Dict[str, Dict[str, Any]]
-) -> Tuple[bool, Optional[str]]:
+    p: dict[str, Any], pub_types: list[str], integrity: dict[str, dict[str, Any]]
+) -> tuple[bool, str | None]:
     retracted = (
         p.get("retracted") is True
         or any(t.strip().lower() == "retracted publication" for t in pub_types)
         or str(p.get("integrity_status") or "").lower() in ("retracted", "withdrawn")
     )
-    notice: Optional[str] = str(p["retraction_notice"]) if p.get("retraction_notice") else None
+    notice: str | None = str(p["retraction_notice"]) if p.get("retraction_notice") else None
     art = None
     for k in (p.get("article_key"), make_key("PMID", p.get("pmid")), make_key("DOI", p.get("doi"))):
         if k and str(k) in integrity:
@@ -843,12 +844,12 @@ def _fill(target: CitationEntry, other: CitationEntry) -> None:
         target.retracted = True
 
 
-def _report_keys(verification_report: Any) -> Tuple[Set[str], Set[str], List[Dict[str, Any]]]:
+def _report_keys(verification_report: Any) -> tuple[set[str], set[str], list[dict[str, Any]]]:
     """(verified keys, rejected keys, claim_support) from a VerificationReport or its model_dump()."""
     if verification_report is None:
         return set(), set(), []
     verified = {k for _, k in scan_keys(" ; ".join(str(v) for v in _get(verification_report, "verified_identifiers", []) or []))}
-    rejected: Set[str] = set()
+    rejected: set[str] = set()
     for d in _get(verification_report, "defects", []) or []:
         if str(_get(d, "category", "")).upper() in _UNVERIFIED_CATEGORIES:
             rejected |= {k for _, k in scan_keys(str(_get(d, "claim", "") or ""))}
@@ -857,8 +858,8 @@ def _report_keys(verification_report: Any) -> Tuple[Set[str], Set[str], List[Dic
     return verified, rejected, support
 
 
-def _history_keys(historical_identifiers: Optional[Dict[str, Iterable[str]]]) -> Set[str]:
-    keys: Set[str] = set()
+def _history_keys(historical_identifiers: dict[str, Iterable[str]] | None) -> set[str]:
+    keys: set[str] = set()
     for name, values in (historical_identifiers or {}).items():
         for value in values or []:
             value = str(value).strip()
@@ -878,14 +879,14 @@ _DOI_FIELDS = {"doi", "dois"}
 _SKIP_FIELD_RE = re.compile(r"base64|_png$", re.IGNORECASE)
 
 
-def _observed_keys(tool_results: Dict[str, ToolResult]) -> Set[str]:
+def _observed_keys(tool_results: dict[str, ToolResult]) -> set[str]:
     """Keys this turn's successful tool data states as identifiers: prefixed ids in its text, plus PMIDs/DOIs
     held in pmid/doi fields. The verifier also accepts a PMID whose digits merely occur in a passage
     ('1234 patients') and a DOI that is a prefix of a longer one, so its verdict alone never makes a chip.
     canonical_ids are skipped: their joined pmid/doi lists are truncated and can end in a partial id."""
     from ..extensions.hooks import apply_serialization_filters
 
-    keys: Set[str] = set()
+    keys: set[str] = set()
 
     def walk(value: Any, field: str, depth: int) -> None:
         if depth > 12:
@@ -911,7 +912,7 @@ def _observed_keys(tool_results: Dict[str, ToolResult]) -> Set[str]:
     return keys
 
 
-def _source_agents() -> Dict[str, str]:
+def _source_agents() -> dict[str, str]:
     try:
         from ..sources import get_sources
 
@@ -923,18 +924,18 @@ def _source_agents() -> Dict[str, str]:
 
 def build_citation_map(
     response: str,
-    tool_results: Dict[str, ToolResult],
+    tool_results: dict[str, ToolResult],
     verification_report: Any,
-    historical_identifiers: Optional[Dict[str, Iterable[str]]] = None,
+    historical_identifiers: dict[str, Iterable[str]] | None = None,
     query_context: Any = None,
-    source_citations: Optional[Dict[str, List[CitationRecord]]] = None,
-) -> Dict[str, Any]:
+    source_citations: dict[str, list[CitationRecord]] | None = None,
+) -> dict[str, Any]:
     """CitationMap.model_dump() for the answer as shown (call it before any banner is prepended)."""
     response = response or ""
     builder = _Builder(_source_agents())
 
-    mention_passages: List[Tuple[str, List[Tuple[CitationPassage, str]]]] = []
-    record_batches: List[Tuple[str, List[Any]]] = []
+    mention_passages: list[tuple[str, list[tuple[CitationPassage, str]]]] = []
+    record_batches: list[tuple[str, list[Any]]] = []
     for tool_key, res in (tool_results or {}).items():
         if not res or not getattr(res, "success", False) or not isinstance(res.data, dict):
             continue
@@ -971,8 +972,8 @@ def build_citation_map(
     verified = {builder.resolve(k) for k in verified}
 
     cmap = CitationMap(aliases=dict(builder.aliases))
-    unverified: List[str] = []
-    observed: Optional[Set[str]] = None
+    unverified: list[str] = []
+    observed: set[str] | None = None
     for _, key in cited:
         if key in rejected:
             if key not in unverified:
@@ -1009,24 +1010,24 @@ def build_citation_map(
 def _attach_supports(
     cmap: CitationMap,
     response: str,
-    cited: List[Tuple[int, str]],
-    claim_support: List[Dict[str, Any]],
+    cited: list[tuple[int, str]],
+    claim_support: list[dict[str, Any]],
     builder: _Builder,
 ) -> None:
     spans = _sentence_spans(response)
     # The verifier cuts each sentence to 240 raw chars before any whitespace folding, so a cut sentence
     # (a long, padded table row) is matched as a prefix of the folded answer sentence.
-    grounded: List[Tuple[str, bool, str, Optional[str]]] = []
+    grounded: list[tuple[str, bool, str, str | None]] = []
     for s in claim_support:
         raw = str(s.get("sentence") or "")
         norm = _norm_sentence(raw)
         if norm:
             grounded.append((norm, len(raw) >= 240, str(s.get("evidence_key") or ""), s.get("passage_id")))
 
-    def grounded_for(norm: str) -> List[Tuple[str, Optional[str]]]:
+    def grounded_for(norm: str) -> list[tuple[str, str | None]]:
         return [(ek, pid) for g, cut, ek, pid in grounded if g == norm or (cut and norm.startswith(g))]
 
-    def support_matches(entry: CitationEntry, evidence_key: str, passage_id: Optional[str]) -> bool:
+    def support_matches(entry: CitationEntry, evidence_key: str, passage_id: str | None) -> bool:
         # The document the verifier grounded the sentence on is authoritative: when it names an identifier, that
         # identifier must resolve to the cited entry. A passage id alone is not enough, since ids from different
         # literature calls can repeat and point at another paper (LIT-001).
@@ -1042,8 +1043,8 @@ def _attach_supports(
             return evidence_key[5:] == entry.source_tool
         return False
 
-    counts: Dict[str, int] = {}
-    used: Dict[str, List[str]] = {}
+    counts: dict[str, int] = {}
+    used: dict[str, list[str]] = {}
     for pos, key in cited:
         occurrence = counts.get(key, 0)
         counts[key] = occurrence + 1
@@ -1054,7 +1055,7 @@ def _attach_supports(
         sentence = response[span[0]:span[1]].strip()
         norm = _norm_sentence(sentence)
         is_grounded = False
-        verifier_pid: Optional[str] = None
+        verifier_pid: str | None = None
         for evidence_key, pid in grounded_for(norm):
             if support_matches(entry, evidence_key, pid):
                 is_grounded = True
@@ -1062,7 +1063,7 @@ def _attach_supports(
                 break
 
         terms = _claim_terms(sentence)
-        best: Tuple[int, Optional[CitationPassage], Optional[str], List[str]] = (0, None, None, [])
+        best: tuple[int, CitationPassage | None, str | None, list[str]] = (0, None, None, [])
         candidates = entry.passages
         if verifier_pid and any(p.passage_id == verifier_pid for p in entry.passages):
             candidates = [p for p in entry.passages if p.passage_id == verifier_pid]
@@ -1110,7 +1111,7 @@ def _passage_fit(passage: CitationPassage, limit: int) -> bool:
 
 
 def _sync_support_highlights(cmap: CitationMap) -> None:
-    by_id: Dict[Tuple[str, str], CitationPassage] = {}
+    by_id: dict[tuple[str, str], CitationPassage] = {}
     for key, entry in cmap.entries.items():
         for p in entry.passages:
             by_id[(key, p.passage_id or "")] = p

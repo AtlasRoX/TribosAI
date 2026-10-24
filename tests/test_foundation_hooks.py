@@ -11,31 +11,35 @@ import hashlib
 import json
 from html import escape
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 
+from tests.fakes import build_recording_registry, called, make_offline_orchestrator
+from tests.test_audit_regressions import api_client  # noqa: F401  (fixture)
 from tribos.agents import authoritative_orchestrator as orch_module
-from tribos.agents.prompts import SYNTHESIS_SYSTEM_PROMPT, build_evidence_block, get_synthesis_system_prompt
+from tribos.agents.prompts import (
+    SYNTHESIS_SYSTEM_PROMPT,
+    build_evidence_block,
+    get_synthesis_system_prompt,
+)
 from tribos.agents.query_context import SourceDecision
 from tribos.extensions import hooks
-from tribos.verify.verifier import TribosVerifier
 from tribos.provenance import run_manifest
 from tribos.sources import CitationRecord, EvidenceSource, register_source, unregister_source
 from tribos.tools.registry import ErrorType, ToolResult, WebSurferSearchInput
 from tribos.utils.memory.research_memory import ResearchMemoryEngine
-from tests.fakes import build_recording_registry, called, make_offline_orchestrator
-from tests.test_audit_regressions import api_client  # noqa: F401  (fixture)
+from tribos.verify.verifier import TribosVerifier
 
 FIXTURES = Path(__file__).parent / "fixtures" / "foundation"
 
 
-def _trial_study() -> Dict[str, Any]:
+def _trial_study() -> dict[str, Any]:
     raw = json.loads((FIXTURES / "ctgov_search_trimmed.json").read_text(encoding="utf-8"))
     return raw["studies"][0]
 
 
-def _trial_data() -> Dict[str, Any]:
+def _trial_data() -> dict[str, Any]:
     st = _trial_study()
     ps = st["protocolSection"]
     return {
@@ -126,7 +130,7 @@ def _trial_tool():
 
 
 class _CapturingLLM:
-    def __init__(self, answer: str, sink: Dict[str, Any]):
+    def __init__(self, answer: str, sink: dict[str, Any]):
         self.answer = answer
         self.sink = sink
 
@@ -147,17 +151,17 @@ async def test_evidence_source_runs_end_to_end(isolated, monkeypatch, tmp_path):
     hooks.register_step_augmenter("fake_trials", "aug", lambda res, tctx: (None, ["augmented detail"]))
     orch, calls = make_offline_orchestrator(monkeypatch, tmp_path, extra_tools=_trial_tool())
 
-    sink: Dict[str, Any] = {}
+    sink: dict[str, Any] = {}
     answer = f"Lithoscribe found registry record {NCT} on osimertinib trial pharmacokinetics."
     monkeypatch.setattr(orch_module, "get_llm", lambda *a, **k: _CapturingLLM(answer, sink))
-    captured: Dict[str, Any] = {}
+    captured: dict[str, Any] = {}
 
     def fake_citation_map(response, tool_results, report, historical, ctx, source_citations):
         captured.update(response=response, tool_results=tool_results, source_citations=source_citations)
         return {"version": 1, "entries": {f"NCT:{NCT}": {"id": NCT}}}
 
     monkeypatch.setattr(orch_module, "build_citation_map", fake_citation_map)
-    events: List[Dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
 
     async def cb(ev):
         events.append(ev)
@@ -199,7 +203,7 @@ async def test_evidence_source_runs_end_to_end(isolated, monkeypatch, tmp_path):
 async def test_evidence_source_skipped_without_tool(isolated, monkeypatch, tmp_path):
     register_source(_FakeTrialSource())
     orch, calls = make_offline_orchestrator(monkeypatch, tmp_path)
-    events: List[Dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
 
     async def cb(ev):
         events.append(ev)
@@ -221,7 +225,7 @@ async def test_evidence_source_fallback_markdown_when_model_unavailable(isolated
     assert res.response.index("#### Test registry") < res.response.index("DiscoveryAgent")
 
 
-def _trial_result() -> Dict[str, ToolResult]:
+def _trial_result() -> dict[str, ToolResult]:
     return {"fake_trials": ToolResult(success=True, tool_name="fake_trial_search", data=_trial_data())}
 
 
@@ -291,7 +295,7 @@ def test_serialization_filter_hides_excluded_doi(isolated):
 
 # 8. An evidence-doc provider replaces the whole-tool doc; claim_support records its key.
 def test_evidence_doc_provider_and_claim_support(isolated):
-    seen: Dict[str, Any] = {}
+    seen: dict[str, Any] = {}
 
     def provider(tool_key, result):
         if tool_key != "fake_trials":
@@ -340,7 +344,7 @@ def test_synthesis_system_prompt_composition(isolated):
 
 
 # 10. Without extensions the evidence block is byte-identical to the pre-hook output.
-def _golden_inputs() -> Dict[str, ToolResult]:
+def _golden_inputs() -> dict[str, ToolResult]:
     raw = json.loads((FIXTURES / "evidence_inputs.json").read_text(encoding="utf-8"))
     return {k: ToolResult(**v) for k, v in raw.items()}
 
@@ -432,7 +436,7 @@ async def test_recorder_noop_and_registry_reporting(monkeypatch):
     token = run_manifest.activate_recorder(rec)
     try:
         assert run_manifest.current_recorder() is rec
-        seen: List[Dict[str, Any]] = []
+        seen: list[dict[str, Any]] = []
         monkeypatch.setattr(run_manifest, "record_tool_call", lambda **kw: seen.append(kw))
         ok = await reg.execute("websurfer_search", query="heat equation")
         bad = await reg.execute("websurfer_search", max_results=99)

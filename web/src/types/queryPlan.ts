@@ -1,6 +1,13 @@
 // Query plan (plan step extra) types (owned by ENTITIES, feature 3). Additive changes only.
 
-export type QueryEntityType = "gene" | "drug" | "disease" | "variant";
+export type QueryEntityType =
+  | "concept"
+  | "equation"
+  | "quantity"
+  | "constant"
+  | "material"
+  | "system"
+  | (string & {});
 
 export interface QueryEntity {
   type: QueryEntityType;
@@ -9,13 +16,13 @@ export interface QueryEntity {
   ids: Record<string, string>;
   source: string;
   matched_on?: string | null;
-  gene?: string | null;
-  variant_kind?: string | null;
+  unit?: string | null;
+  value?: string | number | null;
+  formula?: string | null;
   validated: boolean;
   ambiguous_with?: string[];
   span?: [number, number];
   aliases?: string[];
-  protein_change?: string | null;
 }
 
 export interface SourceDecision {

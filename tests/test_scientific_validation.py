@@ -1,3 +1,6 @@
+import pytest
+
+pytest.importorskip('tribos.vivarix', reason='Legacy vivarix package retired')
 """
 Scientific Validation & Regression Test Suite for Tribos.
 
@@ -16,30 +19,27 @@ Coverage:
 """
 
 import asyncio
-import os
 import time
-import pytest
-from typing import Dict, Any
 
-from tribos.tools.registry import (
-    ToolRegistry,
-    ErrorType,
-    ToolResult,
-    ToolUniverseEntry,
-    AdapterType,
-    get_tool_registry,
-)
+import pytest
+from pydantic import BaseModel, Field
+from tribos.lithoscribe.synthesis_engine import LiteratureSynthesisEngine
 from tribos.utils.biocontext import BioContextMCPClient
 from tribos.vivarix.engine import VivarixSimulationEngine
-from tribos.lithoscribe.synthesis_engine import LiteratureSynthesisEngine
-from tribos.verify.verifier import TribosVerifier, DefectSeverity
-from tribos.utils.memory import MemoryType, VerificationStatus
-from tribos.utils.memory.research_memory import ResearchMemoryEngine
-from tribos.agents.discovery import DiscoveryEngine
-from tribos.agents.authoritative_orchestrator import AuthoritativeOrchestrator
-from pydantic import BaseModel, Field
 
 from tests.fakes import make_offline_orchestrator
+from tribos.agents.authoritative_orchestrator import AuthoritativeOrchestrator
+from tribos.agents.discovery import DiscoveryEngine
+from tribos.tools.registry import (
+    AdapterType,
+    ErrorType,
+    ToolRegistry,
+    ToolResult,
+    ToolUniverseEntry,
+)
+from tribos.utils.memory import VerificationStatus
+from tribos.utils.memory.research_memory import ResearchMemoryEngine
+from tribos.verify.verifier import TribosVerifier
 
 
 @pytest.fixture

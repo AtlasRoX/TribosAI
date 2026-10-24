@@ -36,7 +36,8 @@ import json
 import logging
 import os
 import uuid
-from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Tuple
+from collections.abc import Awaitable, Callable
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
@@ -52,7 +53,7 @@ logger = logging.getLogger("tribos.backend.mcp")
 
 router = APIRouter(tags=["mcp"])
 
-SUPPORTED_VERSIONS: Tuple[str, ...] = ("2026-07-28", "2025-11-25", "2025-06-18", "2025-03-26")
+SUPPORTED_VERSIONS: tuple[str, ...] = ("2026-07-28", "2025-11-25", "2025-06-18", "2025-03-26")
 HANDSHAKE_VERSION = "2025-11-25"
 VERSION_META_KEY = "io.modelcontextprotocol/protocolVersion"
 
@@ -60,52 +61,77 @@ PARSE_ERROR, INVALID_REQUEST, METHOD_NOT_FOUND, INVALID_PARAMS, INTERNAL_ERROR =
 
 RESEARCH_TOOL = "tribos_research"
 
-DEFAULT_TOOLS: Tuple[str, ...] = (
-    "synapta_opentargets_search",
-    "synapta_opentargets_associations",
-    "synapta_kegg_pathways",
+DEFAULT_TOOLS: tuple[str, ...] = (
+    # STEM literature, symbolic math, numerical simulation, and reference data
+    "archivon_literature_search",
+    "archivon_paper_details",
+    "archivon_recommend",
+    "axiom_simplify",
+    "axiom_solve",
+    "axiom_calculus",
+    "axiom_dsolve",
+    "axiom_linalg",
+    "axiom_verify_identity",
+    "axiom_latex",
+    "dynamis_simulate_ode",
+    "dynamis_equilibrium",
+    "dynamis_parameter_scan",
+    "dynamis_optimize",
+    "dynamis_fit_parameters",
+    "dynamis_root_find",
+    "physis_constants",
+    "physis_units",
+    "physis_oeis",
+    "physis_materials",
+    "physis_wolfram",
+    "physis_encyclopedia",
+    "websurfer_search",
+    # Legacy aliases
     "lithoscribe_literature_synthesis",
-    "lithoscribe_clinical_trials_search",
-    "chembl_resolve_drugs",
-    "chembl_drug_profile",
-    "opentargets_disease_targets",
-    "synapta_variant_intelligence",
-    "primekg_query",
-    # Structure and omics tools; each is listed only when registered.
-    "structure_alphafold_prediction",
-    "structure_pdb_search",
-    "gwas_catalog_associations",
-    "gtex_median_expression",
-    "string_interaction_partners",
-    "reactome_pathways",
-    "pubchem_compound_properties",
-    "preprints_recent",
+    "synapta_kegg_pathways",
 )
 
 # Refused whatever TRIBOS_MCP_TOOLS says: writes, uploads, code execution and generative/docking calls. The same
 # policy object guards the run re-play endpoints (SEC-001), so the two entry points cannot drift apart.
 _DENY_RE = UNSAFE_TOOL_RE
 
-_STATIC_DESCRIPTIONS: Dict[str, str] = {
+_STATIC_DESCRIPTIONS: dict[str, str] = {
     RESEARCH_TOOL: (
-        "Answer a biomedical research question with the full Tribos pipeline: literature, target-disease "
-        "evidence, trials, drugs and (when asked) kinetic model simulation, with a verified, cited answer."
+        "Answer an engineering, mathematics, physics or scientific R&D question with the full Tribos pipeline: "
+        "literature (Archivon), symbolic mathematics (Axiom), numerical simulation (Dynamis), "
+        "data computation (Calcula), and reference data (Physis), with a verified, cited answer."
     ),
-    "synapta_opentargets_search": "Search Open Targets for a gene, target or disease by name; returns matching ids.",
-    "synapta_opentargets_associations": "Top disease associations (Open Targets overall association score) for an Ensembl gene id.",
+    "archivon_literature_search": "Search arXiv, zbMATH, Crossref, and OpenAlex for mathematics, physics, and engineering literature.",
+    "archivon_paper_details": "Retrieve full paper metadata, abstract, and citation graph from arXiv, DOI, or zbMATH.",
+    "archivon_recommend": "Recommend related papers and citations given seed paper identifiers.",
+    "axiom_simplify": "Simplify, factor, expand, and cancel symbolic expressions using SymPy.",
+    "axiom_solve": "Solve algebraic equations and systems of equations symbolically with back-substitution verification.",
+    "axiom_calculus": "Compute symbolic derivatives, definite/indefinite integrals, limits, Taylor series, and summations.",
+    "axiom_dsolve": "Solve ordinary differential equations symbolically with initial or boundary conditions.",
+    "axiom_linalg": "Exact symbolic linear algebra: eigenvalues, eigenvectors, determinants, inverses, and nullspaces.",
+    "axiom_verify_identity": "Verify mathematical identity equivalence symbolically and numerically.",
+    "axiom_latex": "Format and parse mathematical expressions to and from LaTeX and SymPy.",
+    "dynamis_simulate_ode": "Simulate ordinary differential equation (ODE) systems and compute time-course trajectories.",
+    "dynamis_equilibrium": "Find dynamical system fixed points and determine linear stability from Jacobian eigenvalues.",
+    "dynamis_parameter_scan": "Perform parameter sensitivity sweeps across ranges.",
+    "dynamis_optimize": "Perform numerical optimization of objective functions subject to constraints.",
+    "dynamis_fit_parameters": "Fit model parameters to experimental calibration data using least squares.",
+    "dynamis_root_find": "Find numerical roots and zeros of nonlinear scalar or system functions.",
+    "physis_constants": "Look up fundamental physical constants from NIST CODATA 2022 with exact uncertainties.",
+    "physis_units": "Convert physical quantities between units and verify dimensional homogeneity.",
+    "physis_oeis": "Search the On-Line Encyclopedia of Integer Sequences (OEIS).",
+    "physis_materials": "Query crystal structures, band gaps, and formation energies from Materials Project.",
+    "physis_wolfram": "Evaluate natural-language or symbolic queries via Wolfram|Alpha.",
+    "physis_encyclopedia": "Search scientific and mathematical reference definitions and encyclopedias.",
+    "websurfer_search": "Search the web for recent engineering and scientific documentation.",
+    "lithoscribe_literature_synthesis": "Search the scientific literature and return ranked passages with citations.",
     "synapta_kegg_pathways": "KEGG pathways that contain a gene symbol.",
-    "lithoscribe_literature_synthesis": "Search the biomedical literature and return ranked passages with PMIDs and DOIs.",
-    "lithoscribe_clinical_trials_search": "Search ClinicalTrials.gov (API v2) for registered trials and posted results.",
-    "chembl_resolve_drugs": "Resolve drug names to ChEMBL molecule ids.",
-    "chembl_drug_profile": "ChEMBL mechanisms of action, bioactivity and approved drugs for drugs or a target.",
-    "opentargets_disease_targets": "Rank the targets associated with a disease (Open Targets).",
-    "synapta_variant_intelligence": "Variant evidence: ClinVar classifications, CIViC evidence, cBioPortal prevalence, gnomAD frequency.",
-    "primekg_query": "Query the local PrimeKG biomedical knowledge graph.",
 }
 
 _INSTRUCTIONS = (
-    "Tribos answers biomedical research questions with cited, verified evidence. Use tribos_research for "
-    "full questions; the other tools are read-only lookups against public databases."
+    "Tribos answers engineering, mathematics, physics and scientific R&D questions with cited, verified evidence. "
+    "Use tribos_research for full questions; the other tools are read-only symbolic, numerical, literature, "
+    "and reference data lookups."
 )
 
 _mcp_slots = UserConcurrencyLimiter(int(os.getenv("TRIBOS_MCP_MAX_CONCURRENT", "2") or 2))
@@ -115,11 +141,11 @@ class ResearchArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     question: str = Field(..., min_length=1, max_length=20_000, description="The research question")
-    framework: Optional[Literal[agent_config.ALL_FRAMEWORKS]] = Field(  # type: ignore[valid-type]
+    framework: Literal[agent_config.ALL_FRAMEWORKS] | None = Field(  # type: ignore[valid-type]
         default=None, description="Orchestration framework id; default agentic-plan-execute"
     )
     enable_web_search: bool = Field(default=True, description="Allow web search in addition to the curated sources")
-    thread_id: Optional[str] = Field(default=None, max_length=200, description="Continue an earlier thread")
+    thread_id: str | None = Field(default=None, max_length=200, description="Continue an earlier thread")
 
 
 # Seams for tests ---------------------------------------------------------------------------------------------
@@ -129,7 +155,7 @@ def _get_registry() -> Any:
     return orch_module.get_tool_registry()
 
 
-async def _default_research_runner(user_id: str, args: ResearchArgs) -> Dict[str, Any]:
+async def _default_research_runner(user_id: str, args: ResearchArgs) -> dict[str, Any]:
     from tribos.agents.authoritative_orchestrator import get_authoritative_orchestrator
 
     timeout = float(os.getenv("TRIBOS_MCP_RESEARCH_TIMEOUT_S", "900") or 900)
@@ -148,10 +174,10 @@ async def _default_research_runner(user_id: str, args: ResearchArgs) -> Dict[str
     return res.to_dict()
 
 
-research_runner: Callable[[str, ResearchArgs], Awaitable[Dict[str, Any]]] = _default_research_runner
+research_runner: Callable[[str, ResearchArgs], Awaitable[dict[str, Any]]] = _default_research_runner
 
 
-def _server_info() -> Dict[str, Any]:
+def _server_info() -> dict[str, Any]:
     try:
         version = importlib.metadata.version("tribos")
     except importlib.metadata.PackageNotFoundError:
@@ -159,7 +185,7 @@ def _server_info() -> Dict[str, Any]:
     return {"name": "tribos", "title": "Tribos biomedical research", "version": version}
 
 
-def _capabilities() -> Dict[str, Any]:
+def _capabilities() -> dict[str, Any]:
     return {"tools": {"listChanged": False}}
 
 
@@ -170,12 +196,12 @@ class RpcError(Exception):
         self.code, self.message, self.data = code, message, data
 
 
-def rpc_result(req_id: Any, result: Any) -> Dict[str, Any]:
+def rpc_result(req_id: Any, result: Any) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": req_id, "result": result}
 
 
-def rpc_error(req_id: Any, code: int, message: str, data: Any = None) -> Dict[str, Any]:
-    err: Dict[str, Any] = {"code": code, "message": message}
+def rpc_error(req_id: Any, code: int, message: str, data: Any = None) -> dict[str, Any]:
+    err: dict[str, Any] = {"code": code, "message": message}
     if data is not None:
         err["data"] = data
     return {"jsonrpc": "2.0", "id": req_id, "error": err}
@@ -192,12 +218,12 @@ MAX_BATCH = 50
 MAX_RPC_BODY_BYTES = 1_000_000
 
 
-async def parse_body(request: Request) -> Tuple[Optional[Any], Optional[JSONResponse]]:
+async def parse_body(request: Request) -> tuple[Any | None, JSONResponse | None]:
     """The JSON body, read in chunks and abandoned as soon as it passes MAX_RPC_BODY_BYTES (SEC-004)."""
     declared = request.headers.get("content-length")
     if declared and declared.isdigit() and int(declared) > MAX_RPC_BODY_BYTES:
         return None, JSONResponse(rpc_error(None, INVALID_REQUEST, "Request body too large"), status_code=413)
-    chunks: List[bytes] = []
+    chunks: list[bytes] = []
     size = 0
     async for chunk in request.stream():
         size += len(chunk)
@@ -211,7 +237,7 @@ async def parse_body(request: Request) -> Tuple[Optional[Any], Optional[JSONResp
         return None, JSONResponse(rpc_error(None, PARSE_ERROR, "Parse error"), status_code=400)
 
 
-async def dispatch_rpc(payload: Any, handler: Callable[[str, Any, Dict[str, Any]], Awaitable[Any]]) -> Response:
+async def dispatch_rpc(payload: Any, handler: Callable[[str, Any, dict[str, Any]], Awaitable[Any]]) -> Response:
     """Run one message or a batch through handler(method, id, params); notifications get no response."""
     batch = isinstance(payload, list)
     messages = payload if batch else [payload]
@@ -224,7 +250,7 @@ async def dispatch_rpc(payload: Any, handler: Callable[[str, Any, Dict[str, Any]
             rpc_error(None, INVALID_REQUEST, f"Batch too large: at most {MAX_BATCH} requests per batch", {"max_batch": MAX_BATCH}),
             status_code=400,
         )
-    responses: List[Dict[str, Any]] = []
+    responses: list[dict[str, Any]] = []
     for msg in messages:
         if not valid_envelope(msg):
             responses.append(rpc_error(msg.get("id") if isinstance(msg, dict) and isinstance(msg.get("id"), (str, int)) else None, INVALID_REQUEST, "Invalid Request"))
@@ -252,14 +278,14 @@ async def dispatch_rpc(payload: Any, handler: Callable[[str, Any, Dict[str, Any]
     return JSONResponse(responses if batch else responses[0])
 
 
-def _allowed_origins() -> List[str]:
+def _allowed_origins() -> list[str]:
     raw = ",".join(
         [os.getenv("TRIBOS_CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"), os.getenv("TRIBOS_MCP_ALLOWED_ORIGINS", "")]
     )
     return [o.strip().rstrip("/") for o in raw.split(",") if o.strip()]
 
 
-def check_origin(request: Request) -> Optional[JSONResponse]:
+def check_origin(request: Request) -> JSONResponse | None:
     origin = request.headers.get("origin")
     if origin and origin.rstrip("/") not in _allowed_origins():
         return JSONResponse(rpc_error(None, INVALID_REQUEST, "Origin not allowed"), status_code=403)
@@ -267,13 +293,13 @@ def check_origin(request: Request) -> Optional[JSONResponse]:
 
 
 # Tools ---------------------------------------------------------------------------------------------------
-def allowlisted_names() -> List[str]:
+def allowlisted_names() -> list[str]:
     raw = os.getenv("TRIBOS_MCP_TOOLS")
     names = [n.strip() for n in raw.split(",") if n.strip()] if raw else list(DEFAULT_TOOLS)
     return [n for n in dict.fromkeys(names) if n != RESEARCH_TOOL and not _DENY_RE.search(n)]
 
 
-def exposed_entries(registry: Any) -> List[Any]:
+def exposed_entries(registry: Any) -> list[Any]:
     out = []
     for name in allowlisted_names():
         entry = registry.get_entry(name) if registry is not None else None
@@ -287,7 +313,7 @@ def _description(entry: Any) -> str:
     return _STATIC_DESCRIPTIONS.get(entry.name) or neutralise(str(entry.description or entry.name))[:600]
 
 
-def tool_definitions(registry: Any) -> List[Dict[str, Any]]:
+def tool_definitions(registry: Any) -> list[dict[str, Any]]:
     tools = [
         {
             "name": RESEARCH_TOOL,
@@ -318,21 +344,21 @@ def _json_safe(value: Any) -> Any:
     return json.loads(json.dumps(value, default=str))
 
 
-def _text_result(text: str, structured: Optional[Dict[str, Any]] = None, is_error: bool = False) -> Dict[str, Any]:
-    out: Dict[str, Any] = {"content": [{"type": "text", "text": text}], "isError": is_error}
+def _text_result(text: str, structured: dict[str, Any] | None = None, is_error: bool = False) -> dict[str, Any]:
+    out: dict[str, Any] = {"content": [{"type": "text", "text": text}], "isError": is_error}
     if structured is not None:
         out["structuredContent"] = structured
     return out
 
 
-async def _call_research(user_id: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+async def _call_research(user_id: str, arguments: dict[str, Any]) -> dict[str, Any]:
     try:
         args = ResearchArgs.model_validate(arguments)
     except ValidationError as exc:
         return _text_result(f"Invalid arguments: {exc.errors(include_url=False)[:3]}", is_error=True)
     try:
         result = await research_runner(user_id, args)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return _text_result("The research run timed out.", is_error=True)
     report = result.get("verification_report") or {}
     structured = _json_safe(
@@ -357,7 +383,7 @@ async def _call_research(user_id: str, arguments: Dict[str, Any]) -> Dict[str, A
     return _text_result(str(result.get("response", "")), structured, is_error=failed)
 
 
-async def _call_registry(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+async def _call_registry(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     registry = _get_registry()
     if any(not isinstance(k, str) for k in arguments):
         return _text_result("Invalid arguments: keys must be strings", is_error=True)
@@ -376,7 +402,7 @@ async def _call_registry(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]
     return _text_result(text, structured)
 
 
-async def _handle(user_id: str, method: str, req_id: Any, params: Dict[str, Any]) -> Any:
+async def _handle(user_id: str, method: str, req_id: Any, params: dict[str, Any]) -> Any:
     meta = params.get("_meta") if isinstance(params.get("_meta"), dict) else {}
     meta_version = meta.get(VERSION_META_KEY)
     if meta_version is not None and meta_version not in SUPPORTED_VERSIONS:
@@ -431,7 +457,7 @@ async def mcp_endpoint(request: Request, user_id: str = Depends(get_current_user
     if error is not None:
         return error
 
-    async def handler(method: str, req_id: Any, params: Dict[str, Any]) -> Any:
+    async def handler(method: str, req_id: Any, params: dict[str, Any]) -> Any:
         return await _handle(user_id, method, req_id, params)
 
     return await dispatch_rpc(payload, handler)

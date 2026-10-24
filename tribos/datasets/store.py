@@ -1,7 +1,7 @@
 """
 Per-user dataset store on local disk:
 
-    <root>/<sha256(user_id)[:16]>/ds_<12 hex>/{original.<ext>, data.h5ad (tables only), manifest.json}
+    <root>/<sha256(user_id)[:16]>/ds_<12 hex>/{original.<ext>, data.h5ad (optional), manifest.json}
 
 User ids may contain ':' (valid in auth ids, illegal in Windows paths), so user directories are hashed.
 Every path is server-generated and checked to lie under the root; uploader file names are kept only as a
@@ -11,6 +11,7 @@ sanitized display_name.
 from __future__ import annotations
 
 import asyncio
+import builtins
 import hashlib
 import json
 import logging
@@ -20,29 +21,35 @@ import secrets
 import shutil
 import threading
 import time
-from datetime import datetime, timezone
+from collections.abc import AsyncIterable, Iterable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import AsyncIterable, Dict, Iterable, List, Optional, Tuple, Union
 
-from .geo import lookup_geo, organism_matches
 from .models import (
     DATASET_ID_RE,
     DatasetKind,
     DatasetProvenanceIn,
     DatasetRecord,
-    GeoVerification,
     ResolvedAttachment,
 )
-from .validators import ValidationFailure, validate_h5ad, validate_sbml, validate_table
+from .validators import (
+    ValidationFailure,
+    validate_hdf5,
+    validate_mat,
+    validate_table,
+)
 
 logger = logging.getLogger(__name__)
 
 EXTENSION_KINDS = {
-    ".h5ad": DatasetKind.H5AD,
     ".csv": DatasetKind.TABLE,
     ".tsv": DatasetKind.TABLE,
-    ".xml": DatasetKind.SBML,
-    ".sbml": DatasetKind.SBML,
+    ".xlsx": DatasetKind.TABLE,
+    ".parquet": DatasetKind.TABLE,
+    ".json": DatasetKind.TABLE,
+    ".h5": DatasetKind.HDF5,
+    ".hdf5": DatasetKind.HDF5,
+    ".mat": DatasetKind.MAT,
 }
 CHUNK_BYTES = 1 << 20
 _MB = 1024 * 1024
@@ -51,7 +58,7 @@ _MANIFEST = "manifest.json"
 _PART = "upload.part"
 _ANALYSIS = "data.h5ad"
 
-Chunks = Union[Iterable[bytes], AsyncIterable[bytes]]
+Chunks = Iterable[bytes] | AsyncIterable[bytes]
 
 
 class DatasetStoreError(Exception):
@@ -86,11 +93,11 @@ def _env_mb(name: str, default_mb: float) -> int:
 
 
 def kind_cap_bytes(kind: DatasetKind) -> int:
-    if kind == DatasetKind.H5AD:
-        return _env_mb("TRIBOS_UPLOAD_MAX_MB_H5AD", 500)
-    if kind == DatasetKind.TABLE:
+    if kind == DatasetKind.HDF5:
+        return _env_mb("TRIBOS_UPLOAD_MAX_MB_HDF5", _env_mb("TRIBOS_UPLOAD_MAX_MB_H5AD", 500) // _MB)
+    if kind in (DatasetKind.TABLE, DatasetKind.MAT):
         return _env_mb("TRIBOS_UPLOAD_MAX_MB_CSV", 100)
-    return _env_mb("TRIBOS_UPLOAD_MAX_MB_SBML", 10)
+    return 100 * _MB
 
 
 def max_upload_bytes() -> int:
@@ -154,11 +161,11 @@ async def _iterate(chunks: Chunks):
 
 
 class DatasetStore:
-    def __init__(self, root: Optional[Path] = None) -> None:
+    def __init__(self, root: Path | None = None) -> None:
         self.root = Path(root or default_upload_root()).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self._locks_guard = threading.Lock()
-        self._user_locks: Dict[str, threading.Lock] = {}
+        self._user_locks: dict[str, threading.Lock] = {}
         self.sweep_orphans()
 
     # -- layout ---------------------------------------------------------------
@@ -180,13 +187,14 @@ class DatasetStore:
     def _original_name(record: DatasetRecord) -> str:
         return f"original{record.original_extension}"
 
-    def file_paths(self, user_id: str, record: DatasetRecord) -> Tuple[Optional[str], Optional[str]]:
+    def file_paths(self, user_id: str, record: DatasetRecord) -> tuple[str | None, str | None]:
         """(analysis_path, model_path) for one of the user's records, after the root check."""
         base = self._dataset_dir(user_id, record.id)
-        if record.kind == DatasetKind.SBML:
-            model = base / self._original_name(record)
-            return None, str(model) if _is_within(model, self.root) and model.exists() else None
-        target = base / (_ANALYSIS if record.kind == DatasetKind.TABLE else self._original_name(record))
+        if record.kind == DatasetKind.TABLE:
+            analysis_file = base / _ANALYSIS
+            if _is_within(analysis_file, self.root) and analysis_file.exists():
+                return str(analysis_file), None
+        target = base / self._original_name(record)
         return (str(target) if _is_within(target, self.root) and target.exists() else None), None
 
     def sweep_orphans(self) -> None:
@@ -203,7 +211,7 @@ class DatasetStore:
                         shutil.rmtree(entry, ignore_errors=True)
                         continue
                     if entry.stat().st_mtime > cutoff:
-                        continue  # possibly an upload in progress
+                        continue
                     if entry.is_dir() and not (entry / _MANIFEST).exists():
                         shutil.rmtree(entry, ignore_errors=True)
                     elif entry.is_file():
@@ -229,7 +237,6 @@ class DatasetStore:
         return total
 
     def _committed_usage_bytes(self, user_id: str, own_dir: Path) -> int:
-        """Bytes of the user's committed datasets plus own_dir (other in-flight uploads are not counted)."""
         udir = self.user_dir(user_id)
         if not udir.exists():
             return 0
@@ -262,10 +269,10 @@ class DatasetStore:
         kind = EXTENSION_KINDS.get(ext)
         if kind is None:
             raise DatasetStoreError(
-                415, f"Unsupported file type '{ext or display_name}'. Upload .h5ad, .csv, .tsv, .xml or .sbml.", "unsupported_type"
+                415,
+                f"Unsupported file type '{ext or display_name}'. Upload table (.csv, .tsv, .xlsx, .json, .parquet), HDF5 (.h5, .hdf5), or MAT (.mat).",
+                "unsupported_type",
             )
-        # Disk work (directory scans, file writes, fsync) runs in worker threads so uploads never block the
-        # event loop that serves other requests.
         if len(await asyncio.to_thread(self.list, user_id)) >= max_datasets():
             raise DatasetStoreError(507, f"Dataset limit reached ({max_datasets()} per user); delete one first.", "quota_exceeded")
         kind_cap = kind_cap_bytes(kind)
@@ -300,25 +307,24 @@ class DatasetStore:
                 raise DatasetStoreError(422, "The uploaded file is empty.", "empty_file")
 
             final = ds_dir / f"original{ext}"
-            derived_sha: Optional[str] = None
+            derived_sha: str | None = None
             try:
-                if kind == DatasetKind.H5AD:
-                    summary = await asyncio.to_thread(validate_h5ad, part)
+                if kind == DatasetKind.HDF5:
+                    summary = await asyncio.to_thread(validate_hdf5, part)
+                elif kind == DatasetKind.MAT:
+                    summary = await asyncio.to_thread(validate_mat, part)
                 elif kind == DatasetKind.TABLE:
+                    out_h5ad = (ds_dir / _ANALYSIS) if ext in (".csv", ".tsv") else None
                     summary, derived_sha = await asyncio.to_thread(
-                        validate_table, part, ext, provenance.table_orientation, ds_dir / _ANALYSIS
+                        validate_table, part, ext, provenance.table_orientation, out_h5ad
                     )
                 else:
-                    summary = await asyncio.to_thread(validate_sbml, part)
+                    raise DatasetStoreError(415, f"Unsupported file type '{ext}'.", "unsupported_type")
             except ValidationFailure as exc:
                 raise DatasetStoreError(422, exc.detail, exc.reason_code) from exc
             if kind == DatasetKind.TABLE and provenance.table_orientation is None and summary.table_orientation:
-                # The orientation inferred from the labels is the one applied; record it like a declared one.
                 provenance = provenance.model_copy(update={"table_orientation": summary.table_orientation})
 
-            geo = await lookup_geo(provenance.geo_accession, provenance.organism) if provenance.geo_accession else GeoVerification()
-            if geo.status == "verified" and geo.organism_matches is False:
-                summary.warnings.append(f"declared organism '{provenance.organism}' differs from GEO taxon '{geo.taxon}'")
             record = DatasetRecord(
                 id=ds_id,
                 kind=kind,
@@ -327,9 +333,8 @@ class DatasetStore:
                 size_bytes=size,
                 sha256=digest.hexdigest(),
                 derived_sha256=derived_sha,
-                uploaded_at=datetime.now(timezone.utc),
+                uploaded_at=datetime.now(UTC),
                 provenance=provenance,
-                geo_verification=geo,
                 validation=summary,
             )
             await asyncio.to_thread(self._commit, user_id, ds_dir, part, final, record)
@@ -339,8 +344,6 @@ class DatasetStore:
             raise
 
     def _commit(self, user_id: str, ds_dir: Path, part: Path, final: Path, record: DatasetRecord) -> None:
-        # Concurrent uploads each passed the early checks; re-check against what is committed now and
-        # commit (manifest written) under the user's lock so limits hold across parallel requests.
         with self._user_lock(user_id):
             if len(self.list(user_id)) >= max_datasets():
                 raise DatasetStoreError(507, f"Dataset limit reached ({max_datasets()} per user); delete one first.", "quota_exceeded")
@@ -352,15 +355,15 @@ class DatasetStore:
             _write_json_atomic(ds_dir / _MANIFEST, record.model_dump(mode="json"))
 
     # -- read -----------------------------------------------------------------
-    def _read_manifest(self, ds_dir: Path) -> Optional[DatasetRecord]:
+    def _read_manifest(self, ds_dir: Path) -> DatasetRecord | None:
         try:
-            with open(ds_dir / _MANIFEST, "r", encoding="utf-8") as fh:
+            with open(ds_dir / _MANIFEST, encoding="utf-8") as fh:
                 return DatasetRecord.model_validate(json.load(fh))
         except (OSError, ValueError) as exc:
             logger.warning("Unreadable dataset manifest in %s: %s", ds_dir.name, exc)
             return None
 
-    def list(self, user_id: str) -> List[DatasetRecord]:
+    def list(self, user_id: str) -> builtins.list[DatasetRecord]:
         udir = self.user_dir(user_id)
         if not udir.exists():
             return []
@@ -381,10 +384,10 @@ class DatasetStore:
             raise DatasetNotFound(ds_id)
         return record
 
-    def resolve_for_user(self, user_id: str, ids: Iterable[str]) -> Tuple[List[ResolvedAttachment], List[str]]:
+    def resolve_for_user(self, user_id: str, ids: Iterable[str]) -> tuple[builtins.list[ResolvedAttachment], builtins.list[str]]:
         """Resolve ids owned by user_id; unknown and foreign ids produce the same error."""
-        found: List[ResolvedAttachment] = []
-        errors: List[str] = []
+        found: list[ResolvedAttachment] = []
+        errors: list[str] = []
         for ds_id in ids:
             try:
                 record = self.get(user_id, ds_id)
@@ -400,29 +403,21 @@ class DatasetStore:
     # -- update / delete --------------------------------------------------------
     async def update_provenance(self, user_id: str, ds_id: str, provenance: DatasetProvenanceIn) -> DatasetRecord:
         snapshot = await asyncio.to_thread(self.get, user_id, ds_id)
-        # The orientation was applied when the table was converted; it cannot change afterwards.
         provenance = provenance.model_copy(update={"table_orientation": snapshot.provenance.table_orientation})
-        geo = snapshot.geo_verification
-        if provenance.geo_accession != snapshot.provenance.geo_accession or geo.status == "lookup_failed":
-            geo = await lookup_geo(provenance.geo_accession, provenance.organism) if provenance.geo_accession else GeoVerification()
-        elif geo.status == "verified":
-            geo = geo.model_copy(update={"organism_matches": organism_matches(provenance.organism, geo.taxon)})
-        return await asyncio.to_thread(self._write_provenance, user_id, ds_id, provenance, geo)
+        return await asyncio.to_thread(self._write_provenance, user_id, ds_id, provenance)
 
     def _write_provenance(
-        self, user_id: str, ds_id: str, provenance: DatasetProvenanceIn, geo: GeoVerification
+        self, user_id: str, ds_id: str, provenance: DatasetProvenanceIn
     ) -> DatasetRecord:
-        # Read-modify-write under the user's lock so concurrent edits each land in the history.
         with self._user_lock(user_id):
             record = self.get(user_id, ds_id)
             previous = {
                 "provenance": record.provenance.model_dump(mode="json"),
-                "geo_status": record.geo_verification.status,
             }
             history = list(record.provenance_history) + [
-                {"changed_at": datetime.now(timezone.utc).isoformat(), "previous": previous}
+                {"changed_at": datetime.now(UTC).isoformat(), "previous": previous}
             ]
-            updated = record.model_copy(update={"provenance": provenance, "geo_verification": geo, "provenance_history": history[-50:]})
+            updated = record.model_copy(update={"provenance": provenance, "provenance_history": history[-50:]})
             updated = DatasetRecord.model_validate(updated.model_dump(mode="json"))
             _write_json_atomic(self._dataset_dir(user_id, ds_id) / _MANIFEST, updated.model_dump(mode="json"))
             return updated
@@ -430,7 +425,6 @@ class DatasetStore:
     def delete(self, user_id: str, ds_id: str) -> None:
         self.get(user_id, ds_id)
         ds_dir = self._dataset_dir(user_id, ds_id)
-        # Renaming first makes the delete all-or-nothing: Windows refuses it while a file inside is open.
         doomed = ds_dir.with_name(f"{ds_id}.{secrets.token_hex(3)}.deleting")
         try:
             os.replace(ds_dir, doomed)
@@ -439,7 +433,7 @@ class DatasetStore:
         shutil.rmtree(doomed, ignore_errors=True)
 
 
-_STORE: Optional[DatasetStore] = None
+_STORE: DatasetStore | None = None
 _STORE_LOCK = threading.Lock()
 
 
@@ -451,7 +445,7 @@ def get_dataset_store() -> DatasetStore:
         return _STORE
 
 
-def existing_dataset_store() -> Optional[DatasetStore]:
+def existing_dataset_store() -> DatasetStore | None:
     """The store if anything was ever uploaded (or it is already open); never creates the upload root."""
     if _STORE is not None or default_upload_root().exists():
         return get_dataset_store()

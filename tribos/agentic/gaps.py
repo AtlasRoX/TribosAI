@@ -30,13 +30,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 from pydantic import BaseModel, Field
 
+from ..utils.text import sentence_spans
 from .guardrails import SPOTLIGHT_RULE, spotlight
 from .runtime import AgentPhase, PhaseOutcome, register_phase
-from .state import evidence_key_label
 from .specialists import (
     LITERATURE_TOOL,
     WEB_TOOL,
@@ -51,8 +51,8 @@ from .specialists import (
     seen_urls,
     stems,
 )
+from .state import evidence_key_label
 from .tool_retrieval import tokenize
-from ..utils.text import sentence_spans
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +83,7 @@ _GENERIC = frozenset(
 _LIMITATIONS_HEADING_RE = re.compile(r"^\s*(?:#{1,6}\s*|\*\*)\s*(?:evidence\s+)?(?:limitations?|gaps?|caveats?)\b", re.I)
 _HEADING_RE = re.compile(r"^\s*(?:#{1,6}\s+\S|\*\*[^*]+\*\*\s*:?\s*$)")
 # Words that tie a sentence to an analysis the researcher did not ask for (see specialists.not_requested_modules).
-MODULE_PATTERNS: Dict[str, "re.Pattern[str]"] = {
+MODULE_PATTERNS: dict[str, re.Pattern[str]] = {
     "kinetic simulation": re.compile(
         r"\b(?:simulat\w*|kinetic\w*|ODE\b|COPASI|BioModels?|BIOMD\d+|Vivarix|pathway dynamics|time[- ]course|"
         r"steady[- ]state)", re.I,
@@ -92,7 +92,7 @@ MODULE_PATTERNS: Dict[str, "re.Pattern[str]"] = {
 }
 
 
-def mentions_modules(text: str, modules: List[str]) -> bool:
+def mentions_modules(text: str, modules: list[str]) -> bool:
     """Whether the text is about one of these (not requested) analyses."""
     return any(MODULE_PATTERNS[m].search(text or "") for m in modules if m in MODULE_PATTERNS)
 
@@ -103,8 +103,8 @@ class _GapItem(BaseModel):
 
 
 class _GapReply(BaseModel):
-    sub_questions: List[_GapItem] = Field(default_factory=list)
-    queries: List[str] = Field(default_factory=list)
+    sub_questions: list[_GapItem] = Field(default_factory=list)
+    queries: list[str] = Field(default_factory=list)
 
 
 GAPS_SYSTEM = (
@@ -120,7 +120,7 @@ GAPS_SYSTEM = (
 
 def _without_limitations(draft: str) -> str:
     """The draft minus its "Evidence limitations" / "Limitations" section (up to the next heading)."""
-    keep: List[str] = []
+    keep: list[str] = []
     skipping = False
     for line in (draft or "").splitlines():
         if _LIMITATIONS_HEADING_RE.match(line):
@@ -133,12 +133,12 @@ def _without_limitations(draft: str) -> str:
     return "\n".join(keep)
 
 
-def hedged_sentences(draft: str, limit: int = MAX_HEDGED, skip_modules: Optional[List[str]] = None) -> List[str]:
+def hedged_sentences(draft: str, limit: int = MAX_HEDGED, skip_modules: list[str] | None = None) -> list[str]:
     """Sentences of the draft that hedge or admit missing evidence (FLARE-style low-confidence spans).
 
     Sentences under the answer's limitations heading and sentences about analyses that were not requested
     (skip_modules, e.g. "kinetic simulation") are not gaps: they are acknowledged scope, not missing evidence."""
-    out: List[str] = []
+    out: list[str] = []
     body = _without_limitations(draft)
     for raw in (body[s:e] for s, e in sentence_spans(body)):
         s = re.sub(r"^[\s#>*\-|0-9.)]+", "", raw).strip(" *_|")
@@ -153,10 +153,10 @@ def hedged_sentences(draft: str, limit: int = MAX_HEDGED, skip_modules: Optional
     return out
 
 
-def rewrite_query(text: str, focus: List[str], max_words: int = 10) -> str:
+def rewrite_query(text: str, focus: list[str], max_words: int = 10) -> str:
     """Keyword-only rewrite of a sub-question or sentence, anchored on the question's focus entities (CRAG)."""
-    words: List[str] = []
-    seen: Set[str] = set()
+    words: list[str] = []
+    seen: set[str] = set()
     cleaned = _HEDGE_RE.sub(" ", text or "")
     for w in re.findall(r"[A-Za-z0-9][A-Za-z0-9\-+/]*", cleaned):
         lw = w.lower()
@@ -175,12 +175,12 @@ def _norm(q: str) -> str:
 _GENERIC_STEMS = frozenset(w[:6] for w in _GENERIC)
 
 
-def content_stems(text: str) -> Set[str]:
+def content_stems(text: str) -> set[str]:
     """Topic stems of a query or sentence: stems() minus the words that only talk about the evidence."""
     return stems(text) - _GENERIC_STEMS
 
 
-def jaccard(a: Set[str], b: Set[str]) -> float:
+def jaccard(a: set[str], b: set[str]) -> float:
     return len(a & b) / len(a | b) if a and b else 0.0
 
 
@@ -213,25 +213,23 @@ _ENDPOINT_RES = {
 _YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
 
 
-def _drugs_in(text: str) -> Set[str]:
+def _drugs_in(text: str) -> set[str]:
     return set()
 
 
-def _diseases_in(text: str) -> Set[str]:
-    from ..lithoscribe.synthesis_engine import cancer_families
-
-    fams = set(cancer_families(text or ""))
+def _diseases_in(text: str) -> set[str]:
+    fams: set[str] = set()
     for word in re.findall(r"[A-Za-z]+", text or ""):
         if word.lower() in _DISEASE_ABBREVIATIONS:
             fams.add(_DISEASE_ABBREVIATIONS[word.lower()])
     return fams
 
 
-def requirement_keys(text: str) -> Dict[str, frozenset]:
+def requirement_keys(text: str) -> dict[str, frozenset]:
     """The structured requirement a search stands for: disease, variant, drugs, regimen, treatment line,
     jurisdiction, year, endpoint and explicit identifiers. Two searches with different keys are different
     obligations; lexical similarity decides only between searches with the same keys."""
-    from ..lithoscribe.identifiers import extract_literature_ids
+    from ..archivon.identifiers import extract_literature_ids
 
     t = text or ""
     keys = {
@@ -248,7 +246,7 @@ def requirement_keys(text: str) -> Dict[str, frozenset]:
     return keys
 
 
-def _lexical_stems(text: str) -> Set[str]:
+def _lexical_stems(text: str) -> set[str]:
     """Content stems with disease names folded to their family, so "CRC" and "colorectal cancer" are one word."""
     folded = text or ""
     for abbr, fam in _DISEASE_ABBREVIATIONS.items():
@@ -256,7 +254,7 @@ def _lexical_stems(text: str) -> Set[str]:
     return content_stems(folded) - {"cancer", "cance", "carcin"}
 
 
-def near_duplicate(text: str, previous: List[str], threshold: float = NEAR_DUPLICATE_JACCARD) -> bool:
+def near_duplicate(text: str, previous: list[str], threshold: float = NEAR_DUPLICATE_JACCARD) -> bool:
     """Whether text is the same search as one of previous: exact after normalisation, or the same requirement keys
     and overlapping content stems. Searches for a different disease, regimen, line, jurisdiction, year, endpoint or
     identifier are never duplicates, however many words they share."""
@@ -269,7 +267,7 @@ def near_duplicate(text: str, previous: List[str], threshold: float = NEAR_DUPLI
     return False
 
 
-def gap_outcome(stats: List[Dict[str, Any]]) -> str:
+def gap_outcome(stats: list[dict[str, Any]]) -> str:
     """What one gap's searches (literature, web) amounted to: filled (usable new evidence), off_topic (new results,
     none about the gap), already_seen (results, all already in the evidence), empty (a successful search with no
     results), incomplete (the search ran out of time or skipped tiers and found nothing usable) or error (every
@@ -291,20 +289,20 @@ def gap_outcome(stats: List[Dict[str, Any]]) -> str:
 DEFINITIVE_OUTCOMES = ("empty", "already_seen")
 
 
-def useful_for_gap(query: str, item_text: str, doc_text: str, focus: List[str]) -> bool:
+def useful_for_gap(query: str, item_text: str, doc_text: str, focus: list[str]) -> bool:
     """Whether a newly retrieved passage or web result is about the gap it was searched for.
 
     The query's content stems (the gap's own when the query has none) must appear in the document: at least one that
     is not a focus entity (every result of the run mentions the question's gene) and, for queries of two or more
     stems, at least two in all. A result that only repeats the focus entity is new but does not fill the gap."""
     # 5-character prefixes: "mutated" and "mutation" (or "approved"/"approval") are the same topic word here.
-    def short(words: Set[str]) -> Set[str]:
+    def short(words: set[str]) -> set[str]:
         return {w[:5] for w in words}
 
     want = short(content_stems(query) or content_stems(item_text))
     if not want:
         return False
-    focus_stems: Set[str] = set()
+    focus_stems: set[str] = set()
     for f in focus:
         focus_stems |= short(stems(f))
     have = {t[:5] for t in tokenize(doc_text) if len(t) > 2}
@@ -315,13 +313,13 @@ def useful_for_gap(query: str, item_text: str, doc_text: str, focus: List[str]) 
     return len(shared) >= min(2, len(want))
 
 
-def _doc_text(kind: str, doc: Dict[str, Any]) -> str:
+def _doc_text(kind: str, doc: dict[str, Any]) -> str:
     if kind == "lit":
         return f"{doc.get('title') or ''} {doc.get('passage_text') or ''}"
     return f"{doc.get('title') or ''} {doc.get('snippet') or doc.get('content') or doc.get('description') or ''}"
 
 
-def coverage(text: str, ev_stems: Set[str]) -> float:
+def coverage(text: str, ev_stems: set[str]) -> float:
     terms = stems(text)
     return len(terms & ev_stems) / len(terms) if terms else 1.0
 
@@ -351,14 +349,14 @@ class GapPhase(AgentPhase):
     def _web_ok(state: Any) -> bool:
         return bool(getattr(state.ctx, "enable_web_search", False)) and named_tool_allowed(state, WEB_TOOL)
 
-    def _items(self, state: Any, ev_stems: Set[str]) -> List[Dict[str, Any]]:
+    def _items(self, state: Any, ev_stems: set[str]) -> list[dict[str, Any]]:
         skip = not_requested_modules(state.ctx, state.tool_results)
         retired = set(state.bag.get("gap_retired") or [])
         searched_hedges = list(state.bag.get("gap_hedged_done") or [])
         # A hedged sentence the loop already searched for comes back in every rewrite ("...was not retrieved"); it is
         # the same gap, not a new one.
         hedged = [h for h in hedged_sentences(state.draft, skip_modules=skip) if not near_duplicate(h, searched_hedges)]
-        items: List[Dict[str, Any]] = []
+        items: list[dict[str, Any]] = []
         if state.sub_questions:
             for q in state.sub_questions:
                 if q.status == "unanswerable" or q.id in retired:
@@ -387,7 +385,7 @@ class GapPhase(AgentPhase):
                 it["status"] = {"correct": "answered", "ambiguous": "partial", "incorrect": "missing"}[it["crag"]]
         return items
 
-    async def _model_check(self, state: Any, items: List[Dict[str, Any]]) -> Optional[_GapReply]:
+    async def _model_check(self, state: Any, items: list[dict[str, Any]]) -> _GapReply | None:
         digest, _keys = evidence_digest(state, max_items=10, chars=220)
         listing = "\n".join(
             f'- id={it["id"]} (deterministic: {it["status"]}, term coverage {it["coverage"]}): {it["text"]}' for it in items
@@ -408,7 +406,7 @@ class GapPhase(AgentPhase):
         reply = await ask_json(state, GAPS_SYSTEM, user, phase=self.key, schema=_GapReply)
         return reply if isinstance(reply, _GapReply) else None
 
-    async def run(self, state: Any) -> Optional[PhaseOutcome]:
+    async def run(self, state: Any) -> PhaseOutcome | None:
         round_no = state.draft_round
         state.bag.setdefault("gap_rounds_done", []).append(round_no)
         step_id = f"agent_gaps_{round_no}"
@@ -418,7 +416,7 @@ class GapPhase(AgentPhase):
         items = self._items(state, ev_stems)
         by_id = {it["id"]: it for it in items}
         checker = "deterministic"
-        model_queries: List[str] = []
+        model_queries: list[str] = []
         reply = await self._model_check(state, items)
         if reply is not None:
             checker = "llm"
@@ -433,7 +431,7 @@ class GapPhase(AgentPhase):
 
         gaps = sorted((it for it in items if it["status"] in ("partial", "missing")), key=lambda it: it["status"] != "missing")
         focus = list(getattr(state.ctx, "focus_terms", lambda: [])() or [])[:2]
-        candidates: List[Dict[str, Any]] = []
+        candidates: list[dict[str, Any]] = []
         if model_queries:
             for q in model_queries:
                 q_stems = stems(q)
@@ -442,10 +440,10 @@ class GapPhase(AgentPhase):
         elif gaps:
             candidates = [{"query": rewrite_query(it["text"], focus), "item": it} for it in gaps]
 
-        done_queries: List[str] = list(state.bag.get("gap_queries") or [])
+        done_queries: list[str] = list(state.bag.get("gap_queries") or [])
         question = _norm(state.clean_query or state.query)
-        queries: List[Dict[str, Any]] = []
-        duplicates: List[str] = []
+        queries: list[dict[str, Any]] = []
+        duplicates: list[str] = []
         for c in candidates:
             q = c["query"]
             if not _norm(q) or _norm(q) == question:
@@ -458,7 +456,7 @@ class GapPhase(AgentPhase):
             if len(queries) >= MAX_QUERIES:
                 break
 
-        report: Dict[str, Any] = {
+        report: dict[str, Any] = {
             "round": round_no,
             "checker": checker,
             "items": [{k: it[k] for k in ("id", "text", "status", "coverage", "crag", "hedged")} for it in items],
@@ -484,22 +482,22 @@ class GapPhase(AgentPhase):
         seen = seen_passages(state.tool_results)
         urls = seen_urls(state.tool_results)
         novelty = report["novelty"]
-        new_by_item: Dict[str, List[str]] = {}
+        new_by_item: dict[str, list[str]] = {}
 
-        async def search(c: Dict[str, Any], q: str) -> Dict[str, Any]:
+        async def search(c: dict[str, Any], q: str) -> dict[str, Any]:
             """One gap query's literature (and web) search. Only results about the gap are stored (off-topic ones
             never enter the evidence); returns the stored keys and each search's outcome statistics."""
             item_text = c["item"]["text"] if c["item"] is not None else ""
             purpose = f"gap re-retrieval: {q}"
             keywords = [w for w in re.findall(r"[A-Za-z0-9][A-Za-z0-9\-]+", q) if w.lower() not in _GENERIC][:6]
-            keys: List[str] = []
-            stats: List[Dict[str, Any]] = []
+            keys: list[str] = []
+            stats: list[dict[str, Any]] = []
 
             def keep(kind: str) -> Any:
                 return lambda d: useful_for_gap(q, item_text, _doc_text(kind, d), focus)
 
             if lit_ok:
-                st: Dict[str, Any] = {}
+                st: dict[str, Any] = {}
                 key, kept = await fetch_new_literature(
                     state, phase=self.key, query=q, purpose=purpose, seen=seen, keywords=keywords, keep=keep("lit"), stats=st,
                 )
@@ -518,7 +516,7 @@ class GapPhase(AgentPhase):
                     keys.append(key)
             return {"c": c, "query": q, "keys": keys, "outcome": gap_outcome(stats)}
 
-        def remember(c: Dict[str, Any], q: str) -> None:
+        def remember(c: dict[str, Any], q: str) -> None:
             state.bag.setdefault("gap_queries", []).append(q)
             if c["item"] is not None and c["item"].get("hedged"):
                 state.bag.setdefault("gap_hedged_done", []).append(c["item"]["text"])
@@ -533,7 +531,7 @@ class GapPhase(AgentPhase):
         # strategy (a keyword-only rewrite of the gap itself, never a rephrasing of the same search); an empty or
         # already-covered result is definitive. A gap still unresolved after that is retired with its reason.
         tried_alt = state.bag.setdefault("gap_alternatives", [])
-        alternatives: List[Dict[str, Any]] = []
+        alternatives: list[dict[str, Any]] = []
         for r in results:
             c = r["c"]
             if r["outcome"] == "filled" or r["outcome"] in DEFINITIVE_OUTCOMES or c["item"] is None:
@@ -548,12 +546,12 @@ class GapPhase(AgentPhase):
             alternatives.append({"c": c, "query": alt_q, "first": r["outcome"]})
         if alternatives:
             alt_results = await asyncio.gather(*(search(a["c"], a["query"]) for a in alternatives))
-            for a, r in zip(alternatives, alt_results):
+            for a, r in zip(alternatives, alt_results, strict=False):
                 r["first"] = a["first"]
                 results.append(r)
         report["alternatives"] = [{"query": a["query"], "after": a["first"]} for a in alternatives]
 
-        outcomes: Dict[str, str] = {}
+        outcomes: dict[str, str] = {}
         for r in results:
             c = r["c"]
             item_id = c["item"]["id"] if c["item"] is not None else ""
@@ -609,7 +607,7 @@ class GapPhase(AgentPhase):
     }
 
     @classmethod
-    def _retire(cls, state: Any, items: List[Dict[str, Any]], outcomes: Optional[Dict[str, str]] = None) -> None:
+    def _retire(cls, state: Any, items: list[dict[str, Any]], outcomes: dict[str, str] | None = None) -> None:
         """Stop checking these gaps; a sub-question keeps its status (partial stays partial) with a note saying why
         (a definitive empty search, or failure, timeout or off-topic results after its one alternative)."""
         retired = state.bag.setdefault("gap_retired", [])
@@ -623,8 +621,8 @@ class GapPhase(AgentPhase):
 
     @staticmethod
     def _update_sub_questions(
-        items: List[Dict[str, Any]], new_by_item: Dict[str, List[str]], *, searched: Set[str], round_no: int = 0,
-        outcomes: Optional[Dict[str, str]] = None,
+        items: list[dict[str, Any]], new_by_item: dict[str, list[str]], *, searched: set[str], round_no: int = 0,
+        outcomes: dict[str, str] | None = None,
     ) -> None:
         for it in items:
             q = it.get("sq")

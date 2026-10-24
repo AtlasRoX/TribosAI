@@ -24,8 +24,9 @@ import json
 import logging
 import math
 import re
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -61,67 +62,108 @@ DEBATE_COST_NOTE = (
 )
 SCORES_NOTE = "Suitability scores from heuristic and model features; they are not calibrated probabilities of the best route."
 
-FRAMEWORK_LABELS: Dict[str, str] = {
+FRAMEWORK_LABELS: dict[str, str] = {
     AGENTIC: "Plan & execute",
     SUPERVISOR: "Supervisor",
     SWARM: "Swarm",
     DEBATE: "Debate",
 }
 
-# Planner intents and search-plan question types grouped into the clinical domains a question touches.
-_INTENT_DOMAINS: Dict[str, str] = {
+# Planner intents and search-plan question types grouped into the mathematical, physical, and engineering domains a question touches.
+_INTENT_DOMAINS: dict[str, str] = {
     "literature": "literature",
-    "clinical_trials": "clinical",
-    "safety": "clinical",
-    "target_assessment": "molecular",
-    "variant_interpretation": "molecular",
-    "drug_mechanism": "molecular",
-    "simulation": "computational",
-    "steady_state": "computational",
-    "single_cell": "computational",
+    "explain": "literature",
+    "derive": "symbolic",
+    "solve": "symbolic",
+    "prove": "symbolic",
+    "compute": "numerical",
+    "simulate": "numerical",
+    "design": "numerical",
+    "estimate": "numerical",
+    "data_analysis": "numerical",
+    "reference": "reference",
+    # Legacy intent aliases for backward compatibility
+    "simulation": "numerical",
+    "steady_state": "numerical",
+    "single_cell": "numerical",
+    "target_assessment": "symbolic",
+    "variant_interpretation": "symbolic",
+    "drug_mechanism": "symbolic",
+    "clinical_trials": "reference",
+    "safety": "reference",
 }
-_QUESTION_TYPE_DOMAINS: Dict[str, str] = {
-    "treatment": "clinical",
-    "diagnosis": "clinical",
-    "prognosis": "clinical",
-    "trials": "clinical",
-    "safety": "clinical",
-    "guideline": "clinical",
-    "regulatory": "clinical",
-    "epidemiology": "clinical",
-    "mechanism": "molecular",
-    "genetics": "molecular",
-    "target": "molecular",
-    "biomarker": "molecular",
-    "pharmacology": "molecular",
+_QUESTION_TYPE_DOMAINS: dict[str, str] = {
+    "proof": "symbolic",
+    "derivation": "symbolic",
+    "symbolic": "symbolic",
+    "numerical": "numerical",
+    "design_sizing": "numerical",
+    "design/sizing": "numerical",
+    "modelling": "numerical",
+    "modeling": "numerical",
+    "simulation": "numerical",
+    "conceptual": "literature",
+    "literature_review": "literature",
+    "literature review": "literature",
+    "reference": "reference",
+    "constants": "reference",
+    "materials": "reference",
+    # Legacy question-type aliases
+    "treatment": "reference",
+    "diagnosis": "reference",
+    "prognosis": "reference",
+    "trials": "reference",
+    "safety": "reference",
+    "guideline": "reference",
+    "regulatory": "reference",
+    "epidemiology": "reference",
+    "mechanism": "symbolic",
+    "genetics": "symbolic",
+    "target": "symbolic",
+    "biomarker": "symbolic",
+    "pharmacology": "symbolic",
 }
-_COMPUTATIONAL_INTENTS = frozenset({"simulation", "steady_state", "single_cell"})
-DOMAINS = ("literature", "clinical", "molecular", "computational")
+_COMPUTATIONAL_INTENTS = frozenset({
+    "compute", "simulate", "design", "estimate", "data_analysis",
+    "simulation", "steady_state", "single_cell",
+})
+DOMAINS = ("literature", "symbolic", "numerical", "reference")
+_LEGACY_DOMAIN_MAP: dict[str, str] = {
+    "clinical": "reference",
+    "molecular": "symbolic",
+    "computational": "numerical",
+}
 
 _HYPOTHESIS = re.compile(
-    r"\b(hypothes[ie]s|hypothesi[sz]e|(?:novel|new) (?:[a-z-]+ )?(?:targets?|mechanisms?|therap\w*|combinations?|indications?)"
-    r"|repurpos\w*|candidate (?:targets?|drugs?)|propose|testable|what (?:could|might) explain|untested)\b",
+    r"\b(hypothes[ie]s|hypothesi[sz]e|conjectur\w*|(?:novel|new) (?:[a-z-]+ )?(?:conjectures?|mechanisms?|models?|bounds?|formulations?|approaches?|architectures?|designs?|ansatz\w*|targets?|therap\w*|combinations?|indications?)"
+    r"|candidate (?:models?|mechanisms?|designs?|materials?|bounds?|approaches?|ansatz\w*|targets?|drugs?)|repurpos\w*|propose|testable|what (?:could|might) explain|untested|scaling law)\b",
     re.I,
 )
 _CONTESTED = re.compile(
-    r"\b(controvers\w*|conflicting|contradict\w*|disputed|debated?|is it (?:true|really)|really (?:works?|effective)"
-    r"|overstated|superior|inferior|non-?inferior|better than|worse than|head[- ]to[- ]head|which is (?:better|best|preferred)"
-    r"|should (?:we|i|clinicians|patients|one)|evidence (?:for and against|against))\b",
+    r"\b(controvers\w*|conflicting|contradict\w*|disputed|debated?|is it (?:true|really)|really (?:works?|effective|holds?|converges?)"
+    r"|overstated|superior|inferior|non-?inferior|better than|worse than|head[- ]to[- ]head|which is (?:better|best|preferred|faster|more accurate|more stable)"
+    r"|should (?:we|i|engineers|researchers|clinicians|patients|one)|evidence (?:for and against|against)|counterexample\w*)\b",
     re.I,
 )
 _STAKES = re.compile(
-    r"\b(my patient|\d{1,3}[- ]?(?:year|yr)s?[- ]?old|pregnan\w*|breast-?feeding|lactat\w*|p(?:a)?ediatric|children|infants?"
+    r"\b(safety[- ]critical|pressure vessel\w*|boiler\w*|high[- ]voltage|arc[- ]flash|fault current|short[- ]circuit"
+    r"|structural (?:integrity|failure|safety|collapse)|buckling|fatigue (?:life|limit|failure)|critical (?:load|speed|pressure|temperature|heat flux)"
+    r"|safety factor|factor of safety|margin of safety|seismic|load[- ]bearing|life[- ]safety|relief valve|blowdown"
+    r"|nuclear|reactor|criticality|containment|thermal runaway|overpressure|explosi\w*|flammab\w*|cryogenic"
+    r"|aerospace|airworthiness|flight[- ]critical|code compliance|\b(?:ASME|IEEE|Eurocode|ACI|AISC|NFPA|NEC|NUREG|FAA)\b"
+    r"|my patient|\d{1,3}[- ]?(?:year|yr)s?[- ]?old|pregnan\w*|breast-?feeding|lactat\w*|p(?:a)?ediatric|children|infants?"
     r"|neonat\w*|elderly|dos(?:e|es|ing|age)|mg/kg|renal (?:impairment|failure)|hepatic (?:impairment|failure)|dialysis"
     r"|contraindicat\w*|drug[- ]drug|interactions?|overdose|black[- ]box|boxed warning"
     r"|should (?:i|we) (?:start|stop|give|prescribe|switch))\b",
     re.I,
 )
 _RECOMMENDATION = re.compile(
-    r"\b(should|recommend\w*|preferred|first[- ]line|best (?:option|treatment|therapy|choice))\b", re.I
+    r"\b(should|recommend\w*|preferred|first[- ]line|best (?:option|method|solver|design|material|architecture|approach|treatment|therapy|choice))\b", re.I
 )
 _TARGET_EVALUATION = re.compile(
-    r"\b(as an? (?:drug |therapeutic |druggable )?target|target (?:assessment|validation|evaluation|prioriti[sz]ation)"
-    r"|druggab\w*|tractab\w*)\b",
+    r"\b(as an? (?:candidate |viable |feasible |drug |therapeutic |druggable )?(?:design|method|solver|material|architecture|approach|model|target)"
+    r"|(?:design|method|material|approach|architecture|solver|target) (?:assessment|validation|evaluation|prioriti[sz]ation|selection|trade-?offs?|feasibility)"
+    r"|trade-?off analysis|feasibility study|druggab\w*|tractab\w*)\b",
     re.I,
 )
 _EXPLORATORY = re.compile(
@@ -150,7 +192,7 @@ _SPECIALIST_FEATURES = frozenset(
      "computational"}
 )
 
-FEATURE_WORDS: Dict[str, str] = {
+FEATURE_WORDS: dict[str, str] = {
     "hypothesis": "asks for hypotheses",
     "contested": "contested claim",
     "high_stakes": "safety-critical",
@@ -175,12 +217,12 @@ FEATURE_WORDS: Dict[str, str] = {
 
 @dataclass
 class RoutingSignals:
-    domains: List[str] = field(default_factory=list)
-    entity_types: List[str] = field(default_factory=list)
-    intents: List[str] = field(default_factory=list)
+    domains: list[str] = field(default_factory=list)
+    entity_types: list[str] = field(default_factory=list)
+    intents: list[str] = field(default_factory=list)
     question_type: str = ""
-    complexity: List[str] = field(default_factory=list)
-    computational: List[str] = field(default_factory=list)
+    complexity: list[str] = field(default_factory=list)
+    computational: list[str] = field(default_factory=list)
     hypothesis: bool = False
     contested: bool = False
     high_stakes: bool = False
@@ -194,7 +236,7 @@ class RoutingSignals:
     def explicit_parts(self) -> bool:
         return bool(_EXPLICIT_PARTS.intersection(self.complexity))
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "domains": self.domains,
             "entity_types": self.entity_types,
@@ -232,7 +274,7 @@ def routing_signals(query: str, ctx: Any) -> RoutingSignals:
     if getattr(ctx, "attachments", None):
         computational.append("attached data")
     if computational:
-        domains.add("computational")
+        domains.add("numerical")
     return RoutingSignals(
         domains=sorted(domains),
         entity_types=entity_types,
@@ -255,7 +297,7 @@ def _multi_domain(n: int) -> float:
     return 0.0 if n <= 1 else 0.5 if n == 2 else 1.0
 
 
-def deterministic_features(s: RoutingSignals) -> Dict[str, float]:
+def deterministic_features(s: RoutingSignals) -> dict[str, float]:
     structural = [c for c in s.complexity if c in _STRUCTURAL]
     return {
         "hypothesis": float(s.hypothesis),
@@ -281,10 +323,13 @@ def deterministic_features(s: RoutingSignals) -> Dict[str, float]:
 # -- semantic features (model) ---------------------------------------------------------------------------------------
 
 QUESTION_KINDS = (
+    "proof", "derivation", "symbolic_solve", "numerical_computation", "simulation", "parameter_estimation",
+    "design_sizing", "method_comparison", "safety_compliance", "materials_lookup", "reference_lookup",
+    "hypothesis_generation", "conjecture", "data_analysis", "literature_review", "exploration", "other",
+    # Legacy kinds accepted for backward compatibility
     "treatment", "therapy_comparison", "dosing", "diagnosis", "prognosis", "etiology", "safety", "pharmacology",
     "mechanism", "variant_interpretation", "target_assessment", "trial_landscape", "drug_repurposing",
-    "hypothesis_generation", "simulation", "data_analysis", "epidemiology", "guideline", "literature_review",
-    "exploration", "other",
+    "epidemiology", "guideline",
 )
 
 
@@ -293,7 +338,7 @@ class SemanticFeatures(BaseModel):
     sub_questions: int = Field(default=1, ge=1, le=12)
     decomposable: bool = False
     sequential: bool = False
-    domains: List[str] = Field(default_factory=list)
+    domains: list[str] = Field(default_factory=list)
     needs_computation: bool = False
     hypothesis_generation: bool = False
     contested: bool = False
@@ -303,46 +348,60 @@ class SemanticFeatures(BaseModel):
     exploratory: bool = False
     open_ended: bool = False
 
-    def to_features(self) -> Dict[str, float]:
-        domains = {d for d in self.domains if d in DOMAINS}
+    def to_features(self) -> dict[str, float]:
+        domains = {
+            _LEGACY_DOMAIN_MAP.get(d, d)
+            for d in self.domains
+            if _LEGACY_DOMAIN_MAP.get(d, d) in DOMAINS
+        }
         return {
-            "hypothesis": float(self.hypothesis_generation or self.question_kind in ("hypothesis_generation", "drug_repurposing")),
+            "hypothesis": float(
+                self.hypothesis_generation
+                or self.question_kind in ("hypothesis_generation", "conjecture", "drug_repurposing")
+            ),
             "contested": float(self.contested),
-            "high_stakes": float(self.high_stakes),
+            "high_stakes": float(self.high_stakes or self.question_kind == "safety_compliance"),
             "recommendation": float(self.asks_recommendation),
-            "comparison": float(self.comparison or self.question_kind == "therapy_comparison"),
-            "target_evaluation": float(self.question_kind == "target_assessment"),
+            "comparison": float(
+                self.comparison or self.question_kind in ("method_comparison", "therapy_comparison")
+            ),
+            "target_evaluation": float(
+                self.question_kind in ("design_sizing", "target_assessment")
+            ),
             "exploratory": float(self.exploratory or self.question_kind == "exploration"),
             "open_ended": float(self.open_ended),
-            "computational": float(self.needs_computation or self.question_kind in ("simulation", "data_analysis")),
+            "computational": float(
+                self.needs_computation
+                or self.question_kind in ("numerical_computation", "simulation", "parameter_estimation", "data_analysis")
+            ),
             "explicit_parts": float(self.sub_questions >= 2 and self.decomposable),
             "decomposable": float(self.decomposable),
             "sequential": float(self.sequential),
-            "breadth": float(len(domains) >= 2 or self.question_kind == "target_assessment"),
+            "breadth": float(len(domains) >= 2 or self.question_kind in ("design_sizing", "target_assessment")),
             "multi_domain": _multi_domain(len(domains)),
         }
 
 
 ROUTER_FEATURES_SYSTEM = f"""[phase:router]
-You read one biomedical or clinical research question and describe its shape for a router that picks an agent
+You read one mathematics, physics, or engineering research question and describe its shape for a router that picks an agent
 architecture. Do not answer the question.
-- question_kind: one of {", ".join(QUESTION_KINDS)}
+- question_kind: one of {", ".join(QUESTION_KINDS[:17])}
 - sub_questions: how many distinct things it asks (1 for a single focused question)
 - decomposable: the parts can be researched independently and in parallel
-- sequential: later steps need the results of earlier ones (a chain, a computation pipeline)
+- sequential: later steps need the results of earlier ones (a derivation chain, a computation pipeline)
 - domains: any of {", ".join(DOMAINS)} that the answer needs
-- needs_computation: a simulation, model fit or analysis of data is requested
-- hypothesis_generation: it asks to propose new hypotheses, targets, mechanisms or repurposing candidates
-- contested: it asks to weigh a disputed or comparative conclusion ("is X better than Y", conflicting evidence)
-- high_stakes: patient-specific care, dosing, pregnancy, children, interactions or contraindications
-- asks_recommendation: it asks what should be done or which option is preferred
-- comparison: it compares two or more options head to head
-- exploratory: open exploration of connections with no single expected answer
-- open_ended: broad assessment, overview or landscape rather than specific facts
+- needs_computation: a numerical simulation, symbolic solve, parameter fit, or data analysis is requested
+- hypothesis_generation: it asks to propose new conjectures, hypotheses, mathematical formulations, or candidate designs
+- contested: it asks to weigh a disputed or comparative conclusion ("is method X better than Y", conflicting bounds or measurements)
+- high_stakes: safety-critical engineering (pressure vessels, structural loads, high voltage, nuclear/thermal limits, code compliance)
+- asks_recommendation: it asks what design, solver, method, or material should be chosen
+- comparison: it compares two or more methods, designs, models, or formulations head to head
+- exploratory: open exploration of mathematical or physical connections with no single expected answer
+- open_ended: broad assessment, survey, or state-of-the-art landscape rather than a single derivation or lookup
 Reply with only JSON with exactly these keys."""
 
 
-def _first_json(text: str) -> Optional[Dict[str, Any]]:
+def _first_json(text: str) -> dict[str, Any] | None:
     m = re.search(r"\{.*\}", text or "", re.S)
     if not m:
         return None
@@ -366,13 +425,13 @@ def semantic_enabled() -> bool:
 ROUTER_PHASE = "router"
 
 
-async def _ask(llm_factory: Callable[..., Any], model_name: str, api_key: Optional[str], temperature: float,
-               system: str, user: str, budget: Optional[RunBudget] = None) -> Optional[Dict[str, Any]]:
+async def _ask(llm_factory: Callable[..., Any], model_name: str, api_key: str | None, temperature: float,
+               system: str, user: str, budget: RunBudget | None = None) -> dict[str, Any] | None:
     """One router model call. With a run budget the call is admitted first (phase "router"), sent exactly its output
     allocation and settled with its usage; a call the budget refuses is not made and routing keeps the
     deterministic signals."""
     alloc = None
-    extra: Dict[str, Any] = {}
+    extra: dict[str, Any] = {}
     if budget is not None:
         try:
             alloc = budget.admit(ROUTER_PHASE, len(system) + len(user), ROUTER_MAX_OUTPUT_TOKENS)
@@ -403,9 +462,9 @@ async def _ask(llm_factory: Callable[..., Any], model_name: str, api_key: Option
 
 
 async def semantic_features(
-    query: str, llm_factory: Callable[..., Any], model_name: str, api_key: Optional[str], samples: int = 1,
-    budget: Optional[RunBudget] = None,
-) -> Tuple[Optional[Dict[str, float]], Optional[str], int]:
+    query: str, llm_factory: Callable[..., Any], model_name: str, api_key: str | None, samples: int = 1,
+    budget: RunBudget | None = None,
+) -> tuple[dict[str, float] | None, str | None, int]:
     """(averaged features, majority question kind, valid samples); (None, None, 0) when no sample parsed."""
     from ..agents.prompts import utc_date_line
 
@@ -415,7 +474,7 @@ async def semantic_features(
         *(_ask(llm_factory, model_name, api_key, temperature, ROUTER_FEATURES_SYSTEM, user, budget)
           for _ in range(samples))
     )
-    parsed: List[SemanticFeatures] = []
+    parsed: list[SemanticFeatures] = []
     for obj in replies:
         if not obj:
             continue
@@ -435,10 +494,10 @@ async def semantic_features(
     return avg, kind, len(parsed)
 
 
-def blend(det: Dict[str, float], sem: Optional[Dict[str, float]]) -> Dict[str, float]:
+def blend(det: dict[str, float], sem: dict[str, float] | None) -> dict[str, float]:
     if sem is None:
         return dict(det)
-    out: Dict[str, float] = {}
+    out: dict[str, float] = {}
     for f in FEATURES:
         if f in _SAFETY_FEATURES:
             out[f] = max(det[f], sem[f])
@@ -452,7 +511,7 @@ def blend(det: Dict[str, float], sem: Optional[Dict[str, float]]) -> Dict[str, f
 
 # -- scores ------------------------------------------------------------------------------------------------------------
 
-def score_terms(f: Dict[str, float]) -> Dict[str, List[Tuple[str, float]]]:
+def score_terms(f: dict[str, float]) -> dict[str, list[tuple[str, float]]]:
     """(factor, contribution) per architecture; a score is the sum of its terms.
 
     Plan & execute is the backbone: decomposable and computational work favour it, since parallel tool plans suit
@@ -502,14 +561,14 @@ def score_terms(f: Dict[str, float]) -> Dict[str, List[Tuple[str, float]]]:
     }
 
 
-def softmax(scores: Dict[str, float], temperature: float = SOFTMAX_TEMPERATURE) -> Dict[str, float]:
+def softmax(scores: dict[str, float], temperature: float = SOFTMAX_TEMPERATURE) -> dict[str, float]:
     top = max(scores.values())
     exp = {k: math.exp((v - top) / temperature) for k, v in scores.items()}
     total = sum(exp.values())
     return {k: round(v / total, 4) for k, v in exp.items()}
 
 
-def bucket_key(kind: str, f: Dict[str, float]) -> str:
+def bucket_key(kind: str, f: dict[str, float]) -> str:
     """Coarse question signature for outcome learning: kind plus the strong flags."""
     flags = [n for n in ("hypothesis", "contested", "high_stakes", "computational", "open_ended", "exploratory",
                          "explicit_parts") if f.get(n, 0) >= 0.5]
@@ -524,21 +583,21 @@ class RoutingDecision:
     rule: str
     reason: str
     signals: RoutingSignals
-    candidates: List[str] = field(default_factory=list)
+    candidates: list[str] = field(default_factory=list)
     tie_break: str = "none"  # none | llm | llm_failed
-    features: Dict[str, float] = field(default_factory=dict)
-    probabilities: Dict[str, float] = field(default_factory=dict)
-    factors: List[Tuple[str, float]] = field(default_factory=list)
-    learned: Dict[str, Dict[str, float]] = field(default_factory=dict)
-    semantic: Dict[str, Any] = field(default_factory=dict)
-    guardrail: Optional[str] = None
+    features: dict[str, float] = field(default_factory=dict)
+    probabilities: dict[str, float] = field(default_factory=dict)
+    factors: list[tuple[str, float]] = field(default_factory=list)
+    learned: dict[str, dict[str, float]] = field(default_factory=dict)
+    semantic: dict[str, Any] = field(default_factory=dict)
+    guardrail: str | None = None
     bucket: str = ""
 
     @property
     def confidence(self) -> float:
         return self.probabilities.get(self.framework, 1.0)
 
-    def to_artifact(self) -> Dict[str, Any]:
+    def to_artifact(self) -> dict[str, Any]:
         return {
             "requested": AUTO,
             "chosen": self.framework,
@@ -569,16 +628,16 @@ def _join(items: Sequence[str]) -> str:
     return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
 
 
-def _explain(framework: str, f: Dict[str, float], s: RoutingSignals, factors: List[Tuple[str, float]]) -> Tuple[str, str]:
+def _explain(framework: str, f: dict[str, float], s: RoutingSignals, factors: list[tuple[str, float]]) -> tuple[str, str]:
     """(rule, reason) from the factors that drove the chosen score."""
     lead = factors[0][0] if factors else "bias"
     if framework == DEBATE:
         if f["hypothesis"] >= f["contested"]:
             return "hypothesis_generation", (
-                "The question asks for new hypotheses; independent critics challenge and rank them before the answer is final."
+                "The question asks for new conjectures or hypotheses; independent critics challenge and rank them before the answer is final."
             )
         return "contested_claim", (
-            "The question weighs a contested conclusion" + (" with clinical stakes" if f["high_stakes"] >= 0.5 else "")
+            "The question weighs a contested conclusion" + (" with safety-critical stakes" if f["high_stakes"] >= 0.5 else "")
             + "; independent critics cross-examine the draft against the evidence."
         )
     if framework == SUPERVISOR:
@@ -597,12 +656,12 @@ def _explain(framework: str, f: Dict[str, float], s: RoutingSignals, factors: Li
 
 def decide(
     s: RoutingSignals,
-    features: Dict[str, float],
+    features: dict[str, float],
     *,
-    learned: Optional[Dict[str, Dict[str, float]]] = None,
-    semantic: Optional[Dict[str, Any]] = None,
+    learned: dict[str, dict[str, float]] | None = None,
+    semantic: dict[str, Any] | None = None,
     bucket: str = "",
-    excluded: Optional[Set[str]] = None,
+    excluded: set[str] | None = None,
 ) -> RoutingDecision:
     """Score every architecture, apply the history nudge and the guardrails, and explain the winner. A question that
     excludes debate ("No ... debate is needed") is never routed to it."""
@@ -645,22 +704,22 @@ def rule_decision(query: str, ctx: Any) -> RoutingDecision:
 
 
 ROUTER_ADJUDICATE_SYSTEM = """[phase:router_adjudicate]
-You choose how a biomedical research assistant answers one question. Options:
+You choose how a mathematics, physics, and engineering research assistant answers one question. Options:
 {options}
 Pick the single best option for this question. Prefer plan_execute unless another option clearly fits better.
 Reply with only JSON: {{"route": "<option id>", "reason": "<one sentence for the user>"}}"""
 
-_OPTION_TEXT: Dict[str, str] = {
-    AGENTIC: "plan_execute: decompose into sub-questions, run search and analysis tools in parallel, check claims against counter-evidence",
-    SUPERVISOR: "supervisor: a manager delegates open-ended parts to domain specialists (literature, targets, trials, omics, simulation)",
+_OPTION_TEXT: dict[str, str] = {
+    AGENTIC: "plan_execute: decompose into sub-questions, run symbolic, numerical, reference, and literature tools in parallel, check claims against counter-evidence",
+    SUPERVISOR: "supervisor: a manager delegates open-ended parts to domain specialists (literature, symbolic math, numerical simulation, computation, reference data)",
     SWARM: "swarm: specialists hand the question along a chain of steps (exploratory, low-stakes multi-hop questions)",
-    DEBATE: "debate: plan_execute plus independent critics who cross-examine the draft (hypotheses, contested conclusions)",
+    DEBATE: "debate: plan_execute plus independent critics (mathematician, physicist, engineer) who cross-examine the draft (conjectures, contested conclusions)",
 }
-_OPTION_IDS: Dict[str, str] = {AGENTIC: "plan_execute", SUPERVISOR: "supervisor", SWARM: "swarm", DEBATE: "debate"}
+_OPTION_IDS: dict[str, str] = {AGENTIC: "plan_execute", SUPERVISOR: "supervisor", SWARM: "swarm", DEBATE: "debate"}
 
 
 async def _adjudicate(query: str, decision: RoutingDecision, llm_factory: Callable[..., Any], model_name: str,
-                      api_key: Optional[str], budget: Optional[RunBudget] = None) -> Optional[Tuple[str, str]]:
+                      api_key: str | None, budget: RunBudget | None = None) -> tuple[str, str] | None:
     options = "\n".join(f"- {_OPTION_TEXT[fw]}" for fw in decision.candidates if fw in _OPTION_TEXT)
     context = json.dumps({"features": decision.features, "probabilities": decision.probabilities})
     obj = await _ask(llm_factory, model_name, api_key, 0.0, ROUTER_ADJUDICATE_SYSTEM.format(options=options),
@@ -676,10 +735,10 @@ async def choose_framework(
     query: str,
     ctx: Any,
     *,
-    llm_factory: Optional[Callable[..., Any]] = None,
+    llm_factory: Callable[..., Any] | None = None,
     model_name: str = "",
-    api_key: Optional[str] = None,
-    budget: Optional[RunBudget] = None,
+    api_key: str | None = None,
+    budget: RunBudget | None = None,
 ) -> RoutingDecision:
     """Route one question: blended features, scores with the history nudge, guardrails, then adjudication if close.
 
@@ -689,9 +748,9 @@ async def choose_framework(
         return rule_decision(query, ctx)
     signals = routing_signals(query, ctx)
     det = deterministic_features(signals)
-    sem: Optional[Dict[str, float]] = None
-    kind: Optional[str] = None
-    semantic: Dict[str, Any] = {"used": False}
+    sem: dict[str, float] | None = None
+    kind: str | None = None
+    semantic: dict[str, Any] = {"used": False}
     if llm_factory is not None and semantic_enabled():
         samples = router_samples()
         question, _ = strip_output_instructions(query)
@@ -699,7 +758,7 @@ async def choose_framework(
         semantic = {"used": sem is not None, "samples": samples, "valid_samples": valid, "question_kind": kind}
     features = blend(det, sem)
     bucket = bucket_key(kind or signals.question_type, features)
-    learned: Dict[str, Dict[str, float]] = {}
+    learned: dict[str, dict[str, float]] = {}
     store = get_store()
     if store is not None:
         try:
@@ -730,9 +789,9 @@ def record_outcome(
     query: str,
     ctx: Any,
     framework: str,
-    routing: Optional[Dict[str, Any]],
-    verification_score: Optional[float],
-    answer_confidence: Optional[float],
+    routing: dict[str, Any] | None,
+    verification_score: float | None,
+    answer_confidence: float | None,
     task_status: str,
     core_status: str,
     llm_calls: int,
@@ -763,9 +822,9 @@ def record_outcome(
 
 # -- escalation --------------------------------------------------------------------------------------------------------
 
-def escalation_triggers(state: Any) -> List[str]:
+def escalation_triggers(state: Any) -> list[str]:
     """Why an Auto run should have critics debate its draft ([] = no escalation)."""
-    triggers: List[str] = []
+    triggers: list[str] = []
     routing = (getattr(state, "bag", None) or {}).get("routing") or {}
     art = (getattr(state, "artifacts", None) or {}).get("evidence_conflicts")
     conflicts = [
@@ -777,7 +836,7 @@ def escalation_triggers(state: Any) -> List[str]:
     features = routing.get("features") or {}
     signals = routing.get("signals") or {}
     if features.get("high_stakes", 0) >= 0.5 or signals.get("high_stakes"):
-        triggers.append("a safety-critical question (patient-specific, dosing or interactions)")
+        triggers.append("a safety-critical question (structural, pressure, high-voltage or code compliance)")
     confidence = routing.get("confidence")
     if isinstance(confidence, (int, float)) and confidence < UNCERTAIN_BELOW:
         triggers.append(f"an uncertain route (top choice {round(confidence * 100)}%)")
@@ -813,7 +872,7 @@ class EscalationPhase(AgentPhase):
             and bool(escalation_triggers(state))
         )
 
-    async def run(self, state: Any) -> Optional[PhaseOutcome]:
+    async def run(self, state: Any) -> PhaseOutcome | None:
         state.bag["escalation_checked"] = True
         triggers = escalation_triggers(state)
         routing = state.bag.get("routing") or {}

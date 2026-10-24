@@ -13,10 +13,12 @@ import inspect
 import logging
 import os
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Callable, Dict, List, Literal, Optional, Type
+from typing import Any, Literal
+
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -45,14 +47,14 @@ class ToolResult(BaseModel):
     success: bool = Field(..., description="Whether tool execution completed successfully without defect")
     tool_name: str = Field(..., description="Name of the executed tool")
     data: Any = Field(default=None, description="Structured output payload or execution artifact")
-    canonical_ids: Dict[str, str] = Field(
+    canonical_ids: dict[str, str] = Field(
         default_factory=dict,
         description="Canonical identifiers resolved (e.g. ensembl_id, uniprot_id, biomodel_id, efo_id, pmid, doi)",
     )
-    error: Optional[str] = Field(default=None, description="Human-readable error description if failed")
-    error_type: Optional[ErrorType] = Field(default=None, description="Typed failure classification")
+    error: str | None = Field(default=None, description="Human-readable error description if failed")
+    error_type: ErrorType | None = Field(default=None, description="Typed failure classification")
     execution_time_seconds: float = Field(default=0.0, description="Measured wall-clock execution duration")
-    metadata: Dict[str, Any] = Field(
+    metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Execution metadata: adapter type, cache status, solver diagnostics, provenance",
     )
@@ -71,19 +73,19 @@ class ToolUniverseEntry(BaseModel):
     description: str = Field(..., description="Detailed description of tool capabilities")
     domain: str = Field(..., description="Specialist agent domain: synapta | vivarix | lumicell | lithoscribe | general")
     adapter_type: AdapterType = Field(..., description="Direct API adapter vs Local engine vs MCP")
-    input_schema: Type[BaseModel] = Field(..., description="Pydantic input schema class")
-    output_schema: Optional[Type[BaseModel]] = Field(default=None, description="Expected structured output schema")
-    canonical_id_types: List[str] = Field(default_factory=list, description="IDs handled, e.g. ['ensembl_id', 'uniprot_id']")
+    input_schema: type[BaseModel] = Field(..., description="Pydantic input schema class")
+    output_schema: type[BaseModel] | None = Field(default=None, description="Expected structured output schema")
+    canonical_id_types: list[str] = Field(default_factory=list, description="IDs handled, e.g. ['ensembl_id', 'uniprot_id']")
     timeout_seconds: float = Field(default=30.0, description="Per-execution timeout cutoff")
-    tags: List[str] = Field(default_factory=list, description="Searchable functional tags")
+    tags: list[str] = Field(default_factory=list, description="Searchable functional tags")
     # True: the executor returns an awaitable (e.g. a lambda wrapping an async client call) and runs on the event
     # loop; False: it is synchronous and runs in a worker thread; None: detected from the callable.
-    is_async: Optional[bool] = Field(default=None, description="Executor returns an awaitable")
+    is_async: bool | None = Field(default=None, description="Executor returns an awaitable")
 
 
 # Native solvers (COPASI, Scanpy) run in their own bounded pool: a call that outlives its timeout cannot be
 # interrupted, so it must not be able to exhaust the default executor that everything else shares.
-_NATIVE_POOL: Optional[ThreadPoolExecutor] = None
+_NATIVE_POOL: ThreadPoolExecutor | None = None
 
 
 def _native_pool() -> ThreadPoolExecutor:
@@ -94,7 +96,7 @@ def _native_pool() -> ThreadPoolExecutor:
     return _NATIVE_POOL
 
 
-_NETWORK_POOL: Optional[ThreadPoolExecutor] = None
+_NETWORK_POOL: ThreadPoolExecutor | None = None
 
 
 def _network_pool() -> ThreadPoolExecutor:
@@ -124,7 +126,7 @@ def _is_async_callable(fn: Callable[..., Any]) -> bool:
     target = fn
     while isinstance(target, functools.partial):
         target = target.func
-    return inspect.iscoroutinefunction(target) or inspect.iscoroutinefunction(getattr(target, "__call__", None))
+    return inspect.iscoroutinefunction(target) or (callable(target) and inspect.iscoroutinefunction(target.__call__))
 
 
 async def _await_maybe(value: Any) -> Any:
@@ -138,8 +140,8 @@ class ToolRegistry:
     """
 
     def __init__(self) -> None:
-        self._tools: Dict[str, ToolUniverseEntry] = {}
-        self._executors: Dict[str, Callable[..., Any]] = {}
+        self._tools: dict[str, ToolUniverseEntry] = {}
+        self._executors: dict[str, Callable[..., Any]] = {}
 
     def register(
         self,
@@ -151,16 +153,19 @@ class ToolRegistry:
         self._executors[entry.name] = executor
         logger.debug("Registered tool in ToolUniverse: %s (%s)", entry.name, entry.domain)
 
-    def get_entry(self, name: str) -> Optional[ToolUniverseEntry]:
+    def get_entry(self, name: str) -> ToolUniverseEntry | None:
         return self._tools.get(name)
 
-    def list_tools(self, domain: Optional[str] = None) -> List[ToolUniverseEntry]:
+    def get_executor(self, name: str) -> Callable[..., Any] | None:
+        return self._executors.get(name)
+
+    def list_tools(self, domain: str | None = None) -> list[ToolUniverseEntry]:
         """List registered tools, optionally filtered by agent domain."""
         if domain:
             return [t for t in self._tools.values() if t.domain.lower() == domain.lower()]
         return list(self._tools.values())
 
-    def search_tools(self, query: str, domain: Optional[str] = None) -> List[ToolUniverseEntry]:
+    def search_tools(self, query: str, domain: str | None = None) -> list[ToolUniverseEntry]:
         """Search registered tools by keyword match across name, description, and tags."""
         q = query.lower()
         candidates = self.list_tools(domain)
@@ -178,21 +183,23 @@ class ToolRegistry:
         matched.sort(key=lambda x: x[0], reverse=True)
         return [c for _, c in matched]
 
-    async def execute(self, tool_name: str, **kwargs: Any) -> ToolResult:
+    async def execute(self, tool_name: str, *args: Any, **kwargs: Any) -> ToolResult:
+        if args and isinstance(args[0], dict):
+            kwargs = {**args[0], **kwargs}
         """
         Execute tool with input validation, timeout enforcement, and typed ToolResult output.
         Every call, whatever its outcome, is reported to the active run recorder.
         """
-        started_at = datetime.now(timezone.utc).isoformat()
+        started_at = datetime.now(UTC).isoformat()
         t0 = time.perf_counter()
-        trace: Dict[str, Any] = {}
-        res: Optional[ToolResult] = None
+        trace: dict[str, Any] = {}
+        res: ToolResult | None = None
         raw_kwargs = dict(kwargs)
         # Arguments that fail the schema only for a trivially fixable reason (a limit above its bound, too many
         # list items, {"name": ...} where a string is expected) are repaired once; the original error stands
         # when the repair does not validate. The adjustment is recorded on the result.
         # Model-generated calls (agents, plans) pass repair_arguments=True; programmatic callers get strict validation.
-        adjusted: List[str] = []
+        adjusted: list[str] = []
         entry = self._tools.get(tool_name)
         if kwargs.pop("_repair_arguments", False) and entry is not None:
             from .arg_repair import repair_arguments
@@ -251,7 +258,7 @@ class ToolRegistry:
         assert res is not None  # set on every path that reaches here (control exceptions propagate instead)
         return res
 
-    async def _execute_inner(self, tool_name: str, kwargs: Dict[str, Any], trace: Dict[str, Any]) -> ToolResult:
+    async def _execute_inner(self, tool_name: str, kwargs: dict[str, Any], trace: dict[str, Any]) -> ToolResult:
         entry = self._tools.get(tool_name)
         executor = self._executors.get(tool_name)
         trace["entry"] = entry
@@ -346,7 +353,7 @@ class ToolRegistry:
                 )
 
             # Extract any canonical IDs in data if dict
-            canonical_ids: Dict[str, str] = {}
+            canonical_ids: dict[str, str] = {}
             if isinstance(raw_out, dict):
                 for id_key in ("ensembl_id", "uniprot_id", "biomodel_id", "efo_id", "pmid", "doi", "chembl_id"):
                     if id_key in raw_out and raw_out[id_key]:
@@ -372,7 +379,7 @@ class ToolRegistry:
 
             return res
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             elapsed = time.perf_counter() - start_t
             return ToolResult(
                 success=False,
@@ -407,18 +414,18 @@ class VivarixSimInput(BaseModel):
     biomodel_id: str = Field(default="BIOMD0000000010", pattern=VIVARIX_MODEL_ID)
     duration: float = Field(default=60.0, ge=1.0, le=5000.0, description="seconds")
     intervals: int = Field(default=40, ge=5, le=500)
-    parameter_overrides: Optional[Dict[str, float]] = Field(default=None, max_length=20)
-    sbml_path: Optional[str] = None
-    model_label: Optional[str] = None
-    model_provenance: Optional[Dict[str, Any]] = None
+    parameter_overrides: dict[str, float] | None = Field(default=None, max_length=20)
+    sbml_path: str | None = None
+    model_label: str | None = None
+    model_provenance: dict[str, Any] | None = None
 
 
 class VivarixSteadyStateInput(BaseModel):
     biomodel_id: str = Field(default="BIOMD0000000010", pattern=VIVARIX_MODEL_ID)
-    sbml_path: Optional[str] = None
-    model_label: Optional[str] = None
-    model_provenance: Optional[Dict[str, Any]] = None
-    parameter_overrides: Optional[Dict[str, float]] = Field(default=None, max_length=20)
+    sbml_path: str | None = None
+    model_label: str | None = None
+    model_provenance: dict[str, Any] | None = None
+    parameter_overrides: dict[str, float] | None = Field(default=None, max_length=20)
 
 
 class VivarixParamScanInput(BaseModel):
@@ -427,14 +434,14 @@ class VivarixParamScanInput(BaseModel):
     start_val: float = Field(default=1.0, allow_inf_nan=False)
     end_val: float = Field(default=10.0, allow_inf_nan=False)
     num_steps: int = Field(default=5, ge=2, le=50, description="points, both endpoints included")
-    target_species: Optional[str] = Field(default="Erk2-PP")
+    target_species: str | None = Field(default="Erk2-PP")
     duration: float = Field(default=60.0, ge=1.0, le=5000.0, description="seconds per point")
     intervals: int = Field(default=100, ge=5, le=500)
     spacing: Literal["linear", "log"] = "linear"
     report_all_species: bool = False
-    sbml_path: Optional[str] = None
-    model_label: Optional[str] = None
-    model_provenance: Optional[Dict[str, Any]] = None
+    sbml_path: str | None = None
+    model_label: str | None = None
+    model_provenance: dict[str, Any] | None = None
 
 
 class LithoscribeSynthesisInput(BaseModel):
@@ -442,9 +449,9 @@ class LithoscribeSynthesisInput(BaseModel):
     max_articles: int = Field(default=8, ge=1, le=50)
     check_integrity: bool = True
     # Planned EuropePMC searches ({"query", "sort", "tier", "label"}); when absent the query is decomposed.
-    search_queries: Optional[List[Dict[str, Any]]] = None
-    keywords: Optional[List[str]] = None  # words that rank retrieved passages
-    pinned_ids: Optional[List[str]] = Field(
+    search_queries: list[dict[str, Any]] | None = None
+    keywords: list[str] | None = None  # words that rank retrieved passages
+    pinned_ids: list[str] | None = Field(
         default=None,
         max_length=10,
         description=(
@@ -460,97 +467,12 @@ class WebSurferSearchInput(BaseModel):
 
 
 def register_default_tools(registry: ToolRegistry) -> None:
-    """Register all builtin biomedical tools into the ToolUniverse registry."""
-    from ..utils.biocontext import BioContextMCPClient
-    from ..vivarix.engine import VivarixSimulationEngine
-    from ..lithoscribe.synthesis_engine import LiteratureSynthesisEngine
+    """Register all builtin STEM tools and extensions into the ToolUniverse registry."""
     from ..tools.web_search import FreeWebSearchClient
 
-    biocontext = BioContextMCPClient()
-    vivarix = VivarixSimulationEngine()
-    lithoscribe = LiteratureSynthesisEngine(biocontext)
     web_search = FreeWebSearchClient()
 
-    # 4. Vivarix ODE Time Course
-    registry.register(
-        ToolUniverseEntry(
-            name="vivarix_simulate_time_course",
-            description="Simulate kinetic ODE time-course trajectory via COPASI / BASICO.",
-            domain="vivarix",
-            adapter_type=AdapterType.LOCAL_COMPUTE,
-            input_schema=VivarixSimInput,
-            canonical_id_types=["biomodel_id"],
-            timeout_seconds=45.0,
-            tags=["simulation", "ode", "copasi", "kinetics"],
-        ),
-        executor=lambda biomodel_id="BIOMD0000000010", duration=60.0, intervals=40, parameter_overrides=None, sbml_path=None, model_label=None, model_provenance=None: vivarix.simulate_time_course(
-            biomodel_id=biomodel_id, duration=duration, intervals=intervals, parameter_overrides=parameter_overrides,
-            sbml_path=sbml_path, model_label=model_label, model_provenance=model_provenance,
-        ),
-    )
-
-    # 5. Vivarix Steady State
-    registry.register(
-        ToolUniverseEntry(
-            name="vivarix_compute_steady_state",
-            description="Compute steady-state concentrations and reaction fluxes via COPASI.",
-            domain="vivarix",
-            adapter_type=AdapterType.LOCAL_COMPUTE,
-            input_schema=VivarixSteadyStateInput,
-            canonical_id_types=["biomodel_id"],
-            timeout_seconds=30.0,
-            tags=["steady_state", "copasi", "fluxes"],
-        ),
-        executor=lambda biomodel_id="BIOMD0000000010", sbml_path=None, model_label=None, model_provenance=None, parameter_overrides=None: vivarix.compute_steady_state(
-            biomodel_id=biomodel_id, sbml_path=sbml_path, model_label=model_label, model_provenance=model_provenance,
-            parameter_overrides=parameter_overrides,
-        ),
-    )
-
-    # 6. Vivarix Parameter Scan
-    registry.register(
-        ToolUniverseEntry(
-            name="vivarix_parameter_scan",
-            description="Scan model parameter across values to compute sensitivity curves.",
-            domain="vivarix",
-            adapter_type=AdapterType.LOCAL_COMPUTE,
-            input_schema=VivarixParamScanInput,
-            canonical_id_types=["biomodel_id"],
-            timeout_seconds=120.0,
-            tags=["parameter_scan", "sensitivity", "copasi"],
-        ),
-        executor=lambda biomodel_id="BIOMD0000000010", parameter_name="V1", start_val=1.0, end_val=10.0, num_steps=5, target_species="Erk2-PP", duration=60.0, intervals=100, spacing="linear", report_all_species=False, sbml_path=None, model_label=None, model_provenance=None: vivarix.run_parameter_scan(
-            biomodel_id=biomodel_id, parameter_name=parameter_name, start_val=start_val, end_val=end_val, num_steps=num_steps, target_species=target_species,
-            duration=duration, intervals=intervals, spacing=spacing, report_all_species=report_all_species,
-            sbml_path=sbml_path, model_label=model_label, model_provenance=model_provenance,
-        ),
-    )
-
-    # 8. Lithoscribe Literature Synthesis
-    registry.register(
-        ToolUniverseEntry(
-            name="lithoscribe_literature_synthesis",
-            description=(
-                "Query EuropePMC with query decomposition and passage extraction; named papers are fetched by exact "
-                "PMID/PMCID/DOI (pinned_ids) before any topical search."
-            ),
-            domain="lithoscribe",
-            adapter_type=AdapterType.DIRECT_REST,
-            input_schema=LithoscribeSynthesisInput,
-            canonical_id_types=["pmid", "doi"],
-            timeout_seconds=40.0,
-            tags=["literature", "europepmc", "citations", "paperqa2"],
-            is_async=True,
-        ),
-        executor=lambda query, max_articles=8, check_integrity=True, search_queries=None, keywords=None, pinned_ids=None: (
-            lithoscribe.execute_literature_synthesis(
-                query, max_articles=max_articles, check_integrity=check_integrity,
-                search_queries=search_queries, keywords=keywords, pinned_ids=pinned_ids,
-            )
-        ),
-    )
-
-    # 9. WebSurfer Live Web Search
+    # WebSurfer Live Web Search
     registry.register(
         ToolUniverseEntry(
             name="websurfer_search",
@@ -566,15 +488,101 @@ def register_default_tools(registry: ToolRegistry) -> None:
         executor=lambda query, max_results=3: web_search.search_and_surf(query, max_results=max_results),
     )
 
-    # Feature extensions register their own tools (each failure is logged and skipped).
+    # Feature extensions register their own tools (Archivon, Axiom, Dynamis, Physis, Calcula, etc.)
     from ..extensions import load_extensions, register_extension_tools
 
     load_extensions()
     register_extension_tools(registry)
 
+    # Backward compatibility aliases pointing to Archivon and Dynamis
+    if registry.get_entry("archivon_literature_search") is not None and registry.get_entry("lithoscribe_literature_synthesis") is None:
+        arch_exec = registry.get_executor("archivon_literature_search")
+        registry.register(
+            ToolUniverseEntry(
+                name="lithoscribe_literature_synthesis",
+                description="Backward-compatible alias for Archivon literature search.",
+                domain="lithoscribe",
+                adapter_type=AdapterType.DIRECT_REST,
+                input_schema=LithoscribeSynthesisInput,
+                canonical_id_types=["arxiv_id", "doi", "pmid"],
+                timeout_seconds=40.0,
+                tags=["literature", "citations", "papers"],
+                is_async=True,
+            ),
+            executor=lambda **kwargs: arch_exec(**kwargs) if arch_exec else None,
+        )
+
+    if registry.get_entry("dynamis_simulate_ode") is not None and registry.get_entry("vivarix_simulate_time_course") is None:
+        dyn_exec = registry.get_executor("dynamis_simulate_ode")
+        registry.register(
+            ToolUniverseEntry(
+                name="vivarix_simulate_time_course",
+                description="Backward-compatible alias for Dynamis ODE simulation.",
+                domain="vivarix",
+                adapter_type=AdapterType.LOCAL_COMPUTE,
+                input_schema=VivarixSimInput,
+                canonical_id_types=["computation_id"],
+                timeout_seconds=45.0,
+                tags=["simulation", "ode", "kinetics"],
+            ),
+            executor=lambda biomodel_id="BIOMD0000000010", duration=60.0, intervals=40, **kw: (
+                dyn_exec(model_name="damped_oscillator", t_span=(0.0, duration), num_points=intervals)
+                if dyn_exec else None
+            ),
+        )
+
+    if registry.get_entry("dynamis_parameter_scan") is not None and registry.get_entry("vivarix_parameter_scan") is None:
+        dyn_scan_exec = registry.get_executor("dynamis_parameter_scan")
+        registry.register(
+            ToolUniverseEntry(
+                name="vivarix_parameter_scan",
+                description="Backward-compatible alias for Dynamis parameter scan.",
+                domain="vivarix",
+                adapter_type=AdapterType.LOCAL_COMPUTE,
+                input_schema=VivarixParamScanInput,
+                canonical_id_types=["computation_id"],
+                timeout_seconds=120.0,
+                tags=["parameter_scan", "sensitivity"],
+            ),
+            executor=lambda biomodel_id="BIOMD0000000010", parameter_name="omega", start_val=1.0, end_val=10.0, num_steps=5, duration=60.0, **kw: (
+                dyn_scan_exec(
+                    rhs={"x": "v", "v": "-2*zeta*omega*v - omega^2*x"},
+                    initial_state={"x": 1.0, "v": 0.0},
+                    parameter=parameter_name,
+                    scan_range=(start_val, end_val),
+                    num_points=num_steps,
+                    t_span=(0.0, duration),
+                    base_parameters={"zeta": 0.15, "omega": 2.0},
+                )
+                if dyn_scan_exec else None
+            ),
+        )
+
+    if registry.get_entry("dynamis_equilibrium") is not None and registry.get_entry("vivarix_compute_steady_state") is None:
+        dyn_eq_exec = registry.get_executor("dynamis_equilibrium")
+        registry.register(
+            ToolUniverseEntry(
+                name="vivarix_compute_steady_state",
+                description="Backward-compatible alias for Dynamis equilibrium solver.",
+                domain="vivarix",
+                adapter_type=AdapterType.LOCAL_COMPUTE,
+                input_schema=VivarixSteadyStateInput,
+                canonical_id_types=["computation_id"],
+                timeout_seconds=30.0,
+                tags=["steady_state", "equilibrium"],
+            ),
+            executor=lambda biomodel_id="BIOMD0000000010", **kw: (
+                dyn_eq_exec(
+                    rhs={"x": "v", "v": "-2*0.15*2.0*v - 4.0*x"},
+                    guess={"x": 0.1, "v": 0.1},
+                )
+                if dyn_eq_exec else None
+            ),
+        )
+
 
 # Global singleton instance
-_GLOBAL_REGISTRY: Optional[ToolRegistry] = None
+_GLOBAL_REGISTRY: ToolRegistry | None = None
 _REGISTRY_COMPLETE = False
 _REGISTRY_LAST_ATTEMPT = 0.0
 _REGISTRY_RETRY_SECONDS = 60.0

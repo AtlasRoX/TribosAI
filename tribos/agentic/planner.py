@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from .guardrails import SPOTLIGHT_RULE, spotlight
 from .plan_graph import PlanGraph, policy_violation
@@ -65,7 +66,7 @@ You are the joiner of a plan-and-execute research agent (LLMCompiler). You read 
 Reply with only a JSON object: {"decision": "finish" | "replan", "reason": "<one sentence>", "missing": ["<what is missing>", ...]}"""
 
 
-def _id_values(item: Any) -> List[str]:
+def _id_values(item: Any) -> list[str]:
     if not isinstance(item, dict):
         return [str(item)[:60]] if isinstance(item, (str, int, float)) else []
     out = []
@@ -78,9 +79,9 @@ def _id_values(item: Any) -> List[str]:
     return out
 
 
-def summarise_result(res: Any) -> Dict[str, Any]:
+def summarise_result(res: Any) -> dict[str, Any]:
     """Compact summary of one ToolResult: success, error type, ids and the sizes of its list fields."""
-    out: Dict[str, Any] = {"tool": getattr(res, "tool_name", ""), "success": bool(getattr(res, "success", False))}
+    out: dict[str, Any] = {"tool": getattr(res, "tool_name", ""), "success": bool(getattr(res, "success", False))}
     if not out["success"]:
         et = getattr(res, "error_type", None)
         out["error_type"] = getattr(et, "value", et)
@@ -91,7 +92,7 @@ def summarise_result(res: Any) -> Dict[str, Any]:
         out["ids"] = {str(k): str(v)[:60] for k, v in list(ids.items())[:4]}
     data = getattr(res, "data", None)
     if isinstance(data, dict):
-        fields: Dict[str, Any] = {}
+        fields: dict[str, Any] = {}
         for k, v in list(data.items())[:30]:
             if isinstance(v, list):
                 sample = [s for item in v[:3] for s in _id_values(item)][:4]
@@ -105,9 +106,9 @@ def summarise_result(res: Any) -> Dict[str, Any]:
     return out
 
 
-def pipeline_summary(tool_results: Dict[str, Any], skip_prefix: str = "agent.plan_execute.") -> Dict[str, Any]:
+def pipeline_summary(tool_results: dict[str, Any], skip_prefix: str = "agent.plan_execute.") -> dict[str, Any]:
     """Which tool_results keys exist, which succeeded or failed, and the key ids each one found."""
-    out: Dict[str, Any] = {}
+    out: dict[str, Any] = {}
     for key, res in list(tool_results.items()):
         if skip_prefix and str(key).startswith(skip_prefix):
             continue
@@ -120,7 +121,7 @@ def pipeline_summary(tool_results: Dict[str, Any], skip_prefix: str = "agent.pla
     return out
 
 
-def constraint_lines(ctx: Any, max_nodes: int) -> List[str]:
+def constraint_lines(ctx: Any, max_nodes: int) -> list[str]:
     lines = [f"plan at most {max_nodes} nodes"]
     if ctx is None:
         return lines
@@ -148,7 +149,7 @@ def constraint_lines(ctx: Any, max_nodes: int) -> List[str]:
     return lines
 
 
-def select_tools(state: Any, sub_questions: Sequence[Any], k: int = 8, per_sub: int = 3, cap: int = 12) -> List[Any]:
+def select_tools(state: Any, sub_questions: Sequence[Any], k: int = 8, per_sub: int = 3, cap: int = 12) -> list[Any]:
     """Registry entries to show the planner: retrieval over the query and each sub-question, policy-filtered."""
     registry = state.registry
     try:
@@ -156,9 +157,9 @@ def select_tools(state: Any, sub_questions: Sequence[Any], k: int = 8, per_sub: 
     except Exception:  # noqa: BLE001
         return []
     excluded = [e.name for e in entries if policy_violation(e, state.ctx)]
-    picked: List[Any] = []
+    picked: list[Any] = []
 
-    def add(found: List[Any]) -> None:
+    def add(found: list[Any]) -> None:
         for e in found:
             if e not in picked and len(picked) < cap:
                 picked.append(e)
@@ -172,7 +173,7 @@ def select_tools(state: Any, sub_questions: Sequence[Any], k: int = 8, per_sub: 
     return picked
 
 
-def _sub_question_lines(sub_questions: Sequence[Any]) -> List[str]:
+def _sub_question_lines(sub_questions: Sequence[Any]) -> list[str]:
     lines = []
     for q in sub_questions:
         deps = f" (after {', '.join(q.depends_on)})" if getattr(q, "depends_on", None) else ""
@@ -181,7 +182,7 @@ def _sub_question_lines(sub_questions: Sequence[Any]) -> List[str]:
     return lines
 
 
-def steering_messages(state: Any) -> List[str]:
+def steering_messages(state: Any) -> list[str]:
     out = list(state.bag.get("steering") or [])
     try:
         out.extend(state.control.peek_steering())
@@ -190,11 +191,11 @@ def steering_messages(state: Any) -> List[str]:
     return out
 
 
-def observations(graph_nodes: Sequence[Any], results: Dict[str, Any]) -> List[Dict[str, Any]]:
+def observations(graph_nodes: Sequence[Any], results: dict[str, Any]) -> list[dict[str, Any]]:
     """What each executed node returned, for the joiner and the next planning round."""
     out = []
     for n in graph_nodes:
-        row: Dict[str, Any] = {"id": n.id, "tool": n.tool, "purpose": n.purpose, "status": n.status}
+        row: dict[str, Any] = {"id": n.id, "tool": n.tool, "purpose": n.purpose, "status": n.status}
         if n.status == "done" and n.id in results:
             row["result"] = summarise_result(results[n.id])
         elif n.error:
@@ -209,8 +210,8 @@ def build_plan_prompt(
     tools: Sequence[Any],
     max_nodes: int,
     mode: str = "dag",
-    previous: Optional[List[Dict[str, Any]]] = None,
-    missing: Optional[List[str]] = None,
+    previous: list[dict[str, Any]] | None = None,
+    missing: list[str] | None = None,
 ) -> tuple:
     system = (
         PLAN_SYSTEM.replace("@MAX_NODES@", str(max_nodes))
@@ -247,7 +248,7 @@ def build_plan_prompt(
     return system, "\n\n".join(parts)
 
 
-def build_join_prompt(state: Any, graph: PlanGraph, results: Dict[str, Any], all_nodes: Sequence[Any]) -> tuple:
+def build_join_prompt(state: Any, graph: PlanGraph, results: dict[str, Any], all_nodes: Sequence[Any]) -> tuple:
     system = JOIN_SYSTEM.replace("@SPOTLIGHT_RULE@", SPOTLIGHT_RULE)
     parts = [f"<question>{state.clean_query or state.query}</question>"]
     if state.sub_questions:
@@ -268,7 +269,7 @@ def build_join_prompt(state: Any, graph: PlanGraph, results: Dict[str, Any], all
     return system, "\n\n".join(parts)
 
 
-def parse_join(value: Any) -> Dict[str, Any]:
+def parse_join(value: Any) -> dict[str, Any]:
     """{"decision": "finish"|"replan", "reason", "missing"}; anything unreadable means finish."""
     if not isinstance(value, dict):
         return {"decision": "finish", "reason": "joiner reply unreadable", "missing": []}

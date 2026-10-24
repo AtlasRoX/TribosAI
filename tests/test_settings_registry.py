@@ -8,7 +8,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 import pytest
 
@@ -287,7 +287,7 @@ NUMERIC_INPUTS = (None, "", "  ", "3", " 12 ", "0", "-4", "100000", "abc", "2.5"
 FLAG_INPUTS = (None, "", "off", "OFF", " on ", "auto", "1", "true", "no", "bogus")
 
 
-def _apply(monkeypatch, name: str, raw: Optional[str]) -> None:
+def _apply(monkeypatch, name: str, raw: str | None) -> None:
     if raw is None:
         monkeypatch.delenv(name, raising=False)
     else:
@@ -342,7 +342,7 @@ def test_validate_environment_clean_environment_has_no_problems():
 def test_validate_environment_reports_typos_with_a_suggestion():
     problems = validate_environment({"TRIBOS_JOB_WORKER": "3", "TRIBOS_RELIABILTY": "on", "TRIBOS_ZZZ": "1"})
     assert len(problems) == 3
-    by_name: Dict[str, str] = {p.split(" ", 1)[0]: p for p in problems}
+    by_name: dict[str, str] = {p.split(" ", 1)[0]: p for p in problems}
     assert "did you mean TRIBOS_JOB_WORKERS?" in by_name["TRIBOS_JOB_WORKER"]
     assert "did you mean TRIBOS_RELIABILITY?" in by_name["TRIBOS_RELIABILTY"]
     assert "did you mean" not in by_name["TRIBOS_ZZZ"]
@@ -402,7 +402,7 @@ def test_health_reports_the_config_problem_count(monkeypatch):
     from app.backend import main as backend_main
 
     class _Probe:
-        async def async_check_service_readiness(self) -> Dict[str, Any]:
+        async def async_check_service_readiness(self) -> dict[str, Any]:
             return {"mcp_remote_active": False, "direct_adapters": {}}
 
     monkeypatch.setattr(backend_main, "BioContextMCPClient", _Probe)

@@ -38,10 +38,9 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any
 
 from .config import env_float, env_int
-
 
 # What remaining_seconds() reports when the run has no time limit: finite, so callers can still use it in min() and
 # as a timeout, but far beyond any real run.
@@ -91,7 +90,7 @@ class RunBudget:
     tokens: int = 0
     started: float = field(default_factory=time.perf_counter)
     exhausted_reason: str = ""
-    by_phase: Dict[str, Dict[str, int]] = field(default_factory=dict)
+    by_phase: dict[str, dict[str, int]] = field(default_factory=dict)
     provider_usage_calls: int = 0  # calls whose token charge came from the provider's reported usage
     estimated_calls: int = 0  # calls charged from the character estimate only
     # Kept for FINAL_PHASES (see the module docstring); 0 = no reserve (the dataclass default; from_env sets one).
@@ -104,7 +103,7 @@ class RunBudget:
     unreconciled_calls: int = 0  # failed/cancelled calls whose real usage is unknown (prompt estimate kept)
 
     @classmethod
-    def from_env(cls, overrides: Optional[Dict[str, Any]] = None, effort_level: Optional[str] = None) -> "RunBudget":
+    def from_env(cls, overrides: dict[str, Any] | None = None, effort_level: str | None = None) -> RunBudget:
         from .config import get_effort_profile
 
         profile = get_effort_profile(effort_level) if effort_level else {}
@@ -200,7 +199,7 @@ class RunBudget:
     def optional_remaining_tokens(self) -> int:
         return max(0, self.max_tokens - self.final_reserve_tokens - self.tokens)
 
-    def _phase(self, phase: str) -> Dict[str, int]:
+    def _phase(self, phase: str) -> dict[str, int]:
         return self.by_phase.setdefault(phase or "agent", {"tool_calls": 0, "llm_calls": 0, "tokens": 0})
 
     def charge_tool(self, phase: str = "", n: int = 1) -> None:
@@ -217,7 +216,7 @@ class RunBudget:
         """The most tokens one reply may still produce without exceeding max_tokens."""
         return self.remaining_tokens()
 
-    def charge_llm(self, phase: str = "", prompt_chars: int = 0, output_tokens: int = 0, final: Optional[bool] = None) -> int:
+    def charge_llm(self, phase: str = "", prompt_chars: int = 0, output_tokens: int = 0, final: bool | None = None) -> int:
         """Charge one model call: its estimated prompt tokens plus the output it may produce (`output_tokens`, reserved
         now so concurrent calls cannot overshoot together). Returns the tokens charged; pass that back as
         estimated_prompt to record_usage, or as reserved to add_output_tokens, once the reply is in.
@@ -260,7 +259,7 @@ class RunBudget:
         return total
 
     def admit(
-        self, phase: str, prompt_chars: int, max_output: int, *, final: Optional[bool] = None, min_output: int = 1
+        self, phase: str, prompt_chars: int, max_output: int, *, final: bool | None = None, min_output: int = 1
     ) -> Allocation:
         """Admit one model call: charge its prompt estimate plus the largest output allocation (at most max_output) that
         fits in its pool, and return it. The provider must be sent `output_cap` as max_tokens, and the call settled
@@ -316,9 +315,9 @@ class RunBudget:
         self,
         alloc: Allocation,
         *,
-        input_tokens: Optional[int] = None,
-        output_tokens: Optional[int] = None,
-        output_chars: Optional[int] = None,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        output_chars: int | None = None,
         failed: bool = False,
     ) -> None:
         """Replace an admitted call's allocation with what it actually used and release the rest. Provider-reported
@@ -371,7 +370,7 @@ class RunBudget:
         if self.tokens >= self.max_tokens and not self.exhausted_reason:
             self.exhausted_reason = f"token budget of {self.max_tokens} used"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "limits": {
                 "tool_calls": self.max_tool_calls,

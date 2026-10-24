@@ -29,7 +29,8 @@ export function CitationRef({ citeKey, occurrence, map, href, children }: Citati
   const dialogId = useId();
   const key = resolveKey(map, citeKey);
   const entry = entryFor(map, key);
-  const link = safeHref(entry?.url) ?? safeHref(href);
+  const externalLink = safeHref(entry?.url) ?? safeHref(href);
+  const chipHref = externalLink ?? (typeof entry?.url === "string" && entry.url.startsWith("#") ? entry.url : "#");
 
   const close = useCallback((restoreFocus: boolean) => {
     setOpen(false);
@@ -46,8 +47,9 @@ export function CitationRef({ citeKey, occurrence, map, href, children }: Citati
   }, [open]);
 
   if (!entry) {
+    if (!externalLink) return <>{children}</>;
     return (
-      <a href={link} target="_blank" rel="noopener noreferrer" className="external-link">
+      <a href={externalLink} target="_blank" rel="noopener noreferrer" className="external-link">
         {children}
         <ExternalLink style={{ width: 11, height: 11, display: "inline", marginLeft: 3 }} />
       </a>
@@ -81,9 +83,9 @@ export function CitationRef({ citeKey, occurrence, map, href, children }: Citati
     <>
       <a
         ref={anchorRef}
-        href={link}
-        target="_blank"
-        rel="noopener noreferrer"
+        href={chipHref}
+        target={externalLink ? "_blank" : undefined}
+        rel={externalLink ? "noopener noreferrer" : undefined}
         className={`${styles.chip}${retracted ? ` ${styles.chipRetracted}` : ""}`}
         aria-haspopup="dialog"
         aria-expanded={open}

@@ -30,7 +30,7 @@ import logging
 import re
 import threading
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -45,7 +45,7 @@ _MARKER_TTL_SECONDS = 6 * 3600
 _MARKER_MAX = 5000
 
 # (user_id, thread_id) -> {"question", "options", "query", "at"}: the last turn of that thread asked a question.
-_ASKED: Dict[Tuple[str, str], Dict[str, Any]] = {}
+_ASKED: dict[tuple[str, str], dict[str, Any]] = {}
 _ASKED_LOCK = threading.Lock()
 
 _COMPARE_RE = re.compile(r"\b(compare|comparison|versus|vs\.?|isoforms?|paralogs?|family|members?|all\s+(?:three|four|of\s+them))\b", re.I)
@@ -55,18 +55,18 @@ _NUMBER_ANSWER_RE = re.compile(r"^\s*(?:option\s*)?(\d)\s*[.)]?\s*$", re.I)
 class ClarifyVerdict(BaseModel):
     ambiguous: bool = False
     question: str = Field(default="", max_length=400)
-    options: List[str] = Field(default_factory=list)
+    options: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------------------------------------
 # Per-thread marker ("never twice in a row")
 # ---------------------------------------------------------------------------------------------------------
 
-def _marker_key(state: AgentState) -> Tuple[str, str]:
+def _marker_key(state: AgentState) -> tuple[str, str]:
     return (str(state.user_id), str(state.thread_id))
 
 
-def remember_question(user_id: str, thread_id: str, question: str, options: List[str], query: str) -> None:
+def remember_question(user_id: str, thread_id: str, question: str, options: list[str], query: str) -> None:
     now = time.time()
     with _ASKED_LOCK:
         for key, value in list(_ASKED.items()):
@@ -78,7 +78,7 @@ def remember_question(user_id: str, thread_id: str, question: str, options: List
         _ASKED[(user_id, thread_id)] = {"question": question, "options": list(options), "query": query[:1000], "at": now}
 
 
-def pop_question(user_id: str, thread_id: str) -> Optional[Dict[str, Any]]:
+def pop_question(user_id: str, thread_id: str) -> dict[str, Any] | None:
     with _ASKED_LOCK:
         value = _ASKED.pop((user_id, thread_id), None)
     if value is not None and time.time() - float(value.get("at", 0)) > _MARKER_TTL_SECONDS:
@@ -103,9 +103,9 @@ def _mentions_attachment(query: str, att: Any) -> bool:
     return any(tok and tok in q for tok in (name, stem, ident) if len(tok) >= 3)
 
 
-def detect_signals(ctx: Any, query: str) -> List[Dict[str, Any]]:
+def detect_signals(ctx: Any, query: str) -> list[dict[str, Any]]:
     """Ambiguity signals for one question: [{"signal", "strength": high|borderline, "question", "options", "reason"}]."""
-    out: List[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     scope = getattr(ctx, "scope", "research")
     if scope == "unclear":
         out.append(
@@ -176,14 +176,14 @@ def detect_signals(ctx: Any, query: str) -> List[Dict[str, Any]]:
     return out
 
 
-def format_question(question: str, options: List[str]) -> str:
+def format_question(question: str, options: list[str]) -> str:
     lines = [question.strip(), ""]
     lines.extend(f"{i}. {opt}" for i, opt in enumerate(options, 1))
     lines.extend(["", "Reply with a number or in your own words, and I will continue from there."])
     return "\n".join(lines)
 
 
-async def _model_check(state: AgentState, signal: Dict[str, Any]) -> Optional[ClarifyVerdict]:
+async def _model_check(state: AgentState, signal: dict[str, Any]) -> ClarifyVerdict | None:
     if not state.llm.available:
         return None
     system = (
@@ -204,7 +204,7 @@ async def _model_check(state: AgentState, signal: Dict[str, Any]) -> Optional[Cl
         return None
 
 
-def _is_answer(answer: str, options: List[str], scope: str) -> bool:
+def _is_answer(answer: str, options: list[str], scope: str) -> bool:
     """The reply answers the question (rather than asking something new)."""
     low = answer.lower().strip()
     if not low:
@@ -214,7 +214,7 @@ def _is_answer(answer: str, options: List[str], scope: str) -> bool:
     return scope != "research" or len(low.split()) <= 6
 
 
-async def _continue_after_answer(state: AgentState, previous: Dict[str, Any]) -> None:
+async def _continue_after_answer(state: AgentState, previous: dict[str, Any]) -> None:
     """CLAM's last step: answer the clarified question. A short reply ("2", "KRAS") is merged with the original
     question and the routing context is rebuilt in place, so the turn searches for what was meant."""
     answer = state.clean_query.strip()
@@ -266,7 +266,7 @@ class ClarifyPhase(AgentPhase):
     def applies(self, state: AgentState) -> bool:
         return bool(state.options.get("allow_clarification", True))
 
-    async def run(self, state: AgentState) -> Optional[PhaseOutcome]:
+    async def run(self, state: AgentState) -> PhaseOutcome | None:
         previous = pop_question(*_marker_key(state))
         if previous is not None or state.bag.get("clarified"):
             # This turn answers the question asked last turn: never ask twice in a row.
@@ -278,7 +278,7 @@ class ClarifyPhase(AgentPhase):
         if not signals:
             return None
         chosen = next((s for s in signals if s["strength"] == "high"), None)
-        verdict: Optional[ClarifyVerdict] = None
+        verdict: ClarifyVerdict | None = None
         if chosen is None:
             borderline = signals[0]
             verdict = await _model_check(state, borderline)

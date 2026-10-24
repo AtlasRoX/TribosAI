@@ -8,7 +8,7 @@ unchanged. Every other framework runs the registered phases that list it (or all
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, Optional
+from typing import Any
 
 from tribos.config.settings import FLAG, get_float, get_int, get_str
 
@@ -23,7 +23,7 @@ AUTO = "auto"
 AGENTIC_FRAMEWORKS = (AGENTIC, SUPERVISOR, SWARM, DEBATE)
 ALL_FRAMEWORKS = (AUTO, CLASSIC, *AGENTIC_FRAMEWORKS)
 
-FRAMEWORK_DESCRIPTIONS: Dict[str, str] = {
+FRAMEWORK_DESCRIPTIONS: dict[str, str] = {
     AUTO: (
         "Reads each question and picks the best architecture for it, then brings in critics to debate the draft "
         "when the evidence conflicts or the question is safety-critical."
@@ -47,7 +47,7 @@ EFFORT_HIGH = "high"
 EFFORT_ULTRA = "ultra"
 ALL_EFFORT_LEVELS = (EFFORT_LOW, EFFORT_MEDIUM, EFFORT_HIGH, EFFORT_ULTRA)
 
-EFFORT_PROFILES: Dict[str, Dict[str, Any]] = {
+EFFORT_PROFILES: dict[str, dict[str, Any]] = {
     EFFORT_LOW: {
         "level": EFFORT_LOW,
         "label": "Low",
@@ -119,7 +119,7 @@ EFFORT_PROFILES: Dict[str, Dict[str, Any]] = {
 }
 
 
-def get_effort_profile(level: Optional[str] = None) -> Dict[str, Any]:
+def get_effort_profile(level: str | None = None) -> dict[str, Any]:
     """Retrieve the deliberation and budget profile for an effort level (defaults to 'medium')."""
     raw = (level or "").strip().lower()
     if raw in ("max", "highest", "extreme"):
@@ -133,12 +133,12 @@ def get_effort_profile(level: Optional[str] = None) -> Dict[str, Any]:
     return EFFORT_PROFILES.get(raw, EFFORT_PROFILES[EFFORT_MEDIUM])
 
 
-def is_agentic(framework: Optional[str]) -> bool:
+def is_agentic(framework: str | None) -> bool:
     """Whether a run gets a run control and agent phases; Auto always routes to an agentic framework."""
     return framework in AGENTIC_FRAMEWORKS or framework == AUTO
 
 
-def resolve_framework(requested: Optional[str], default: Optional[str] = None) -> str:
+def resolve_framework(requested: str | None, default: str | None = None) -> str:
     """A known framework id; unknown or empty values fall back to the default (env TRIBOS_DEFAULT_FRAMEWORK)."""
     value = (requested or "").strip()
     if value in ALL_FRAMEWORKS:

@@ -7,18 +7,18 @@ import datetime as dt
 import gzip
 import json
 import socket
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
+from tests.fakes import build_recording_registry
 from tribos.evals import cassette as cas
 from tribos.evals.cli import main as cli_main
 from tribos.evals.runner import Evaluator, RunConfig
 from tribos.evals.schema import EvalCase
 from tribos.tools import reliability
 from tribos.utils.llm import llm_factory
-from tests.fakes import build_recording_registry
 
 TODAY = dt.date.today().isoformat()
 
@@ -101,13 +101,13 @@ class CassetteFakeOrchestrator:
 
         self._registry = registry
         self.memory = FakeMemory()
-        self.reasoning: List[str] = []
+        self.reasoning: list[str] = []
 
     @property
     def registry(self) -> Any:
         return self._registry
 
-    async def execute_inquiry(self, query: str, **kw: Any) -> Dict[str, Any]:
+    async def execute_inquiry(self, query: str, **kw: Any) -> dict[str, Any]:
 
         res = await self._registry.execute("lithoscribe_literature_synthesis", query=query, max_articles=8)
         llm = llm_factory.get_llm(model_name=kw["model_name"], streaming=True)
@@ -132,7 +132,7 @@ class CassetteFakeOrchestrator:
 
 
 def golden_case(**over: Any) -> EvalCase:
-    data: Dict[str, Any] = {
+    data: dict[str, Any] = {
         "id": "golden-fake", "suite": "golden", "query": "Summarise sotorasib's approval and CodeBreaK 200.",
         "framework": "agentic-plan-execute",
         "answer": {"verified": None, "facts": [
@@ -150,11 +150,11 @@ def _fake_env(monkeypatch):
     return chat, reg, calls
 
 
-def _run(ev: Evaluator, cases: List[EvalCase]):
+def _run(ev: Evaluator, cases: list[EvalCase]):
     return asyncio.run(ev.run(cases))
 
 
-def _scored(res) -> Dict[str, Any]:
+def _scored(res) -> dict[str, Any]:
     """What a replay must reproduce exactly: pass, checks, metrics and the scored observations."""
     obs = {k: v for k, v in res.observed.items() if k != "replay_latency_s"}
     return {"passed": res.passed, "checks": [c.model_dump() for c in res.checks], "metrics": res.metrics,

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from typing import Any, Dict, List
+from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
@@ -53,28 +53,30 @@ _STATE = {
     "interrupted": "failed",
 }
 
-_SKILLS: List[Dict[str, Any]] = [
+_SKILLS: list[dict[str, Any]] = [
     {
-        "id": "biomedical-research",
-        "name": "Biomedical research question",
+        "id": "stem-research",
+        "name": "Engineering, Mathematics and Physics Research",
         "description": (
-            "Answers a biomedical research question with literature, target-disease associations, clinical trials, "
-            "drug mechanisms and variant evidence; every claim is checked against the retrieved evidence and cited."
+            "Answers a STEM research question with mathematics (Axiom), physics and reference data (Physis), "
+            "numerical simulation (Dynamis), literature (Archivon), and sandboxed computation (Calcula); "
+            "every claim is verified and cited."
         ),
-        "tags": ["biomedical", "literature", "drug discovery", "target assessment", "clinical trials"],
+        "tags": ["engineering", "mathematics", "physics", "simulation", "computer algebra", "literature"],
         "examples": [
-            "What diseases is KRAS associated with, and which drugs target it?",
-            "Summarise the clinical trial evidence for osimertinib in EGFR-mutant NSCLC.",
+            "Derive the dispersion relation for plasma oscillations and solve for the cutoff frequency.",
+            "Simulate the harmonic oscillator ODE system with damping and plot the trajectory.",
+            "What is the fine-structure constant and its CODATA 2022 recommended value?",
         ],
         "inputModes": ["text/plain"],
         "outputModes": ["text/plain", "text/markdown"],
     },
     {
-        "id": "model-simulation",
-        "name": "Kinetic model simulation",
-        "description": "Simulates an SBML kinetic model from BioModels (time course, steady state, parameter scan) and explains the result.",
-        "tags": ["systems biology", "SBML", "COPASI", "simulation"],
-        "examples": ["Simulate BIOMD0000000010 for 200 seconds and report the MAPK-PP endpoint."],
+        "id": "symbolic-numerical-simulation",
+        "name": "Symbolic Mathematics and Numerical Simulation",
+        "description": "Performs exact computer algebra with SymPy and numerical ODE simulation and optimization with SciPy.",
+        "tags": ["symbolic math", "SymPy", "ODE", "SciPy", "simulation"],
+        "examples": ["Solve the differential equation dy/dx + 2*y = exp(-x) with y(0) = 1."],
         "inputModes": ["text/plain"],
         "outputModes": ["text/plain", "text/markdown"],
     },
@@ -86,15 +88,16 @@ def _base_url(request: Request) -> str:
 
 
 @router.get("/.well-known/agent-card.json")
-async def agent_card(request: Request) -> Dict[str, Any]:
+async def agent_card(request: Request) -> dict[str, Any]:
     base = _base_url(request)
     info = _server_info()
     return {
         "protocolVersion": A2A_VERSION,
         "name": "Tribos",
         "description": (
-            "Biomedical research agent: plans and runs evidence searches across literature, knowledge graphs, trials, "
-            "drug and variant databases and kinetic models, then returns a verified, cited answer."
+            "Engineering, Mathematics and Scientific R&D Assistant: plans and executes multi-agent investigations across "
+            "literature (Archivon), symbolic mathematics (Axiom), numerical simulation (Dynamis), sandboxed Python (Calcula), "
+            "and physical constants (Physis), returning verified, cited answers."
         ),
         "url": f"{base}/a2a",
         "preferredTransport": "JSONRPC",
@@ -115,7 +118,7 @@ def _text_of(message: Any) -> str:
     if not isinstance(message, dict):
         return ""
     parts = message.get("parts") or message.get("content") or []
-    texts: List[str] = []
+    texts: list[str] = []
     for part in parts if isinstance(parts, list) else []:
         if not isinstance(part, dict):
             continue
@@ -125,7 +128,7 @@ def _text_of(message: Any) -> str:
     return "\n".join(t.strip() for t in texts if t.strip())
 
 
-def _agent_message(text: str, task_id: str, context_id: str) -> Dict[str, Any]:
+def _agent_message(text: str, task_id: str, context_id: str) -> dict[str, Any]:
     return {
         "kind": "message",
         "role": "agent",
@@ -136,10 +139,10 @@ def _agent_message(text: str, task_id: str, context_id: str) -> Dict[str, Any]:
     }
 
 
-def task_view(job: Dict[str, Any]) -> Dict[str, Any]:
+def task_view(job: dict[str, Any]) -> dict[str, Any]:
     state = _STATE.get(job["status"], "unknown")
-    status: Dict[str, Any] = {"state": state, "timestamp": job.get("updated_at")}
-    task: Dict[str, Any] = {
+    status: dict[str, Any] = {"state": state, "timestamp": job.get("updated_at")}
+    task: dict[str, Any] = {
         "kind": "task",
         "id": job["job_id"],
         "contextId": job["thread_id"],
@@ -172,7 +175,7 @@ def task_view(job: Dict[str, Any]) -> Dict[str, Any]:
     return task
 
 
-def _job_or_404(user_id: str, task_id: Any) -> Dict[str, Any]:
+def _job_or_404(user_id: str, task_id: Any) -> dict[str, Any]:
     if not isinstance(task_id, str) or not JOB_ID_RE.match(task_id):
         raise RpcError(TASK_NOT_FOUND, "Task not found")
     job = get_job_manager().get(task_id, user_id)
@@ -181,7 +184,7 @@ def _job_or_404(user_id: str, task_id: Any) -> Dict[str, Any]:
     return job
 
 
-async def _send_message(user_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
+async def _send_message(user_id: str, params: dict[str, Any]) -> dict[str, Any]:
     message = params.get("message")
     text = _text_of(message)
     if not text:
@@ -206,7 +209,7 @@ async def _send_message(user_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
     return task_view(manager.get(job["job_id"], user_id) or job)
 
 
-async def _list_tasks(user_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
+async def _list_tasks(user_id: str, params: dict[str, Any]) -> dict[str, Any]:
     try:
         size = max(1, min(100, int(params.get("pageSize") or 50)))
     except (TypeError, ValueError):
@@ -220,7 +223,7 @@ async def _list_tasks(user_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
     return {"tasks": tasks, "nextPageToken": "", "pageSize": size, "totalSize": len(tasks)}
 
 
-async def _cancel_task(user_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
+async def _cancel_task(user_id: str, params: dict[str, Any]) -> dict[str, Any]:
     job = _job_or_404(user_id, params.get("id"))
     if job["status"] in ("succeeded", "failed", "cancelled"):
         raise RpcError(TASK_NOT_CANCELABLE, f"Task is already {_STATE[job['status']]}")
@@ -228,7 +231,7 @@ async def _cancel_task(user_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
     return task_view(get_job_manager().get(job["job_id"], user_id) or updated or job)
 
 
-async def _handle(user_id: str, method: str, params: Dict[str, Any]) -> Any:
+async def _handle(user_id: str, method: str, params: dict[str, Any]) -> Any:
     if method in ("SendMessage", "message/send"):
         return await _send_message(user_id, params)
     if method in ("GetTask", "tasks/get"):
@@ -246,7 +249,7 @@ async def a2a_endpoint(request: Request, user_id: str = Depends(get_current_user
     if error is not None:
         return error
 
-    async def handler(method: str, req_id: Any, params: Dict[str, Any]) -> Any:
+    async def handler(method: str, req_id: Any, params: dict[str, Any]) -> Any:
         return await _handle(user_id, method, params)
 
     return await dispatch_rpc(payload, handler)

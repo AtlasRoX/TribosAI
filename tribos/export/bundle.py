@@ -6,7 +6,7 @@ import io
 import json
 import logging
 import zipfile
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .report_model import ReportModel, report_markdown
 
@@ -17,7 +17,7 @@ def _answer_markdown(report: ReportModel) -> str:
     return f"# {report.question or 'Question'}\n\n{report.answer_markdown}\n"
 
 
-def _reproduce_md(report: ReportModel, manifest: Optional[Dict[str, Any]], notes: List[str]) -> str:
+def _reproduce_md(report: ReportModel, manifest: dict[str, Any] | None, notes: list[str]) -> str:
     run_id = report.run_id or "<run_id>"
     lines = [
         "# Reproducing this run",
@@ -72,8 +72,8 @@ def render_bundle(report: ReportModel) -> bytes:
     from .docx_renderer import render_docx
     from .pdf_renderer import render_pdf
 
-    notes: List[str] = []
-    files: Dict[str, bytes] = {}
+    notes: list[str] = []
+    files: dict[str, bytes] = {}
     for name, fn in (("report.pdf", render_pdf), ("report.docx", render_docx)):
         try:
             files[name] = fn(report)

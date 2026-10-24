@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import weakref
-from typing import Dict
 
 from fastapi import HTTPException
 
@@ -17,7 +16,7 @@ class UserConcurrencyLimiter:
 
     def __init__(self, limit: int) -> None:
         self.limit = max(1, int(limit))
-        self._active: Dict[str, int] = {}
+        self._active: dict[str, int] = {}
 
     def try_acquire(self, user_id: str) -> bool:
         current = self._active.get(user_id, 0)
@@ -46,7 +45,7 @@ class UserSemaphores:
 
     def __init__(self, value: int = 1) -> None:
         self.value = value
-        self._items: "weakref.WeakValueDictionary[str, asyncio.Semaphore]" = weakref.WeakValueDictionary()
+        self._items: weakref.WeakValueDictionary[str, asyncio.Semaphore] = weakref.WeakValueDictionary()
 
     def get(self, user_id: str) -> asyncio.Semaphore:
         sem = self._items.get(user_id)

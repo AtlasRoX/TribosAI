@@ -28,7 +28,7 @@ import asyncio
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -77,7 +77,7 @@ class SpecialistTurn(BaseModel):
     thought: str = ""
     action: str = "finish"
     tool: str = ""
-    args: Optional[Dict[str, Any]] = None
+    args: dict[str, Any] | None = None
     summary: str = ""
 
 
@@ -85,7 +85,7 @@ class SwarmTurn(BaseModel):
     action: str = "finish"
     target: str = ""
     tool: str = ""
-    args: Optional[Dict[str, Any]] = None
+    args: dict[str, Any] | None = None
     note: str = ""
 
 
@@ -97,7 +97,7 @@ class Critique(BaseModel):
 
 
 class DebateReply(BaseModel):
-    critiques: List[Critique] = Field(default_factory=list)
+    critiques: list[Critique] = Field(default_factory=list)
     verdict: str = "accept"
 
 
@@ -110,10 +110,10 @@ class Dialogue:
         self.topology = topology
         existing = state.artifacts.get("agent_dialogue")
         prior = existing.get("turns") if isinstance(existing, dict) and existing.get("topology") == topology else None
-        self.turns: List[Dict[str, Any]] = list(prior or [])
+        self.turns: list[dict[str, Any]] = list(prior or [])
         self._n = 0
 
-    def add(self, agent: str, action: str, tool: Optional[str] = None, summary: str = "") -> None:
+    def add(self, agent: str, action: str, tool: str | None = None, summary: str = "") -> None:
         if len(self.turns) < MAX_TURNS_RECORDED:
             self.turns.append({"agent": agent, "action": action, "tool": tool, "summary": (summary or "")[:400]})
         self.save()
@@ -126,7 +126,7 @@ class Dialogue:
         return f"agent_{prefix}_{self._n}"
 
 
-def match_specialist(name: str, specialists: Dict[str, Specialist]) -> Optional[Specialist]:
+def match_specialist(name: str, specialists: dict[str, Specialist]) -> Specialist | None:
     """A specialist by name or label ('literature', 'Literature specialist', 'target agent')."""
     key = re.sub(r"\b(specialist|agent)\b", "", (name or "").lower()).strip(" :-_")
     if key in specialists:
@@ -137,7 +137,7 @@ def match_specialist(name: str, specialists: Dict[str, Specialist]) -> Optional[
     return None
 
 
-def _signature(tool: str, args: Dict[str, Any]) -> str:
+def _signature(tool: str, args: dict[str, Any]) -> str:
     return tool + json.dumps(args, sort_keys=True, default=str)
 
 
@@ -153,8 +153,8 @@ def call_step_status(obs: str, executed: bool) -> str:
 
 
 async def run_specialist_tool(
-    state: Any, sp: Specialist, tool: str, args: Optional[Dict[str, Any]], *, phase: str, purpose: str
-) -> Tuple[str, Optional[str], bool]:
+    state: Any, sp: Specialist, tool: str, args: dict[str, Any] | None, *, phase: str, purpose: str
+) -> tuple[str, str | None, bool]:
     """Validate and run one of a specialist's own tools. Returns (observation, result key, executed).
 
     Arguments failing the schema for a trivially fixable reason are repaired once (tools.arg_repair); a repeated
@@ -166,7 +166,7 @@ async def run_specialist_tool(
     if not ok:
         return f"{tool} is not allowed for this question: {why}.", None, False
     args = dict(args or {})
-    adjusted: List[str] = []
+    adjusted: list[str] = []
     try:
         entry.input_schema.model_validate(args)
     except ValidationError as exc:
@@ -226,11 +226,11 @@ async def run_specialist(
     dialogue: Dialogue,
     context: str = "",
     max_calls: int = MAX_SPECIALIST_CALLS,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """One delegated task: a bounded ReAct loop over the specialist's own tools."""
     system = SPECIALIST_SYSTEM.format(label=sp.label, role=sp.spec.role, cards=_cards_text(sp), max_calls=max_calls)
-    observations: List[str] = []
-    keys: List[str] = []
+    observations: list[str] = []
+    keys: list[str] = []
     calls = 0
     summary = ""
     for _ in range(max_calls + 2):  # tool calls plus room for one invalid call and the finish
@@ -275,7 +275,7 @@ async def run_specialist(
 # (or each step of the question, in the order the researcher named them) runs a fixed set of its own tools with
 # arguments filled from the resolved entities. Every call still goes through run_specialist_tool (policy, schema
 # validation, no repeated calls).
-LEG_CUES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
+LEG_CUES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("target", re.compile(
         r"(?i:\btargets?\b|\bsynthetic[- ]lethal\w*|\bPPIs?\b|\bprotein[- ]protein\b|\binteract\w*|\bhubs?\b"
         r"|\bpartners?\b)|\bSL\b"
@@ -284,7 +284,7 @@ LEG_CUES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
     ("clinical", re.compile(r"(?i:\btrials?\b|\bopenFDA\b|\bsafety\b|\blabels?\b|\bFAERS\b)")),
 )
 # Specialists that carry each step, in preference order (the clinical step spans trials and openFDA).
-LEG_SPECIALISTS: Dict[str, Tuple[str, ...]] = {
+LEG_SPECIALISTS: dict[str, tuple[str, ...]] = {
     "target": ("target", "omics"),
     "chemistry": ("chemistry",),
     "clinical": ("literature", "chemistry"),
@@ -298,9 +298,9 @@ MAX_FALLBACK_SPECIALISTS = 3
 MAX_FALLBACK_CALLS = 2  # per specialist or per question step
 
 
-def question_legs(question: str) -> List[str]:
+def question_legs(question: str) -> list[str]:
     """The research steps the question names (target, chemistry, clinical), in the order it first mentions them."""
-    found: List[Tuple[int, str]] = []
+    found: list[tuple[int, str]] = []
     for leg, rx in LEG_CUES:
         m = rx.search(question or "")
         if m:
@@ -308,14 +308,14 @@ def question_legs(question: str) -> List[str]:
     return [leg for _pos, leg in sorted(found)]
 
 
-def _named_trials(question: str) -> List[str]:
+def _named_trials(question: str) -> list[str]:
     """Trials the question names ("SOLO-1"), so the trials search lists and fetches them first."""
     return []
 
 
-def _found_drug_names(state: Any, limit: int = 4) -> List[str]:
+def _found_drug_names(state: Any, limit: int = 4) -> list[str]:
     """Drugs the question names, then approved/bioactive compounds ChEMBL returned this turn (names only)."""
-    names: List[str] = list(query_entities(state.ctx).get("drugs") or [])
+    names: list[str] = list(query_entities(state.ctx).get("drugs") or [])
     for res in list(state.tool_results.values()):
         if not getattr(res, "success", False) or not str(getattr(res, "tool_name", "")).startswith("chembl"):
             continue
@@ -327,14 +327,14 @@ def _found_drug_names(state: Any, limit: int = 4) -> List[str]:
                 name = item.get("pref_name") if isinstance(item, dict) else None
                 if isinstance(name, str) and _DRUG_NAME_RE.match(name.strip()) and not name.upper().startswith("CHEMBL"):
                     names.append(name.strip())
-    out: List[str] = []
+    out: list[str] = []
     for n in names:
         if n.lower() not in {o.lower() for o in out}:
             out.append(n)
     return out[:limit]
 
 
-def _tool_ran(state: Any, tool: str, mention: Optional[str] = None) -> bool:
+def _tool_ran(state: Any, tool: str, mention: str | None = None) -> bool:
     """Whether a tool already returned evidence this turn (pipeline or agent), optionally mentioning a name."""
     for res in list(state.tool_results.values()):
         if getattr(res, "tool_name", "") != tool or not getattr(res, "success", False):
@@ -344,13 +344,13 @@ def _tool_ran(state: Any, tool: str, mention: Optional[str] = None) -> bool:
     return False
 
 
-def leg_calls(state: Any, leg: str) -> List[Tuple[str, Dict[str, Any]]]:
+def leg_calls(state: Any, leg: str) -> list[tuple[str, dict[str, Any]]]:
     """Fixed (tool, args) calls for one research step, from the question's entities; empty args are dropped."""
     question = state.clean_query or state.query or ""
     ents = query_entities(state.ctx)
     genes, drugs, diseases = ents.get("genes") or [], ents.get("drugs") or [], ents.get("diseases") or []
     gene = genes[0] if genes else ""
-    calls: List[Tuple[str, Dict[str, Any]]] = []
+    calls: list[tuple[str, dict[str, Any]]] = []
     if leg == "target":
         if gene and _SL_RE.search(question):
             calls.append(("depmap_gene_effect", {"gene": gene}))
@@ -387,7 +387,7 @@ def leg_calls(state: Any, leg: str) -> List[Tuple[str, Dict[str, Any]]]:
     return [(tool, {k: v for k, v in args.items() if v not in (None, "", [], {})}) for tool, args in calls]
 
 
-def specialist_calls(state: Any, sp: Specialist) -> List[Tuple[str, Dict[str, Any]]]:
+def specialist_calls(state: Any, sp: Specialist) -> list[tuple[str, dict[str, Any]]]:
     """Fixed calls a specialist makes when its own model loop gives nothing (only its own tools)."""
     question = state.clean_query or state.query or ""
     legs = {"literature": ["literature"], "target": ["target"], "chemistry": ["chemistry"], "omics": ["omics"]}.get(sp.name, [])
@@ -395,7 +395,7 @@ def specialist_calls(state: Any, sp: Specialist) -> List[Tuple[str, Dict[str, An
         legs.append("clinical")
     if sp.name == "chemistry" and _SAFETY_RE.search(question):
         legs.append("clinical")
-    out: List[Tuple[str, Dict[str, Any]]] = []
+    out: list[tuple[str, dict[str, Any]]] = []
     for leg in legs:
         out.extend(c for c in leg_calls(state, leg) if sp.get(c[0]) is not None and c not in out)
     return out
@@ -403,17 +403,17 @@ def specialist_calls(state: Any, sp: Specialist) -> List[Tuple[str, Dict[str, An
 
 async def run_fixed_calls(
     state: Any,
-    specialists: Dict[str, Specialist],
-    calls: List[Tuple[str, Dict[str, Any]]],
+    specialists: dict[str, Specialist],
+    calls: list[tuple[str, dict[str, Any]]],
     *,
     phase: str,
     dialogue: Dialogue,
     purpose: str,
     limit: int = MAX_FALLBACK_CALLS,
-) -> Tuple[int, List[str]]:
+) -> tuple[int, list[str]]:
     """Run fixed calls through their owning specialist; returns (executed calls, result keys)."""
     executed = 0
-    keys: List[str] = []
+    keys: list[str] = []
     for tool, args in calls:
         if executed >= limit or state.budget.exhausted():
             break
@@ -447,7 +447,7 @@ SUPERVISOR_SYSTEM = (
 )
 
 
-def task_ledger(state: Any, specialists: Dict[str, Specialist]) -> Dict[str, Any]:
+def task_ledger(state: Any, specialists: dict[str, Specialist]) -> dict[str, Any]:
     """Magentic-One task ledger, built deterministically from the question and the evidence so far."""
     ctx = state.ctx
     given = [f"Question: {state.clean_query or state.query}", f"Entities: {_entities_line(state)}"]
@@ -462,7 +462,7 @@ def task_ledger(state: Any, specialists: Dict[str, Specialist]) -> Dict[str, Any
         status = "returned evidence" if getattr(res, "success", False) else "failed"
         gathered.append(f"{key} ({getattr(res, 'tool_name', '')}): {status}")
     open_qs = [f"[{q.id}] {q.text}" for q in state.sub_questions if q.status in ("open", "partial")]
-    ranked: List[str] = []
+    ranked: list[str] = []
     try:
         allowed = [e.name for e in state.registry.list_tools() if not tool_allowed(ctx, e)[0]]
         for e in retrieve_tools(state.registry, state.clean_query or state.query, k=8, exclude=allowed):
@@ -484,8 +484,8 @@ def task_ledger(state: Any, specialists: Dict[str, Specialist]) -> Dict[str, Any
     }
 
 
-def _ledger_text(ledger: Dict[str, Any]) -> str:
-    out: List[str] = []
+def _ledger_text(ledger: dict[str, Any]) -> str:
+    out: list[str] = []
     for title, key in (("Facts given", "facts_given"), ("Evidence gathered", "facts_gathered"),
                        ("To look up", "to_look_up"), ("To derive", "to_derive"), ("Plan", "plan"),
                        ("Reflection", "notes")):
@@ -505,7 +505,7 @@ class SupervisorPhase(AgentPhase):
     def applies(self, state: Any) -> bool:
         return getattr(state.ctx, "scope", "research") == "research"
 
-    async def run(self, state: Any) -> Optional[PhaseOutcome]:
+    async def run(self, state: Any) -> PhaseOutcome | None:
         specialists = team_specialists(state)
         if not specialists:
             return None
@@ -515,7 +515,7 @@ class SupervisorPhase(AgentPhase):
         await state.step("agent_supervisor", "Supervisor: planning the team's work", f"Team: {team}",
                          status="running", agent="Supervisor")
         dialogue.add("Supervisor", "task ledger", None, f"team: {team}")
-        history: List[Dict[str, Any]] = []
+        history: list[dict[str, Any]] = []
         stall = replans = delegations = bad = 0
         finished = False  # the supervisor itself said the request is satisfied
         for _ in range(MAX_DELEGATIONS + MAX_REPLANS + 4):
@@ -589,13 +589,13 @@ class SupervisorPhase(AgentPhase):
         return None
 
     async def _fallback(
-        self, state: Any, ledger: Dict[str, Any], specialists: Dict[str, Specialist], dialogue: Dialogue,
-        history: List[Dict[str, Any]],
+        self, state: Any, ledger: dict[str, Any], specialists: dict[str, Specialist], dialogue: Dialogue,
+        history: list[dict[str, Any]],
     ) -> int:
         """Delegate to the top specialists of the ranked plan (question steps first). A specialist whose own model
         loop gives nothing (or when the model is failing) runs its fixed tool calls instead."""
         question = state.clean_query or state.query or ""
-        order: List[str] = []
+        order: list[str] = []
         for leg in question_legs(question):
             order += [n for n in LEG_SPECIALISTS.get(leg, ()) if n in specialists and n not in order][:1]
         order += [n for n in ledger.get("ranked") or [] if n in specialists and n not in order]
@@ -614,7 +614,7 @@ class SupervisorPhase(AgentPhase):
             dialogue.add("Supervisor", "delegate", None, f"{sp.label}: {instruction} (fixed plan)")
             await state.step(dialogue.step_id("supervisor"), f"Supervisor → {sp.label} (fixed plan)", instruction,
                              agent="Supervisor")
-            report: Dict[str, Any] = {"specialist": sp.name, "summary": "", "keys": [], "calls": 0}
+            report: dict[str, Any] = {"specialist": sp.name, "summary": "", "keys": [], "calls": 0}
             if not failing:
                 report = await run_specialist(state, sp, instruction, phase=self.key, dialogue=dialogue,
                                               context=self._context(history))
@@ -631,12 +631,12 @@ class SupervisorPhase(AgentPhase):
         return delegated
 
     @staticmethod
-    def _context(history: List[Dict[str, Any]]) -> str:
+    def _context(history: list[dict[str, Any]]) -> str:
         notes = [f"{h['specialist']}: {h.get('summary', '')}" for h in history[-4:] if h.get("summary")]
         return spotlight("\n".join(notes), "earlier specialist reports", 2000) if notes else ""
 
     @staticmethod
-    def _prompt(state: Any, ledger: Dict[str, Any], specialists: Dict[str, Specialist], history: List[Dict[str, Any]]) -> str:
+    def _prompt(state: Any, ledger: dict[str, Any], specialists: dict[str, Specialist], history: list[dict[str, Any]]) -> str:
         team = "\n".join(
             f"- {sp.name} ({sp.label}): {sp.spec.role.split('.')[0]}. Tools: {', '.join(sp.tool_names()[:8])}"
             for sp in specialists.values()
@@ -653,7 +653,7 @@ class SupervisorPhase(AgentPhase):
         )
 
     @staticmethod
-    def _replan(ledger: Dict[str, Any], history: List[Dict[str, Any]], n: int) -> None:
+    def _replan(ledger: dict[str, Any], history: list[dict[str, Any]], n: int) -> None:
         tried = sorted({str(h.get("specialist")) for h in history})
         recent = [h.get("instruction", "")[:120] for h in history[-3:]]
         ledger["replans"] = n
@@ -686,7 +686,7 @@ class SwarmPhase(AgentPhase):
         return getattr(state.ctx, "scope", "research") == "research"
 
     @staticmethod
-    def _start(state: Any, specialists: Dict[str, Specialist]) -> Specialist:
+    def _start(state: Any, specialists: dict[str, Specialist]) -> Specialist:
         """The specialist for the first step the question names (target, then chemistry, then clinical, in the
         order the researcher wrote them); otherwise the owner of the best-matching tool."""
         for leg in question_legs(state.clean_query or state.query or ""):
@@ -703,7 +703,7 @@ class SwarmPhase(AgentPhase):
             logger.debug("Swarm start selection failed: %s", exc)
         return specialists.get("literature") or next(iter(specialists.values()))
 
-    async def run(self, state: Any) -> Optional[PhaseOutcome]:
+    async def run(self, state: Any) -> PhaseOutcome | None:
         specialists = team_specialists(state)
         if not specialists:
             return None
@@ -712,9 +712,9 @@ class SwarmPhase(AgentPhase):
         await state.step("agent_swarm", "Swarm: specialists working on the question", f"Starting with the {active.label}",
                          status="running", agent=active.label)
         dialogue.add(active.label, "start", None, "selected for the question")
-        used_pairs: Set[frozenset] = set()
+        used_pairs: set[frozenset] = set()
         handoffs = total_calls = calls_here = bad = 0
-        observations: List[str] = []
+        observations: list[str] = []
         fixed_chain = False  # the model stopped giving usable replies: follow the question's steps instead
         for _ in range(SWARM_MAX_TURNS):
             if state.budget.exhausted():
@@ -786,9 +786,9 @@ class SwarmPhase(AgentPhase):
         return None
 
     async def _ensure_legs(
-        self, state: Any, specialists: Dict[str, Specialist], dialogue: Dialogue, legs: List[str], active: Specialist,
+        self, state: Any, specialists: dict[str, Specialist], dialogue: Dialogue, legs: list[str], active: Specialist,
         *, chain: bool,
-    ) -> Tuple[int, Specialist]:
+    ) -> tuple[int, Specialist]:
         """Run each asked step's fixed calls whose tool has not returned evidence yet; returns (calls, last agent)."""
         total = 0
         for leg in legs:
@@ -819,7 +819,7 @@ class SwarmPhase(AgentPhase):
         return total, active
 
     @staticmethod
-    def _refuse(active: Specialist, target: Optional[Specialist], handoffs: int, used_pairs: Set[frozenset]) -> str:
+    def _refuse(active: Specialist, target: Specialist | None, handoffs: int, used_pairs: set[frozenset]) -> str:
         if target is None:
             return "no such specialist is available for this question"
         if target.name == active.name:
@@ -831,15 +831,15 @@ class SwarmPhase(AgentPhase):
         return ""
 
     @staticmethod
-    def _system(active: Specialist, specialists: Dict[str, Specialist]) -> str:
+    def _system(active: Specialist, specialists: dict[str, Specialist]) -> str:
         others = "\n".join(
             f"- {sp.name}: {sp.spec.role.split('.')[0]}" for sp in specialists.values() if sp.name != active.name
         ) or "- none"
         return SWARM_SYSTEM.format(label=active.label, role=active.spec.role, cards=_cards_text(active), others=others)
 
     @staticmethod
-    def _prompt(state: Any, observations: List[str], dialogue: Dialogue, handoffs: int,
-                used_pairs: Set[frozenset], active: Specialist) -> str:
+    def _prompt(state: Any, observations: list[str], dialogue: Dialogue, handoffs: int,
+                used_pairs: set[frozenset], active: Specialist) -> str:
         blocked = sorted(next(iter(p - {active.name})) for p in used_pairs if active.name in p and len(p) == 2)
         recent = "\n".join(f"- {t['agent']}: {t['action']}" + (f" {t['tool']}" if t.get("tool") else "")
                            for t in dialogue.turns[-6:])
@@ -854,7 +854,7 @@ class SwarmPhase(AgentPhase):
 
 
 # Debate --------------------------------------------------------------------------------------------------------
-PERSONAS: Tuple[Tuple[str, str], ...] = (
+PERSONAS: tuple[tuple[str, str], ...] = (
     ("methodologist", "Judge study design and strength of evidence: model system (in vitro, animal, human), sample "
      "size, controls, statistics; flag claims generalised beyond what the cited study type can show."),
     ("clinical skeptic", "Judge clinical relevance: whether human or trial data exist, trial phase, effect sizes, "
@@ -922,7 +922,7 @@ class DebatePhase(AgentPhase):
         per_call = max(1, estimate_tokens(prompt_chars)) + output_reserve_tokens()
         return max(0, min(n, left // per_call)) if per_call else n
 
-    async def run(self, state: Any) -> Optional[PhaseOutcome]:
+    async def run(self, state: Any) -> PhaseOutcome | None:
         state.bag["debate_done"] = True
         left = self._calls_left(state)
         n = 3 if left >= 8 else 2
@@ -932,6 +932,10 @@ class DebatePhase(AgentPhase):
         dialogue = Dialogue(state, "debate")
         digest, keys = evidence_digest(state)
         valid_keys = {_norm_key(k) for k in [*keys, *state.tool_results.keys()]}
+        if hasattr(state, "registry") and state.registry is not None:
+            for entry in state.registry.list_tools():
+                valid_keys.add(_norm_key(entry.name))
+                valid_keys.add(_norm_key(entry.domain))
         base = (
             f"Question: {state.clean_query or state.query}\n\nGathered evidence:\n{digest}\n\n"
             f"Draft answer:\n{spotlight(state.draft, 'draft answer', 9000)}"
@@ -947,12 +951,12 @@ class DebatePhase(AgentPhase):
         await state.step("agent_debate", "Debate: critics reviewing the draft",
                          ", ".join(p for p, _ in personas), status="running", agent="Debate moderator")
 
-        async def critic(persona: str, focus: str, user: str) -> Optional[DebateReply]:
+        async def critic(persona: str, focus: str, user: str) -> DebateReply | None:
             reply = await ask_json(state, DEBATE_SYSTEM.format(persona=persona, focus=focus), user,
                                    phase=self.key, schema=DebateReply)
             return reply if isinstance(reply, DebateReply) else None
 
-        rounds: List[Dict[str, Optional[DebateReply]]] = []
+        rounds: list[dict[str, DebateReply | None]] = []
         first = await asyncio.gather(*(critic(p, f, base) for p, f in personas))
         rounds.append(dict(zip((p for p, _ in personas), first, strict=True)))
         await self._record(state, dialogue, rounds[-1], 1)
@@ -967,7 +971,7 @@ class DebatePhase(AgentPhase):
             rounds.append(dict(zip((p for p, _ in personas if p in answered), second, strict=True)))
             await self._record(state, dialogue, rounds[-1], 2)
 
-        final: Dict[str, DebateReply] = {}
+        final: dict[str, DebateReply] = {}
         for rnd in rounds:
             final.update({p: r for p, r in rnd.items() if r is not None})
         revise = [p for p, r in final.items() if r.verdict.strip().lower() == "revise"]
@@ -1006,7 +1010,7 @@ class DebatePhase(AgentPhase):
         return PhaseOutcome(resynthesize=True, feedback=feedback)
 
     @staticmethod
-    def _round_two(base: str, persona: str, answered: Dict[str, DebateReply]) -> str:
+    def _round_two(base: str, persona: str, answered: dict[str, DebateReply]) -> str:
         others = []
         for p, r in answered.items():
             if p == persona:
@@ -1025,8 +1029,8 @@ class DebatePhase(AgentPhase):
         )
 
     @staticmethod
-    def _valid_critiques(final: Dict[str, DebateReply], valid_keys: Set[str]) -> Tuple[List[Dict[str, Any]], int]:
-        out: List[Dict[str, Any]] = []
+    def _valid_critiques(final: dict[str, DebateReply], valid_keys: set[str]) -> tuple[list[dict[str, Any]], int]:
+        out: list[dict[str, Any]] = []
         dropped = 0
         for persona, reply in final.items():
             for c in reply.critiques:
@@ -1040,8 +1044,8 @@ class DebatePhase(AgentPhase):
         return out, dropped
 
     @staticmethod
-    def _feedback(critiques: List[Dict[str, Any]], limit: int = 6) -> List[str]:
-        grouped: Dict[str, Dict[str, Any]] = {}
+    def _feedback(critiques: list[dict[str, Any]], limit: int = 6) -> list[str]:
+        grouped: dict[str, dict[str, Any]] = {}
         for c in critiques:
             norm = re.sub(r"[^a-z0-9 ]", "", c["claim"].lower())[:80]
             g = grouped.setdefault(norm, {**c, "personas": []})
@@ -1057,7 +1061,7 @@ class DebatePhase(AgentPhase):
         ]
 
     @staticmethod
-    async def _record(state: Any, dialogue: Dialogue, rnd: Dict[str, Optional[DebateReply]], n: int) -> None:
+    async def _record(state: Any, dialogue: Dialogue, rnd: dict[str, DebateReply | None], n: int) -> None:
         for persona, reply in rnd.items():
             agent = f"Critic: {persona}"
             if reply is None:
