@@ -70,7 +70,7 @@ EFFORT_PROFILES: dict[str, dict[str, Any]] = {
         "label": "Medium",
         "badge": "⚖️ Balanced",
         "short_desc": "Standard analytical depth",
-        "description": "Balanced deliberation: 2-3 subqueries, standard literature & clinical trials, up to 2 draft rounds.",
+        "description": "Balanced deliberation: 2-3 subqueries, standard literature & scientific reference data, up to 2 draft rounds.",
         "reasoning_effort": "medium",
         "thinking_budget_tokens": 4096,
         "max_subqueries": 3,

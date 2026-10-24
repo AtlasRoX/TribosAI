@@ -1,5 +1,5 @@
 /**
- * Intelligent Dynamic Title Generator for Clinical & Biomedical Conversations.
+ * Intelligent Dynamic Title Generator for Scientific & Engineering Conversations.
  * Extracts clean, high-signal, professional topic titles from raw user prompts.
  */
 
@@ -72,7 +72,7 @@ function formatTitleWord(word: string, isFirst: boolean): string {
  * Trims conversational filler, formats into Title Case, and keeps clean lengths.
  */
 export function generateDynamicTitle(prompt: string, maxChars = 52): string {
-  if (!prompt || typeof prompt !== "string") return "Clinical Investigation";
+  if (!prompt || typeof prompt !== "string") return "Investigation";
 
   const clean = prompt
     .replace(/```[\s\S]*?```/g, " ") // remove code blocks
@@ -80,7 +80,7 @@ export function generateDynamicTitle(prompt: string, maxChars = 52): string {
     .replace(/\s+/g, " ")
     .trim();
 
-  if (!clean) return "Clinical Investigation";
+  if (!clean) return "Investigation";
 
   // Iteratively strip conversational preambles
   let stripped = clean;
@@ -111,13 +111,13 @@ export function generateDynamicTitle(prompt: string, maxChars = 52): string {
     .replace(/[?!:;.,'"'`\s\-_=]+$/, "")
     .trim();
 
-  if (!normalized) return "Clinical Investigation";
+  if (!normalized) return "Investigation";
 
   // Split into words and format
   const words = normalized.split(/\s+/).filter(Boolean);
-  if (words.length === 0) return "Clinical Investigation";
+  if (words.length === 0) return "Investigation";
 
-  // Format words with biomedical awareness
+  // Format words with domain awareness
   const formattedWords = words.map((w, idx) => formatTitleWord(w, idx === 0));
 
   // Build title up to maxChars
@@ -141,5 +141,5 @@ export function generateDynamicTitle(prompt: string, maxChars = 52): string {
     .trim();
   const finalTitle = trailingCleaned || result;
 
-  return finalTitle || "Clinical Investigation";
+  return finalTitle || "Investigation";
 }

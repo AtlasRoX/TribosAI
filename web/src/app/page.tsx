@@ -190,7 +190,7 @@ const FRAMEWORK_LABEL: Record<string, string> = {
 
 const AUTH_TOKEN_STORAGE_KEY = "tribos-auth-token";
 const BACKEND_URL_STORAGE_KEY = "tribos-backend-url";
-const DEFAULT_MODEL = process.env.NEXT_PUBLIC_DEFAULT_MODEL || "nvidia/nemotron-3-super-120b-a12b";
+const DEFAULT_MODEL = process.env.NEXT_PUBLIC_DEFAULT_MODEL || "nvidia/nemotron-3.5-super-vl-120b-a12b";
 
 /** A backend base URL the user typed, normalized, or null when it is not an http(s) URL. */
 function parseBackendUrl(value: string): string | null {
@@ -236,7 +236,14 @@ export default function TribosAssistant() {
       } else if (saved) {
         localStorageService.saveSettings({ ...savedSettings, selectedFramework: undefined });
       }
-      if (savedSettings.selectedModel) setSelectedModel(savedSettings.selectedModel);
+      if (savedSettings.selectedModel) {
+        if (savedSettings.selectedModel.includes("nemotron-3-") || savedSettings.selectedModel.includes("nemotron-3.")) {
+          setSelectedModel("nvidia/nemotron-3.5-super-vl-120b-a12b");
+          localStorageService.saveSettings({ ...savedSettings, selectedModel: "nvidia/nemotron-3.5-super-vl-120b-a12b" });
+        } else {
+          setSelectedModel(savedSettings.selectedModel);
+        }
+      }
       setAgentOptions(normalizeAgentOptions(savedSettings.agentOptions));
       if (typeof savedSettings.projectId === "string" && /^prj_[A-Za-z0-9]{6,40}$/.test(savedSettings.projectId)) {
         setProjectId(savedSettings.projectId);
@@ -389,7 +396,7 @@ export default function TribosAssistant() {
     authToken ? { ...extra, Authorization: `Bearer ${authToken}` } : extra;
   const [theme, setTheme] = useState<"dark" | "light">("dark");
 
-  // Clinical Memory Vault State
+  // Memory Vault State
   const [showMemoryVault, setShowMemoryVault] = useState(false);
   const [memoryStats, setMemoryStats] = useState<MemoryStats | null>(null);
   const [memoryEntities, setMemoryEntities] = useState<MemoryEntity[]>([]);
@@ -469,7 +476,7 @@ export default function TribosAssistant() {
   };
 
   const handleClearAllMemory = async () => {
-    if (!window.confirm("Are you sure you want to clear all of your stored clinical memories?")) return;
+    if (!window.confirm("Are you sure you want to clear all of your stored memories?")) return;
     try {
       await apiFetch(`${backendUrl}/api/memory/clear`, { method: "DELETE", headers: authHeaders() }, pageApi);
       setMemorySearchResults([]);
@@ -697,10 +704,12 @@ export default function TribosAssistant() {
   function normalizeLegacyAgentNames(text: string): string {
     if (!text) return "";
     return text
-      .replace(/\bTalk2KnowledgeGraphs?\b/gi, "Synapta")
-      .replace(/\bTalk2BioModels?\b/gi, "Vivarix")
-      .replace(/\bTalk2Cells?\b/gi, "Lumicell")
-      .replace(/\bTalk2Scholars?\b/gi, "Lithoscribe")
+      .replace(/\bClinical Orchestrator\b/gi, "Tribos Orchestrator")
+      .replace(/\bClinical\b/gi, "Tribos")
+      .replace(/\bTalk2KnowledgeGraphs?\b/gi, "Axiom")
+      .replace(/\bTalk2BioModels?\b/gi, "Dynamis")
+      .replace(/\bTalk2Cells?\b/gi, "Calcula")
+      .replace(/\bTalk2Scholars?\b/gi, "Archivon")
       .replace(/\bTalk2AI[-_ ]?Agents[-_ ]?4[-_ ]?Pharma\b/gi, "Tribos")
       .replace(/\bAI[-_ ]?Agents[-_ ]?4[-_ ]?Pharma\b/gi, "Tribos");
   }
@@ -807,48 +816,62 @@ export default function TribosAssistant() {
 
   const domainAgents: AgentMetadata[] = [
     {
-      id: "t2kg",
-      name: "Synapta",
-      domain: "PrimeKG & Target Networks",
-      description: "Full PrimeKG graph analytics: repurposing, mechanism paths, phenotype differentials, regimen checks.",
-      tools: ["PrimeKG Full Graph", "PrimeKG Subgraphs", "BioContext OpenTargets", "BioContext KEGG", "Entity normalization", "ChEMBL", "ClinVar/CIViC/cBioPortal/gnomAD"],
-      color: "#38bdf8",
-      icon: <Dna className="w-4 h-4 text-sky-400" />,
+      id: "archivon",
+      name: "Archivon",
+      domain: "Literature & Preprints",
+      description: "arXiv, Crossref, Semantic Scholar, OpenAlex, zbMATH Open, NASA ADS literature synthesis.",
+      tools: ["arXiv", "Crossref", "Semantic Scholar", "OpenAlex", "zbMATH Open", "NASA ADS"],
+      color: "#f59e0b",
+      icon: <BookOpen className="w-4 h-4 text-amber-400" />,
     },
     {
-      id: "t2b",
-      name: "Vivarix",
-      domain: "Kinetic Modeling & ODEs",
-      description: "COPASI BASICO, SBML simulations, parameter scans, steady-state curves.",
-      tools: ["SimulateModel", "SearchModels", "BioContext UniProt", "Uploaded SBML"],
+      id: "axiom",
+      name: "Axiom",
+      domain: "Symbolic Mathematics & Proofs",
+      description: "SymPy computer algebra, calculus, equation solving, ODE dsolve, matrix algebra, identity proofs.",
+      tools: ["SymPy", "mpmath", "Symbolic Engine"],
+      color: "#38bdf8",
+      icon: <Brain className="w-4 h-4 text-sky-400" />,
+    },
+    {
+      id: "dynamis",
+      name: "Dynamis",
+      domain: "Dynamics & Simulation",
+      description: "Numerical ODE integration, parameter sweeps, phase portraits, stability and curve fitting.",
+      tools: ["SciPy solve_ivp", "Dynamical Systems", "Parameter Estimation"],
       color: "#10b981",
       icon: <Activity className="w-4 h-4 text-emerald-400" />,
     },
     {
-      id: "scp",
-      name: "Lumicell",
-      domain: "Single-Cell Transcriptomics",
-      description: "Single Cell Portal, AnnData scRNA-seq matrices, cell cluster markers.",
-      tools: ["SingleCellPortal", "BioContext PanglaoDB", "BioContext Ensembl", "Uploaded .h5ad/.csv"],
-      color: "#a855f7",
-      icon: <Microscope className="w-4 h-4 text-purple-400" />,
+      id: "calcula",
+      name: "Calcula",
+      domain: "Scientific Computing & Data",
+      description: "Sandboxed scientific Python computation, array processing, graph theory, data analysis.",
+      tools: ["NumPy", "SciPy", "Pandas", "NetworkX", "Pint Sandbox"],
+      color: "#818cf8",
+      icon: <Cpu className="w-4 h-4 text-indigo-400" />,
     },
     {
-      id: "s2",
-      name: "Lithoscribe",
-      domain: "Literature & Clinical Trials",
-      description: "PubMed, EuropePMC, Semantic Scholar, clinical paper synthesis.",
-      tools: ["SemanticScholar", "BioContext EuropePMC", "ClinicalTrials.gov", "openFDA"],
-      color: "#f59e0b",
-      icon: <BookOpen className="w-4 h-4 text-amber-400" />,
+      id: "physis",
+      name: "Physis",
+      domain: "Physical Constants & Reference Data",
+      description: "CODATA physical constants, Pint units & dimensions, OEIS sequences, Materials Project, WolframAlpha.",
+      tools: ["NIST CODATA 2022", "Pint Units", "OEIS", "Materials Project", "WolframAlpha"],
+      color: "#a855f7",
+      icon: <Database className="w-4 h-4 text-purple-400" />,
     },
   ];
 
   const agentIdMap: Record<string, string> = {
-    Synapta: "t2kg",
-    Vivarix: "t2b",
-    Lumicell: "scp",
-    Lithoscribe: "s2",
+    Archivon: "archivon",
+    Axiom: "axiom",
+    Dynamis: "dynamis",
+    Calcula: "calcula",
+    Physis: "physis",
+    Synapta: "axiom",
+    Vivarix: "dynamis",
+    Lumicell: "calcula",
+    Lithoscribe: "archivon",
   };
 
   const flushLiveText = () => {
@@ -921,7 +944,7 @@ export default function TribosAssistant() {
       id: `ast_${Date.now()}`,
       sender: "assistant",
       content: normalizeLegacyAgentNames(answer.content),
-      agent: "Clinical Orchestrator",
+      agent: "Tribos Orchestrator",
       model: res.model_used || model,
       steps: res.steps || [],
       // The run is done: a step the backend left "running" must not spin forever.
@@ -1205,7 +1228,7 @@ export default function TribosAssistant() {
             id: `ast_${Date.now()}`,
             sender: "assistant",
             content: partial ? `${partial}\n\n${note}` : note,
-            agent: "Clinical Orchestrator",
+            agent: "Tribos Orchestrator",
             model: sendModel,
             steps: [],
             thoughts: sanitizeThoughts(accumulatedThoughts).map((th) =>
@@ -1402,7 +1425,7 @@ export default function TribosAssistant() {
 
   const handleResetSession = () => {
     const newInv = localStorageService.createNewThread(
-      "New Clinical Investigation",
+      "New Investigation",
       selectedFramework,
       selectedModel
     );
@@ -2043,7 +2066,7 @@ export default function TribosAssistant() {
               type="button"
               onClick={() => setShowSettings(!showSettings)}
               aria-expanded={showSettings}
-              aria-label="Clinical R&D settings"
+              aria-label="Tribos R&D settings"
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -2085,7 +2108,7 @@ export default function TribosAssistant() {
                     boxShadow: "0 1px 3px rgba(0, 0, 0, 0.1)",
                   }}
                 >
-                  CR
+                  TR
                 </div>
                 <span
                   style={{
@@ -2097,7 +2120,7 @@ export default function TribosAssistant() {
                     whiteSpace: "nowrap",
                   }}
                 >
-                  Clinical R&D
+                  Tribos R&D
                 </span>
               </div>
               <Settings
@@ -2115,7 +2138,7 @@ export default function TribosAssistant() {
             <button
               type="button"
               onClick={() => setShowSettings(!showSettings)}
-              title="Clinical R&D (Settings)"
+              title="Tribos R&D (Settings)"
               style={{
                 width: "32px",
                 height: "32px",
@@ -2185,7 +2208,7 @@ export default function TribosAssistant() {
                 whiteSpace: "nowrap",
               }}
             >
-              {investigations.find((i) => i.id === activeThreadId)?.title || "Clinical Investigation"}
+              {investigations.find((i) => i.id === activeThreadId)?.title || "Investigation"}
             </span>
           </div>
 
@@ -2284,7 +2307,7 @@ export default function TribosAssistant() {
                 fontSize: "12px",
                 fontWeight: 600,
               }}
-              title="Clinical Memory Vault (Working Memory, Episodic History & Entity Knowledge)"
+              title="Memory Vault (Working Memory, Episodic History & Entity Knowledge)"
             >
               <Brain style={{ width: 15, height: 15, color: "var(--domain-t2kg)" }} />
               <span className="hidden sm:inline">Memory</span>
@@ -2589,7 +2612,7 @@ export default function TribosAssistant() {
           </div>
         )}
 
-        {/* Clinical Memory Vault Modal Dialog */}
+        {/* Memory Vault Modal Dialog */}
         {showMemoryVault && (
           <div
             ref={memoryDialogRef}
@@ -2629,7 +2652,7 @@ export default function TribosAssistant() {
                       id="memory-vault-modal-title"
                       style={{ margin: 0, fontWeight: 700, fontSize: "16px", color: "var(--text-heading)" }}
                     >
-                      Clinical Memory Vault
+                      Tribos Memory Vault
                     </h2>
                     <p style={{ margin: "2px 0 0", fontSize: "11px", color: "var(--text-muted)" }}>
                       Durable multi-tier memory: working dialogue, episodic history, entity knowledge & semantic search
@@ -2700,7 +2723,7 @@ export default function TribosAssistant() {
                     <input
                       id="memory-search"
                       type="text"
-                      placeholder="Search memory across past targets, literature citations, or ODE biomodels..."
+                      placeholder="Search memory across past equations, literature citations, constants, or models..."
                       value={memorySearchQuery}
                       onChange={(e) => setMemorySearchQuery(e.target.value)}
                       style={{
@@ -2783,14 +2806,14 @@ export default function TribosAssistant() {
                   </div>
                 )}
 
-                {/* Discovered Biological Entities Vault */}
+                {/* Discovered Entities Vault */}
                 <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                   <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--text-heading)" }}>
                     Entities mentioned in your memories ({memoryEntities.length})
                   </span>
                   {memoryEntities.length === 0 ? (
                     <div style={{ fontSize: "12px", color: "var(--text-muted)", padding: "12px", textAlign: "center" }}>
-                      No clinical entities indexed yet. Run your first investigation to populate the memory vault!
+                      No research entities indexed yet. Run your first investigation to populate the memory vault!
                     </div>
                   ) : (
                     <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", maxHeight: "180px", overflowY: "auto" }}>
@@ -2916,7 +2939,7 @@ export default function TribosAssistant() {
                   {/* UI-007: where conversation history is kept, and for how long. */}
                   <fieldset style={{ border: "none", margin: 0, padding: 0, display: "grid", gap: "6px" }}>
                     <legend style={{ fontSize: "11px", color: "var(--text-muted)", marginBottom: "4px" }}>
-                      Conversations can contain clinical details. History is kept per backend and access token, unencrypted
+                      Conversations can contain research details. History is kept per backend and access token, unencrypted
                       in this browser.
                     </legend>
                     <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px" }}>
@@ -3054,7 +3077,7 @@ export default function TribosAssistant() {
                 </div>
                 <h1 className="hero-title">What shall we investigate today?</h1>
                 <p className="hero-subtitle">
-                  Tribos coordinates knowledge graphs, kinetic simulations, single-cell analysis, and the
+                  Tribos coordinates symbolic mathematics, numerical simulation, scientific computing, physical reference data, and the
                   literature, then checks the answer&apos;s claims against the retrieved evidence and shows what was
                   and was not checked.
                 </p>
@@ -3086,7 +3109,7 @@ export default function TribosAssistant() {
                             style={{ width: "13px", height: "13px", objectFit: "contain" }}
                           />
                         </span>
-                        <span style={{ fontWeight: 600, color: "var(--text-main)" }}>{msg.agent || "Tribos"}</span>
+                        <span style={{ fontWeight: 600, color: "var(--text-main)" }}>{normalizeLegacyAgentNames(msg.agent || "Tribos Orchestrator")}</span>
                         {msg.framework_used ? (
                           <span
                             style={{ color: "var(--text-faint)" }}
@@ -3269,7 +3292,7 @@ export default function TribosAssistant() {
                       style={{ width: "13px", height: "13px", objectFit: "contain" }}
                     />
                   </span>
-                  <span style={{ fontWeight: 600, color: "var(--text-main)" }}>Clinical Orchestrator</span>
+                  <span style={{ fontWeight: 600, color: "var(--text-main)" }}>Tribos Orchestrator</span>
                 </div>
 
                 <div
@@ -3361,12 +3384,12 @@ export default function TribosAssistant() {
                 aria-label={canSteer ? "Guidance for the running agent" : "Research question"}
                 placeholder={
                   canSteer
-                    ? "Guide this run, e.g. “prioritise phase 3 data”…"
+                    ? "Guide this run, e.g. “focus on boundary conditions and derivation steps”…"
                     : liveHere
                       ? stoppingRun
                         ? "Stopping the run…"
                         : "Draft your next question while this answer finishes…"
-                      : "Ask about a target, a BioModel, or attach a dataset…"
+                      : "Ask an engineering, physics, or mathematics question, derive an equation, or explore literature…"
                 }
                 rows={1}
                 style={{
@@ -3412,7 +3435,7 @@ export default function TribosAssistant() {
                     data-active={isWebSearchEnabled}
                     aria-pressed={isWebSearchEnabled}
                     onClick={() => setIsWebSearchEnabled((prev) => !prev)}
-                    title={`Web Search: ${isWebSearchEnabled ? "Enabled (live biomedical literature & web)" : "Disabled"}`}
+                    title={`Web Search: ${isWebSearchEnabled ? "Enabled (live scientific literature & web)" : "Disabled"}`}
                     aria-label={`Toggle web search, currently ${isWebSearchEnabled ? "enabled" : "disabled"}`}
                     style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}
                   >

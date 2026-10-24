@@ -344,7 +344,7 @@ def _heuristic_title(text: str, max_chars: int = 50) -> str:
         res = cand
 
     res = re.sub(r"\s+(?:in|of|and|for|on|with|to|at|by|a|the|vs)$", "", res, flags=re.I).strip()
-    return res or "Clinical Investigation"
+    return res or "Investigation"
 
 
 class TitleRequest(BaseModel):
@@ -689,8 +689,8 @@ async def generate_chat_title(
     user_id: str = Depends(get_current_user),
 ) -> TitleResponse:
     """
-    Generate an intelligent, concise (3-6 words) title for a clinical conversation.
-    Uses orchestrator LLM when available, falling back seamlessly to biomedical heuristic title extraction.
+    Generate an intelligent, concise (3-6 words) title for a research conversation.
+    Uses orchestrator LLM when available, falling back seamlessly to dynamic title extraction.
     """
     query = req.message.strip()
     if not query:
@@ -746,7 +746,7 @@ async def _ai_or_heuristic_title(req: TitleRequest, query: str) -> TitleResponse
 async def chat_endpoint(req: ChatRequest, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     """
     Standard JSON chat endpoint returning agent reasoning steps,
-    transparent thoughts, and synthesized clinical response.
+    transparent thoughts, and synthesized response.
     """
     thread_id = req.thread_id or str(uuid.uuid4())
     model_id = req.model or DEFAULT_ORCHESTRATOR_MODEL

@@ -33,8 +33,8 @@ test("generateDynamicTitle extracts clean titles from conversational prompts", (
   );
 
   // Empty or invalid inputs
-  assert.equal(generateDynamicTitle(""), "Clinical Investigation");
-  assert.equal(generateDynamicTitle("   ??? "), "Clinical Investigation");
+  assert.equal(generateDynamicTitle(""), "Investigation");
+  assert.equal(generateDynamicTitle("   ??? "), "Investigation");
 });
 
 test("generateDynamicTitle drops punctuation left at the cut", () => {

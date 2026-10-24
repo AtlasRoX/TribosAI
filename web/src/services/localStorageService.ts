@@ -2,7 +2,7 @@
  * Tribos Local Storage Service
  * Persistence for investigations (threads), chat message histories and user preferences in the browser.
  *
- * Privacy (UI-007): conversations can hold clinical details, so history is
+ * Privacy (UI-007): conversations can hold research details, so history is
  * - namespaced by backend origin + a fingerprint of the access token, so another user (token) or another backend on
  *   the same browser never sees or deletes this history;
  * - kept where the user chose: on this device (localStorage), for this browser session only (sessionStorage), or not
@@ -454,7 +454,7 @@ export class LocalStorageService {
   }
 
   public createNewThread(
-    title: string = "New Clinical Investigation",
+    title: string = "New Investigation",
     framework?: string,
     model?: string
   ): InvestigationItem {
@@ -519,7 +519,11 @@ export class LocalStorageService {
       const raw = this.store()!.getItem(this.msgKey(threadId));
       if (!raw) return [];
       const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
+      if (!Array.isArray(parsed)) return [];
+      return parsed.map((m: any) => ({
+        ...m,
+        agent: m.agent === "Clinical Orchestrator" ? "Tribos Orchestrator" : (m.agent || "Tribos Orchestrator"),
+      }));
     } catch (e) {
       console.warn(`TribosLocalStorage: failed to get messages for ${threadId}`, e);
       return [];
@@ -579,6 +583,9 @@ export class LocalStorageService {
       const isGenericTitle = (t: string) => {
         const lower = t.toLowerCase().trim();
         return (
+          lower === "new investigation" ||
+          lower.startsWith("new investigation") ||
+          lower === "investigation" ||
           lower === "new clinical investigation" ||
           lower.startsWith("new clinical investigation") ||
           lower === "clinical investigation" ||
@@ -605,7 +612,7 @@ export class LocalStorageService {
           autoGenerateTitle ||
           (messages[0]?.content
             ? messages[0].content.slice(0, 42).replace(/\n/g, " ")
-            : "Clinical Investigation");
+            : "Investigation");
 
         const newItem: InvestigationItem = {
           id: threadId,

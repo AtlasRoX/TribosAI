@@ -307,7 +307,7 @@ def summarize_grades(grades: Iterable[EvidenceGrade]) -> dict[str, int]:
     return counts
 
 
-def summary_phrases(grade_summary: dict[str, int]) -> list[str]:
+def summary_phrases(grade_summary: dict[str, int], *args: Any, **kwargs: Any) -> list[str]:
     phrases: list[str] = []
     ordered = sorted(
         [(k, v) for k, v in grade_summary.items() if k != "total"],
@@ -330,10 +330,12 @@ def summary_phrases(grade_summary: dict[str, int]) -> list[str]:
 
 def basis_phrase(grade: dict[str, Any]) -> str:
     basis = str(grade.get("basis") or "")
-    if basis == GradeBasis.PUBTYPE.value:
-        return "publication type"
-    if basis == GradeBasis.MESH.value:
-        return "MeSH"
+    if basis in (GradeBasis.SOURCE_METADATA.value, "pubtype", "source_metadata"):
+        return "source metadata"
+    if basis == GradeBasis.ZB_MATH.value:
+        return "zbMATH"
+    if basis == GradeBasis.JOURNAL_VENUE.value:
+        return "journal venue"
     if basis == GradeBasis.HEURISTIC.value:
         return "text heuristic"
     return "unclassified"

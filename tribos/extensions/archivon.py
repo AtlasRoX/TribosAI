@@ -77,8 +77,15 @@ async def execute_archivon_literature_search(
     query: str,
     max_results: int = 15,
     sources: list[str] | None = None,
+    **kwargs: Any,
 ) -> Any:
     from tribos.tools.registry import ErrorType, ToolResult
+
+    if "max_articles" in kwargs and max_results == 15:
+        try:
+            max_results = int(kwargs["max_articles"])
+        except (ValueError, TypeError):
+            pass
 
     try:
         engine = get_archivon_engine()

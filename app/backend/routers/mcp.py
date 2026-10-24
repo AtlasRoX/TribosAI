@@ -182,7 +182,7 @@ def _server_info() -> dict[str, Any]:
         version = importlib.metadata.version("tribos")
     except importlib.metadata.PackageNotFoundError:
         version = "1.0.0"
-    return {"name": "tribos", "title": "Tribos biomedical research", "version": version}
+    return {"name": "tribos", "title": "Tribos scientific & engineering research", "version": version}
 
 
 def _capabilities() -> dict[str, Any]:

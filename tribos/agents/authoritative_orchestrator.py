@@ -1,5 +1,5 @@
 """
-Authoritative Biomedical Multi-Agent Orchestrator for Tribos.
+Authoritative Engineering & Scientific Multi-Agent Orchestrator for Tribos.
 Implements:
 - Biomni (2025) & ReAct (2022) unified multi-specialist coordination
 - LLMCompiler (2023) dependency-aware DAG scheduling with bounded concurrency

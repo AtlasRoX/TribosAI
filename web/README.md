@@ -1,9 +1,9 @@
 # Tribos — Web Application
 
-> **Tribos** — Clinical and Translational R&D Web Interface  
+> **Tribos** — Engineering & Scientific R&D Web Interface  
 > **Made by ChronoStrider Engineering**
 
-This is the Next.js frontend application for **Tribos**, the biomedical research assistant.
+This is the Next.js frontend application for **Tribos**, the engineering, mathematics and scientific research assistant.
 
 ## Getting Started
 

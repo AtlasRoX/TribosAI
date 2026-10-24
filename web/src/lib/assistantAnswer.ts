@@ -1,5 +1,5 @@
 // What an assistant message says when the backend result has no answer text (UI-009). Framework-free so `node --test`
-// can import it. "No answer" is a failure state, never a fabricated "Clinical evaluation completed." success line.
+// can import it. "No answer" is a failure state, never a fabricated "Evaluation completed." success line.
 import type { TaskOutcome } from "../types/chat";
 
 export const EMPTY_ANSWER_TEXT =

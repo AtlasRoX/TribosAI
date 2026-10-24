@@ -87,7 +87,7 @@ const GUIDE: Record<string, GuideEntry> = {
       "Runs Plan & Execute, then independent critics cross-examine the draft against the evidence before it is rewritten.",
     steps: [
       "Gathers evidence and writes a draft the Plan & Execute way.",
-      "Three critics review it for up to two rounds: a methodologist (study design), a clinical skeptic (human evidence, effect sizes, safety) and a mechanistic biologist (pathway logic).",
+      "Three critics review it for up to two rounds: a mathematician (formal derivations, edge cases), a physicist (first principles, dimensional consistency) and an engineer (practical bounds, safety margins).",
       "The answer is rewritten to address their objections; disagreements that remain are reported, not hidden.",
     ],
     bestFor: ["Generating hypotheses", "Contested or disputed claims", "Is X better than Y?"],

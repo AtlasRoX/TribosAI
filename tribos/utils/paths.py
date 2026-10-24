@@ -3,7 +3,7 @@ One data root for Tribos state: TRIBOS_DATA_DIR.
 
 When TRIBOS_DATA_DIR is set, every state directory defaults to a subdirectory of it:
 
-  memory/           clinical memory vault (TRIBOS_MEMORY_DIR wins)
+  memory/           research memory vault (TRIBOS_MEMORY_DIR wins)
   runs/             run manifests (TRIBOS_RUNS_DIR wins)
   uploads/          uploaded datasets (TRIBOS_UPLOAD_ROOT wins)
   jobs/             background-job SQLite store (TRIBOS_JOBS_DIR, then <TRIBOS_RUNS_DIR>/jobs, win)

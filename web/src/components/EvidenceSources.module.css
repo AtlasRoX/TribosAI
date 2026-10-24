@@ -8,7 +8,7 @@
   color: var(--danger);
 }
 
-/* Tier ramp: 1 meta-analysis/SR, 2 RCT, 3 trial/observational, 4 case report/review, 5 preclinical, 6 other */
+/* Tier ramp: 1 formal proof/theorem, 2 established theory, 3 peer-reviewed, 4 preprint, 5 simulation/computation, 6 other */
 .groupHead {
   --tier-color: var(--text-faint);
   display: flex;
