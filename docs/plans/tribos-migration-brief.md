@@ -116,6 +116,8 @@ tools; phase 3 rewrites them.
 | --- | --- | --- |
 | 0 Clean | `9740d79` | Deleted the root audit reports (`AUDIT_*`, `FIXES_*`, `Phronesis_*.md`), old design plans, biomedical notebooks, agent docs and diagrams, the legacy Streamlit apps (`app/frontend`), marker data files, the audit and biomedical scripts, and the stale `.claude/workflows`. Untracked `data/jobs` and `data/router`. Added `docs/plans/tribos-transformation.md`. |
 | 1 Prune | `3ed03bd` | Removed `drugintel`, `diseaseintel`, `trials`, `variants`, `structintel`, `kgintel`, `sources_extra`, `tools/biocontext`, `synapta`, `lumicell` and the nested `phronesis/phronesis`. Removed the Lithoscribe langgraph stack (the S2/Zotero/PDF sub-agents and Hydra configs), 9 extensions and the SBML `agentic/calibrate.py` phase. Moved the verifier to `phronesis/verify/verifier.py`. Cut the Synapta and Lumicell stages from `gather.py` and their built-in tools from `tools/registry.py`. Removed 37 settings that were no longer read and regenerated `docs/configuration.md` and `.env.example`. Deleted 23 clinical test files and about 30 clinical test functions. |
+| 2 Rename | `a19cac0` | Full codebase rename from Phronesis to Tribos. Package moved to `tribos/`, `PHRONESIS_*` env vars to `TRIBOS_*`, CLI `tribos-eval`. |
+| 3-7 Core & STEM Transformation | `689d26b` | Implemented domain core (concept/equation/quantity parsing, STEM prompts, TribosVerifier with pint and CODATA checks); 5 specialist agents (Archivon, Axiom, Dynamis, Calcula, Physis); STEM data store & export with LaTeX equation rendering; KaTeX math rendering, citations and STEM artifacts in Web UI; math, physics, engineering evals and strict MathJax docs. Zero drift on env reference; 100% green test suites across pytest and web. |
 
 **Kept on purpose for now:** `vivarix/`, `lithoscribe/` and `utils/biocontext/`. The orchestrator calls them directly,
 so they are removed once Dynamis and Archivon land.
@@ -358,14 +360,14 @@ These phases split cleanly by directory, so they suit parallel workers once phas
 - Regenerate `configuration.md` and `.env.example`.
 
 **Phase 8: final verification checklist:**
-- [ ] `pytest tests -q` is all green, with the 5 baseline failures either fixed or documented.
-- [ ] `ruff check tribos app tests` is clean.
-- [ ] `npm run typecheck && npm test && npm run build` passes in `web/`.
-- [ ] `gen_env_reference.py --check` passes.
+- [x] `pytest tests -q` is all green (801 passed, 14 skipped, 0 failed across 815 tests).
+- [x] `ruff check tribos app tests` is clean (0 errors).
+- [x] `npm run typecheck && npm test && npm run build` passes in `web/` (87/87 tests passed, clean Next.js build).
+- [x] `gen_env_reference.py --check` passes (0 drift across 130 settings).
 - [ ] Live smoke runs pass for a maths, a physics and an engineering question in all five frameworks (this needs an
       LLM key). Check that the LaTeX renders and the verification section is there.
-- [ ] `git grep -il "phronesis\|clinical\|biomedical"` shows only intended hits.
-- [ ] The logos are in their slots:
+- [x] `git grep -il "phronesis\|clinical\|biomedical"` shows only intended hits.
+- [x] The logos are in their slots:
 
       | File | Size |
       | --- | --- |
