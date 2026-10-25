@@ -120,6 +120,12 @@ export function markdownToLatex(markdown: string): string {
       continue;
     }
     closeList();
+    // A line that follows another prose line is a new line of the same paragraph (as on screen), not a space.
+    const prev = i > 0 ? lines[i - 1] : "";
+    const prevProse = Boolean(prev.trim()) && out.length > 0 && out[out.length - 1] !== "" &&
+      !/^\\(?:section|subsection|subsubsection|paragraph|begin|end|medskip|\]|\[)/.test(out[out.length - 1]) &&
+      !/^\s*(?:[-*+]|\d+[.)])\s+|^\s*\||^#{1,6}\s|^\s*>|^\$\$$/.test(prev);
+    if (prevProse) out[out.length - 1] += " \\\\";
     out.push(inlineToLatex(line));
   }
   closeList();

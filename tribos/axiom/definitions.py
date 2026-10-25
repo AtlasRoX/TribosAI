@@ -21,6 +21,7 @@ every search is bounded.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 import re
 from fractions import Fraction
 from typing import Any
@@ -530,11 +531,58 @@ def _claim_tasks(text: str, defs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return tasks
 
 
+# "If n is even, replace it with n/2. If n is odd, replace it with 3n + 1.": a process given as rules is a map.
+_PROCESS_RULE_RE = re.compile(
+    r"(?i)\bif\s+([a-z])\s+is\s+(even|odd)\s*,?\s*(?:then\s+)?(?:replace|set|change|map|send|turn)\s+(?:it|[a-z])\s+"
+    r"(?:with|to|by|into)\s+([^.;\n]+?)\s*(?:[.;]|$)")
+# "... this process eventually reaches 1 for every positive integer"
+_REACHES_RE = re.compile(
+    r"(?i)\b(?:this|the)\s+(?:process|procedure|iteration|sequence|map|rule)\s+(?:will\s+)?(?:always\s+)?(?:eventually\s+)?"
+    r"(?:reach(?:es)?|arrives?\s+at|hits?|gets?\s+to|ends?\s+(?:at|in)|terminates?\s+at)\s+(?:the\s+(?:value|number)\s+)?"
+    r"(?P<target>-?\d+)\s+(?P<q>for\s+(?:every|all|each|any)\s+[^.?;\n]+)")
+PROCESS_NAME = "step"
+
+
+def _process_definition(text: str) -> dict[str, Any] | None:
+    rules = _PROCESS_RULE_RE.findall(text)
+    if len(rules) < 2 or len({r[0] for r in rules}) != 1:
+        return None
+    var = rules[0][0]
+    branches = []
+    for _, cond, expr in rules:
+        try:
+            body = safe_parse_expr(expr.strip(), local_dict={var: sp.Symbol(var)})
+        except Exception:  # noqa: BLE001 - an unreadable rule: the process is not represented
+            return None
+        if body.free_symbols - {sp.Symbol(var)}:
+            return None
+        branches.append({"expression": sp.sstr(body), "condition": cond.lower()})
+    return {"name": PROCESS_NAME, "parameter": var, "domain": domain_from_words(text) or "integer", "branches": branches}
+
+
+def _reaches_tasks(text: str, defs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    proc = next((d for d in defs if d["name"] == PROCESS_NAME), None) or (defs[0] if len(defs) == 1 else None)
+    if proc is None:
+        return []
+    tasks = []
+    for m in _REACHES_RE.finditer(text):
+        domain = domain_from_words(m.group("q")) or proc.get("domain") or "positive_integer"
+        tasks.append({"id": "reaches", "op": "reaches", "function": proc["name"], "target": m.group("target"),
+                      "variable": proc["parameter"], "domain": domain,
+                      "statement": f"the process reaches {m.group('target')} {m.group('q').strip()}"})
+    return tasks
+
+
 def parse_structured(text: str) -> tuple[dict[str, Any] | None, list[str]]:
     """The structured reading of a question -> (params {"definitions", "tasks"} or None, problems)."""
     defs, spans, problems = parse_definitions(text)
+    if not defs:
+        proc = _process_definition(text)
+        defs = [proc] if proc else []
     rest = _mask(text, spans)
     tasks: list[dict[str, Any]] = []
+    if defs:
+        tasks += _reaches_tasks(rest, defs)
     tasks += _case_tasks(rest, defs)
     if not tasks:
         tasks += _substitution_tasks(rest, defs)
@@ -895,6 +943,148 @@ def axiom_structured(definitions: list[dict[str, Any]] | None = None, tasks: lis
     return run_structured(defs, _clean(list(tasks or [])))
 
 
+# "Reaches c for every n": a bounded check that never claims more than it checked, and the lemmas that are provable --
+
+REACH_LIMIT_N = 5000  # start values checked
+REACH_MAX_STEPS = 10_000  # applications per start value before it is reported as not reached (not as a counterexample)
+
+
+def _compile(expr: sp.Expr, var: sp.Symbol) -> Callable[[Fraction], Fraction]:
+    """Exact rational evaluation of a validated SymPy expression as nested closures (no eval, no exec)."""
+    if expr == var:
+        return lambda x: x
+    if expr.is_Rational:
+        c = Fraction(int(expr.p), int(expr.q))
+        return lambda _x: c
+    if isinstance(expr, sp.Add):
+        parts = [_compile(a, var) for a in expr.args]
+        return lambda x: sum((p(x) for p in parts), Fraction(0))
+    if isinstance(expr, sp.Mul):
+        parts = [_compile(a, var) for a in expr.args]
+
+        def mul(x: Fraction) -> Fraction:
+            out = Fraction(1)
+            for p in parts:
+                out *= p(x)
+            return out
+        return mul
+    if isinstance(expr, sp.Pow) and expr.exp.is_Integer and 0 <= int(expr.exp) <= 64:
+        base, k = _compile(expr.base, var), int(expr.exp)
+        return lambda x: base(x) ** k
+    raise DefinitionError(f"{expr} is not rational arithmetic in {var}")
+
+
+def _compiled_step(defn: dict[str, Any]) -> Callable[[Fraction], Fraction]:
+    var = sp.Symbol(defn["parameter"])
+    branches = [(b["condition"], _compile(safe_parse_expr(b["expression"], local_dict={var.name: var}), var))
+                for b in defn["branches"]]
+    if any(c not in ("even", "odd") for c, _ in branches):
+        raise DefinitionError("only parity branches are iterated by the bounded check")
+    table = dict(branches)
+
+    def step(x: Fraction) -> Fraction:
+        if x.denominator != 1:
+            raise DefinitionError(f"{x} is not an integer")
+        return table["even" if x.numerator % 2 == 0 else "odd"](x)
+    return step
+
+
+def branch_lemmas(defn: dict[str, Any], domain: str) -> list[str]:
+    """What can be proved about each parity branch on its own, for every integer of the domain: whether it lowers
+    the value, the parity of its output, and the two-step map when the output parity is fixed. Each statement is
+    derived symbolically (n = 2k + r), never sampled."""
+    var, k = sp.Symbol(defn["parameter"]), sp.Symbol("k", integer=True, nonnegative=True)
+    low = {"positive_integer": 1, "nonnegative_integer": 0}.get(domain)
+    out: list[str] = []
+    forms: dict[str, sp.Expr] = {}
+    for b in defn["branches"]:
+        if b["condition"] not in ("even", "odd"):
+            continue
+        f = safe_parse_expr(b["expression"], local_dict={var.name: var})
+        forms[b["condition"]] = f
+        r = 0 if b["condition"] == "even" else 1
+        on_class = sp.expand(f.subs(var, 2 * k + r))  # the branch on its residue class, k >= 0
+        diff = sp.expand(on_class - (2 * k + r))
+        shown = _pretty(sp.sstr(f))
+        if low is not None and sp.Poly(diff, k).degree() <= 1:
+            a, c = sp.Poly(diff, k).all_coeffs() if sp.Poly(diff, k).degree() == 1 else (sp.Integer(0), diff)
+            k_min = max(0, -(-(low - r) // 2))  # smallest k with 2k + r >= low
+            value_at_min = a * k_min + c
+            if a <= 0 and value_at_min < 0:
+                out.append(f"Proved: for every {b['condition']} {var} >= {2 * k_min + r} in the domain, {shown} < {var} "
+                           f"(on {var} = 2k + {r}: {shown} - {var} = {_pretty(sp.sstr(diff))} < 0), so this rule strictly lowers the value.")
+            elif a >= 0 and value_at_min > 0:
+                out.append(f"Proved: for every {b['condition']} {var} in the domain, {shown} > {var} "
+                           f"({shown} - {var} = {_pretty(sp.sstr(diff))} > 0 on {var} = 2k + {r}), so this rule raises the value.")
+        if on_class.is_polynomial(k) and all(c.is_integer for c in sp.Poly(on_class, k).all_coeffs()):
+            parities = {int(on_class.subs(k, j)) % 2 for j in (0, 1)}
+            coeffs_even = all(int(c) % 2 == 0 for c in sp.Poly(on_class, k).all_coeffs()[:-1])
+            if len(parities) == 1 and coeffs_even:
+                parity = "even" if parities == {0} else "odd"
+                out.append(f"Proved: for {b['condition']} {var} = 2k + {r}, {shown} = {_pretty(sp.sstr(on_class))}, which is "
+                           f"always {parity}; so the next rule applied is the {parity} rule.")
+                forms[f"{b['condition']}->{parity}"] = forms.get(parity, sp.nan)
+    for b in ("even", "odd"):
+        nxt = next((key.split("->")[1] for key in forms if key.startswith(f"{b}->")), None)
+        if nxt and b in forms and nxt in forms:
+            two = sp.simplify(forms[nxt].subs(var, forms[b]))
+            if two != forms[b]:
+                rel = sp.simplify(two - var)
+                trend = "above" if (low is not None and rel.subs(var, max(low, 1)) > 0 and sp.Poly(rel, var).LC() >= 0) else "not always above"
+                out.append(f"Consequently two consecutive steps from an {b} value give {_pretty(sp.sstr(two))}, "
+                           f"which is {trend} the start: a single monotone argument cannot settle every orbit.")
+    return out
+
+
+def _run_reaches(task: dict[str, Any], defs: list[dict[str, Any]]) -> dict[str, Any]:
+    defn = next(d for d in defs if d["name"] == task["function"])
+    var, domain = task.get("variable") or defn["parameter"], task.get("domain") or defn.get("domain") or "positive_integer"
+    target = Fraction(int(task["target"]))
+    step = _compiled_step(defn)
+    worst, worst_n, peak, peak_n, not_reached = -1, None, Fraction(0), None, []
+    starts = [int(v) for v in domain_values(domain, REACH_LIMIT_N)]
+    for n in starts:
+        x, steps, seen = Fraction(n), 0, {Fraction(n)}
+        while x != target and steps < REACH_MAX_STEPS:
+            x = step(x)
+            steps += 1
+            if x > peak:
+                peak, peak_n = x, n
+            if x != target and x in seen:
+                # A cycle that avoids the target: this start never reaches it, which disproves the claim exactly.
+                cycle = [x]
+                y = step(x)
+                while y != x and len(cycle) < 1000:
+                    cycle.append(y)
+                    y = step(y)
+                text_cycle = " -> ".join(str(v) for v in [*cycle, x])
+                return {"status": "disproved", "counterexample": str(n), "cycle": [str(v) for v in cycle],
+                        "detail": f"the orbit of {n} enters the cycle {text_cycle}, which does not contain {task['target']}",
+                        "steps": [f"Starting at {var} = {n}, the orbit enters the cycle {text_cycle}.",
+                                  f"The cycle does not contain {task['target']}, so {var} = {n} never reaches it."],
+                        "text": f"False: {var} = {n} never reaches {task['target']} (cycle {text_cycle})."}
+            seen.add(x)
+        if x != target:
+            not_reached.append(n)
+        elif steps > worst:
+            worst, worst_n = steps, n
+    lemmas = branch_lemmas(defn, domain)
+    reduction = (f"Reduction (well-ordering): if some {var} never reaches {task['target']}, take the least such {var}; "
+                 f"every smaller value reaches {task['target']}, so this least counterexample's orbit never falls below "
+                 f"it. It is therefore enough to prove that every {var} > {task['target']} eventually reaches a value "
+                 f"smaller than {var}.") if domain in ("positive_integer", "nonnegative_integer") else ""
+    evidence = (f"Checked exactly: every {var} from {starts[0]} to {starts[-1]} reaches {task['target']}; the longest "
+                f"orbit starts at {worst_n} ({worst} steps), the largest value reached is {peak} (from {peak_n}).")
+    if not_reached:
+        evidence += f" Not reached within {REACH_MAX_STEPS} steps: {', '.join(map(str, not_reached[:10]))} (undecided, not counterexamples)."
+    steps_out = [*lemmas, *([reduction] if reduction else []), evidence,
+                 "Status: no proof follows from these facts and no counterexample was found; the claim is not settled here."]
+    return {"status": "unresolved", "checked_up_to": starts[-1], "longest": {"start": worst_n, "steps": worst},
+            "peak": {"value": str(peak), "start": peak_n}, "not_reached": not_reached[:50], "lemmas": lemmas,
+            "reduction": reduction, "steps": steps_out,
+            "text": f"Not settled: {evidence} This is evidence, not a proof."}
+
+
 def run_structured(definitions: list[dict[str, Any]], tasks: list[dict[str, Any]]) -> dict[str, Any]:
     """Execute every task against the definitions. A task that cannot be carried out reports its reason; it never
     falls back to a different problem."""
@@ -919,6 +1109,8 @@ def run_structured(definitions: list[dict[str, Any]], tasks: list[dict[str, Any]
                 res["steps"] = evaluation_steps(task, definitions, value, trace)
             elif task["op"] == "orbit":
                 res.update(_run_orbit(task, definitions))
+            elif task["op"] == "reaches":
+                res.update(_run_reaches(task, definitions))
             elif task["op"] == "claim":
                 res.update(_run_claim(task, definitions))
             else:
@@ -1122,6 +1314,28 @@ def check_structured(params: dict[str, Any], data: dict[str, Any]) -> list[tuple
                     comp_bad.append(f"{t['function']}({a}) = {again}, orbit shows {b}")
             if t.get("mode") == "cycle" and r.get("closed") and seq and seq[-1] not in seq[:-1]:
                 comp_bad.append("the reported cycle does not close")
+        elif t["op"] == "reaches":
+            # Recomputed through the definition (SymPy, branch by branch), not the compiled closures that produced it.
+            defn = next((d for d in defs if d["name"] == t["function"]), None)
+            if defn is None:
+                continue
+            target = _exact_value(t["target"])
+            if r.get("status") == "disproved" and r.get("cycle"):
+                cyc = [_exact_value(v) for v in r["cycle"]]
+                ok = target not in cyc and all(apply_definition(defn, a)[0] == b for a, b in zip(cyc, [*cyc[1:], cyc[0]]))
+                x, steps = _exact_value(r["counterexample"]), 0
+                while x not in cyc and steps < REACH_MAX_STEPS:
+                    x, steps = apply_definition(defn, x)[0], steps + 1
+                checked += 1
+                if not ok or x not in cyc:
+                    comp_bad.append(f"{t['id']}: the reported cycle does not recompute")
+            elif (r.get("longest") or {}).get("start") is not None:
+                x, steps = _exact_value(str(r["longest"]["start"])), 0
+                while x != target and steps < REACH_MAX_STEPS:
+                    x, steps = apply_definition(defn, x)[0], steps + 1
+                checked += 1
+                if steps != r["longest"]["steps"]:
+                    comp_bad.append(f"{t['id']}: orbit of {r['longest']['start']} takes {steps} steps, reported {r['longest']['steps']}")
         elif t["op"] == "claim":
             if r.get("status") == "disproved" and "undefined" in str(r.get("detail")):
                 checked += 1

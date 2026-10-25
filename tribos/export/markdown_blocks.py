@@ -47,7 +47,8 @@ def _math_span(state: Any, silent: bool) -> bool:
 
 @functools.lru_cache(maxsize=1)
 def markdown_parser() -> MarkdownIt:
-    md = MarkdownIt("commonmark", {"html": False}).enable("table").enable("strikethrough")
+    # breaks: a single newline is a line break, as on screen (two written lines export as two lines, not one).
+    md = MarkdownIt("commonmark", {"html": False, "breaks": True}).enable("table").enable("strikethrough")
     md.inline.ruler.before("escape", "math_span", _math_span)
     md.add_render_rule("image", _image_as_text)
     return md
@@ -114,7 +115,8 @@ def inline_runs(token: Any) -> list[Run]:
         elif t == "code_inline":
             runs.append(Run(text=ch.content, bold=bold, italic=italic, code=True, link=link))
         elif t in ("softbreak", "hardbreak"):
-            runs.append(Run(text=" " if t == "softbreak" else "\n"))
+            # A written newline is a line break in the document as on screen (python-docx turns "\n" into <w:br/>).
+            runs.append(Run(text="\n"))
         elif t == "image":
             alt = ch.content or "image"
             runs.append(Run(text=f"[{alt}]", italic=True))

@@ -198,12 +198,13 @@ class StructuredDefinition(BaseModel):
 
 class StructuredTask(BaseModel):
     id: str = Field(..., min_length=1, max_length=80, description="Label from the question: 'T(4)', 'Case A', 'claim'")
-    op: Literal["evaluate", "orbit", "claim"]
+    op: Literal["evaluate", "orbit", "claim", "reaches"]
     expression: str | None = Field(default=None, max_length=1000, description="evaluate / predicate claims: the expression")
     bindings: dict[str, int | float | str] | None = Field(default=None, description="evaluate: case-local values, e.g. {'n': 40}")
     factor: bool = Field(default=False, description="evaluate: also give the prime factorization")
     function: str | None = Field(default=None, max_length=16, description="orbit: the function to iterate")
     start: int | str | None = Field(default=None, description="orbit: start value")
+    target: int | str | None = Field(default=None, description="reaches: the value every orbit is claimed to reach")
     mode: Literal["cycle", "steps", "until_repeat"] | None = None
     steps: int | None = Field(default=None, ge=1, le=1000)
     lhs: str | None = Field(default=None, max_length=1000)

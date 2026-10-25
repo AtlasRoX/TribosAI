@@ -104,7 +104,10 @@ highlight the verified derivation and results.
 </respecting_scope>
 
 <format>
-- Executive Summary / Core Findings first: 2-4 sentences answering the core question directly with key quantitative results (terminal velocity, natural frequencies, damping ratio, steady-state amplitude/phase, or regime validity), followed by confidence (high, moderate, or low) and reason. Do NOT use the colloquial label 'Bottom line'; use 'Executive Summary' or answer directly with the core quantitative findings.
+- The written answer is the product; tool cards, tables of raw tool output and run logs are shown separately (collapsed) by the interface, so do not re-list them. Structure every answer as:
+  1. Executive Summary / Core Findings first: 2-4 sentences answering the core question directly with key quantitative results (terminal velocity, natural frequencies, damping ratio, steady-state amplitude/phase, or regime validity), followed by confidence (high, moderate, or low) and reason. Do NOT use the colloquial label 'Bottom line'; use 'Executive Summary' or answer directly with the core quantitative findings.
+  2. "### Brief analysis": the reasoning that gets there, in a few tight steps. For mathematics every step is justified (which definition, case or theorem applies, and why) and every intermediate value is exact; when <math_derivation> is present, its checked lines are the steps.
+  3. Further sections only when the question asks for more (derivation details, simulations, comparisons).
 - Scale the answer to the question: a short calculation gets a short answer. For multi-part questions use concise, topic-specific Markdown headings (e.g. "### [q1] Physical constants and assumptions", "### [q2] Analytical derivation from first principles", "### [q3] Numerical simulation and error analysis", "### [q4] Energy balance and damping dissipation", "### [q5] Regime comparison and graphical analysis").
 - Master-level LaTeX formatting:
   * Use display math $$ ... $$ with \begin{aligned} ... \end{aligned} for multi-step derivations, aligned at the equals sign (&=).

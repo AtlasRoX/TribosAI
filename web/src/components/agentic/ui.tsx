@@ -86,6 +86,9 @@ export function dotClass(status: unknown): string {
 
 /** The open state the disclosure policy chose for the card(s) inside; undefined leaves each card's own default. */
 export const CardDisclosureContext = createContext<boolean | undefined>(undefined);
+/** True when the card holds something the reader should see (a contradiction, low support, a failed step): a
+ * collapsed card then says so in its header instead of opening on its own. */
+export const CardAttentionContext = createContext<boolean>(false);
 
 export function Card({
   icon,
@@ -109,6 +112,7 @@ export function Card({
   // The disclosure policy (MessageArtifacts) overrides the card's own default. Only a reader's click is stored, so an
   // untouched card follows the policy as new data arrives, and a reader's choice survives later updates.
   const policy = useContext(CardDisclosureContext);
+  const attention = useContext(CardAttentionContext);
   const [manual, setManual] = useState<boolean | null>(null);
   // "[" / "]" (or a value link pointing into a closed card) open or close every collapsible card at once.
   useEffect(() => {
@@ -133,7 +137,10 @@ export function Card({
           {icon}
         </span>
         <div className={styles.headText}>
-          <div className={styles.title}>{title}</div>
+          <div className={styles.title}>
+            {title}
+            {collapsible && !open && attention ? <span className={styles.attentionChip}>needs a look</span> : null}
+          </div>
           {meta ? <div className={styles.meta}>{meta}</div> : null}
         </div>
         <div className={styles.headActions} onClick={(e) => e.stopPropagation()}>

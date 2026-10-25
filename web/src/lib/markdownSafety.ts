@@ -39,6 +39,32 @@ export function remarkHtmlBreaks() {
   return (tree: MdastNode) => visit(tree);
 }
 
+/**
+ * A single newline inside text is a line break, as the writer meant it ("ALPHA\nBETA" shows as two lines), not the
+ * CommonMark soft break that joins the lines with a space. Paragraphs still separate on blank lines; code, inline
+ * code and math are separate node types and are left exactly as written. The exports use the same rule.
+ */
+export function remarkSoftBreaks() {
+  const visit = (node: MdastNode) => {
+    if (!node.children) return;
+    const next: MdastNode[] = [];
+    for (const child of node.children) {
+      if (child.type === "text" && child.value && child.value.includes("\n")) {
+        const lines = child.value.split("\n");
+        lines.forEach((line, i) => {
+          if (i > 0) next.push({ type: "break" });
+          if (line) next.push({ type: "text", value: line });
+        });
+        continue;
+      }
+      visit(child);
+      next.push(child);
+    }
+    node.children = next;
+  };
+  return (tree: MdastNode) => visit(tree);
+}
+
 const BLOCKED_TAGS = new Set([
   "script", "style", "iframe", "frame", "frameset", "object", "embed", "applet", "form", "button",
   "textarea", "select", "option", "link", "meta", "base", "template", "portal", "video", "audio",

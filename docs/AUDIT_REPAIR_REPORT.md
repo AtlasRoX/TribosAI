@@ -58,7 +58,7 @@ stated parts remain; **Open** = not changed, scope given; **Blocked** = could no
 | I14 | P1 | Yes ("Not addressed: rigorous proof" on the correct T05 disproof, found live) | Topic-overlap, empty-evidence and deliverables graders did not know the task | Task-aware graders: no empty-evidence or overlap defect for self-contained or strict-form answers; status questions and requested proofs are delivered by a verdict | `test_completion_graders_respect_the_task`, `test_a_disproof_delivers_a_requested_proof_of_a_false_claim` | Fixed for the observed graders. `TaskOutcome.requested_operation` is still "evidence_synthesis" except for literal copies |
 | I15 | P1 | Not reproduced as a code defect | The content of research answers comes from the model | Indirect mitigations only: no irrelevant literature in self-contained answers; with Search off the writer may not name papers | Live T01 (§5) | Open: T12 (Tao primary-source check) was not run |
 | I16 | P1 | Partly | Relevance as above; acceptance status and argument validity are not separate fields | Relevance only (I06) | I06 tests | Open: T13 (claimed-proof sources, metadata outage) not implemented |
-| I17 | P1 | Yes (`ALPHA\nBETA` shown as one line; banner inside copied text) | No contract; CommonMark soft breaks; banner prepended to the answer; template rules in the writer prompt | Contract extraction; deterministic literal path; writer and reviser rule; no banner or confidence-line rewrite in strict-form answers; content-preserving `conform` after the last revision; contract-aware rendering; banner-free copy and export (both variants, backend too); verified-answer fallback when the writer fails | `test_literal_payloads_are_extracted_exactly` (4, incl. Bangla and indentation), `test_t07_...`, `web/tests/auditOutputContract.test.mts` | Partly: DOCX/PDF/LaTeX exporters still render a single newline as a space (`tribos/export/markdown_blocks.py`); no browser-level DOM or clipboard test was run |
+| I17 | P1 | Yes (`ALPHA\nBETA` shown as one line; banner inside copied text) | No contract; CommonMark soft breaks; banner prepended to the answer; template rules in the writer prompt | Contract extraction; deterministic literal path; writer and reviser rule; no banner or confidence-line rewrite in strict-form answers; content-preserving `conform` after the last revision; contract-aware rendering; banner-free copy and export (both variants, backend too); verified-answer fallback when the writer fails | `test_literal_payloads_are_extracted_exactly` (4, incl. Bangla and indentation), `test_t07_...`, `web/tests/auditOutputContract.test.mts`, `tests/test_export_line_breaks.py`, `web/tests/lineBreaks.test.mts` | Fixed in round 2: a written newline is now a line break on screen (`remarkSoftBreaks`), in DOCX (`<w:br/>`), PDF (`breaks: True` → `<br>`), LaTeX (`\`) and rich copy, with code and math untouched. No browser-level DOM or clipboard test was run |
 | I18 | P2 | Yes | No final validation of the form | `validate` after the final revision; violations go to the task status (`partial`) | `test_contract_limits_and_json_only` | Partly: a violation is reported, never rewritten by a model |
 | I19 | P1 | Yes ("Benchmark precision 25% (n=2)" on an unverified card) | The card and brief showed the benchmark rate of verified answers on every status | Shown, and sent to the writer, only for verified answers; the card title says "Verified" only when verified | `test_benchmark_precision_is_never_attached_to_an_unverified_answer` | Partly: claim-score rounding (0.37 card vs 0.38 trace) and the Verification tab percentage badge are unchanged |
 | I20 | P1 | Yes (code: `handleQuotaExceeded` removed other threads' message lists) | Quota fallback deleted whole conversations, oldest first, including pinned or project threads | Never deletes conversation text: reconstructible caches (plots, passage text) are dropped first, then the save reports "not saved" | `a full browser never deletes another investigation's conversation` (fails on the original code, passes now) | Partly: the slimming of other threads is not transactional; the notice is single-slot; threads pruned by older versions still open empty without an explanation |
@@ -221,7 +221,6 @@ simulation clarification.
 
 **Remains:**
 - T12/T13 research-claim and source-status work;
-- DOCX/PDF soft-break rendering;
 - browser-level end-to-end tests;
 - I22 timing definitions;
 - the backend claim-tally wording and truncation;
@@ -233,3 +232,46 @@ simulation clarification.
   for those must say so ("cite", "papers"); the plan step states this.
 - The structured parser covers explicit definitions. Recursive or multi-parameter definitions are reported as
   unsupported rather than guessed.
+
+## 11. Round 2 (follow-up requests)
+
+1. **Exports.** One rule everywhere: a single written newline is a line break.
+   - On screen: the `remarkSoftBreaks` plugin (no new dependency).
+   - DOCX: a run with `"
+"` (python-docx writes `<w:br/>`).
+   - PDF: markdown-it `breaks: True` gives `<br>`.
+   - LaTeX: `\` between consecutive prose lines.
+   - Rich copy: the rendered page now carries `<br>`.
+
+   Both verification-banner variants are stripped from every export.
+
+   Tests:
+   - `tests/test_export_line_breaks.py`: DOCX paragraph text `A: 1681 = 41 * 41
+B: 1763 = 41 * 43` with `<w:br/>`; PDF lines `ALPHA` and `BETA` separate; banner absent.
+   - `web/tests/lineBreaks.test.mts`: paragraphs, lists, code and display math unchanged.
+2. **Answer first, cards collapsed.**
+   - Every result card under an answer starts collapsed, and the supporting-evidence deck starts closed.
+   - A collapsed card that holds a warning shows a "needs a look" chip in its header. The existing `artifactDisclosure` analysis now decides only this chip.
+   - The writer's format rule is: direct answer (Executive Summary with confidence), then "### Brief analysis" with justified exact steps, then further sections only when asked. Raw tool output is not repeated in the text, since the cards hold it.
+3. **Open problems are worked, not only reported.** The approach is general; nothing is specific to one conjecture.
+   - Process rules ("If n is even, replace it with …") become a parity map, and "reaches c for every n" becomes a `reaches` task.
+   - The tool checks every start value up to 5000 exactly, using compiled rational closures with no eval or exec. A cycle that avoids the target is a rigorous disproof, independently recomputed.
+   - The tool derives what is provable per branch: decrease or increase on the residue class, parity of the output, and the two-step map. It adds the least-counterexample reduction.
+   - It reports the result as "unresolved", meaning evidence and not a proof, unless it is disproved.
+   - Every proof request gets `PROOF_ATTEMPT_NOTE`. It requires trying the standard methods, giving the strongest rigorous partial results, naming where each approach stops, and labelling each statement proved, evidence or open. It forbids passing evidence off as proof or claiming an open problem resolved.
+   - Example (T01): the lemmas "n/2 < n for even n ≥ 2" and "3n + 1 = 6k + 4 is always even for odd n", the two-step map (3n+1)/2, the reduction, and "every n from 1 to 5000 reaches 1; longest orbit 3711 (237 steps)". The 3n − 1 variant is disproved by the cycle 5 → 14 → 7 → 20 → 10 → 5.
+4. **Checker defects found live in round 2 and fixed.**
+   - An answer that writes its own piecewise map branch by branch ("f(n) = n/2 (even n)", "f(n) = 3n+1 (odd n)") was bound to its first branch, so the second branch was reported as a contradiction. Now:
+     - an answer function equal to a branch of the question's definition is that definition;
+     - a function restated next to branch words (even, odd, otherwise, "if n < ...") is never bound to one branch.
+   - The units audit read the variables `n` and `k` as unit symbols ("inconsistent units" on `3n + 1 = 6k + 4`). It now runs only when the question involves physical quantities or units.
+   - Test: `test_a_piecewise_map_written_branch_by_branch_is_not_a_contradiction_and_pure_maths_has_no_units`.
+
+**Round 2 results:**
+- Backend suite: **1536 passed, 17 skipped, 0 failed**.
+- Web: typecheck pass; eslint 0 errors; `npm test` 201/201; `next build` pass.
+- Ruff, bandit (0 high) and env-check pass.
+- Live T01 (132.6 s, 0 external calls):
+  - verification passed, task completed;
+  - answer: the exact statement; proved lemmas (even step decreases; odd step increases and is followed by an even step; the two-step map exceeds n, so no monotone descent works); the well-ordering reduction; exact evidence up to 5000 labelled as evidence; status "known open problem", nothing claimed resolved.
+- Live T04: 16.8 s, verified. Live T06: 9.9 s, exactly two lines.

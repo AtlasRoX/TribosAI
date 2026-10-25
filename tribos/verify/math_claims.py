@@ -154,6 +154,7 @@ class _Statement:
     kind: str = "relation"  # relation | table_row
     source: str = ""
     lead: str = ""
+    around: str = ""  # the words just before and after the math ("for odd $n$", "(even $n$)")
 
 
 def _heading_before(md: str, pos: int) -> str:
@@ -407,6 +408,12 @@ def _segments(md: str) -> list[tuple[int, str, bool]]:
         out.append((m.start(), body, in_table))
     return out
 
+
+# Words around a function statement that make it one branch of a piecewise definition ("(even $n$)", "for odd n",
+# "if $n < 0$", "otherwise", "\text{if } ...").
+_BRANCH_WORDS_RE = re.compile(
+    r"\b(?:even|odd|otherwise)\b|\\text\s*\{\s*(?:if|for|when|otherwise)|"
+    r"\b(?:if|when|for)\s+\$?\s*[A-Za-z]\s*\$?\s*(?:is\b|[<>≤≥]|\\(?:le|ge|lt|gt|leq|geq|neq)\b)", re.I)
 
 _PLAIN_ATOM = (r"(?:[A-Za-z]\w{0,2}\s*\([^()\n=$]{1,30}\)|\d+(?:\.\d+)?|(?<![A-Za-z])[A-Za-z](?![A-Za-z(])"
                r"|\((?:[^()\n=$]|\([^()\n=$]*\)){1,60}\))")
@@ -720,6 +727,7 @@ class _Auditor:
         self.cases: dict[str, dict[str, str]] = {str(c["id"]): dict(c.get("bindings") or {})
                                                  for c in problem.get("cases") or [] if c.get("id")}
         self.current_case: str | None = None
+        self.piecewise: set[str] = set()  # answer functions written branch by branch
         # The problem's unknowns (solve / inequality / extremum): "x = 0" names a case examined, never binds x.
         self.unknowns = {canonical_name(u) for u in unknowns or ()}
         self.functions = functions
@@ -966,6 +974,20 @@ class _Auditor:
             # carry the claim.
             terms, rels = terms[1:], rels[1:]
         head = self._definable(terms[0])
+        if head and head[0] == "function" and canonical_name(head[1]) not in self.env.defined:
+            c = canonical_name(head[1])
+            alias = self._question_branch(head, terms)
+            if alias is not None:
+                # The answer names the question's map itself ("f(n) = 3n + 1" for the odd rule of the defined
+                # process): f is that definition, with all its branches.
+                self.env.defined[c] = alias
+                self.env.funcs.pop(c, None)
+            elif c in self.piecewise or _BRANCH_WORDS_RE.search(st.around or ""):
+                # A piecewise function written branch by branch ("f(n) = n/2 for even n"): never bound to one branch,
+                # so the other branch is not read as a contradiction. Its uses stay undecided.
+                self.piecewise.add(c)
+                self.env.funcs.pop(c, None)
+                head = None
         if head and head[0] == "function" and canonical_name(head[1]) in self.env.defined:
             head = None  # "T(n) = n/2" restates a branch of the question's definition: checked, never re-bound
         if head and head[0] == "symbol" and canonical_name(head[1]) in self.case_scoped and self._is_bound(head):
@@ -1008,6 +1030,27 @@ class _Auditor:
             return
         self._settle(claim)
         self.claims.append(claim)
+
+    def _question_branch(self, head: tuple[str, str, tuple[sp.Symbol, ...]], terms: list[_Term]) -> dict[str, Any] | None:
+        """The question's multi-branch definition whose branch this statement writes, renamed to the answer's name."""
+        from ..axiom.engine import safe_parse_expr
+
+        _kind, name, params = head
+        value = next((t.expr for t in terms[1:] if t.expr is not None), None)
+        if value is None or len(params) != 1:
+            return None
+        for defn in self.env.defined.values():
+            if len(defn.get("branches") or []) < 2:
+                continue
+            p = sp.Symbol(defn["parameter"])
+            for b in defn["branches"]:
+                try:
+                    body = safe_parse_expr(b["expression"], local_dict={p.name: p}).xreplace({p: params[0]})
+                    if sp.simplify(body - value) == 0:
+                        return {**defn, "name": name}
+                except Exception:  # noqa: BLE001
+                    continue
+        return None
 
     def enter_case(self, case_id: str) -> None:
         """Statements from here on belong to `case_id`: its bindings replace the previous case's."""
@@ -1386,7 +1429,8 @@ def audit_answer(
         except Exception:  # noqa: BLE001
             continue
         for part in _depth_split(tokens, _is_separator):
-            statements.append(_Statement(part, _tex(part), heading, pos, source=body, lead=prefix[-160:]))
+            statements.append(_Statement(part, _tex(part), heading, pos, source=body, lead=prefix[-160:],
+                                         around=prefix[-60:] + " " + md[pos + len(body):pos + len(body) + 60]))
 
     row_items: list[tuple[int, str, list[tuple[float, float, str]], str, str]] = []
     for pos, _header, cells, heading in _table_rows(md):
@@ -1420,12 +1464,30 @@ def audit_answer(
     auditor.claims.sort(key=lambda c: c.position)
     from .units_audit import audit_units
 
-    units = audit_units(response, query)
+    # Pure mathematics has no units: in "n = 2k" and "3n + 1" the letters are variables, so a units audit would read
+    # them as unit symbols and report "inconsistent units". It runs when the question involves physical quantities.
+    units = audit_units(response, query) if _physical_question(query) else {
+        "checked": 0, "consistent": 0, "inconsistent": [], "not_evaluated": 0}
     for i, issue in enumerate(units["inconsistent"]):
         auditor.claims.append(MathClaim(claim_id=f"units-{i}", text=issue["statement"], context="Units",
             kind="units", status=FAILED, detail=issue["reason"], source_text=issue["statement"]))
     return MathAudit(claims=auditor.claims, definitions=auditor.definitions, record_revision=record.revision,
                      variable=variable, units=units)
+
+
+_UNIT_NAME_RE = re.compile(
+    r"\b(?:seconds?|minutes?|hours?|met(?:er|re)s?|grams?|kilograms?|newtons?|joules?|watts?|volts?|amperes?|amps?|ohms?|"
+    r"kelvin|celsius|fahrenheit|pascals?|hertz|liters?|litres?|moles?|units?|dimensions?|velocity|force|energy|mass|"
+    r"temperature|pressure|current|voltage)\b", re.I)
+
+
+def _physical_question(query: str) -> bool:
+    """Whether units can matter: the question gives a quantity with a unit, names a unit or physical quantity, or is not
+    a mathematics question at all."""
+    from ..agents.evidence_need import _given_quantities
+    from ..axiom.problem import has_math_intent
+
+    return bool(_given_quantities(query or "") or _UNIT_NAME_RE.search(query or "") or not has_math_intent(query or ""))
 
 
 def _case_marks(md: str, cases: dict[str, dict[str, str]]) -> list[tuple[int, str]]:

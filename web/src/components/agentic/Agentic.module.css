@@ -1569,3 +1569,18 @@ a.chipItem:focus-visible,
   gap: 2px;
   margin-top: 8px;
 }
+
+/* A collapsed card that holds a warning says so in its header (cards start collapsed; the answer comes first). */
+.attentionChip {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  vertical-align: 1px;
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+}

@@ -257,8 +257,27 @@ CLOSED_COMPUTATION_ANSWER_NOTE = (
 )
 
 
+# The answer shape for a proof request (prove, show that, prove or disprove), including well-known open problems: the
+# answer works the problem instead of only reporting its status, and keeps proved, evidenced and open apart.
+PROOF_ATTEMPT_NOTE = (
+    "PROOF REQUEST: work the problem; never stop at reporting its status or at saying it is hard. Within any length or "
+    "format the user set: (1) state the claim exactly (quantifiers, domain, definitions). (2) Try the standard methods "
+    "in turn and carry each as far as it rigorously goes: direct proof, contrapositive, contradiction, induction "
+    "(ordinary, strong, on a well-chosen quantity), the least-counterexample (well-ordering) reduction, invariants and "
+    "monovariants, parity and modular arithmetic, case analysis, bounding, and the search for a counterexample. (3) If a "
+    "proof is complete, give it with every step justified. If the claim is false, give the counterexample and check it. "
+    "(4) If no complete proof is reached, or the statement is a known open problem, still deliver the attempt: prove the "
+    "strongest rigorous partial results (special cases, lemmas, reductions, equivalent forms), use the proved lemmas and "
+    "computed evidence in <math_derivation> when present, name the exact step where each approach stops and why, and "
+    "report computational evidence with its exact range separately from what is proved. Label each statement as "
+    "proved, evidence or open. Never present an unproved step, a heuristic or numerical evidence as a proof, and never "
+    "claim a known open problem is resolved."
+)
+
+
 __all__ = [
     "CLOSED_COMPUTATION_ANSWER_NOTE",
+    "PROOF_ATTEMPT_NOTE",
     "CLOSED_REASON",
     "EvidenceNeed",
     "assess_evidence_need",

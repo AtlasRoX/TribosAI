@@ -533,3 +533,58 @@ def test_real_lean_accepts_mathlib_notation_after_the_core_rewrite_and_reports_u
     assert check_lean(core_notation(code))["status"] == "verified"
     failed = check_lean("theorem t (m : Nat) : m + 1 = m := by simp")
     assert failed["status"] == "failed" and "⊢" in failed["error"]
+
+
+# Open problems: worked, not merely reported -------------------------------------------------------------------------
+
+def test_an_open_iteration_claim_gets_proved_lemmas_a_reduction_and_bounded_evidence_never_a_proof():
+    art = _solve(T01)
+    res = _results(art)["reaches"]
+    assert res["status"] == "unresolved" and art["status"] == "partially_verified"  # evidence is never a proof
+    steps = "\n".join(res["steps"])
+    assert "Proved: for every even n >= 2 in the domain, n/2 < n" in steps
+    assert "3*n + 1 = 6*k + 4, which is always even" in steps
+    assert "take the least such n" in steps  # the well-ordering reduction
+    assert "every n from 1 to 5000 reaches 1" in steps and "3711 (237 steps)" in steps
+    assert "not settled" in steps
+
+
+def test_a_false_iteration_claim_is_disproved_by_a_checked_cycle():
+    q = ("Start with any positive integer n. If n is even, replace it with n/2. If n is odd, replace it with 3n - 1. "
+         "Prove that this process eventually reaches 1 for every positive integer.")
+    art = _solve(q)
+    res = _results(art)["reaches"]
+    assert res["status"] == "disproved" and res["counterexample"] == "5" and res["cycle"] == ["5", "14", "7", "20", "10"]
+    assert art["status"] == "verified"
+
+
+def test_a_forged_cycle_fails_the_independent_recomputation():
+    from tribos.axiom.definitions import check_structured, parse_structured
+    from tribos.axiom.problem import normalize_math_text
+
+    params, _ = parse_structured(normalize_math_text(T01))
+    forged = {"results": [{"id": "reaches", "op": "reaches", "status": "disproved", "counterexample": "7",
+                           "cycle": ["7", "22", "11"]}]}
+    comp = next(c for c in check_structured(params, forged) if c[0].startswith("computation"))
+    assert comp[1] is False
+
+
+def test_proof_requests_get_the_attempt_protocol():
+    from tribos.agents.evidence_need import PROOF_ATTEMPT_NOTE
+
+    for phrase in ("never stop at reporting its status", "least-counterexample", "Label each statement as proved, evidence or open",
+                   "never claim a known open problem is resolved"):
+        assert phrase in PROOF_ATTEMPT_NOTE
+
+
+def test_a_piecewise_map_written_branch_by_branch_is_not_a_contradiction_and_pure_maths_has_no_units():
+    from tribos.verify.math_claims import audit_answer
+
+    # Found live: the answer wrote "f(n) = n/2 (even n)" then "f(n) = 3n+1 (odd n)" and the checker reported the second
+    # branch, and correct algebra in k and n, as errors (units audit read n and k as unit symbols).
+    answer = ("For the map $f(n)=n/2$ (even $n$) and $f(n)=3n+1$ (odd $n$), write $n=2k+1$ for odd $n$; then "
+              "$f(n)-n=(3n+1)-n=2n+1=4k+3>0$ and $3n+1=6k+4$.")
+    audit = audit_answer(answer, T01)
+    assert not [c for c in audit.claims if c.status == "failed"], [(c.text, c.detail) for c in audit.claims]
+    # A function the question defines is still checked through its branches.
+    assert [c.status for c in audit_answer("T(1) = 1/2", T03).claims] == ["failed"]

@@ -13,7 +13,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from ...agentic.budget import BudgetExhausted, RunDeadlineExceeded
 from ...agentic.control import RunCancelled
-from ..evidence_need import CLOSED_COMPUTATION_ANSWER_NOTE, is_closed_computation
+from ..evidence_need import CLOSED_COMPUTATION_ANSWER_NOTE, PROOF_ATTEMPT_NOTE, is_closed_computation
 from ..result_keys import (
     AXIOM,
     CALCULA,
@@ -249,7 +249,13 @@ def prepare_context(run: RunContext) -> None:
             scope_notes.extend(n for n in (provider(ctx, tool_results) or []) if n)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Scope note provider failed: %s", exc)
-    if is_closed_computation(ctx):
+    from ...verify.formal.prove import wants_proof
+
+    if wants_proof(run.clean_query or run.query):
+        # A proof request is worked as a proof attempt (proved / evidence / open), never answered as a bare calculation
+        # or a bare status report.
+        scope_notes.append(PROOF_ATTEMPT_NOTE)
+    elif is_closed_computation(ctx):
         scope_notes.append(CLOSED_COMPUTATION_ANSWER_NOTE)
     run.vivarix_summary, run.lumicell_summary = vivarix_summary, lumicell_summary
     run.lithoscribe_summary, run.synapta_summary = lithoscribe_summary, synapta_summary

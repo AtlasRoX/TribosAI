@@ -23,9 +23,12 @@ import { MathAgentArtifact } from "@/components/agentic/MathAgentArtifact";
 import { PlanGraphArtifact } from "@/components/agentic/PlanGraphArtifact";
 import { PlanApprovalArtifact, ProjectMemoryArtifact } from "@/components/agentic/ProjectMemoryArtifact";
 import { SandboxAnalysisArtifact } from "@/components/agentic/SandboxAnalysisArtifact";
-import { CardDisclosureContext } from "@/components/agentic/ui";
+import { CardAttentionContext, CardDisclosureContext } from "@/components/agentic/ui";
 import { FEATURE_ARTIFACTS } from "@/components/artifacts/registry";
 import styles from "./MessageArtifacts.module.css";
+
+/** Cards that hold something the reader should see (artifactDisclosure), by artifact key. */
+const AttentionContext = React.createContext<Record<string, boolean>>({});
 
 function ArtifactBoundary({
   name,
@@ -38,9 +41,12 @@ function ArtifactBoundary({
   open?: boolean;
   children: React.ReactNode;
 }) {
+  const attention = React.useContext(AttentionContext);
   return (
     <ErrorBoundary name={`Artifact "${name}"`} resetKey={data} fallback={<ArtifactRenderFallback label={name.replace(/_/g, " ")} data={data} />}>
-      <CardDisclosureContext.Provider value={open}>{children}</CardDisclosureContext.Provider>
+      <CardAttentionContext.Provider value={Boolean(attention[name])}>
+        <CardDisclosureContext.Provider value={open}>{children}</CardDisclosureContext.Provider>
+      </CardAttentionContext.Provider>
     </ErrorBoundary>
   );
 }
@@ -55,7 +61,7 @@ export function MessageArtifacts({
   taskStatus?: TaskOutcome | null;
 }) {
   const [chosenTab, setChosenTab] = useState<string | null>(null);
-  const [inspectorOpen, setInspectorOpen] = useState<boolean>(true);
+  const [inspectorOpen, setInspectorOpen] = useState<boolean>(false); // supporting evidence starts closed: the answer comes first
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const deckRef = useRef<HTMLElement>(null);
   const deckId = useId();
@@ -72,7 +78,10 @@ export function MessageArtifacts({
     []
   );
   if (!artifacts) return null;
-  const open = artifactDisclosure({ question, taskStatus, artifacts });
+  // Every card starts collapsed so the written answer is what the reader sees first; a card that holds a warning
+  // (contradiction, low support, failed or unfinished work) says "needs a look" in its header instead of opening.
+  const attention = artifactDisclosure({ question, taskStatus, artifacts });
+  const open: Record<string, boolean> = Object.fromEntries(Object.keys(artifacts).map((key) => [key, false]));
 
   const derivationData = artifacts.derivation ?? artifacts.axiom;
   const derivationKey = artifacts.derivation ? "derivation" : "axiom";
@@ -169,7 +178,7 @@ export function MessageArtifacts({
   };
 
   return (
-    <>
+    <AttentionContext.Provider value={attention}>
       {/* 1. Direct core analytical and physical results (a plan approval is a record of the run: Plan & trace) */}
       {artifacts.math_agent && (
         <ArtifactBoundary name="math_agent" open={open["math_agent"]} data={artifacts.math_agent}>
@@ -338,6 +347,6 @@ export function MessageArtifacts({
           )}
         </section>
       )}
-    </>
+    </AttentionContext.Provider>
   );
 }

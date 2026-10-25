@@ -16,6 +16,7 @@ import {
   linkWebMarkers,
   rehypeStripUnsafe,
   remarkHtmlBreaks,
+  remarkSoftBreaks,
   safeUrlTransform,
   splitStreamingBlocks,
   stabilizeStreamingTail,
@@ -309,7 +310,7 @@ function useFitDisplayMath(ref: React.RefObject<HTMLDivElement | null>, content:
   }, [ref, content]);
 }
 
-const REMARK_PLUGINS: NonNullable<MarkdownOptions["remarkPlugins"]> = [remarkGfm, remarkMath, remarkHtmlBreaks];
+const REMARK_PLUGINS: NonNullable<MarkdownOptions["remarkPlugins"]> = [remarkGfm, remarkMath, remarkHtmlBreaks, remarkSoftBreaks];
 const REHYPE_KATEX_PLUGIN: [typeof rehypeKatex, typeof KATEX_OPTIONS] = [rehypeKatex, KATEX_OPTIONS];
 const MATH_BLOCK_KEY = "math-block";
 
