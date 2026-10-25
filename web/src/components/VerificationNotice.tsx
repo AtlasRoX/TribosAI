@@ -6,6 +6,7 @@ import { decodeEntities } from "@/lib/entities";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { emitUi } from "@/lib/uiEvents";
 import { claimSummary, taskHeadline, verificationState } from "@/lib/verificationState";
+import { unitsSummary } from "@/lib/unitsSummary";
 import type { ClaimCheck, ClaimStatus, TaskOutcome, TaskStatus, VerificationReport } from "@/types/chat";
 
 interface VerificationNoticeProps {
@@ -91,13 +92,14 @@ export function VerificationNotice({ report }: VerificationNoticeProps) {
   const [manual, setManual] = useState<boolean | null>(null);
   const listId = useId();
   const state = verificationState(report);
+  const units = unitsSummary(report?.units);
   if (state.kind !== "problems" || !report) {
     const Icon = state.kind === "not_checked" || state.kind === "not_evaluated" ? CircleDashed : CircleCheck;
     if (state.kind === "not_checked" || state.kind === "not_evaluated") {
       return (
         <div className="task-status verify-state" data-verification={state.kind} role="status">
           <Icon style={{ width: 13, height: 13, flexShrink: 0 }} aria-hidden={true} />
-          <span>{state.text}</span>
+          <span>{state.text}{units && ` · ${units}`}</span>
         </div>
       );
     }
@@ -114,7 +116,7 @@ export function VerificationNotice({ report }: VerificationNoticeProps) {
         }}
       >
         <Icon style={{ width: 13, height: 13, flexShrink: 0 }} aria-hidden={true} />
-        <span>{state.text}</span>
+        <span>{state.text}{units && ` · ${units}`}</span>
         <ChevronRight style={{ width: 12, height: 12, flexShrink: 0, opacity: 0.6 }} aria-hidden={true} />
       </button>
     );
@@ -169,6 +171,7 @@ export function VerificationNotice({ report }: VerificationNoticeProps) {
         )}
       </button>
       {note && <div className="verify-claim-reason" style={{ display: "block", padding: "0 12px 8px" }}>{note}</div>}
+      {units && <div className="verify-claim-reason" style={{ display: "block", padding: "0 12px 8px" }}>{units}</div>}
       {open && (
         <div id={listId}>
           {flagged.length > 0 && (

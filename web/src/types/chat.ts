@@ -4,6 +4,7 @@ import type { DatasetPublic, MessageAttachment } from "./datasets";
 import type { LiteratureArtifact } from "./literature";
 import type { RunManifest, SourceRecord } from "./runs";
 import type { AgenticArtifacts } from "./agentic";
+import type { UnitsAudit } from "../lib/unitsSummary";
 
 /** Structured outputs rendered beside an answer; features add keys here through their own type files. */
 export interface ExecutionArtifacts extends AgenticArtifacts {
@@ -78,6 +79,7 @@ export interface ClaimCheck {
 }
 
 export interface VerificationReport {
+  units?: UnitsAudit;
   passed?: boolean;
   verification_score?: number;
   defects?: { description?: string; claim?: string; [k: string]: any }[];

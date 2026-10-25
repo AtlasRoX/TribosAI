@@ -124,6 +124,7 @@ class MathAudit:
     definitions: list[MathClaim] = field(default_factory=list)
     record_revision: str = ""
     variable: str = "t"
+    units: dict[str, Any] = field(default_factory=dict)
 
     def counts(self) -> dict[str, int]:
         out = {PASSED: 0, FAILED: 0, INCONCLUSIVE: 0, UNSUPPORTED: 0}
@@ -138,7 +139,7 @@ class MathAudit:
         return [c for c in self.claims if c.status == FAILED]
 
     def to_dict(self) -> dict[str, Any]:
-        return {"counts": self.counts(), "variable": self.variable, "record_revision": self.record_revision,
+        return {"counts": self.counts(), "variable": self.variable, "record_revision": self.record_revision, "units": self.units,
                 "claims": [c.to_dict() for c in self.claims][:200],
                 "definitions": [d.to_dict() for d in self.definitions][:60]}
 
@@ -1301,8 +1302,14 @@ def audit_answer(
         except Exception as exc:  # noqa: BLE001
             logger.debug("Row grounding skipped: %s", exc)
     auditor.claims.sort(key=lambda c: c.position)
+    from .units_audit import audit_units
+
+    units = audit_units(response, query)
+    for i, issue in enumerate(units["inconsistent"]):
+        auditor.claims.append(MathClaim(claim_id=f"units-{i}", text=issue["statement"], context="Units",
+            kind="units", status=FAILED, detail=issue["reason"], source_text=issue["statement"]))
     return MathAudit(claims=auditor.claims, definitions=auditor.definitions, record_revision=record.revision,
-                     variable=variable)
+                     variable=variable, units=units)
 
 
 def _table_statement(pos: int, cells: list[str], heading: str, statements: list[_Statement],

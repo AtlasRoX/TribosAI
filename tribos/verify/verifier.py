@@ -132,6 +132,7 @@ class VerificationReport(BaseModel):
     status: str = "not_evaluated"
     # The deterministic audit of the answer's mathematical statements (tribos.verify.math_claims)
     math_audit: dict[str, Any] | None = None
+    units: dict[str, Any] = Field(default_factory=dict)
     # The answer text this report describes (sha256 prefix) and the result record revision it was checked against
     answer_hash: str = ""
     record_revision: str = ""
@@ -2004,6 +2005,7 @@ class TribosVerifier:
             coverage=coverage,
             status=report_status,
             math_audit=math_audit.to_dict() if math_audit is not None else None,
+            units=math_audit.units if math_audit is not None else {},
             answer_hash=hashlib.sha256((response_markdown or "").encode("utf-8")).hexdigest()[:16],
             record_revision=math_audit.record_revision if math_audit is not None else "",
         )

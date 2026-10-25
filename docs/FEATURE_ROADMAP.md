@@ -135,7 +135,8 @@ No dependencies added; intervals are local normal approximations, with singular 
 
 ## T4: Unit checking on every answer
 
-**Goal.** Add `tribos/verify/units_audit.py` and run it automatically inside `math_claims.audit_answer`.
+**Status: DONE (2026-10-25).** Implemented deterministic dimensional audit in `tribos/verify/units_audit.py` integrated into `math_claims.audit_answer` and `VerificationNotice.tsx`.
+Pint checks dimensional consistency, unit conversion values, and wrong unit labels; ambiguous symbols remain unevaluated. All gates and 1349 tests pass.
 
 **What to check.** Extract quantity statements and equations with units from both text and LaTeX ("F = 50 N", `$E = mc^2 = 9.0\times10^{16}\,\mathrm{J}$`). Bind symbols to the quantities stated in the question and the answer, then check:
 
