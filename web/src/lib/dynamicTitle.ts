@@ -3,18 +3,14 @@
  * Extracts clean, high-signal, professional topic titles from raw user prompts.
  */
 
-// Well-known biomedical acronyms, genes, targets and technologies that must preserve casing
+// Acronyms and names from mathematics, physics, engineering and scientific software that keep their casing.
+// Only tokens that are never ordinary English words: a title must not turn "all" or "met" into an acronym.
 const PRESERVED_ACRONYMS = new Set([
-  "DNA", "RNA", "mRNA", "tRNA", "siRNA", "shRNA", "snRNA", "lncRNA",
-  "KRAS", "EGFR", "TP53", "BRCA1", "BRCA2", "BRAF", "MYC", "HER2", "HER3",
-  "ALK", "ROS1", "RET", "MET", "NTRK", "NTRK1", "NTRK2", "NTRK3",
-  "PIK3CA", "PTEN", "AKT1", "CDK4", "CDK6", "RB1", "APC", "VHL",
-  "PD-1", "PD-L1", "CTLA-4", "LAG-3", "TIM-3", "TIGIT",
-  "NSCLC", "SCLC", "CRC", "PDAC", "HCC", "RCC", "TNBC", "GBM", "AML", "CML", "ALL", "CLL",
-  "ODE", "SBML", "SED-ML", "PDB", "GEO", "MCP", "API", "DAG",
-  "ChEMBL", "PrimeKG", "CIViC", "ClinVar", "gnomAD", "COSMIC", "TCGA",
-  "UniProt", "OpenTargets", "KEGG", "PubMed", "Ensembl",
-  "G12D", "G12C", "G12V", "G12A", "G12S", "G12R", "Q61H", "Q61K", "Q61L", "T790M", "C797S", "V600E"
+  "ODE", "ODEs", "PDE", "PDEs", "DAE", "FFT", "DFT", "FEM", "FEA", "CFD", "SVD", "PCA", "QR", "LU", "LQR", "PID", "MPC",
+  "RLC", "RC", "RL", "LC", "AC", "DC", "EMF", "RF", "IMU", "GPS", "LiDAR", "MOSFET", "BJT", "LED", "CMOS", "FPGA",
+  "GPU", "CPU", "API", "MCP", "DAG", "HDF5", "CSV", "JSON", "SI", "CODATA", "NIST", "IEEE", "ISO", "NASA", "ADS",
+  "SymPy", "SciPy", "NumPy", "Pint", "MATLAB", "LaTeX", "arXiv", "OEIS", "zbMATH", "OpenAlex", "WolframAlpha",
+  "1D", "2D", "3D", "4D",
 ]);
 
 // Minor words that stay lowercase in titles (unless first word)
@@ -34,7 +30,7 @@ const PREAMBLE_PATTERNS = [
 ];
 
 /**
- * Format a single word for title casing, respecting biomedical acronyms.
+ * Format a single word for title casing, keeping the casing of known acronyms.
  */
 function formatTitleWord(word: string, isFirst: boolean): string {
   // Check exact acronym match or uppercase match
@@ -45,7 +41,7 @@ function formatTitleWord(word: string, isFirst: boolean): string {
     }
   }
 
-  // Preserve hyphenated names (e.g. EGFR-mutant, PD-L1)
+  // Format each part of a hyphenated name (e.g. FFT-based, Runge-Kutta)
   if (word.includes("-")) {
     return word
       .split("-")
@@ -58,7 +54,7 @@ function formatTitleWord(word: string, isFirst: boolean): string {
     return lower;
   }
 
-  // If word is already mixed case like ChEMBL or PrimeKG, keep it
+  // If word is already mixed case like SymPy or LaTeX, keep it
   if (/[a-z]/.test(word) && /[A-Z]/.test(word) && word.length > 2) {
     return word;
   }
@@ -134,7 +130,7 @@ export function generateDynamicTitle(prompt: string, maxChars = 52): string {
     result = candidate;
   }
 
-  // Clean trailing punctuation left by a word-boundary cut ("…Lung Cancer,") and trailing minor words
+  // Clean trailing punctuation left by a word-boundary cut ("…Heat Equation,") and trailing minor words
   const trailingCleaned = result
     .replace(/[,.:;\-\s]+$/, "")
     .replace(/\s+(?:in|of|and|for|on|with|to|at|by|a|the|vs)$/i, "")

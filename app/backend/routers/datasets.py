@@ -27,6 +27,7 @@ from tribos.datasets.store import (
     extension_of,
     get_dataset_store,
     max_upload_bytes,
+    upload_limits,
 )
 
 router = APIRouter(prefix="/api/datasets", tags=["datasets"])
@@ -124,6 +125,13 @@ async def upload_dataset(request: Request, user_id: str = Depends(get_current_us
 async def list_datasets(user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     records = await asyncio.to_thread(get_dataset_store().list, user_id)
     return {"datasets": [r.to_api() for r in records], "count": len(records)}
+
+
+@router.get("/limits")
+async def dataset_limits(user_id: str = Depends(get_current_user)) -> dict[str, Any]:
+    """Accepted extensions and the per-kind size caps, so the client can refuse a file before uploading it.
+    Declared before "/{ds_id}" so the path is not taken for a dataset id."""
+    return upload_limits()
 
 
 @router.get("/{ds_id}")

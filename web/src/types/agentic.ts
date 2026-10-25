@@ -160,7 +160,11 @@ export interface JobSummary {
   updated?: string | number;
   created_at?: string | number;
   updated_at?: string | number;
-  request?: { message?: string; framework?: string; thread_id?: string; [k: string]: any };
+  /**
+   * The stored request. `message` includes the transcriptions of attached images; `display_message` (newer servers)
+   * is the text the user typed.
+   */
+  request?: { message?: string; display_message?: string; framework?: string; thread_id?: string; model?: string; [k: string]: unknown };
   message?: string;
   title?: string;
   error?: string;
@@ -171,21 +175,97 @@ export interface JobSummary {
 export interface CreateJobResponse {
   job_id: string;
   run_id?: string;
+  /** True when the server already had a job for this client_request_id and returned it instead of a new one. */
+  duplicate?: boolean;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
 // Projects (F16)
 // ---------------------------------------------------------------------------------------------------------------
 
+/** The caller's role in a project (contract C1). */
+export type ProjectRole = "owner" | "editor" | "viewer";
+
+/** A project as GET /api/projects returns it (contract C1); older servers send only id, name, description, counts. */
 export interface Project {
   id: string;
   name: string;
   description?: string;
+  /** Added to the context of every chat in the project. */
+  instructions?: string;
+  /** An emoji. */
+  icon?: string;
+  /** A CSS colour (#rrggbb). */
+  color?: string;
+  owner_id?: string;
+  role?: ProjectRole;
+  member_count?: number;
+  fact_count?: number;
+  invalid_fact_count?: number;
+  pending_review_count?: number;
+  file_count?: number;
+  created_at?: string | number;
+  updated_at?: string | number;
   created?: string | number;
   updated?: string | number;
-  fact_count?: number;
   [k: string]: any;
 }
+
+/** POST /api/projects body; PATCH takes any subset. */
+export interface ProjectInput {
+  name: string;
+  description?: string;
+  instructions?: string;
+  icon?: string;
+  color?: string;
+}
+
+export type ProjectPatchInput = Partial<ProjectInput>;
+
+export interface ProjectMember {
+  user_id: string;
+  role: ProjectRole;
+  added_at?: string | number;
+  added_by?: string;
+}
+
+export interface ProjectFile {
+  dataset_id: string;
+  name?: string;
+  kind?: string;
+  size_bytes?: number;
+  added_at?: string | number;
+  added_by?: string;
+}
+
+export type ProjectActivityAction =
+  | "project.created"
+  | "project.updated"
+  | "member.added"
+  | "member.removed"
+  | "member.role_changed"
+  | "file.added"
+  | "file.removed"
+  | "fact.added"
+  | "fact.edited"
+  | "fact.invalidated"
+  | "fact.approved"
+  | "fact.rejected"
+  | "fact.deleted"
+  | "run.completed";
+
+export interface ProjectActivityEvent {
+  id: string;
+  at: string | number;
+  actor?: string;
+  action: ProjectActivityAction | string;
+  target_type?: string;
+  target_id?: string;
+  summary?: string;
+}
+
+/** Review state of a project fact: facts written by runs start "pending". */
+export type FactReviewStatus = "pending" | "approved" | "rejected";
 
 export interface MemoryFact {
   id: string;
@@ -199,7 +279,20 @@ export interface MemoryFact {
   confidence?: number;
   invalid?: boolean;
   tags?: string[];
+  review_status?: FactReviewStatus;
+  reviewed_by?: string | null;
+  reviewed_at?: string | number | null;
+  review_note?: string | null;
   [k: string]: any;
+}
+
+/** POST /api/projects/{id}/memory body. */
+export interface NewFactInput {
+  subject: string;
+  relation: string;
+  object: string;
+  confidence?: number;
+  note?: string;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -294,7 +387,18 @@ export interface Hypothesis {
   intervention?: { kind?: string; parameter?: string; factor?: number };
   readout?: string;
   prediction?: "increase" | "decrease" | string;
-  result?: { baseline?: number | null; perturbed?: number | null; log2_fold_change?: number | null; supports?: boolean | null } | null;
+  result?: {
+    baseline?: number | null;
+    perturbed?: number | null;
+    /** (perturbed - baseline) / |baseline|. */
+    relative_change?: number | null;
+    /** The readout the change was measured on, e.g. "final value" or "peak". */
+    metric?: string | null;
+    monotonic?: boolean | null;
+    /** Only when both values are positive. */
+    log2_fold_change?: number | null;
+    supports?: boolean | null;
+  } | null;
   elo?: number;
   rank?: number;
   evidence_keys?: string[];
@@ -305,6 +409,8 @@ export interface HypothesesArtifact {
   model_id?: string | null;
   method?: string;
   experiments_run?: number;
+  /** Minimum |relative change| in the predicted direction for "supported" (e.g. 0.05 = 5 %). */
+  threshold_relative_change?: number | null;
   hypotheses?: Hypothesis[];
   note?: string;
 }
@@ -347,6 +453,43 @@ export interface SandboxTable {
   name?: string;
   columns?: string[];
   rows?: any[][] | Record<string, any>[];
+}
+
+/** One check of the mathematics agent's independent verifier (level 0 execution, 1 semantic alignment, 2 independent). */
+export interface MathCheck {
+  name: string;
+  passed: boolean | null;
+  level: number;
+  detail?: string;
+}
+
+export interface MathAgentStep {
+  index: number;
+  tool: string;
+  policy: string;
+  strategy_name?: string;
+  arguments?: Record<string, any>;
+  rationale?: string;
+  status: "ok" | "error";
+  failure: string;
+  error?: string;
+  seconds?: number;
+  cached?: boolean;
+  output?: Record<string, any>;
+  verdict?: { status: string; checks?: MathCheck[] } | null;
+}
+
+/** Verified mathematics agent run (tribos/axiom/agent.py). */
+export interface MathAgentArtifact {
+  status: "verified" | "partially_verified" | "unverified" | "failed";
+  answer?: { text?: string; latex?: string; [k: string]: any };
+  verification?: { status: string; level: number; checks?: MathCheck[]; uncertainty?: string[] } | null;
+  uncertainty?: string[];
+  /** Empirical P(correct | status) on the held-out benchmark; absent when no answer was given. */
+  confidence?: { p_correct: number; lower_95: number; n: number; fitted_on?: string } | null;
+  problem?: { text?: string; kind?: string; [k: string]: any };
+  steps?: MathAgentStep[];
+  metrics?: Record<string, any>;
 }
 
 export interface SandboxAnalysisArtifact {
@@ -410,6 +553,8 @@ export interface FrameworkRoutingArtifact {
   requested: "auto";
   chosen: FrameworkId;
   label?: string;
+  /** The scored approach: "direct" runs the plan-and-execute framework without its planner. */
+  approach?: string;
   rule?: string;
   reason?: string;
   signals?: Record<string, unknown>;
@@ -417,7 +562,7 @@ export interface FrameworkRoutingArtifact {
   tie_break?: "none" | "llm" | "llm_failed";
   /** Probability of the chosen architecture (softmax over the scores). */
   confidence?: number;
-  probabilities?: Partial<Record<FrameworkId, number>>;
+  probabilities?: Partial<Record<FrameworkId | "direct", number>>;
   /** The factors behind the chosen score, strongest first (weight = contribution to the score). */
   factors?: { factor: string; label: string; weight: number }[];
   features?: Record<string, number>;
@@ -443,6 +588,7 @@ export interface AgenticArtifacts {
   evidence_conflicts?: EvidenceConflictsArtifact;
   claim_confidence?: ClaimConfidenceArtifact;
   sandbox_analysis?: SandboxAnalysisArtifact;
+  math_agent?: MathAgentArtifact;
   model_calibration?: ModelCalibrationArtifact;
   project_memory?: ProjectMemoryArtifact;
   agent_dialogue?: AgentDialogueArtifact;

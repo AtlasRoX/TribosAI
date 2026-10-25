@@ -72,6 +72,12 @@ dev = [
   "twine==6.2.0",
   "python-semantic-release==10.5.3",
 ]
+# Image input (questions as photos or scans): Indra OCR on the CPU. opencv is pinned below 4.11 because later
+# wheels require numpy 2, and numpy is pinned to 1.26 above.
+vision = [
+  "indra-ocr==1.1.2",
+  "opencv-python-headless==4.10.0.84",
+]
 docs = [
   "mkdocs==1.6.1",
   "mkdocs-include-markdown-plugin==7.2.0",
@@ -207,8 +213,8 @@ skips = [
 skips = ["*_test.py", "*/test_*.py"]
 
 [tool.coverage.run]
-source = ["tribos"]
-omit = ["*/tests/*", "*/test_*", "docs/*", "app/*"]
+source = ["tribos", "app"]
+omit = ["*/tests/*", "*/test_*", "docs/*"]
 
 [tool.coverage.report]
 exclude_lines = [

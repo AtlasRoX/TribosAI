@@ -66,6 +66,18 @@ TOOL_INTENTS: dict[str, str] = {
     "axiom_linalg": "symbolic linear algebra matrix determinant inverse rank nullspace columnspace eigenvalues eigenvectors characteristic polynomial jordan form",
     "axiom_verify_identity": "verify mathematical identity prove algebraic trigonometric equivalence symbolic simplification zero test",
     "axiom_latex": "convert expression to latex parse latex into symbolic math canonical form",
+    "axiom_nsolve": "numeric fallback without a closed form scans an interval for every real root refines with findroot residual checked x equals cos x",
+    "axiom_optimize": "maximum minimum maximize minimize extrema global optimum critical points on an interval largest smallest value",
+    "axiom_inequality": "solve inequality less than greater than solution intervals sign chart where is the function positive negative",
+    "axiom_tangent": "tangent line normal line slope of the curve at a point derivative at x equals a",
+    "axiom_vector_calculus": "gradient divergence curl laplacian hessian jacobian of a scalar or vector field partial derivatives",
+    "axiom_transform": "laplace transform inverse laplace fourier transform frequency domain transfer function signal",
+    "axiom_nintegrate": "numerical definite integral quadrature no closed form approximate value of an integral",
+    "axiom_number_theory": "prime factorization is it prime gcd lcm greatest common divisor modular arithmetic inverse mod chinese remainder totient",
+    "axiom_recurrence": "solve recurrence relation closed form fibonacci sequence difference equation a n",
+    "axiom_probability": "probability distribution normal binomial poisson exponential expected value variance cdf quantile",
+    "calcula_statistics": "statistics mean median standard deviation t test p value linear regression correlation confidence interval of data",
+    "axiom_solve_problem": "solve a complete math question end to end bounded tool loop independent verifier re checks the answer verified result",
     "dynamis_simulate_ode": "simulate ordinary differential equation ode system initial value problem ivp time course trajectory dynamics phase portrait rk45 bdf radau",
     "dynamis_equilibrium": "find equilibrium points fixed points steady state jacobian eigenvalues linear stability analysis hyperbolic saddle node",
     "dynamis_parameter_scan": "vary a parameter sensitivity analysis parameter sweep bifurcation continuation response curve",
@@ -108,6 +120,10 @@ QUERY_EXPANSIONS: dict[str, str] = {
     "solv": "axiom_solve dynamis_root_find equation roots",
     "root": "axiom_solve dynamis_root_find zeros polynomial",
     "zero": "dynamis_root_find axiom_solve roots",
+    "transcend": "axiom_nsolve numeric roots",
+    "findroot": "axiom_nsolve numeric roots",
+    "verifi": "axiom_solve_problem axiom_verify_identity verified",
+    "verified": "axiom_solve_problem verified answer",
     "polynom": "axiom_solve roots algebraic",
     "integr": "axiom_calculus integrate integral calculus",
     "deriv": "axiom_calculus differentiate derivative calculus",
@@ -127,7 +143,7 @@ QUERY_EXPANSIONS: dict[str, str] = {
     "nullspac": "axiom_linalg nullspace rank matrix",
     "rank": "axiom_linalg rank matrix",
     "jordan": "axiom_linalg jordan matrix",
-    "identit": "axiom_verify_identityequivalence proof",
+    "identit": "axiom_verify_identity equivalence proof",
     "prove": "axiom_verify_identity proof theorem",
     "proof": "axiom_verify_identity theorem",
     "equiv": "axiom_verify_identity simplify",
@@ -326,6 +342,9 @@ class _BM25:
 def expand_query(query: str) -> tuple[list[str], dict[str, float]]:
     """Stemmed query terms plus lexicon expansions, and the weight of each term (expansions weigh less)."""
     raw = tokenize((query or "").replace("_", " "))
+    # Notation the tokenizer drops still names the task: "x^2 - 4 > 0" is an inequality, "7 mod 3" modular arithmetic.
+    if re.search(r"[<>≤≥]", query or ""):
+        raw += ["inequality", "intervals"]
     weights: dict[str, float] = {_stem(t): 1.0 for t in raw}
     for t in raw:
         for key, extra in QUERY_EXPANSIONS.items():

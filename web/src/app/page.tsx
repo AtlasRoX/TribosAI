@@ -2,54 +2,40 @@
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
-  Activity,
-  BookOpen,
-  Bot,
   Brain,
   Check,
-  CheckCircle2,
-  ChevronDown,
-  ChevronRight,
-  ChevronUp,
   Clock,
   Copy,
   Cpu,
-  Database,
-  Dna,
   Edit2,
-  FileText,
   GitBranch,
   Hourglass,
   Globe,
-  Key,
+  Info,
   Loader2,
-  Menu,
   MessageSquareText,
   MessagesSquare,
   Network,
   Workflow,
-  Microscope,
   MoreHorizontal,
   PanelLeft,
   PanelLeftClose,
-  Play,
-  Plus,
   RefreshCw,
   Search,
   Navigation,
   Send,
   Route,
   Settings,
-  Shield,
   Square,
   SquarePen,
   Sun,
   Moon,
-  Trash,
   Trash2,
   X,
-  XCircle,
-  Zap,
+  ImagePlus,
+  Pin,
+  PinOff,
+  SkipForward,
 } from "lucide-react";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { SmoothMarkdown } from "@/components/SmoothMarkdown";
@@ -57,14 +43,46 @@ import { ThinkingProcess } from "@/components/ThinkingProcess";
 import { TaskStatusNotice, VerificationNotice, stripVerificationBanner } from "@/components/VerificationNotice";
 import { MessageArtifacts } from "@/components/MessageArtifacts";
 import { MessageActionsExtra } from "@/components/MessageActionsExtra";
-import { FrameworkGuide, FrameworkMenu } from "@/components/FrameworkMenu";
-import { EffortMenu } from "@/components/EffortMenu";
+import { FrameworkGuide } from "@/components/FrameworkMenu";
 import { ChatGPTEffortControl } from "@/components/ChatGPTEffortControl";
 import { ComposerAttachButton } from "@/components/ComposerAttachButton";
 import { ComposerAttachmentChips } from "@/components/ComposerAttachmentChips";
 import { MessageAttachmentChips } from "@/components/MessageAttachmentChips";
+import { ComposerImages, MessageImages } from "@/components/ComposerImages";
+import { expectedSeconds, recordDuration, remainingText } from "@/lib/routeTiming";
+import { linkedValuesFrom } from "@/lib/mathInteractions";
+import { emitUi, isTypingTarget, onUi } from "@/lib/uiEvents";
+import { CommandPalette, type PaletteAction } from "@/components/CommandPalette";
+import { AnswerToc } from "@/components/AnswerToc";
+import { FirstRunTour } from "@/components/FirstRunTour";
+import { finishNoticeEnabled, noticeFinished, setFinishNotice } from "@/lib/finishNotice";
+import {
+  LatexInsert,
+  RoutePreviewChip,
+  SlashMenu,
+  UnitHintsRow,
+  applyTemplate,
+  matchingCommands,
+  slashQuery,
+  type SlashCommand,
+} from "@/components/ComposerAssist";
+import {
+  DEFAULT_IMAGE_QUESTION,
+  IMAGE_ACCEPT,
+  MAX_IMAGES,
+  imageContext,
+  isAcceptedImage,
+  makeThumbnail,
+  precheckImage,
+  readImage,
+  cropImage,
+  rotateImage,
+  sentImages,
+  type ComposerImage,
+} from "@/services/visionService";
 import { AgentOptionsSettings } from "@/components/agentic/AgentOptionsSettings";
 import { JobsPanel, jobTitle } from "@/components/agentic/JobsPanel";
+import { jobQuestion } from "@/lib/jobs";
 import { ApprovalCard, ClarificationChips, SteeringNotes, type SteerNote } from "@/components/agentic/LiveRunControls";
 import { ProjectSelector } from "@/components/agentic/ProjectSelector";
 import {
@@ -75,12 +93,14 @@ import {
   type InvestigationItem,
   type StorageNotice,
 } from "@/services/localStorageService";
-import { cancelRun, createJob, EFFORT_LEVELS, fetchConversationTitle, fetchFrameworks, getJob, normalizeAgentOptions, steerRun, streamJobEvents, toAgentOptions } from "@/services/agentService";
+import { JobFailedError, cancelRun, createJob, fetchConversationTitle, fetchFrameworks, getJob, normalizeAgentOptions, skipRunStep, steerRun, streamJobEvents, toAgentOptions } from "@/services/agentService";
 import { ApiError, apiFetch, errorMessage, errorStatus, jsonInit, readSseEvents, requestJson, type RequestOptions } from "@/services/apiClient";
 import { ArtifactRenderFallback, ErrorBoundary, MessageRenderFallback } from "@/components/ErrorBoundary";
 import { useFocusTrap } from "@/lib/useFocusTrap";
 import { generateDynamicTitle } from "@/lib/dynamicTitle";
-import { finalizeThoughts } from "@/components/agentic/thoughts";
+import { normalizeLegacyAgentName, normalizeThoughtAgents } from "@/lib/legacyNames";
+import { DEFAULT_MODEL_ID, migrateSavedModel } from "@/lib/modelMigration";
+import { finalizeThoughts, mergeThought } from "@/components/agentic/thoughts";
 import { resolveAnswer } from "@/lib/assistantAnswer";
 import { entitySummary, memoryBadgeCount, memoryStatTiles, memoryTypeLabel, verificationStatusLabel } from "@/lib/memoryVault";
 import { Message, ThoughtStep, FrameworkOption } from "@/types/chat";
@@ -98,16 +118,6 @@ import type {
   ModelsResponse,
   StreamEvent,
 } from "@/types/api";
-
-interface AgentMetadata {
-  id: string;
-  name: string;
-  domain: string;
-  description: string;
-  tools: string[];
-  color: string;
-  icon: React.ReactNode;
-}
 
 const ORCHESTRATION_FRAMEWORK = "authoritative-react-compiler";
 // The API's default when TRIBOS_DEFAULT_FRAMEWORK is unset: Auto routing (docs/agentic/auto-routing.md).
@@ -143,7 +153,7 @@ const FRAMEWORK_OPTIONS: FrameworkOption[] = [
     badgeColor: "var(--domain-t2kg)",
     icon: Network,
     description:
-      "A central manager coordinates and delegates tasks to domain specialists (literature, disease targets, simulations, omics).",
+      "A central manager coordinates and delegates tasks to domain specialists (symbolic math, computation, simulation, reference data, literature).",
     available: true,
   },
   {
@@ -190,7 +200,7 @@ const FRAMEWORK_LABEL: Record<string, string> = {
 
 const AUTH_TOKEN_STORAGE_KEY = "tribos-auth-token";
 const BACKEND_URL_STORAGE_KEY = "tribos-backend-url";
-const DEFAULT_MODEL = process.env.NEXT_PUBLIC_DEFAULT_MODEL || "nvidia/nemotron-3.5-super-vl-120b-a12b";
+const DEFAULT_MODEL = process.env.NEXT_PUBLIC_DEFAULT_MODEL || DEFAULT_MODEL_ID;
 
 /** A backend base URL the user typed, normalized, or null when it is not an http(s) URL. */
 function parseBackendUrl(value: string): string | null {
@@ -203,12 +213,40 @@ function parseBackendUrl(value: string): string | null {
   }
 }
 
+/** "about 2 min left" for a live run, from the approach its route step names ("Chose Direct workflow"). */
+/** True while the literature or web search step of a live run is still running. */
+/** The server's own "error" event in a chat stream: its reason for ending the answer, not a dropped connection. */
+class StreamServerError extends Error {
+  name = "StreamServerError";
+}
+
+function searchRunning(thoughts: ThoughtStep[]): boolean {
+  return thoughts.some(
+    (t) => t.status === "running" && /archivon|websurfer|web search|literature/i.test(`${t.agent || ""} ${t.id || ""} ${t.title || ""}`)
+  );
+}
+
+function liveRemaining(thoughts: ThoughtStep[], elapsed: number): string | null {
+  const route = thoughts.find((t) => typeof t.title === "string" && t.title.startsWith("Chose "));
+  return route ? remainingText(expectedSeconds(String(route.title).slice(6)), elapsed) : null;
+}
+
 export default function TribosAssistant() {
   const [messages, setMessages] = useState<Message[]>([]);
 
   const [inputMessage, setInputMessage] = useState("");
   // Datasets attached to the next question; they stay attached after sending until removed.
   const [attachedDatasets, setAttachedDatasets] = useState<MessageAttachment[]>([]);
+  // Question images: each is read into text on the server and reviewed before sending (visionService).
+  const [composerImages, setComposerImages] = useState<ComposerImage[]>([]);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  // Composer assists: the highlighted slash command and the formula editor (Ctrl+M).
+  const [slashIndex, setSlashIndex] = useState(0);
+  const [latexOpen, setLatexOpen] = useState(false);
+  const [skipRequested, setSkipRequested] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  // A message to scroll to once its conversation has loaded (a history search result).
+  const pendingScrollRef = useRef<string | null>(null);
   const [isWebSearchEnabled, setIsWebSearchEnabled] = useState(true);
   const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
@@ -216,9 +254,7 @@ export default function TribosAssistant() {
   // True once the user (or their saved settings) picked a framework; until then the backend default applies.
   const frameworkChosenRef = useRef(false);
   const [frameworkCatalog, setFrameworkCatalog] = useState<FrameworkInfo[] | null>(null);
-  const [isFrameworkDropdownOpen, setIsFrameworkDropdownOpen] = useState(false);
   const [isFrameworkGuideOpen, setIsFrameworkGuideOpen] = useState(false);
-  const [isEffortDropdownOpen, setIsEffortDropdownOpen] = useState(false);
   // Agentic settings (sent as agent_options), research project (project_id) and background submission.
   const [agentOptions, setAgentOptions] = useState<AgentOptionsState>(() => normalizeAgentOptions(null));
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -226,6 +262,9 @@ export default function TribosAssistant() {
   const [jobsRefreshKey, setJobsRefreshKey] = useState(0);
 
   useEffect(() => {
+    // Keys saved before the phronesis -> tribos rename move to their new names first (SUP-8). This is the page's
+    // first effect, so every later read (settings, token, backend URL, theme, history) sees the migrated keys.
+    localStorageService.migrateLegacyStorage();
     try {
       const savedSettings = localStorageService.getSettings();
       const saved = savedSettings.selectedFramework;
@@ -237,12 +276,10 @@ export default function TribosAssistant() {
         localStorageService.saveSettings({ ...savedSettings, selectedFramework: undefined });
       }
       if (savedSettings.selectedModel) {
-        if (savedSettings.selectedModel.includes("nemotron-3-") || savedSettings.selectedModel.includes("nemotron-3.")) {
-          setSelectedModel("nvidia/nemotron-3.5-super-vl-120b-a12b");
-          localStorageService.saveSettings({ ...savedSettings, selectedModel: "nvidia/nemotron-3.5-super-vl-120b-a12b" });
-        } else {
-          setSelectedModel(savedSettings.selectedModel);
-        }
+        // Only an explicitly retired model id is replaced (LOG-33); every current model is kept as saved.
+        const model = migrateSavedModel(savedSettings.selectedModel);
+        setSelectedModel(model);
+        if (model !== savedSettings.selectedModel) localStorageService.saveSettings({ ...savedSettings, selectedModel: model });
       }
       setAgentOptions(normalizeAgentOptions(savedSettings.agentOptions));
       if (typeof savedSettings.projectId === "string" && /^prj_[A-Za-z0-9]{6,40}$/.test(savedSettings.projectId)) {
@@ -263,14 +300,13 @@ export default function TribosAssistant() {
     localStorageService.saveSettings({ projectId: next || undefined });
   };
 
+  // The thread whose options menu is open; a click outside it closes it.
+  const [openMenuThreadId, setOpenMenuThreadId] = useState<string | null>(null);
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       const target = event.target as HTMLElement;
       if (!target.closest?.(".investigation-menu-container")) {
         setOpenMenuThreadId(null);
-      }
-      if (!target.closest?.(".framework-selector-container")) {
-        setIsFrameworkDropdownOpen(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -280,7 +316,6 @@ export default function TribosAssistant() {
   }, []);
 
   const [isProcessing, setIsProcessing] = useState(false);
-  const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
   const [threadId, setThreadId] = useState("session_default");
   const [backendUrl, setBackendUrl] = useState(
     process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000"
@@ -302,6 +337,8 @@ export default function TribosAssistant() {
   // Saved history is only read once the stored token and backend URL are known (UI-007).
   const [credentialsLoaded, setCredentialsLoaded] = useState(false);
   const [historyPrefs, setHistoryPrefs] = useState<HistoryPrefs>(DEFAULT_HISTORY_PREFS);
+  const [notifyOnFinish, setNotifyOnFinish] = useState(true);
+  useEffect(() => setNotifyOnFinish(finishNoticeEnabled()), []);
   const [storageNotice, setStorageNotice] = useState<StorageNotice | null>(null);
 
   useEffect(() => {
@@ -585,7 +622,6 @@ export default function TribosAssistant() {
   // Modal dialogs keep Tab inside them and return focus to the opener when they close.
   const settingsDialogRef = useFocusTrap<HTMLDivElement>(showSettings);
   const memoryDialogRef = useFocusTrap<HTMLDivElement>(showMemoryVault);
-  const [openMenuThreadId, setOpenMenuThreadId] = useState<string | null>(null);
   const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
   const [editTitleInput, setEditTitleInput] = useState<string>("");
   const [hoveredThreadId, setHoveredThreadId] = useState<string | null>(null);
@@ -701,19 +737,6 @@ export default function TribosAssistant() {
     }
   };
 
-  function normalizeLegacyAgentNames(text: string): string {
-    if (!text) return "";
-    return text
-      .replace(/\bClinical Orchestrator\b/gi, "Tribos Orchestrator")
-      .replace(/\bClinical\b/gi, "Tribos")
-      .replace(/\bTalk2KnowledgeGraphs?\b/gi, "Axiom")
-      .replace(/\bTalk2BioModels?\b/gi, "Dynamis")
-      .replace(/\bTalk2Cells?\b/gi, "Calcula")
-      .replace(/\bTalk2Scholars?\b/gi, "Archivon")
-      .replace(/\bTalk2AI[-_ ]?Agents[-_ ]?4[-_ ]?Pharma\b/gi, "Tribos")
-      .replace(/\bAI[-_ ]?Agents[-_ ]?4[-_ ]?Pharma\b/gi, "Tribos");
-  }
-
   const chatEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -743,22 +766,11 @@ export default function TribosAssistant() {
     setThreadId(initialActiveId);
     setMessages(localStorageService.getMessages(initialActiveId));
     refreshLocalStorageStats();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [credentialsLoaded, backendUrl, authToken]);
 
   // UI-008: slimming, pruning and expiry of saved history are announced, never silent.
   useEffect(() => localStorageService.subscribe((notice) => setStorageNotice(notice)), []);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
-        e.preventDefault();
-        handleResetSession();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
 
   const scrollToBottom = (_instant: boolean = false) => {
     // Scroll only the messages panel. scrollIntoView would also scroll every ancestor, including the
@@ -814,66 +826,6 @@ export default function TribosAssistant() {
     };
   }, [isProcessing, liveStartTime]);
 
-  const domainAgents: AgentMetadata[] = [
-    {
-      id: "archivon",
-      name: "Archivon",
-      domain: "Literature & Preprints",
-      description: "arXiv, Crossref, Semantic Scholar, OpenAlex, zbMATH Open, NASA ADS literature synthesis.",
-      tools: ["arXiv", "Crossref", "Semantic Scholar", "OpenAlex", "zbMATH Open", "NASA ADS"],
-      color: "#f59e0b",
-      icon: <BookOpen className="w-4 h-4 text-amber-400" />,
-    },
-    {
-      id: "axiom",
-      name: "Axiom",
-      domain: "Symbolic Mathematics & Proofs",
-      description: "SymPy computer algebra, calculus, equation solving, ODE dsolve, matrix algebra, identity proofs.",
-      tools: ["SymPy", "mpmath", "Symbolic Engine"],
-      color: "#38bdf8",
-      icon: <Brain className="w-4 h-4 text-sky-400" />,
-    },
-    {
-      id: "dynamis",
-      name: "Dynamis",
-      domain: "Dynamics & Simulation",
-      description: "Numerical ODE integration, parameter sweeps, phase portraits, stability and curve fitting.",
-      tools: ["SciPy solve_ivp", "Dynamical Systems", "Parameter Estimation"],
-      color: "#10b981",
-      icon: <Activity className="w-4 h-4 text-emerald-400" />,
-    },
-    {
-      id: "calcula",
-      name: "Calcula",
-      domain: "Scientific Computing & Data",
-      description: "Sandboxed scientific Python computation, array processing, graph theory, data analysis.",
-      tools: ["NumPy", "SciPy", "Pandas", "NetworkX", "Pint Sandbox"],
-      color: "#818cf8",
-      icon: <Cpu className="w-4 h-4 text-indigo-400" />,
-    },
-    {
-      id: "physis",
-      name: "Physis",
-      domain: "Physical Constants & Reference Data",
-      description: "CODATA physical constants, Pint units & dimensions, OEIS sequences, Materials Project, WolframAlpha.",
-      tools: ["NIST CODATA 2022", "Pint Units", "OEIS", "Materials Project", "WolframAlpha"],
-      color: "#a855f7",
-      icon: <Database className="w-4 h-4 text-purple-400" />,
-    },
-  ];
-
-  const agentIdMap: Record<string, string> = {
-    Archivon: "archivon",
-    Axiom: "axiom",
-    Dynamis: "dynamis",
-    Calcula: "calcula",
-    Physis: "physis",
-    Synapta: "axiom",
-    Vivarix: "dynamis",
-    Lumicell: "calcula",
-    Lithoscribe: "archivon",
-  };
-
   const flushLiveText = () => {
     liveFlushRef.current = null;
     setLiveReasoning(liveReasoningRef.current);
@@ -907,14 +859,10 @@ export default function TribosAssistant() {
     setStoppingRun(false);
   };
 
-  const sanitizeThoughts = (thoughts: ThoughtStep[]): ThoughtStep[] =>
-    thoughts.map((th) => ({
-      ...th,
-      title: normalizeLegacyAgentNames(th.title || ""),
-      text: normalizeLegacyAgentNames(th.text || ""),
-    }));
+  // Only agent labels are renamed; titles and text stay exactly as the server sent them (LOG-31).
+  const sanitizeThoughts = (thoughts: ThoughtStep[]): ThoughtStep[] => normalizeThoughtAgents(thoughts);
 
-  // Intelligent dynamic conversation title generator (biomedical-aware heuristic)
+  // Instant local title for a new conversation; refineConversationTitleAsync replaces it with the server's.
   const conversationTitle = (text: string, max = 52) => generateDynamicTitle(text, max);
 
   /** Refines the conversation title via background AI endpoint without blocking user interaction */
@@ -940,10 +888,17 @@ export default function TribosAssistant() {
   const buildAssistantMessage = (res: ChatResult, model: string): Message => {
     // UI-009: an empty or missing answer is a failure, never a fabricated "completed" line.
     const answer = resolveAnswer(res);
+    const routeLabel = res.execution_artifacts?.framework_routing?.label;
+    if (routeLabel && typeof res.duration_seconds === "number") recordDuration(routeLabel, res.duration_seconds);
+    noticeFinished(
+      "Your answer is ready",
+      String(answer.content || "").replace(/[#*$`>|]/g, "").replace(/\s+/g, " ").trim(),
+      Number(res.duration_seconds) || 0
+    );
     return {
       id: `ast_${Date.now()}`,
       sender: "assistant",
-      content: normalizeLegacyAgentNames(answer.content),
+      content: answer.content,
       agent: "Tribos Orchestrator",
       model: res.model_used || model,
       steps: res.steps || [],
@@ -1032,12 +987,10 @@ export default function TribosAssistant() {
       case "thought": {
         const [th] = sanitizeThoughts([parsed.data]);
         const idx = th.id ? accumulatedThoughts.findIndex((t) => t.id === th.id) : -1;
-        if (idx >= 0) accumulatedThoughts[idx] = th;
+        // A late or replayed "running" update never reopens a step that already finished.
+        if (idx >= 0) accumulatedThoughts[idx] = mergeThought(accumulatedThoughts[idx], th);
         else accumulatedThoughts.push(th);
         setLiveThoughts([...accumulatedThoughts]);
-        if (th.agent) {
-          setActiveAgentId(agentIdMap[normalizeLegacyAgentNames(th.agent)] || "orchestrator");
-        }
         break;
       }
       case "reasoning_delta":
@@ -1075,7 +1028,7 @@ export default function TribosAssistant() {
         onDone(parsed.result);
         break;
       case "error":
-        throw new Error(parsed.detail || "The orchestrator reported an error.");
+        throw new StreamServerError(parsed.detail || "The orchestrator reported an error.");
     }
   };
 
@@ -1084,7 +1037,7 @@ export default function TribosAssistant() {
       ? crypto.randomUUID()
       : `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 
-  /** The request body for a chat or job; agentic fields are only added for agentic frameworks. */
+  /** The request body for a chat or job; the research project is only sent for agentic frameworks. */
   const buildRequestPayload = (text: string, sendThreadId: string, sendModel: string): Record<string, unknown> => {
     const body: Record<string, unknown> = {
       message: text,
@@ -1093,20 +1046,24 @@ export default function TribosAssistant() {
       enable_web_search: isWebSearchEnabled,
       api_key: apiKey || undefined,
       dataset_ids: attachedDatasets.length ? attachedDatasets.map((d) => d.id) : undefined,
+      image_context: imageContext(composerImages),
       framework: selectedFramework,
-      // UI-021: one id per question, reused by the JSON fallback retry, so a server that saw the first POST can
-      // recognise the retry as the same request instead of starting a second run.
+      // UI-021: one id per question, reused by the JSON fallback retry. The server answers 409 for an id whose first
+      // request is still running, so a retry after a dropped stream never starts a second run (LOG-38).
       client_request_id: newClientRequestId(),
+      // The effort level applies to every framework, the classic pipeline included (LOG-34); the classic pipeline has
+      // no plan, critics or budget, so it gets only the effort level.
+      agent_options:
+        selectedFramework === ORCHESTRATION_FRAMEWORK ? { effort_level: agentOptions.effort_level || "medium" } : toAgentOptions(agentOptions),
     };
-    if (selectedFramework !== ORCHESTRATION_FRAMEWORK) {
-      body.agent_options = toAgentOptions(agentOptions);
-      if (projectId) body.project_id = projectId;
-    }
+    if (selectedFramework !== ORCHESTRATION_FRAMEWORK && projectId) body.project_id = projectId;
     return body;
   };
 
   const handleSendMessage = async (textToSend?: string) => {
-    const text = textToSend || inputMessage;
+    if (composerImages.some((i) => i.status === "reading")) return; // wait until every image has been read
+    const withImages = !textToSend && imageContext(composerImages) !== undefined;
+    const text = textToSend || inputMessage || (withImages ? DEFAULT_IMAGE_QUESTION : "");
     if (!text.trim() || isProcessing) return;
     if (runInBackground && !textToSend) {
       void handleSubmitJob(text);
@@ -1120,6 +1077,7 @@ export default function TribosAssistant() {
       sender: "user",
       content: text,
       attachments: attachedDatasets.length ? [...attachedDatasets] : undefined,
+      images: withImages ? sentImages(composerImages) : undefined,
       timestamp: nowTimestamp(),
     };
 
@@ -1140,7 +1098,6 @@ export default function TribosAssistant() {
     setStreamingThreadId(sendThreadId);
     resetLiveState();
     setLiveStartTime(startedAt);
-    setActiveAgentId("orchestrator");
     isNearBottomRef.current = true;
 
     const controller = new AbortController();
@@ -1149,6 +1106,7 @@ export default function TribosAssistant() {
     let streamOpened = false;
 
     const requestBody = JSON.stringify(buildRequestPayload(text, sendThreadId, sendModel));
+    if (withImages) clearComposerImages();
 
     const systemMessage = (content: string): Message => ({
       id: `err_${Date.now()}`,
@@ -1202,6 +1160,18 @@ export default function TribosAssistant() {
         } catch (jsonErr: unknown) {
           if (controller.signal.aborted) {
             appendAssistantMessage(systemMessage("> Stopped before the answer started."), currentMessages, sendThreadId);
+          } else if (jsonErr instanceof ApiError && jsonErr.status === 409) {
+            // LOG-38: the server is still answering the first request (same client_request_id) and refused to start a
+            // second run. Its answer cannot be reattached to this page; the question is not run twice.
+            appendAssistantMessage(
+              systemMessage(
+                "> ⚠️ **The connection to the answer was lost.** The server is still working on this question from the " +
+                  "first attempt, so it was not started again. Wait for it to finish, then ask again. Long questions can run " +
+                  "as background jobs (the **Background** toggle), which you can reopen from **Jobs** after a dropped connection."
+              ),
+              currentMessages,
+              sendThreadId
+            );
           } else if (jsonErr instanceof ApiError && jsonErr.status > 0) {
             appendAssistantMessage(systemMessage(`> ⚠️ **Request not accepted.** ${jsonErr.message}`), currentMessages, sendThreadId);
           } else {
@@ -1239,7 +1209,11 @@ export default function TribosAssistant() {
             duration_seconds: Math.round((Date.now() - startedAt) / 100) / 10,
             task_status: {
               task_status: aborted ? "cancelled" : "failed",
-              reason: aborted ? "Stopped by you before the answer finished." : "The connection ended before the answer finished.",
+              reason: aborted
+                ? "Stopped by you before the answer finished."
+                : err instanceof StreamServerError
+                  ? err.message
+                  : "The connection ended before the answer finished.",
             },
             timestamp: nowTimestamp(),
           },
@@ -1252,7 +1226,6 @@ export default function TribosAssistant() {
       setIsProcessing(false);
       setStreamingThreadId(null);
       resetLiveState();
-      setActiveAgentId(null);
     }
   };
 
@@ -1260,11 +1233,13 @@ export default function TribosAssistant() {
   const handleSubmitJob = async (text: string) => {
     const sendThreadId = threadId;
     const sendModel = selectedModel;
+    const withImages = imageContext(composerImages) !== undefined;
     const userMessage: Message = {
       id: `usr_${Date.now()}`,
       sender: "user",
       content: text,
       attachments: attachedDatasets.length ? [...attachedDatasets] : undefined,
+      images: withImages ? sentImages(composerImages) : undefined,
       timestamp: nowTimestamp(),
     };
     const currentMessages = [...messages, userMessage];
@@ -1281,16 +1256,24 @@ export default function TribosAssistant() {
     let content: string;
     let jobId: string | undefined;
     try {
-      const res = await createJob(backendUrl, authHeaders, buildRequestPayload(text, sendThreadId, sendModel));
+      const payload = buildRequestPayload(text, sendThreadId, sendModel);
+      if (withImages) clearComposerImages();
+      const res = await createJob(backendUrl, authHeaders, payload);
       jobId = res.job_id;
+      // A repeated client_request_id returns the job the first submission created (duplicate: true), never a second one.
       content =
-        `> Queued as background job \`${res.job_id}\`. It keeps running on the server, even if you close this tab. ` +
+        (res.duplicate
+          ? `> This question is already queued as background job \`${res.job_id}\`; it was not started again. `
+          : `> Queued as background job \`${res.job_id}\`. It keeps running on the server, even if you close this tab. `) +
         "Open it from **Jobs** to follow it live or to read the answer.";
       setJobsRefreshKey((k) => k + 1);
     } catch (err: unknown) {
       const status = errorStatus(err);
       if (status === 401 || status === 403) setAuthProblem("The API rejected the access token. Set it under Settings → Tribos Access Token.");
-      content = `> ⚠️ **Background job not started.** ${errorMessage(err, "The backend did not accept the job.")}`;
+      content =
+        status === 409
+          ? "> ⚠️ **Background job not started again.** The server is still storing the first submission of this question; open it from **Jobs** in a moment."
+          : `> ⚠️ **Background job not started.** ${errorMessage(err, "The backend did not accept the job.")}`;
     }
     appendAssistantMessage(
       {
@@ -1318,7 +1301,8 @@ export default function TribosAssistant() {
     const jobThreadId = typeof job.request?.thread_id === "string" && job.request.thread_id ? job.request.thread_id : threadId;
     const sendThreadId = jobThreadId;
     const sendModel = (typeof job.request?.model === "string" && job.request.model) || selectedModel;
-    const question = typeof job.request?.message === "string" ? job.request.message : "";
+    // The typed text without image transcriptions (LOG-37); older servers only store `message`.
+    const question = jobQuestion(job);
     let baseMessages = sendThreadId === threadId ? [...messages] : localStorageService.getMessages(sendThreadId);
     if (sendThreadId !== threadId) {
       if (!localStorageService.getInvestigations().some((i) => i.id === sendThreadId)) {
@@ -1351,7 +1335,6 @@ export default function TribosAssistant() {
     setStreamingThreadId(sendThreadId);
     resetLiveState();
     setLiveStartTime(startedAt);
-    setActiveAgentId("orchestrator");
     isNearBottomRef.current = true;
     const controller = new AbortController();
     abortRef.current = controller;
@@ -1386,9 +1369,15 @@ export default function TribosAssistant() {
     } catch (err: unknown) {
       const aborted = controller.signal.aborted;
       const partial = liveContentRef.current.trim();
+      // The job's own error event (LOG-35): the server's reason, not a dropped connection.
+      const jobFailed = !aborted && err instanceof JobFailedError ? err : null;
       const note = aborted
         ? "> Detached from the background job; it keeps running on the server. Open it again from **Jobs**."
-        : `> ⚠️ **Could not follow the background job**: ${errorMessage(err, "connection lost")}`;
+        : jobFailed
+          ? jobFailed.cancelled
+            ? `> The background job was cancelled. ${jobFailed.message}`
+            : `> ⚠️ **The background job failed**: ${jobFailed.message}`
+          : `> ⚠️ **Could not follow the background job**: ${errorMessage(err, "connection lost")}`;
       appendAssistantMessage(
         {
           id: `ast_${Date.now()}`,
@@ -1407,7 +1396,9 @@ export default function TribosAssistant() {
           // Detaching leaves the job running on the server; any other failure means no answer was shown (UI-014).
           task_status: aborted
             ? undefined
-            : { task_status: "failed", reason: `Could not follow the background job: ${errorMessage(err, "connection lost")}` },
+            : jobFailed
+              ? { task_status: jobFailed.cancelled ? "cancelled" : "failed", reason: jobFailed.message }
+              : { task_status: "failed", reason: `Could not follow the background job: ${errorMessage(err, "connection lost")}` },
           timestamp: nowTimestamp(),
         },
         baseMessages,
@@ -1418,7 +1409,6 @@ export default function TribosAssistant() {
       setIsProcessing(false);
       setStreamingThreadId(null);
       resetLiveState();
-      setActiveAgentId(null);
       setJobsRefreshKey((k) => k + 1);
     }
   };
@@ -1437,6 +1427,23 @@ export default function TribosAssistant() {
     refreshLocalStorageStats();
   };
 
+  // Ctrl/Cmd+N: the listener is installed once and calls the latest handleResetSession through a ref, so a new
+  // thread records the current framework and model, not the ones of the first render.
+  const resetSessionRef = useRef(handleResetSession);
+  useEffect(() => {
+    resetSessionRef.current = handleResetSession;
+  });
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        resetSessionRef.current();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   // Static options, with the backend's own descriptions (and availability) once /api/frameworks answered.
   const frameworkOptions: FrameworkOption[] = FRAMEWORK_OPTIONS.map((fw) => {
     if (!frameworkCatalog) return fw;
@@ -1445,11 +1452,9 @@ export default function TribosAssistant() {
       ? { ...fw, description: info.description || fw.description }
       : { ...fw, available: false, description: "Not offered by this backend" };
   });
-  const currentFramework = frameworkOptions.find((fw) => fw.id === selectedFramework) || frameworkOptions[0];
   const chooseFramework = (id: string) => {
     frameworkChosenRef.current = true;
     setSelectedFramework(id);
-    setIsFrameworkDropdownOpen(false);
     try {
       localStorageService.saveSettings({ ...localStorageService.getSettings(), selectedFramework: id });
     } catch {}
@@ -1457,6 +1462,195 @@ export default function TribosAssistant() {
   // While an agentic run streams in this thread, the composer steers it instead of asking a new question.
   const liveHere = isProcessing && streamingThreadId === activeThreadId;
   const canSteer = liveHere && !!liveRunId && !stoppingRun;
+  /** Adds images to the question and reads each one into text on the server. */
+  const addImages = (files: File[]) => {
+    const room = MAX_IMAGES - composerImages.length;
+    const picked = files.filter(isAcceptedImage).slice(0, Math.max(0, room));
+    for (const file of picked) {
+      const problem = precheckImage(file);
+      const key = `img_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const name =
+        file.name && file.name !== "image.png"
+          ? file.name
+          : `pasted-${new Date().toISOString().slice(11, 19).replace(/:/g, "")}.png`;
+      const item: ComposerImage = {
+        key,
+        name,
+        kind: file.type === "application/pdf" ? "pdf" : "image",
+        file,
+        previewUrl: URL.createObjectURL(file),
+        thumbUrl: "",
+        status: problem ? "error" : "reading",
+        text: "",
+        error: problem ?? undefined,
+      };
+      setComposerImages((prev) => [...prev, item]);
+      const patch = (p: Partial<ComposerImage>) =>
+        setComposerImages((prev) => prev.map((i) => (i.key === key ? { ...i, ...p } : i)));
+      void makeThumbnail(file).then((thumbUrl) => patch({ thumbUrl }));
+      if (problem) continue;
+      readImage(backendUrl, authHeaders, file, { onStatus: noteAuthStatus })
+        .then((reading) => patch({ status: "ready", reading, text: reading.text }))
+        .catch((err: unknown) => patch({ status: "error", error: err instanceof Error ? err.message : String(err) }));
+    }
+  };
+
+  /** Rotates or crops an attached image in the browser and reads the result again. */
+  const editImage = async (key: string, edit: { rotate: true } | { crop: { x: number; y: number; w: number; h: number } }) => {
+    const current = composerImages.find((i) => i.key === key);
+    if (!current?.file || current.kind === "pdf") return;
+    const file = "rotate" in edit ? await rotateImage(current.file) : await cropImage(current.file, edit.crop);
+    const previewUrl = URL.createObjectURL(file);
+    URL.revokeObjectURL(current.previewUrl);
+    const patch = (p: Partial<ComposerImage>) =>
+      setComposerImages((prev) => prev.map((i) => (i.key === key ? { ...i, ...p } : i)));
+    patch({ file, previewUrl, status: "reading", reading: undefined, text: "", error: undefined });
+    void makeThumbnail(file).then((thumbUrl) => patch({ thumbUrl }));
+    readImage(backendUrl, authHeaders, file, { onStatus: noteAuthStatus })
+      .then((reading) => patch({ status: "ready", reading, text: reading.text }))
+      .catch((err: unknown) => patch({ status: "error", error: err instanceof Error ? err.message : String(err) }));
+  };
+
+  const removeImage = (key: string) =>
+    setComposerImages((prev) => {
+      const gone = prev.find((i) => i.key === key);
+      if (gone) URL.revokeObjectURL(gone.previewUrl);
+      return prev.filter((i) => i.key !== key);
+    });
+
+  const clearComposerImages = () =>
+    setComposerImages((prev) => {
+      prev.forEach((i) => URL.revokeObjectURL(i.previewUrl));
+      return [];
+    });
+
+  useEffect(() => {
+    if (!isProcessing) setSkipRequested(false);
+  }, [isProcessing]);
+
+  // Unsent text is kept per conversation and comes back when the conversation is opened again.
+  const draftThreadRef = useRef(threadId);
+  useEffect(() => {
+    if (draftThreadRef.current === threadId) return;
+    draftThreadRef.current = threadId;
+    setInputMessage(localStorageService.getDraft(threadId));
+  }, [threadId]);
+  useEffect(() => {
+    const t = window.setTimeout(() => localStorageService.saveDraft(draftThreadRef.current, inputMessage), 400);
+    return () => window.clearTimeout(t);
+  }, [inputMessage]);
+
+  /** Replaces the composer text and puts the cursor at `cursor`. */
+  const setComposerText = (text: string, cursor = text.length) => {
+    setInputMessage(text);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(cursor, cursor);
+    });
+  };
+
+  const pickSlashCommand = (c: SlashCommand) => {
+    if (c.framework) chooseFramework(c.framework);
+    if (c.template) {
+      const { text, cursor } = applyTemplate(c.template);
+      setComposerText(text, cursor);
+    } else {
+      setComposerText("");
+    }
+    setSlashIndex(0);
+  };
+
+  const insertLatex = (latex: string, display: boolean) => {
+    const el = textareaRef.current;
+    const start = el?.selectionStart ?? inputMessage.length;
+    const end = el?.selectionEnd ?? inputMessage.length;
+    const snippet = display ? `\n$$${latex}$$\n` : `$${latex}$`;
+    setComposerText(inputMessage.slice(0, start) + snippet + inputMessage.slice(end), start + snippet.length);
+  };
+
+  const lastUserQuestion = (): string => {
+    for (let i = messages.length - 1; i >= 0; i--) if (messages[i].sender === "user") return messages[i].content;
+    return "";
+  };
+
+  // Cards, value links and the palette ask for questions and card toggles through page-wide events.
+  const sendRef = useRef(handleSendMessage);
+  const setTextRef = useRef(setComposerText);
+  useEffect(() => {
+    sendRef.current = handleSendMessage;
+    setTextRef.current = setComposerText;
+  });
+  useEffect(
+    () =>
+      onUi("tribos:ask", ({ text, send }) => {
+        if (send) void sendRef.current(text);
+        else setTextRef.current(text);
+      }),
+    []
+  );
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+        return;
+      }
+      if (isTypingTarget(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === "[" || e.key === "]") {
+        e.preventDefault();
+        emitUi("tribos:cards", { open: e.key === "]" });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  useEffect(() => {
+    const id = pendingScrollRef.current;
+    if (!id) return;
+    const el = document.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(id)}"]`);
+    if (!el) return;
+    pendingScrollRef.current = null;
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    el.classList.remove("value-flash");
+    void el.offsetWidth;
+    el.classList.add("value-flash");
+  }, [messages]);
+
+  const openThreadFromPalette = (id: string, messageId?: string) => {
+    const inv = investigations.find((i) => i.id === id);
+    if (!inv) return;
+    pendingScrollRef.current = messageId || null;
+    if (id === activeThreadId && messageId) {
+      document.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(messageId)}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      pendingScrollRef.current = null;
+      return;
+    }
+    handleSelectInvestigation(inv);
+  };
+
+  const paletteActions: PaletteAction[] = [
+    { id: "new", label: "New investigation", keywords: "chat conversation start", shortcut: "Ctrl N", run: () => handleResetSession() },
+    { id: "theme", label: theme === "dark" ? "Switch to light theme" : "Switch to dark theme", keywords: "dark light mode appearance", run: () => toggleTheme() },
+    {
+      id: "web",
+      label: isWebSearchEnabled ? "Turn web search off" : "Turn web search on",
+      keywords: "internet search literature",
+      run: () => setIsWebSearchEnabled((v) => !v),
+    },
+    { id: "auto", label: "Approach: Auto", hint: "cheapest adequate approach per question", keywords: "route framework", run: () => chooseFramework("auto") },
+    { id: "plan", label: "Approach: Plan & execute", keywords: "route framework planner", run: () => chooseFramework("agentic-plan-execute") },
+    { id: "supervisor", label: "Approach: Supervisor", keywords: "route framework specialists", run: () => chooseFramework("multi-agent-supervisor") },
+    { id: "debate", label: "Approach: Debate", keywords: "route framework critics", run: () => chooseFramework("multi-agent-debate") },
+    { id: "image", label: "Add an image of the question", keywords: "photo picture screenshot upload", run: () => imageInputRef.current?.click() },
+    { id: "formula", label: "Insert a formula", keywords: "latex equation math", shortcut: "Ctrl M", run: () => setLatexOpen(true) },
+    { id: "expand", label: "Expand all result cards", keywords: "open show", shortcut: "]", run: () => emitUi("tribos:cards", { open: true }) },
+    { id: "collapse", label: "Collapse all result cards", keywords: "close hide", shortcut: "[", run: () => emitUi("tribos:cards", { open: false }) },
+    { id: "settings", label: "Open settings", keywords: "preferences history storage", run: () => setShowSettings(true) },
+    { id: "tour", label: "Show the tour", keywords: "help introduction tips", run: () => window.dispatchEvent(new Event("tribos:tour")) },
+  ];
+
   const submitComposer = () => {
     if (canSteer) {
       const text = inputMessage.trim();
@@ -1468,6 +1662,64 @@ export default function TribosAssistant() {
     handleSendMessage();
   };
   const isAgenticFramework = selectedFramework !== ORCHESTRATION_FRAMEWORK;
+
+  // Images can be dropped anywhere on the page and pasted while focus is outside the composer; the latest addImages
+  // is read through a ref so the window listeners are installed once.
+  const addImagesRef = useRef(addImages);
+  const imageInputBlockedRef = useRef(canSteer);
+  useEffect(() => {
+    addImagesRef.current = addImages;
+    imageInputBlockedRef.current = canSteer;
+  });
+  const [imageDragActive, setImageDragActive] = useState(false);
+  useEffect(() => {
+    let depth = 0;
+    const hasImage = (e: DragEvent) =>
+      Array.from(e.dataTransfer?.items ?? []).some((it) => it.kind === "file" && (it.type.startsWith("image/") || it.type === "application/pdf"));
+    const onEnter = (e: DragEvent) => {
+      if (!hasImage(e) || imageInputBlockedRef.current) return;
+      depth += 1;
+      setImageDragActive(true);
+    };
+    const onOver = (e: DragEvent) => {
+      if (hasImage(e) && !imageInputBlockedRef.current) e.preventDefault();
+    };
+    const onLeave = () => {
+      depth = Math.max(0, depth - 1);
+      if (!depth) setImageDragActive(false);
+    };
+    const onDrop = (e: DragEvent) => {
+      depth = 0;
+      setImageDragActive(false);
+      if (e.defaultPrevented || imageInputBlockedRef.current) return; // the composer handled it
+      const files = Array.from(e.dataTransfer?.files ?? []).filter(isAcceptedImage);
+      if (!files.length) return;
+      e.preventDefault();
+      addImagesRef.current(files);
+      textareaRef.current?.focus();
+    };
+    const onPaste = (e: ClipboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.closest("input, textarea, [contenteditable='true']") || imageInputBlockedRef.current)) return;
+      const files = Array.from(e.clipboardData?.files ?? []).filter(isAcceptedImage);
+      if (!files.length) return;
+      e.preventDefault();
+      addImagesRef.current(files);
+      textareaRef.current?.focus();
+    };
+    window.addEventListener("dragenter", onEnter);
+    window.addEventListener("dragover", onOver);
+    window.addEventListener("dragleave", onLeave);
+    window.addEventListener("drop", onDrop);
+    document.addEventListener("paste", onPaste);
+    return () => {
+      window.removeEventListener("dragenter", onEnter);
+      window.removeEventListener("dragover", onOver);
+      window.removeEventListener("dragleave", onLeave);
+      window.removeEventListener("drop", onDrop);
+      document.removeEventListener("paste", onPaste);
+    };
+  }, []);
 
   return (
     <div
@@ -1518,15 +1770,10 @@ export default function TribosAssistant() {
               {/* Tribos Brand */}
               <div style={{ display: "flex", alignItems: "center", height: "26px", overflow: "hidden" }}>
                 <img
-                  src="/logo-tight.png"
+                  src="/tribos/logo-wordmark.png"
                   alt="Tribos"
                   className="tribos-tight-logo"
-                  style={{
-                    height: "22px",
-                    width: "auto",
-                    objectFit: "contain",
-                    display: "inline-block",
-                  }}
+                  style={{ height: "22px", width: "auto", display: "inline-block" }}
                 />
               </div>
 
@@ -1595,7 +1842,7 @@ export default function TribosAssistant() {
                 />
               ) : (
                 <img
-                  src="/icon.png"
+                  src="/tribos/icon.png"
                   alt="Tribos"
                   className="tribos-icon"
                   style={{
@@ -1716,9 +1963,11 @@ export default function TribosAssistant() {
         >
           {isSidebarOpen ? (
             /* Expanded Grouped List */
-            ["Today", "Yesterday", "Previous 7 days", "Older"].map((groupName) => {
-              const groupItems = investigations.filter(
-                (inv) => getInvestigationDateGroup(inv.updatedAt || inv.createdAt) === groupName
+            ["Pinned", "Today", "Yesterday", "Previous 7 days", "Older"].map((groupName) => {
+              const groupItems = investigations.filter((inv) =>
+                groupName === "Pinned"
+                  ? inv.pinned
+                  : !inv.pinned && getInvestigationDateGroup(inv.updatedAt || inv.createdAt) === groupName
               );
               if (groupItems.length === 0) return null;
 
@@ -1863,6 +2112,12 @@ export default function TribosAssistant() {
                                 transition: "padding-right 0.12s ease",
                               }}
                             >
+                              {inv.pinned && (
+                                <Pin
+                                  style={{ width: 11, height: 11, marginRight: 5, verticalAlign: "-1px", opacity: 0.7 }}
+                                  aria-label="Pinned"
+                                />
+                              )}
                               {inv.title}
                               {streamingThreadId === inv.id ? " · running" : ""}
                             </span>
@@ -1932,6 +2187,43 @@ export default function TribosAssistant() {
                                     gap: "2px",
                                   }}
                                 >
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      localStorageService.setPinned(inv.id, !inv.pinned);
+                                      setInvestigations(localStorageService.getInvestigations());
+                                      setOpenMenuThreadId(null);
+                                    }}
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "8px",
+                                      padding: "6px 8px",
+                                      borderRadius: "6px",
+                                      background: "none",
+                                      border: "none",
+                                      color: "var(--text-main)",
+                                      fontSize: "12px",
+                                      cursor: "pointer",
+                                      textAlign: "left",
+                                      width: "100%",
+                                      transition: "background 0.15s",
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      e.currentTarget.style.backgroundColor = "var(--bg-surface-hover)";
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      e.currentTarget.style.backgroundColor = "transparent";
+                                    }}
+                                  >
+                                    {inv.pinned ? (
+                                      <PinOff style={{ width: 12, height: 12, color: "var(--domain-t2kg)" }} />
+                                    ) : (
+                                      <Pin style={{ width: 12, height: 12, color: "var(--domain-t2kg)" }} />
+                                    )}
+                                    {inv.pinned ? "Unpin" : "Pin"}
+                                  </button>
+
                                   <button
                                     type="button"
                                     onClick={() => handleStartRename(inv)}
@@ -2163,7 +2455,7 @@ export default function TribosAssistant() {
                 e.currentTarget.style.transform = "scale(1)";
               }}
             >
-              CR
+              TR
             </button>
           )}
         </div>
@@ -2936,6 +3228,18 @@ export default function TribosAssistant() {
                     </div>
                   </div>
 
+                  <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px" }}>
+                    <input
+                      type="checkbox"
+                      checked={notifyOnFinish}
+                      onChange={(e) => {
+                        setNotifyOnFinish(e.target.checked);
+                        void setFinishNotice(e.target.checked);
+                      }}
+                    />
+                    Chime and notify me when an answer finishes in a background tab
+                  </label>
+
                   {/* UI-007: where conversation history is kept, and for how long. */}
                   <fieldset style={{ border: "none", margin: 0, padding: 0, display: "grid", gap: "6px" }}>
                     <legend style={{ fontSize: "11px", color: "var(--text-muted)", marginBottom: "4px" }}>
@@ -3073,7 +3377,7 @@ export default function TribosAssistant() {
             {messages.length === 0 ? (
               <div className="hero">
                 <div className="hero-emblem">
-                  <img src="/icon-tight.png" alt="" className="welcome-emblem" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                  <img src="/tribos/icon.png" alt="" className="welcome-emblem" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
                 </div>
                 <h1 className="hero-title">What shall we investigate today?</h1>
                 <p className="hero-subtitle">
@@ -3090,6 +3394,7 @@ export default function TribosAssistant() {
               return (
                 <ErrorBoundary key={msg.id} name={`Message ${msg.id}`} resetKey={msg.content} fallback={<MessageRenderFallback content={msg.content} />}>
                 <div
+                  data-message-id={msg.id}
                   style={{
                     display: "flex",
                     flexDirection: "column",
@@ -3103,24 +3408,27 @@ export default function TribosAssistant() {
                       <>
                         <span className="msg-avatar" aria-hidden="true">
                           <img
-                            src="/icon-tight.png"
+                            src="/tribos/icon.png"
                             alt=""
                             className="tribos-icon"
                             style={{ width: "13px", height: "13px", objectFit: "contain" }}
                           />
                         </span>
-                        <span style={{ fontWeight: 600, color: "var(--text-main)" }}>{normalizeLegacyAgentNames(msg.agent || "Tribos Orchestrator")}</span>
+                        <span style={{ fontWeight: 600, color: "var(--text-main)" }}>{normalizeLegacyAgentName(msg.agent || "Tribos Orchestrator")}</span>
                         {msg.framework_used ? (
                           <span
                             style={{ color: "var(--text-faint)" }}
                             title={
                               msg.execution_artifacts?.framework_routing?.reason
-                                ? `Auto chose ${FRAMEWORK_LABEL[msg.framework_used] || msg.framework_used}: ${msg.execution_artifacts.framework_routing.reason}`
-                                : `Ran: ${msg.framework_used}${msg.model ? ` · ${msg.model}` : ""}`
+                                ? `Auto chose ${msg.execution_artifacts.framework_routing.label || FRAMEWORK_LABEL[msg.framework_used] || msg.framework_used}: ${msg.execution_artifacts.framework_routing.reason}`
+                                : `Ran: ${FRAMEWORK_LABEL[msg.framework_used] || msg.framework_used}`
                             }
                           >
                             {msg.execution_artifacts?.framework_routing?.requested === "auto" ? "Auto · " : ""}
-                            {FRAMEWORK_LABEL[msg.framework_used] || msg.framework_used}
+                            {(msg.execution_artifacts?.framework_routing?.requested === "auto" &&
+                              msg.execution_artifacts.framework_routing.label) ||
+                              FRAMEWORK_LABEL[msg.framework_used] ||
+                              msg.framework_used}
                           </span>
                         ) : null}
                         {msg.duration_seconds && !hasThoughts ? (
@@ -3197,9 +3505,18 @@ export default function TribosAssistant() {
                                     : undefined
                                 }
                                 onReveal={handleSavedReveal}
+                                linkedValues={linkedValuesFrom(msg.execution_artifacts)}
                               />
                             ) : (
-                              <MarkdownRenderer content={stripVerificationBanner(msg.content)} citations={msg.citations} />
+                              <>
+                                <AnswerToc content={msg.content} messageId={msg.id} />
+                                <MarkdownRenderer
+                                  content={stripVerificationBanner(msg.content)}
+                                  citations={msg.citations}
+                                  linkedValues={linkedValuesFrom(msg.execution_artifacts)}
+                                  sectionActions={msg.agent !== "System"}
+                                />
+                              </>
                             )}
                             </ErrorBoundary>
                           </div>
@@ -3211,8 +3528,9 @@ export default function TribosAssistant() {
                             />
                           )}
                           {msg.storage_slimmed === "plots" && (
-                            <p className="composer-footnote storage-notice" role="note">
-                              Saved without plots and source passages: browser storage was full.
+                            <p className="message-storage-note" role="note">
+                              <Info aria-hidden="true" />
+                              Plots and source passages of this answer were not kept: browser storage was full when it was saved.
                             </p>
                           )}
                           {/* Each card has its own boundary inside MessageArtifacts (with a visible fallback); this outer one only
@@ -3233,6 +3551,7 @@ export default function TribosAssistant() {
                         <>
                           <div style={{ whiteSpace: "pre-wrap" }}>{msg.content}</div>
                           {msg.attachments?.length ? <MessageAttachmentChips attachments={msg.attachments} /> : null}
+                          {msg.images?.length ? <MessageImages images={msg.images} /> : null}
                         </>
                       )}
                     </div>
@@ -3286,7 +3605,7 @@ export default function TribosAssistant() {
                 <div className="msg-meta">
                   <span className="msg-avatar" aria-hidden="true">
                     <img
-                      src="/icon-tight.png"
+                      src="/tribos/icon.png"
                       alt=""
                       className="tribos-icon"
                       style={{ width: "13px", height: "13px", objectFit: "contain" }}
@@ -3310,7 +3629,23 @@ export default function TribosAssistant() {
                     isStreaming={true}
                     elapsedSeconds={liveElapsedSeconds}
                     answerStarted={liveContent.trim().length > 0}
+                    remaining={liveRemaining(liveThoughts, liveElapsedSeconds)}
                   />
+                  {liveRunId && searchRunning(liveThoughts) && (
+                    <button
+                      type="button"
+                      className="skip-search-btn"
+                      disabled={skipRequested}
+                      onClick={() => {
+                        setSkipRequested(true);
+                        skipRunStep(backendUrl, authHeaders, liveRunId).catch(() => setSkipRequested(false));
+                      }}
+                      title="Stop the literature and web search now; the answer is written from the evidence gathered so far"
+                    >
+                      <SkipForward style={{ width: 12, height: 12 }} aria-hidden="true" />
+                      {skipRequested ? "Skipping the search…" : "Skip the search"}
+                    </button>
+                  )}
 
                   {liveApproval && (
                     <ApprovalCard
@@ -3322,8 +3657,17 @@ export default function TribosAssistant() {
                     />
                   )}
 
+                  {!liveContent.trim() && !liveApproval && (
+                    // Where the answer will appear: a quiet skeleton that the first streamed words replace.
+                    <div className="answer-skeleton" aria-hidden="true">
+                      <span style={{ width: "62%" }} />
+                      <span style={{ width: "94%" }} />
+                      <span style={{ width: "88%" }} />
+                      <span style={{ width: "40%" }} />
+                    </div>
+                  )}
                   {liveContent.trim() && (
-                    <div className="msg-assistant-card" style={{ position: "relative" }}>
+                    <div className="msg-assistant-card answer-arrive" style={{ position: "relative" }}>
                       {/* UI-003: the live text has not been checked yet; the verifier may still remove or revise claims. */}
                       <div className="verify-draft-label" role="status">
                         <Hourglass style={{ width: 12, height: 12 }} aria-hidden="true" />
@@ -3362,6 +3706,17 @@ export default function TribosAssistant() {
             <form
               className="composer"
               data-steering={canSteer || undefined}
+              onDragOver={(e) => {
+                if (Array.from(e.dataTransfer.items).some((it) => it.kind === "file" && (it.type.startsWith("image/") || it.type === "application/pdf"))) {
+                  e.preventDefault();
+                }
+              }}
+              onDrop={(e) => {
+                const files = Array.from(e.dataTransfer.files).filter(isAcceptedImage);
+                if (!files.length || canSteer) return;
+                e.preventDefault();
+                addImages(files);
+              }}
               onSubmit={(e) => {
                 e.preventDefault();
                 submitComposer();
@@ -3371,11 +3726,71 @@ export default function TribosAssistant() {
                 attached={attachedDatasets}
                 onRemove={(id) => setAttachedDatasets((a) => a.filter((x) => x.id !== id))}
               />
+              {slashQuery(inputMessage) !== null && !canSteer && (
+                <SlashMenu
+                  query={slashQuery(inputMessage) ?? ""}
+                  active={slashIndex}
+                  onPick={pickSlashCommand}
+                  onHover={setSlashIndex}
+                />
+              )}
+              {latexOpen && <LatexInsert onInsert={insertLatex} onClose={() => setLatexOpen(false)} />}
+              <ComposerImages
+                images={composerImages}
+                onRemove={removeImage}
+                onEdit={(key, edit) => void editImage(key, edit)}
+                onChangeText={(key, text) =>
+                  setComposerImages((prev) => prev.map((i) => (i.key === key ? { ...i, text } : i)))
+                }
+              />
               <textarea
                 ref={textareaRef}
                 value={inputMessage}
-                onChange={(e) => setInputMessage(e.target.value)}
+                onChange={(e) => {
+                  setInputMessage(e.target.value);
+                  setSlashIndex(0);
+                }}
+                onPaste={(e) => {
+                  const files = Array.from(e.clipboardData.files).filter(isAcceptedImage);
+                  if (!files.length || canSteer) return;
+                  e.preventDefault();
+                  addImages(files);
+                }}
                 onKeyDown={(e) => {
+                  const slash = slashQuery(inputMessage);
+                  const commands = slash !== null ? matchingCommands(slash) : [];
+                  if (commands.length) {
+                    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                      e.preventDefault();
+                      const step = e.key === "ArrowDown" ? 1 : -1;
+                      setSlashIndex((i) => (i + step + commands.length) % commands.length);
+                      return;
+                    }
+                    if (e.key === "Enter" || e.key === "Tab") {
+                      e.preventDefault();
+                      pickSlashCommand(commands[Math.min(slashIndex, commands.length - 1)]);
+                      return;
+                    }
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      setComposerText("");
+                      return;
+                    }
+                  }
+                  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "m") {
+                    e.preventDefault();
+                    setLatexOpen((o) => !o);
+                    return;
+                  }
+                  // An empty composer recalls the last question for editing (like a shell's history).
+                  if (e.key === "ArrowUp" && !inputMessage && !canSteer) {
+                    const last = lastUserQuestion();
+                    if (last) {
+                      e.preventDefault();
+                      setComposerText(last);
+                    }
+                    return;
+                  }
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
                     submitComposer();
@@ -3410,6 +3825,17 @@ export default function TribosAssistant() {
                 }}
               />
 
+              {!canSteer && inputMessage.trim() && (
+                <div className="composer-assist">
+                  <RoutePreviewChip
+                    text={inputMessage}
+                    enabled={selectedFramework === "auto"}
+                    backendUrl={backendUrl}
+                    authHeaders={authHeaders}
+                  />
+                  <UnitHintsRow text={inputMessage} />
+                </div>
+              )}
               <div
                 style={{
                   display: "flex",
@@ -3427,6 +3853,30 @@ export default function TribosAssistant() {
                     backendUrl={backendUrl}
                     authHeaders={authHeaders}
                     disabled={isProcessing}
+                  />
+
+                  <button
+                    type="button"
+                    className="composer-pill"
+                    onClick={() => imageInputRef.current?.click()}
+                    disabled={canSteer || composerImages.length >= MAX_IMAGES}
+                    title="Add an image of the question (or paste or drop one). Its text is read and checked against the image, and you review it before sending."
+                    aria-label="Add an image of the question"
+                    style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}
+                  >
+                    <ImagePlus style={{ width: 13, height: 13, flexShrink: 0 }} />
+                    <span className="composer-pill-label">Image</span>
+                  </button>
+                  <input
+                    ref={imageInputRef}
+                    type="file"
+                    accept={IMAGE_ACCEPT}
+                    multiple
+                    hidden
+                    onChange={(e) => {
+                      addImages(Array.from(e.target.files ?? []));
+                      e.target.value = "";
+                    }}
                   />
 
                   <button
@@ -3500,9 +3950,12 @@ export default function TribosAssistant() {
                     <button
                       type="submit"
                       className="send-btn"
-                      disabled={!inputMessage.trim()}
+                      disabled={
+                        composerImages.some((i) => i.status === "reading") ||
+                        (!inputMessage.trim() && imageContext(composerImages) === undefined)
+                      }
                       aria-label="Send question"
-                      title="Send"
+                      title={composerImages.some((i) => i.status === "reading") ? "Reading the image…" : "Send"}
                     >
                       <Send style={{ width: 15, height: 15 }} />
                     </button>
@@ -3536,6 +3989,24 @@ export default function TribosAssistant() {
             )}
           </div>
         </main>
+        <CommandPalette
+          open={paletteOpen}
+          onClose={() => setPaletteOpen(false)}
+          actions={paletteActions}
+          investigations={investigations}
+          search={(q) => localStorageService.searchHistory(q)}
+          onOpenThread={openThreadFromPalette}
+        />
+        <FirstRunTour />
+        {imageDragActive && (
+          <div className="image-drop-overlay" aria-hidden="true">
+            <div className="image-drop-target">
+              <ImagePlus style={{ width: 26, height: 26 }} />
+              <span className="image-drop-title">Drop the image to add it to your question</span>
+              <span className="image-drop-hint">PNG, JPEG, WebP, BMP, TIFF or PDF · up to {MAX_IMAGES} files</span>
+            </div>
+          </div>
+        )}
         <FrameworkGuide
           open={isFrameworkGuideOpen}
           options={frameworkOptions}

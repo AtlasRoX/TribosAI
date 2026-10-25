@@ -49,8 +49,10 @@ export function DerivationArtifact({ data }: DerivationArtifactProps) {
     ? Number(data.residual ?? data.max_residual ?? data.spot_check_residual)
     : null;
   const solutions = arr<any>(data.solutions ?? data.roots);
+  const figures = arr<{ name?: string; png_base64?: string }>(data.figures ?? data.metadata?.figures)
+    .filter((f) => f && typeof f.png_base64 === "string" && f.png_base64.length > 50);
 
-  if (!steps.length && !mainLatex && !mainOutput && !solutions.length) return null;
+  if (!steps.length && !mainLatex && !mainOutput && !solutions.length && !figures.length) return null;
 
   const copyPayload = mainLatex || mainOutput || steps.map((s) => str(s.output_latex ?? s.latex ?? s.output ?? s.result)).filter(Boolean).join("\n");
 
@@ -112,6 +114,27 @@ export function DerivationArtifact({ data }: DerivationArtifactProps) {
                 ))}
               </tbody>
             </table>
+          </div>
+        </Section>
+      )}
+
+      {figures.length > 0 && (
+        <Section title="Figures & Visualizations" meta={`${figures.length} generated`}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12, marginTop: 8 }}>
+            {figures.map((f, i) => (
+              <figure key={i} style={{ margin: 0, padding: 8, background: "rgba(255,255,255,0.03)", borderRadius: 6, border: "1px solid rgba(255,255,255,0.08)" }}>
+                <img
+                  src={`data:image/png;base64,${f.png_base64}`}
+                  alt={f.name || `Figure ${i + 1}`}
+                  style={{ width: "100%", height: "auto", borderRadius: 4, display: "block" }}
+                />
+                {f.name && (
+                  <figcaption style={{ fontSize: 12, color: "#9ca3af", marginTop: 6, textAlign: "center" }}>
+                    {f.name}
+                  </figcaption>
+                )}
+              </figure>
+            ))}
           </div>
         </Section>
       )}

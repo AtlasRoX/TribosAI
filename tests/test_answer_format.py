@@ -24,48 +24,45 @@ from tribos.tools.registry import ToolResult
 
 def test_prompt_carries_the_expert_brief_rules():
     p = SYNTHESIS_SYSTEM_PROMPT
-    # 1. fixed evidence-level scale, in words, after key claims
-    assert "guideline/label > phase III RCT or meta-analysis > phase I/II trial > observational > preclinical in vivo > in vitro > computational" in p
-    assert '"(PMID: 12345678; phase III RCT)"' in p and "never upgrade it" in p
-    # 2. approval vs trial phase
-    assert '"FDA-approved for X (NDA/BLA number, date)" only when an FDA label or approval record is in the evidence' in p
-    assert "highest trial phase reached with its NCT ID" in p
-    # 3. effect sizes with context
-    assert "endpoint, population, comparator, estimate with 95% CI or p-value, and follow-up" in p
-    assert 'never a bare "improved survival"' in p
-    # 4. bottom line with calibrated confidence
-    assert "Bottom line first" in p and "high, moderate or low" in p
-    # 5. conflicting evidence in the body
-    assert "conflicting, null or negative evidence its own short paragraph in the body" in p
-    # 6. what would change the conclusion
-    assert '"What would change this conclusion" (pending trials by NCT ID, missing analyses)' in p
-    # 7. compact summary table, at most 5 columns
-    assert "Candidate | Mechanism/target | Evidence level | Key result | Source" in p and "At most 5 columns" in p
-    # 8. time-sensitive facts dated
-    assert '"as of" the <retrieval_date>' in p
+    # 1. fixed STEM evidence-level scale, in words, after literature claims; never upgraded
+    assert ("peer-reviewed journal/conference > preprint > textbook/reference work > technical report/standard > "
+            "web/other") in p
+    assert '"(arXiv:2312.04511; preprint)"' in p and "never upgrade it" in p
+    # 2. the primary report is cited for its own results
+    assert "primary report is in <evidence>, cite that report for its results" in p
+    # 3. values with SI units, significant figures and validity regimes
+    assert "with their units (SI units) and significant figures" in p and "valid governing regimes" in p
+    # 4. executive summary with calibrated confidence
+    assert "Executive Summary" in p and "confidence (high, moderate, or low)" in p
+    # 5. gaps stated, never filled
+    assert "Evidence limitations" in p and "Never fabricate experimental measurements" in p
+    # 6. no literal backslash line continuations reach the model (BRK-5); LaTeX examples stay intact
+    assert "\\\n" not in p and not p.startswith("\\")
+    assert "\\begin{aligned}" in p and "\\frac{\\mathrm{d}^2 x}{\\mathrm{d}t^2}" in p
 
 
 def test_correction_prompt_keeps_the_same_format_rules():
     assert "same grounding, scope, and format rules" in CORRECTION_SYSTEM_PROMPT
     assert "evidence levels" in CORRECTION_SYSTEM_PROMPT and '"as of" dates' in CORRECTION_SYSTEM_PROMPT
+    assert "species name" not in CORRECTION_SYSTEM_PROMPT and "effect-size" not in CORRECTION_SYSTEM_PROMPT
 
 
 @pytest.mark.parametrize(
     "passage, level",
     [
-        ({"evidence_grade": {"study_type": "rct"}, "title": "A phase 3 trial of sotorasib"}, "phase III RCT"),
-        ({"evidence_grade": {"study_type": "rct"}}, "RCT"),
-        ({"evidence_grade": {"study_type": "clinical_trial"}, "pub_types": ["Clinical Trial, Phase I", "Clinical Trial, Phase II"]}, "phase I/II trial"),
-        ({"evidence_grade": {"study_type": "clinical_trial"}, "title": "A phase 1b/2 study"}, "phase I/II trial"),
-        ({"evidence_grade": {"study_type": "rct"}, "passage_text": "In this randomized phase IIb trial ..."}, "phase II RCT"),
-        ({"evidence_grade": {"study_type": "observational"}}, "observational"),
-        ({"evidence_grade": {"study_type": "preclinical_in_vivo"}, "title": "phase II-like xenograft"}, "preclinical in vivo"),
-        ({"evidence_grade": {"study_type": "in_vitro"}}, "in vitro"),
-        ({"evidence_grade": {"study_type": "computational"}}, "computational"),
-        ({"evidence_grade": {"study_type": "meta_analysis"}}, "meta-analysis"),
-        ({"pub_types": ["Practice Guideline"], "evidence_grade": {"study_type": "review"}}, "guideline"),
-        ({"experimental_setting": "in-vivo"}, "preclinical in vivo"),  # ungraded: legacy setting
-        ({"experimental_setting": "human-clinical", "title": "phase in"}, "human clinical"),
+        ({"evidence_grade": {"study_type": "peer_reviewed"}}, "peer-reviewed journal/conference"),
+        ({"evidence_grade": {"study_type": "conference"}}, "peer-reviewed journal/conference"),
+        ({"evidence_grade": {"study_type": "theorem_proof"}}, "peer-reviewed journal/conference"),
+        ({"evidence_grade": {"study_type": "preprint"}}, "preprint"),
+        ({"evidence_grade": {"study_type": "peer_reviewed", "is_preprint": True}}, "preprint"),
+        ({"evidence_grade": {"study_type": "monograph_standard"}}, "textbook/reference work"),
+        ({"evidence_grade": {"study_type": "book_chapter"}}, "textbook/reference work"),
+        ({"evidence_grade": {"study_type": "technical_report"}}, "technical report/standard"),
+        ({"evidence_grade": {"study_type": "numerical_simulation", "confidence": "low", "basis": "text_heuristic"}},
+         "peer-reviewed journal/conference (type inferred from wording, unverified)"),
+        ({"evidence_grade": {"study_type": "unclassified"}}, "unclassified"),
+        ({"evidence_grade": {"study_type": "rct"}, "title": "A phase 3 trial"}, "unclassified"),  # legacy clinical grade
+        ({"experimental_setting": "in-vivo"}, "unclassified"),  # ungraded
         ({}, "unclassified"),
     ],
 )
@@ -75,13 +72,14 @@ def test_evidence_level_uses_the_fixed_scale(passage, level):
 
 def test_graded_passage_renders_its_level_without_duplicate_attributes():
     passage = {
-        "pmid": "33721583", "year": "2021", "title": "Sotorasib for KRAS G12C: a phase 3 randomized trial",
-        "passage_text": "PFS was longer with sotorasib.", "evidence_grade": {"study_type": "rct", "label": "Randomized controlled trial"},
-        "grade_label": "Randomized controlled trial", "experimental_setting": "human-clinical",
+        "arxiv_id": "2312.04511", "doi": "10.48550/arXiv.2312.04511", "year": "2023", "source": "arxiv",
+        "title": "Terminal velocity of small spheres", "passage_text": "The drag coefficient follows Stokes' law for Re < 1.",
+        "evidence_grade": {"study_type": "preprint", "label": "Preprint"}, "grade_label": "Preprint",
     }
-    block = build_evidence_block({"lithoscribe": ToolResult(success=True, tool_name="lithoscribe_literature_synthesis", data={"ranked_passages": [passage]})}, "ranking")
+    block = build_evidence_block({"archivon": ToolResult(success=True, tool_name="archivon_literature_search", data={"ranked_passages": [passage]})}, "ranking")
     doc = re.search(r"<document [^>]*>", block).group(0)
-    assert 'evidence_level="phase III RCT"' in doc
+    assert 'evidence_level="preprint"' in doc and 'arxiv_id="2312.04511"' in doc and 'source="arXiv"' in doc
+    assert '<literature source="arXiv">' in block and "EuropePMC" not in block
     names = re.findall(r'\s([\w-]+)="', doc)
     assert len(names) == len(set(names))
     # Ungraded passages keep the legacy rendering (the foundation golden is byte-identical without extensions).
@@ -106,10 +104,10 @@ async def test_orchestrator_sends_date_and_evidence_levels(offline_orchestrator,
         if tool_name in ("lithoscribe_literature_synthesis", "archivon_literature_search"):
             return {"ranked_passages": [
                 {"pmid": "123456", "title": "A phase III randomized trial of KRAS inhibition", "year": "2023",
-                 "passage_text": "KRAS signaling in pancreatic cancer.", "evidence_grade": {"study_type": "rct", "label": "Randomized controlled trial"},
-                 "grade_label": "Randomized controlled trial"},
+                 "passage_text": "KRAS signaling in pancreatic cancer.", "evidence_grade": {"study_type": "peer_reviewed", "label": "Journal article"},
+                 "grade_label": "Journal article"},
                 {"pmid": "234567", "passage_text": "KRAS mutant xenografts regressed.",
-                 "evidence_grade": {"study_type": "preclinical_in_vivo", "label": "Preclinical in vivo"}},
+                 "evidence_grade": {"study_type": "preprint", "label": "Preprint"}},
             ]}
         return original(tool_name, kwargs)
 
@@ -129,5 +127,5 @@ async def test_orchestrator_sends_date_and_evidence_levels(offline_orchestrator,
     await orch.execute_inquiry("Find KRAS papers only.", thread_id="t-format", enable_web_search=False)
     _system, human = captured["messages"]
     assert f"<retrieval_date>{time.strftime('%Y-%m-%d')}</retrieval_date>" in human.content
-    assert 'evidence_level="phase III RCT"' in human.content
-    assert 'evidence_level="preclinical in vivo"' in human.content
+    assert 'evidence_level="peer-reviewed journal/conference"' in human.content
+    assert 'evidence_level="preprint"' in human.content

@@ -29,11 +29,12 @@ Tribos answers advanced engineering and physical inquiries by decomposing questi
 
 ## Agent Orchestration Frameworks
 
-Choose an orchestration backend per request with `framework`, or configure a global default with `TRIBOS_DEFAULT_FRAMEWORK`. `GET /api/frameworks` lists available modes:
+Choose an orchestration backend per request with `framework`, or configure a global default with `TRIBOS_DEFAULT_FRAMEWORK`. A request that names no framework (and no default is configured) uses **Auto** routing. `GET /api/frameworks` lists available modes and reports the active default:
 
 | Mode | `framework` | Architectural Description |
 | :--- | :--- | :--- |
-| **Plan-and-Execute** *(API Default)* | `agentic-plan-execute` | Decomposes the inquiry into an LLM-planned tool DAG executed concurrently (LLMCompiler). Performs Self-RAG gap-driven re-retrieval, ContraCrow counter-evidence search, NLI claim audits, and calibrated confidence scoring. |
+| **Auto** *(API Default)* | `auto` | Reads each question and routes it to the architecture that fits (`tribos/agentic/router.py`): closed computations and fully specified problems run the direct workflow with the mathematics agent, open questions go to one of the agentic frameworks below, and critics debate the draft when the evidence conflicts. |
+| **Plan-and-Execute** | `agentic-plan-execute` | Decomposes the inquiry into an LLM-planned tool DAG executed concurrently (LLMCompiler). Performs Self-RAG gap-driven re-retrieval, ContraCrow counter-evidence search, NLI claim audits, and calibrated confidence scoring. |
 | **Authoritative ReAct Compiler** | `authoritative-react-compiler` | Structured deterministic pipeline executing parallel Stage 1 evidence gathering followed by Stage 2 numerical/symbolic computation and Reflexion auditing. |
 | **Centralized Supervisor** | `multi-agent-supervisor` | Magentic-One-style progress ledger delegating subtasks dynamically to Archivon, Axiom, Dynamis, Calcula, and Physis. |
 | **Specialist Swarm** | `multi-agent-swarm` | Peer-to-peer delegation where specialist agents directly hand off context and intermediate findings to each other until synthesis is complete. |
@@ -44,8 +45,36 @@ All frameworks share:
 - Human-in-the-loop controls: clarifying questions, plan approval, steering, and cancellation.
 - Background jobs with reconnectable SSE streams.
 - Thread-scoped persistent memory vault (Mem0 SQLite store with Okapi BM25 scoring).
-- Subprocess code execution sandbox (`TRIBOS_SANDBOX=on` by default).
+- Subprocess code execution sandbox (on by default; `TRIBOS_SANDBOX=off` disables it).
 - Model Context Protocol server (`POST /mcp`) and Agent-to-Agent card (`/.well-known/agent-card.json`).
+
+---
+
+## Verified Mathematics Agent
+
+Concrete mathematical tasks are solved by a bounded ReAct controller over the Axiom tools (`tribos/axiom/agent.py`), following the patterns in `math_agent_research_recommendations.md` (ReAct, ToRA, THOR, Toolformer, RAP). It covers 20 task kinds, each with its own independent check:
+
+| Area | Tools | Independent check |
+| :--- | :--- | :--- |
+| Algebra | `axiom_solve`, `axiom_nsolve`, `axiom_inequality`, `axiom_simplify` | back-substitution, root counting (Sturm / square-free degree), sampled interval membership |
+| Calculus | `axiom_calculus`, `axiom_tangent`, `axiom_optimize`, `axiom_nintegrate` | numeric derivatives, quadrature, one-sided limits, O(hⁿ) truncation, dense sampling for global extrema, two quadrature rules |
+| Differential equations and transforms | `axiom_dsolve`, `axiom_transform`, `axiom_recurrence` | `checkodesol` + initial conditions, the defining Laplace/Fourier integral, direct iteration |
+| Linear algebra and vector calculus | `axiom_linalg`, `axiom_vector_calculus` | second algorithms, Cayley–Hamilton, finite-difference partial derivatives |
+| Discrete mathematics | `axiom_number_theory`, `axiom_verify_identity` | independent integer arithmetic (Miller–Rabin, square-and-multiply), exact counterexamples |
+| Probability and statistics | `axiom_probability`, `calcula_statistics` | exact SymPy against SciPy, textbook formulas against SciPy |
+
+- **Parse, never rewrite.** `tribos/axiom/problem.py` turns prose, LaTeX or Unicode math into a typed `ProblemSpec` (kind, expression, variable, bounds, domain, assumptions) and keeps the verbatim question; anything it had to guess is listed as an ambiguity.
+- **Rules first, model on escalation.** A deterministic strategy ladder per task kind runs at zero model cost (e.g. exact solve → numeric interval scan); the planning model chooses steps only when the rules reach no checked answer.
+- **Independent verifier.** `tribos/axiom/verifier.py` re-derives every check from the *original* problem, never from the agent's arguments: level 1 confirms the tool call encodes the question asked (same equation up to a nonzero factor, same integrand and bounds, same matrix); level 2 checks the answer by a second method (back-substitution, differentiation, quadrature, numeric limits, Cayley–Hamilton, `checkodesol`, exact counterexamples).
+- **Typed failures and local repair.** Schema, argument, semantic-mismatch, cannot-solve, no-progress and infrastructure failures are classified separately; repairs are local (at most `TRIBOS_MATH_AGENT_MAX_REPAIRS`, default 4), identical failed calls are never re-run, and infrastructure faults are never charged to the policy.
+- **Honest status.** Every answer is `verified`, `partially_verified` (e.g. a periodic root family, or numeric roots whose completeness cannot be proven), `unverified` or `failed`, with the passing checks and the open gaps. The synthesis is told to report exactly that.
+- **Trajectories as data.** Set `TRIBOS_MATH_TRAJECTORY_DIR` to append each run as a JSONL record with interleaved decision / tool_call / observation / verification events and per-step labels (`tool_schema_valid`, `execution_success`, `semantic_alignment`, `local_result_valid`, `progress_made`), ready for evaluation and SFT.
+
+- **Parse fidelity.** Every number, differential and meaning-changing word in the question ("twice", "area", "maximum", ...) must be used by the parsed problem; otherwise the answer can never be `verified`, because it may answer a different question.
+- **Measured and calibrated.** `python -m tribos.axiom.math_eval` runs a stratified benchmark (development set and three held-out sets, 268 problems; prose, LaTeX and Unicode phrasing) graded against gold answers, independently of the verifier, plus an adversarial suite of known-wrong candidates. It reports accuracy, verified precision and coverage, false accepts and rejects, cross-fitted ECE/Brier and latency. `tribos/axiom/calibration.json` holds P(correct | status), fitted on the third held-out set with the code frozen (verified: 43/43, Laplace estimate 0.98, Wilson 95% lower bound 0.92). That figure describes the agent's final answer expression only and is shown with its scope and n; the written answer around it is checked statement by statement (see below), never covered by it.
+- **The written answer is checked too.** `tribos/verify/math_claims.py` re-evaluates every equation, derivation step and result-table row of the final answer with the question's values and the tools' structured outputs (arithmetic, identities by sampling, derivatives of the stated functions, deferred equations, amplitude-phase reconstruction, tool-value cross-checks, grounding of table numbers). A contradicted statement fails verification and goes back to the writer with the computed value; coverage (how many statements were evaluated) is reported apart from the result, and an answer with nothing checkable is "not evaluated". `python -m tribos.evals.math_claims_matrix` measures false alarms and detection across nine kinds of mathematics. See docs/TRIBOS_REMEDIATION.md.
+
+It runs as the `math_agent` phase of every agentic framework and is available to planners as the `axiom_solve_problem` tool. `tests/test_math_agent.py` holds the Phase 1 gate: zero false accepts on every benchmark set and on the adversarial suite.
 
 ---
 
@@ -111,6 +140,14 @@ The web application connects to `NEXT_PUBLIC_API_URL` (default `http://127.0.0.1
 cd web && npm run typecheck && npm test && npm run build
 ```
 
+### Docker
+
+```sh
+docker compose -f docker/compose.yml up --build
+```
+
+This builds `docker/backend.Dockerfile` (context: the repository root) and `docker/web.Dockerfile` (context: `web/`), reads secrets from `.env`, keeps all backend state on the `tribos-data` volume, and publishes both ports on `127.0.0.1` only (see the header of `docker/compose.yml` to expose them behind a TLS proxy).
+
 ---
 
 ## Configuration Reference
@@ -163,8 +200,9 @@ See [docs/evals.md](docs/evals.md) for benchmark suites and CI integration detai
 # Run backend test suite
 uv run pytest -q tests/
 
-# Run code linters
-uv run ruff check tribos app tests
+# Run code linters (the CI gate: pyflakes and syntax errors; the full rule set still reports legacy findings)
+uv run ruff check --select F,E9 tribos app tests
+uv run bandit -c pyproject.toml -r tribos app --severity-level high
 
 # Build and verify documentation site
 uv run mkdocs build --strict

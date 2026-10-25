@@ -178,11 +178,11 @@ def test_get_bool_words_and_fallback(monkeypatch, caplog):
         monkeypatch.setenv("TRIBOS_SANDBOX", word)
         assert get_bool("TRIBOS_SANDBOX") is expected, word
     monkeypatch.delenv("TRIBOS_SANDBOX", raising=False)
-    assert get_bool("TRIBOS_SANDBOX") is False
+    assert get_bool("TRIBOS_SANDBOX") is True  # on by default, like sandbox_enabled()
     assert get_bool("TRIBOS_LLM_FALLBACK") is True or "TRIBOS_LLM_FALLBACK" in os.environ
     with caplog.at_level(logging.WARNING, logger="tribos.config.settings"):
         monkeypatch.setenv("TRIBOS_SANDBOX", "maybe")
-        assert get_bool("TRIBOS_SANDBOX") is False
+        assert get_bool("TRIBOS_SANDBOX") is True  # an unreadable value falls back to the default (on)
     assert any("not a boolean" in r.getMessage() for r in caplog.records)
 
 
@@ -405,7 +405,7 @@ def test_health_reports_the_config_problem_count(monkeypatch):
         async def async_check_service_readiness(self) -> dict[str, Any]:
             return {"mcp_remote_active": False, "direct_adapters": {}}
 
-    monkeypatch.setattr(backend_main, "BioContextMCPClient", _Probe)
+    monkeypatch.setattr(backend_main, "_readiness_probe", _Probe().async_check_service_readiness)
     monkeypatch.setitem(backend_main._health_cache, "readiness", None)
     client = TestClient(backend_main.app)
     baseline = client.get("/api/health").json()["config_problems"]
@@ -429,7 +429,7 @@ def test_docs_use_registry_metadata_and_keep_secrets_blank(gen, scanned):
         if setting.secret:
             assert f"# {name}=\n" in example, name
     assert "# TRIBOS_JOB_WORKERS=2\n" in example
-    assert "# TRIBOS_SANDBOX=false\n" in example
+    assert "# TRIBOS_SANDBOX=true\n" in example
 
 
 def test_generated_reference_is_up_to_date(gen):

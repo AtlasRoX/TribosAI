@@ -10,10 +10,11 @@ from .pdf_renderer import BRAND_MARK, BRAND_WORDMARK
 from .report_model import (
     ReportModel,
     citation_line,
-    fmt_number,
     question_is_title,
     report_headline,
     report_kind,
+    simulation_line,
+    simulation_table,
     task_lines,
     verification_lines,
 )
@@ -385,13 +386,8 @@ def render_docx(report: ReportModel) -> bytes:
     sim = report.simulation
     if sim and (sim.rows or report.plot_png):
         doc.add_heading("Simulation", 1)
-        label = " ".join(x for x in (sim.model_id, f"({sim.model_name})" if sim.model_name else "") if x)
-        if label:
-            line = f"Model: {label}"
-            if sim.duration is not None:
-                line += f", duration {fmt_number(sim.duration)} {sim.time_unit}".rstrip()
-            if sim.convergence_status:
-                line += f", {sim.convergence_status}"
+        line = simulation_line(sim)
+        if line:
             doc.add_paragraph(line)
         if report.plot_png:
             try:
@@ -399,13 +395,7 @@ def render_docx(report: ReportModel) -> bytes:
             except Exception:  # noqa: BLE001
                 doc.add_paragraph("The simulation plot could not be embedded.")
         if sim.rows:
-            unit = f" ({sim.quantity_unit})" if sim.quantity_unit else ""
-            has_ss = any(r.steady_state is not None for r in sim.rows)
-            header = ["Species", f"Initial{unit}", f"Final{unit}"] + ([f"Steady state{unit}"] if has_ss else [])
-            rows = [
-                [r.species, fmt_number(r.initial), fmt_number(r.final)] + ([fmt_number(r.steady_state)] if has_ss else [])
-                for r in sim.rows
-            ]
+            header, rows = simulation_table(sim)
             _add_table(doc, header, rows, runs_mode=False)
 
     for table in report.data_tables:

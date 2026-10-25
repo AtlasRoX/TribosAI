@@ -23,12 +23,15 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any
 
+from ..agents.evidence_need import is_closed_computation
 from .budget import BudgetExhausted
-from .config import AGENTIC, DEBATE, env_flag, env_float, env_int
+from .config import AGENTIC, DEBATE, DIRECT_ROUTES, MATH_DIRECT_ROUTES, env_flag, env_float, env_int
 from .executor import PlanExecutor
 from .llm import AgentLLMUnavailable
+from .math_agent import math_agent_available
 from .plan_graph import (
     PlanGraph,
     PlanNode,
@@ -80,6 +83,38 @@ def prior_calls(state: Any, nodes: list[PlanNode] | None = None) -> list[tuple[s
     return out
 
 
+def _purpose_words(text: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z0-9]+", (text or "").lower()) if len(w) > 2}
+
+
+def link_recoveries(nodes: list[PlanNode], tool_results: dict[str, Any]) -> list[dict[str, str]]:
+    """Mark each failed node that a later successful node of the same tool and purpose replaced (typically the
+    replanned call): `node.recovered_by`, and `metadata["recovered_by"]` on the failed result, so the task status
+    reports the failure as recovered history instead of a missing piece of the answer."""
+    links: list[dict[str, str]] = []
+    for i, node in enumerate(nodes):
+        if node.status != "error" or node.recovered_by:
+            continue
+        words = _purpose_words(node.purpose)
+        for later in nodes[i + 1:]:
+            if later.status != "done" or later.tool != node.tool:
+                continue
+            other = _purpose_words(later.purpose)
+            same = not words or not other or len(words & other) / min(len(words), len(other)) >= 0.5
+            if not same:
+                continue
+            node.recovered_by = later.id
+            res = tool_results.get(node.result_key) if node.result_key else None
+            if res is not None:
+                try:
+                    res.metadata = {**(getattr(res, "metadata", None) or {}), "recovered_by": later.result_key or later.id}
+                except Exception:  # noqa: BLE001 - an immutable result keeps its status; the node link remains
+                    logger.debug("Could not mark %s as recovered", node.result_key)
+            links.append({"step": node.id, "recovered_by": later.id, "tool": node.tool})
+            break
+    return links
+
+
 def _dropped_ids(payload: dict[str, Any], graph: PlanGraph) -> set[str]:
     """Node ids an edited approval payload removes: {"drop": [...]}, {"keep": [...]}, or an edited "nodes"
     list (entries with run/approved false or drop true are removed; ids missing from the list are removed)."""
@@ -112,7 +147,11 @@ def _dropped_ids(payload: dict[str, Any], graph: PlanGraph) -> set[str]:
 async def request_dag_approval(state: Any, graph: PlanGraph, round_no: int) -> dict[str, Any] | None:
     """Ask the researcher to approve the nodes before they run; returns the approval record or None."""
     control = state.control
-    expensive = [n.id for n in graph.nodes if is_expensive_tool(n.tool)]
+    registry = getattr(state, "registry", None)
+    expensive = [
+        n.id for n in graph.nodes
+        if is_expensive_tool(n.tool, registry.get_entry(n.tool) if hasattr(registry, "get_entry") else None)
+    ]
     # A run a human was attached to still asks (RunControl refuses at once when nobody is watching), so a job whose
     # watcher left never runs expensive nodes unasked (AGT-005).
     needs = getattr(control, "needs_human_decision", None)
@@ -181,6 +220,13 @@ class PlanExecutePhase(AgentPhase):
         if env_flag("TRIBOS_AGENT_PLAN", "auto") == "off":
             return False
         if state.options.get("enable_plan") is False:
+            return False
+        if is_closed_computation(state.ctx) and math_agent_available(state):
+            return False  # the verified mathematics agent solves and checks it; a tool plan would only repeat that
+        rule = (state.bag.get("routing") or {}).get("rule")
+        if rule in DIRECT_ROUTES and (rule not in MATH_DIRECT_ROUTES or math_agent_available(state)):
+            # Auto chose the direct workflow (config.DIRECT_ROUTES); the two math-problem routes rely on the
+            # mathematics agent, so without it the planner still runs.
             return False
         return getattr(state.ctx, "scope", "research") == "research"
 
@@ -293,6 +339,9 @@ class PlanExecutePhase(AgentPhase):
             raise
         finally:
             artifact.setdefault("status", "ok")
+            recovered = link_recoveries(all_nodes, state.tool_results)
+            if recovered:
+                artifact["recovered"] = recovered
             artifact["nodes"] = [n.to_artifact() for n in all_nodes][:50]
             artifact["rejected"] = artifact["rejected"][:50]
             if joins:
@@ -302,9 +351,12 @@ class PlanExecutePhase(AgentPhase):
             state.artifacts["agent_plan"] = artifact
             state.bag["agent_plan_results"] = {n.id: n.result_key for n in all_nodes if n.result_key}
         done = sum(1 for n in all_nodes if n.status == "done")
-        failed_n = sum(1 for n in all_nodes if n.status == "error")
+        failed_n = sum(1 for n in all_nodes if n.status == "error" and not n.recovered_by)
+        recovered_n = sum(1 for n in all_nodes if n.status == "error" and n.recovered_by)
         skipped = sum(1 for n in all_nodes if n.status == "skipped")
         text = f"{done} done · {failed_n} failed · {skipped} skipped · {len(artifact['rejected'])} rejected"
+        if recovered_n:
+            text += f" · {recovered_n} failed attempt(s) recovered by a retry"
         if artifact["replans"]:
             text += f" · {artifact['replans']} replan(s)"
         planner_failed = artifact.get("status") in ("planner_failed", "planner_unusable", "budget")

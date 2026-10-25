@@ -58,6 +58,7 @@ class RunControl:
         self.cancelled = False
         self.cancel_reason = ""
         self._steering: list[str] = []
+        self._skipped: set[str] = set()
         self._pending: dict[str, _Pending] = {}
         self.decisions: list[dict[str, Any]] = []
         self.created = time.time()
@@ -73,6 +74,20 @@ class RunControl:
     def checkpoint(self) -> None:
         if self.cancelled:
             raise RunCancelled(self.cancel_reason or "cancelled")
+
+    # Skipping ------------------------------------------------------------------------------------------------
+    # Evidence steps the user chose to skip while they ran ("search": the literature and web search). A skipped step
+    # stops at once and the answer is written from the evidence already gathered.
+    SKIPPABLE = frozenset({"search"})
+
+    def request_skip(self, what: str) -> bool:
+        if what not in self.SKIPPABLE:
+            return False
+        self._skipped.add(what)
+        return True
+
+    def is_skipped(self, what: str) -> bool:
+        return what in self._skipped
 
     # Steering ------------------------------------------------------------------------------------------------
     def steer(self, message: str) -> None:

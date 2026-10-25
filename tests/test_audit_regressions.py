@@ -73,21 +73,28 @@ async def test_gene_mention_alone_does_not_trigger_simulation(offline_orchestrat
 @pytest.mark.asyncio
 async def test_explicit_simulation_request_still_runs(offline_orchestrator):
     orch, calls = offline_orchestrator
-    res = await orch.execute_inquiry("Simulate KRAS using BIOMD0000000048 for 100 seconds.", thread_id="t-sim", enable_web_search=False)
-    sims = _called(calls, "dynamis_simulate_ode") or _called(calls, "vivarix_simulate_time_course")
-    assert sims and (sims[0].get("biomodel_id") == "BIOMD0000000048" or sims[0].get("duration") == 100.0 or sims[0].get("t_span") == (0.0, 100.0))
-    assert ("Dynamis" in res.selected_agents) or ("Vivarix" in res.selected_agents)
-    assert not _called(calls, "dynamis_find_equilibrium") and not _called(calls, "vivarix_compute_steady_state")
+    res = await orch.execute_inquiry("Simulate the Lorenz system for 100 seconds.", thread_id="t-sim", enable_web_search=False)
+    sims = _called(calls, "dynamis_simulate_ode")
+    assert sims and sims[0].get("model_name") == "lorenz" and tuple(sims[0]["t_span"]) == (0.0, 100.0)
+    assert "Dynamis" in res.selected_agents
+    assert not _called(calls, "dynamis_equilibrium") and not _called(calls, "vivarix_compute_steady_state")
 
 
 @pytest.mark.asyncio
-async def test_steady_state_request_runs_root_finding(offline_orchestrator):
-    orch, calls = offline_orchestrator
-    res = await orch.execute_inquiry("Compute the steady state of BIOMD0000000010.", thread_id="t-ss", enable_web_search=False)
-    assert _called(calls, "dynamis_find_equilibrium") or _called(calls, "vivarix_compute_steady_state")
-    dyn = res.execution_artifacts.get("dynamis") or res.execution_artifacts.get("vivarix", {})
-    conc = (dyn.get("steady_state") or dyn.get("equilibrium") or {}).get("steady_state_concentrations")
-    assert conc == {"Mos": 30.0}
+async def test_steady_state_request_runs_root_finding(monkeypatch, tmp_path):
+    from tests.fakes import make_offline_orchestrator
+    from tribos.dynamis.schemas import DynamisEquilibriumInput
+
+    fixed = {"fixed_point": {"x": 0.0, "v": 0.0}, "stability": "stable_spiral", "converged": True,
+             "residual_norm": 0.0, "eigenvalues": [{"real": -0.3, "imag": 1.98, "str": "-0.3+1.98j"}]}
+    orch, calls = make_offline_orchestrator(
+        monkeypatch, tmp_path, extra_tools={"dynamis_equilibrium": (DynamisEquilibriumInput, lambda kw: fixed)}
+    )
+    res = await orch.execute_inquiry("Simulate the damped oscillator and compute its steady state.", thread_id="t-ss", enable_web_search=False)
+    eq = _called(calls, "dynamis_equilibrium")
+    assert eq and eq[0]["rhs"]["v"] == "-2 * zeta * omega * v - omega^2 * x" and eq[0]["guess"] == {"x": 1.0, "v": 0.0}
+    assert res.execution_artifacts["dynamis"]["steady_state"]["fixed_point"] == {"x": 0.0, "v": 0.0}
+    assert not _called(calls, "vivarix_compute_steady_state")
 
 
 @pytest.mark.asyncio
@@ -142,151 +149,161 @@ def test_discovery_single_cell_score_tracks_log_fold_change():
 # FINDING-05 / FINDING-06 / FINDING-07 / FINDING-08 / FIX-13: verifier
 # =============================================================================
 
-def _sim_result(units="nmol"):
+def _sim_result():
+    # A Dynamis time course (dynamis_simulate_ode output shape) of two coupled state variables.
     return ToolResult(
         success=True,
-        tool_name="vivarix_simulate_time_course",
-        canonical_ids={"biomodel_id": "BIOMD0000000010"},
+        tool_name="dynamis_simulate_ode",
         data={
-            "model_id": "BIOMD0000000010",
-            "simulation_type": "TIME_COURSE",
-            "units": {"time": "s", "quantity": units},
-            "initial_concentrations": {"Mos": 100.0, "Mos-P": 0.0},
-            "final_concentrations": {"Mos": 34.13, "Mos-P": 65.87},
+            "model_name": "two_tank",
+            "state_variables": ["h1", "h1_dot"],
+            "t_span": [0.0, 120.0],
+            "summary": {
+                "h1": {"initial": 100.0, "final": 34.13, "min": 34.13, "max": 100.0, "mean": 55.0},
+                "h1_dot": {"initial": 0.0, "final": 65.87, "min": 0.0, "max": 65.87, "mean": 40.0},
+            },
         },
     )
 
 
-def test_verifier_no_false_positive_on_phosphorylated_prefix():
+def test_verifier_no_false_positive_on_suffixed_variable_name():
     report = TribosVerifier().verify_response(
-        query="Simulate Mos phosphorylation",
-        response_markdown="Mos-P reached 65.87 nM while Mos was 34.13 nM.\n| **Mos** | 100.000 nM | 34.130 nM | -65.9% |",
-        tool_results={"vivarix": _sim_result()},
+        query="Simulate the two-tank system",
+        response_markdown="h1_dot reached 65.87 while h1 was 34.13.\n| **h1** | 100.000 | 34.130 | -65.9% |",
+        tool_results={"dynamis": _sim_result()},
     )
     assert report.numerical_checks_failed == 0
     assert not [d for d in report.defects if d.category == "NUMERICAL"]
 
 
 def test_verifier_no_false_positive_with_unicode_hyphens():
-    # Models typeset "Mos‑P" with U+2011 and use narrow no-break spaces; that must not read as "Mos".
+    # Models typeset names with U+2011 and use narrow no-break spaces; "h1‑dot" must not read as "h1".
+    sim = _sim_result()
+    sim.data["summary"]["h1-dot"] = sim.data["summary"].pop("h1_dot")
     report = TribosVerifier().verify_response(
-        query="Simulate Mos phosphorylation",
-        response_markdown="- Mos‑P = **65.87 nM**\n- Mos = **34.13 nM**\nActive Mos‑P rises to 65.87 nM.",
-        tool_results={"vivarix": _sim_result()},
+        query="Simulate the two-tank system",
+        response_markdown="- h1‑dot = **65.87**\n- h1 = **34.13**\nThe flow h1‑dot rises to 65.87.",
+        tool_results={"dynamis": sim},
     )
     assert not [d for d in report.defects if d.category == "NUMERICAL"]
 
 
 def test_verifier_still_catches_errors_written_with_unicode_hyphens():
+    sim = _sim_result()
+    sim.data["summary"]["h1-dot"] = sim.data["summary"].pop("h1_dot")
     report = TribosVerifier().verify_response(
-        query="Simulate Mos phosphorylation",
-        response_markdown="- Mos‑P = **12.00 nM**",
-        tool_results={"vivarix": _sim_result()},
+        query="Simulate the two-tank system",
+        response_markdown="- final h1‑dot = **12.00**",
+        tool_results={"dynamis": sim},
     )
     assert [d for d in report.defects if d.category == "NUMERICAL"]
 
 
-def test_verifier_catches_unit_and_sign_errors():
+def test_verifier_catches_role_and_sign_errors_and_converts_declared_units():
     verifier = TribosVerifier()
-    wrong_unit = verifier.verify_response("Mos simulation", "Final Mos concentration: 34.13 mM.", {"vivarix": _sim_result()})
-    assert any(d.category == "NUMERICAL" for d in wrong_unit.defects)
-    negative = verifier.verify_response("Mos simulation", "Mos: -34.13 nM at the end of the run.", {"vivarix": _sim_result()})
+    wrong_role = verifier.verify_response("tank simulation", "The final h1 value: 100.0.", {"dynamis": _sim_result()})
+    assert any(d.category == "NUMERICAL" for d in wrong_role.defects)
+    negative = verifier.verify_response("tank simulation", "h1: -34.13 at the end of the run.", {"dynamis": _sim_result()})
     assert any(d.category == "NUMERICAL" for d in negative.defects)
-    converted = verifier.verify_response("Mos simulation", "Mos ended at 0.03413 µM.", {"vivarix": _sim_result()})
+    sim = _sim_result()
+    sim.data["units"] = {"h1": "m"}
+    converted = verifier.verify_response("tank simulation", "h1 ended at 34130 mm.", {"dynamis": sim})
     assert not any(d.category == "NUMERICAL" for d in converted.defects)
+    # Without a stated unit, a prefixed value is not compared (its scale is unknown).
+    unknown = verifier.verify_response("tank simulation", "h1 ended at 34130 mm.", {"dynamis": _sim_result()})
+    assert not any(d.category == "NUMERICAL" for d in unknown.defects)
 
 
-def test_verifier_flags_unobserved_ensembl_and_uniprot():
-    verifier = TribosVerifier()
-    tool_results = {"synapta": ToolResult(success=True, tool_name="synapta", canonical_ids={"ensembl_id": "ENSG00000133703"}, data={"x": 1})}
-    report = verifier.verify_response(
-        "KRAS identifiers",
-        "KRAS maps to ENSG00000133703 but also ENSG99999999999 and UniProt P99999.",
-        tool_results,
+def test_verifier_flags_unobserved_arxiv_and_doi_but_not_observed_ones():
+    passages = ToolResult(success=True, tool_name="archivon_literature_search", data={"ranked_passages": [
+        {"arxiv_id": "1602.03837", "doi": "10.1103/PhysRevLett.116.061102", "passage_text": "Observation of GW150914."},
+    ]})
+    report = TribosVerifier().verify_response(
+        "GW150914 detection",
+        "GW150914 was reported in arXiv:1602.03837v2 (DOI 10.1103/PhysRevLett.116.061102), not in arXiv:9912.99999.",
+        {"archivon": passages},
     )
-    flagged = {d.claim for d in report.defects if d.category == "IDENTIFIER"}
-    assert {"ENSG99999999999", "P99999"} <= flagged
-    assert "ENSG00000133703" not in flagged
-    assert "ENSEMBL:ENSG00000133703" in report.verified_identifiers
+    flagged = {d.claim for d in report.defects if d.category in ("IDENTIFIER", "CITATION")}
+    assert "arXiv:9912.99999" in flagged
+    assert not any("1602.03837" in f or "061102" in f for f in flagged)
+    assert "ARXIV:1602.03837" in report.verified_identifiers
 
 
 def _passages(*texts):
     return ToolResult(
         success=True,
-        tool_name="lithoscribe_literature_synthesis",
-        data={"ranked_passages": [{"pmid": str(i), "passage_text": t} for i, t in enumerate(texts, 1)]},
+        tool_name="archivon_literature_search",
+        data={"ranked_passages": [{"arxiv_id": f"2401.0000{i}", "passage_text": t} for i, t in enumerate(texts, 1)]},
     )
 
 
-def test_verifier_rejects_clinical_claim_backed_by_unrelated_passages():
+def test_verifier_rejects_measured_claim_backed_by_unrelated_passages():
     report = TribosVerifier().verify_response(
-        "sotorasib efficacy",
-        "Phase 3 trial readouts confirmed an 85% objective response rate and curative efficacy for sotorasib.",
-        {"lithoscribe": _passages("Glycolytic enzymes regulate hepatic metabolism.", "Endometrial repair depends on stromal remodeling.")},
+        "YBCO critical temperature",
+        "Experiments measured a critical temperature of 135 K for the YBCO film (arXiv:2401.00001).",
+        {"archivon": _passages("Phonon transport in silicon nanowires.", "Turbulent boundary layers over riblets.")},
     )
-    assert any(d.category == "CLINICAL_CLAIM" for d in report.defects)
+    assert any(d.category == "UNSUPPORTED_CLAIM" and d.severity.value == "CRITICAL" for d in report.defects)
     assert report.passed is False
 
 
-def test_verifier_accepts_clinical_claim_grounded_in_passage():
+def test_verifier_accepts_measured_claim_grounded_in_passage():
     report = TribosVerifier().verify_response(
-        "sotorasib efficacy in NSCLC",
-        "In the phase 2 CodeBreaK 100 trial, sotorasib achieved a 37.1% objective response rate in KRAS G12C NSCLC.",
-        {"lithoscribe": _passages(
-            "In CodeBreaK 100, sotorasib produced an objective response rate of 37.1% in previously treated KRAS G12C-mutant NSCLC.",
-            "Unrelated passage about metabolism.",
+        "YBCO critical temperature",
+        "Resistivity measurements gave a critical temperature of 92 K for the YBCO film (arXiv:2401.00001).",
+        {"archivon": _passages(
+            "Resistivity measurements of the YBCO film show a critical temperature of 92 K.",
+            "Unrelated passage about turbulence.",
         )},
     )
-    assert not any(d.category == "CLINICAL_CLAIM" for d in report.defects)
+    assert not any(d.category == "UNSUPPORTED_CLAIM" for d in report.defects)
 
 
 def test_verifier_allows_honest_limitation_statements():
     report = TribosVerifier().verify_response(
-        "PF-99999999 phase 3 overall survival",
-        "No Phase 3 overall survival data are available for PF-99999999; the compound is unverified.",
-        {"lithoscribe": _passages("KRAS biology review.")},
+        "compound X-99 superconducting transition",
+        "No measured transition temperature is available for compound X-99; the value is unverified.",
+        {"archivon": _passages("Cuprate superconductivity review.")},
     )
-    assert not any(d.category == "CLINICAL_CLAIM" for d in report.defects)
+    assert not any(d.category == "UNSUPPORTED_CLAIM" for d in report.defects)
 
 
-def test_verifier_steady_state_distinction():
+def test_verifier_equilibrium_distinction():
     verifier = TribosVerifier()
-    asserted = verifier.verify_response("Mos simulation", "Mos reaches a steady state of 34.13 nM.", {"vivarix": _sim_result()})
+    asserted = verifier.verify_response("tank simulation", "h1 reaches an equilibrium of 34.13.", {"dynamis": _sim_result()})
     assert any(d.category == "MODELING_DISTINCTION" for d in asserted.defects)
-    hedged = verifier.verify_response("Mos simulation", "Mos ends at 34.13 nM; this is not a steady state.", {"vivarix": _sim_result()})
+    hedged = verifier.verify_response("tank simulation", "h1 ends at 34.13; this is not an equilibrium.", {"dynamis": _sim_result()})
     assert not any(d.category == "MODELING_DISTINCTION" for d in hedged.defects)
 
 
-def test_verifier_suggested_experiment_is_not_a_steady_state_claim():
+def test_verifier_suggested_experiment_is_not_an_equilibrium_claim():
     # Found by the evaluation harness: a "Suggested next experiments" bullet was flagged as a modelling claim.
     report = TribosVerifier().verify_response(
-        "Mos simulation",
-        "Mos ends at 34.13 nM.\n\n### Suggested next experiments\n"
-        "- Run a systematic parameter sweep of V1 and record the steady-state concentrations of Mos-P.",
-        {"vivarix": _sim_result()},
+        "tank simulation",
+        "h1 ends at 34.13.\n\n### Suggested next experiments\n"
+        "- Run a systematic parameter sweep of the valve gain and record the equilibrium of h1 at 20 settings.",
+        {"dynamis": _sim_result()},
     )
     assert not any(d.category == "MODELING_DISTINCTION" for d in report.defects)
 
 
-def test_verifier_complex_name_is_not_a_value_of_its_component():
-    # Found by the evaluation harness: "(EGF_EGFR)2-P" was read as species EGF_EGFR with value 2.
-    sim = _sim_result()
-    sim.data["final_concentrations"] = {"EGF_EGFR": 17.43, "(EGF_EGFR)2-P": 3.61, "(EGF_EGFR)_Shc-P": 1.84}
+def test_verifier_function_argument_is_not_a_value():
+    # "h1(120) = 34.13": the argument is the time, not the value of h1.
     report = TribosVerifier().verify_response(
-        "EGFR simulation",
-        "| Species | Concentration (nmol) |\n|---|---|\n| EGF_EGFR | 17.43 |\n| (EGF_EGFR)2‑P | 3.61 |\n| (EGF_EGFR)_Shc‑P | 1.84 |",
-        {"vivarix": sim},
+        "tank simulation",
+        "| Variable | Value |\n|---|---|\n| h1(120) | 34.13 |\n| h1_dot(120) | 65.87 |",
+        {"dynamis": _sim_result()},
     )
     assert not [d for d in report.defects if d.category == "NUMERICAL"], [d.description for d in report.defects]
 
 
 def test_verifier_accepts_identifiers_from_verified_memory():
     verifier = TribosVerifier()
-    text = "As established previously, BIOMD0000000010 captured MAPK ultrasensitivity."
-    without = verifier.verify_response("previous MAPK conclusion", text, {})
+    text = "As established previously, arXiv:1602.03837 reported the first binary black hole merger."
+    without = verifier.verify_response("previous GW conclusion", text, {})
     assert any(d.category == "IDENTIFIER" for d in without.defects)
     with_memory = verifier.verify_response(
-        "previous MAPK conclusion", text, {}, historical_identifiers={"biomodels": {"BIOMD0000000010"}}
+        "previous GW conclusion", text, {}, historical_identifiers={"arxiv": {"arXiv:1602.03837"}}
     )
     assert not any(d.category == "IDENTIFIER" for d in with_memory.defects)
 

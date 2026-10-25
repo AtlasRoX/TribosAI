@@ -11,9 +11,11 @@ on:
       - "tribos/agentic/**"
       - "tribos/tools/**"
       - "tribos/sources/**"
-      - "tribos/sources_extra/**"
-      - "tribos/drugintel/**"
-      - "tribos/lithoscribe/**"
+      - "tribos/archivon/**"
+      - "tribos/axiom/**"
+      - "tribos/dynamis/**"
+      - "tribos/physis/**"
+      - "tribos/verify/**"
       - "tribos/evals/**"
       - "tribos/utils/**"
       - "tribos/extensions/**"
@@ -30,9 +32,11 @@ on:
       - "tribos/agentic/**"
       - "tribos/tools/**"
       - "tribos/sources/**"
-      - "tribos/sources_extra/**"
-      - "tribos/drugintel/**"
-      - "tribos/lithoscribe/**"
+      - "tribos/archivon/**"
+      - "tribos/axiom/**"
+      - "tribos/dynamis/**"
+      - "tribos/physis/**"
+      - "tribos/verify/**"
       - "tribos/evals/**"
       - "tribos/utils/**"
       - "tribos/extensions/**"
@@ -54,8 +58,8 @@ on:
         type: boolean
         default: true
       suites:
-        description: "Suites (clinical, behavior, pubmedqa, litqa2, or a .jsonl path)"
-        default: "clinical,behavior"
+        description: "Suites (math, physics, engineering, behavior, golden, or a .jsonl path)"
+        default: "math,physics,engineering,behavior"
       limit:
         description: "At most this many cases (empty for all)"
         default: ""
@@ -79,7 +83,7 @@ jobs:
       - name: Harness and search-plan tests
         run: uv run pytest -q tests/test_evals.py tests/test_evals_harness.py tests/test_evals_cassette.py tests/test_search_plan.py
       - name: Plan level, offline (every offline expectation must hold)
-        run: uv run python -m tribos.evals run --suite clinical,behavior --level plan --fail-under "plan.pass_rate=1"
+        run: uv run python -m tribos.evals run --suite math,physics,engineering,behavior --level plan --fail-under "plan.pass_rate=1"
       - name: Replay committed answer cassettes (offline, deterministic)
         # Every tool and model call comes from tribos/evals/cassettes/<suite>/<case>.json; the network is closed.
         # A call the cassette does not hold (the code now asks something else) fails the step: re-record the case.
@@ -118,7 +122,7 @@ jobs:
       - name: Run evaluation
         run: >
           uv run python -m tribos.evals run
-          --suite "${{ inputs.suites || 'clinical,behavior' }}"
+          --suite "${{ inputs.suites || 'math,physics,engineering,behavior' }}"
           --level "${{ inputs.levels || 'retrieval,answer' }}"
           ${{ inputs.limit && format('--limit {0} --seed 1', inputs.limit) || '' }}
           --judge --concurrency 2

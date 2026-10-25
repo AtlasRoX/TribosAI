@@ -262,7 +262,6 @@ def make_offline_orchestrator(monkeypatch, tmp_path, extra_tools: ExtraTools | N
     monkeypatch.setattr(orch_module, "get_llm", no_llm)
     orch = AuthoritativeOrchestrator()
     orch.memory = ResearchMemoryEngine(storage_dir=str(tmp_path / "mem"))
-    monkeypatch.setattr(orch.vivarix, "search_models", lambda *_a, **_k: [{"accession": "BIOMD0000000010"}])
     return orch, calls
 
 

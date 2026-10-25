@@ -32,7 +32,8 @@ from tribos.tools.registry import AdapterType, ErrorType, ToolResult, ToolUniver
 from tribos.utils.memory.research_memory import ResearchMemoryEngine
 
 FIXTURES = json.loads((Path(__file__).parent / "fixtures" / "export" / "upstream_versions.json").read_text(encoding="utf-8"))
-SIM_QUERY = "Simulate BIOMD0000000010 over 120 seconds and summarize KRAS literature"
+# A named Dynamis system: a BioModels id is not simulated (no SBML engine), so it would run nothing.
+SIM_QUERY = "Simulate the damped oscillator over 120 seconds and summarize KRAS literature"
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 

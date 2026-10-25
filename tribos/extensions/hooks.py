@@ -227,7 +227,7 @@ class VerificationContext:
     tool_results: dict[str, Any]
     evidence_documents: list[str]
     evidence_keys: list[str]
-    observed: dict[str, set[str]]  # legacy keys (biomodels, pmids, dois, ensembl, uniprot) + every id family
+    observed: dict[str, set[str]]  # pmids, dois, keys (canonical scholarly keys) + every id family
     cited: dict[str, list[str]]  # ids extracted from the response for the same keys
     historical: dict[str, set[str]]
     context_identifiers: dict[str, set[str]]

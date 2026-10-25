@@ -26,14 +26,17 @@ A plan approval payload:
 ```json
 {
   "sources": [
-    {"key": "synapta", "label": "Target-disease associations and pathways (OpenTargets, KEGG)", "run": true, "reason": ""},
+    {"key": "archivon", "label": "Scholarly literature search (Archivon, arXiv, Europe PMC)", "run": true, "reason": ""},
     {"key": "websurfer", "label": "Web search", "run": true, "reason": ""},
-    {"key": "vivarix", "label": "Kinetic model simulation (Vivarix, COPASI)", "run": false, "reason": "no simulation requested"}
+    {"key": "dynamis", "label": "Dynamical simulation (Dynamis, SciPy)", "run": false, "reason": "no simulation requested"}
   ],
   "expensive": ["parameter scan"],
   "question": "..."
 }
 ```
+
+Legacy alias keys (`lithoscribe`, `vivarix`) and tools this installation does not have are never listed; switching a
+source off also switches off its alias. A source the plan skipped (`run: false`) cannot be switched on from the card.
 
 Plan approval runs on interactive runs when `agent_options.require_plan_approval` is set or expensive work is
 routed (simulation, parameter scan, single-cell analysis, calibration, docking, sandboxed analysis). A
@@ -81,7 +84,7 @@ and can be replayed and followed.
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/api/jobs` | body = the `/api/chat` request fields → `201 {"job_id","run_id","status":"queued","thread_id"}`; 429 over the per-user limit |
+| POST | `/api/jobs` | body = the `/api/chat` request fields → `201 {"job_id","run_id","status":"queued","thread_id"}`; 429 over the per-user limit; a repeated `client_request_id` returns the same job (see below) |
 | GET | `/api/jobs` | `?status=&thread_id=&limit=` → `{"jobs":[…]}` (no results in the list) |
 | GET | `/api/jobs/{id}` | the job with `result` (the chat response object), `pending_approvals`, `watchers`, `last_seq` |
 | GET | `/api/jobs/{id}/events` | SSE: replay `?after=N` then follow; `Last-Event-ID` works; `?stream=false` returns JSON |
@@ -98,7 +101,7 @@ pending approval is approved automatically.
 
 ```bash
 curl -X POST http://localhost:8000/api/jobs -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"message":"What diseases is KRAS associated with?","framework":"agentic-plan-execute","agent_options":{"require_plan_approval":true}}'
+  -d '{"message":"Simulate a damped oscillator with m=1, c=0.4, k=4 and find its decay time.","framework":"agentic-plan-execute","agent_options":{"require_plan_approval":true}}'
 
 # reattach after event 42
 curl -N "http://localhost:8000/api/jobs/job_0123456789abcdef/events?after=42" -H "Authorization: Bearer $TOKEN"
@@ -106,6 +109,26 @@ curl -N "http://localhost:8000/api/jobs/job_0123456789abcdef/events?after=42" -H
 
 A runtime `api_key` sent with a job is kept in memory only, never written to the job store. After a
 restart, a resumed job runs with the server's keys.
+
+The stored `request` keeps `message` (the question as solved, with the transcriptions of attached images) and
+`display_message` (what the user typed): clients compare the thread's last user message with
+`request.display_message ?? request.message` when they reopen a job, so the question is not shown twice.
+
+### Retries: `client_request_id`
+
+`POST /api/chat`, `POST /api/chat/stream` and `POST /api/jobs` accept an optional `client_request_id`
+(1-100 characters of `A-Z a-z 0-9 _ . : -`, e.g. a UUID). A client generates one per question and sends the same
+id when it retries that question (for example the web app's JSON fallback after a dropped stream):
+
+- Chat: while a request with the same id is still running for the same user, the duplicate is refused with
+  `409` (`"This question is already running …"`) and takes no chat slot. The id is released when the run ends,
+  so a retry after the first run finished or failed runs normally.
+- Jobs: a duplicate within 10 minutes returns the job the first request created (`200`, same `job_id`, plus
+  `"duplicate": true`) instead of queueing the question twice; `409` while the first submission is still
+  being stored.
+
+Ids are kept per user in a bounded in-memory table (at most 32 ids per user, entries expire), so they are not
+shared between server processes and are forgotten on restart.
 
 ## Research projects: `/api/projects`
 
@@ -115,7 +138,7 @@ restart, a resumed job runs with the server's keys.
 | GET | `/api/projects` | list with fact counts |
 | GET / PATCH / DELETE | `/api/projects/{id}` | PATCH `{"name"?,"description"?}`; DELETE removes the project and its facts |
 | GET | `/api/projects/{id}/memory` | `?query=` ranked recall (what the agent would get), else newest first; `include_invalid=true` shows history |
-| PATCH | `/api/projects/{id}/memory/{fact_id}` | `{"invalidate":true,"reason"}` or an edit `{"object"?,"value"?,"confidence"?,"verified"?,"tags"?}` |
+| PATCH | `/api/projects/{id}/memory/{fact_id}` | `{"invalidate":true,"reason"}` or an edit `{"object"?,"value"?,"confidence"?,"verified"?,"tags"?}`; unknown fields are refused with 422 |
 | DELETE | `/api/projects/{id}/memory/{fact_id}` | hard delete |
 
 Send `project_id` with a chat or job request to use the project's memory. A fact is
@@ -141,16 +164,16 @@ Tools:
 - `tribos_research` `{question, framework?, enable_web_search?, thread_id?}` runs the full orchestrator
   non-interactively. It returns the answer as text plus `structuredContent`
   `{answer, citations, verification, task_status, framework, thread_id}`.
-- Read-only registry tools from `TRIBOS_MCP_TOOLS` (comma-separated). The default list is the OpenTargets
-  search and associations, KEGG, literature, clinical trials, ChEMBL resolve and profile, disease targets,
-  variant intelligence and PrimeKG query, plus structure and omics tools when they are registered. Each
+- Read-only registry tools from `TRIBOS_MCP_TOOLS` (comma-separated). The default list
+  (`DEFAULT_TOOLS` in `app/backend/routers/mcp.py`) is the Archivon literature tools, the Axiom computer-algebra
+  tools, the Dynamis simulation tools and the Physis reference-data tools, each when it is registered. Each
   `inputSchema` is the tool's pydantic schema. Tools whose names suggest writes, uploads, code execution,
   docking or generation are never exposed.
 
 ```bash
 curl -X POST http://localhost:8000/mcp -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -H "MCP-Protocol-Version: 2025-11-25" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"synapta_kegg_pathways","arguments":{"target_symbol":"BRAF"}}}'
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"axiom_solve","arguments":{"equations":"x^2 - 2 = 0","variables":"x","domain":"real"}}}'
 ```
 
 Client configuration (Claude Desktop, Claude Code or any client that supports remote Streamable HTTP servers):
@@ -180,8 +203,9 @@ Security, following Hou et al. 2025 (arXiv:2503.23278):
 ## A2A: `/.well-known/agent-card.json` and `POST /a2a`
 
 The A2A v1.0.0 JSON-RPC binding (https://a2a-protocol.org/latest/specification/). The Agent Card is public.
-It lists the skills `biomedical-research` and `model-simulation`, a bearer security scheme, and
-`capabilities.streaming = false`.
+It lists the skills `stem-research` and `symbolic-numerical-simulation`, a bearer security scheme, and
+`capabilities.streaming = false`. Its URLs use `TRIBOS_PUBLIC_URL` when it is set (an `http(s)://` base URL,
+e.g. behind a reverse proxy), else the base URL of the request.
 
 Methods: `SendMessage`, `GetTask`, `ListTasks` and `CancelTask`. The pre-1.0 aliases `message/send`,
 `tasks/get`, `tasks/list` and `tasks/cancel` are also accepted. Every message becomes a background job:
@@ -196,7 +220,7 @@ Errors: `-32001` task not found, `-32002` task not cancelable.
 ```bash
 curl -X POST http://localhost:8000/a2a -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{
   "jsonrpc":"2.0","id":1,"method":"SendMessage",
-  "params":{"message":{"role":"user","messageId":"m1","parts":[{"kind":"text","text":"What diseases is KRAS associated with?"}]},
+  "params":{"message":{"role":"user","messageId":"m1","parts":[{"kind":"text","text":"What is the period of a 2 kg mass on a 50 N/m spring?"}]},
             "configuration":{"blocking":true}}}'
 ```
 
@@ -210,12 +234,13 @@ curl -X POST http://localhost:8000/a2a -H "Authorization: Bearer $TOKEN" -H "Con
 | `TRIBOS_MAX_JOBS_PER_USER` | 3 | queued + running jobs per user |
 | `TRIBOS_JOB_MAX_EVENTS` | 20000 | log cap (token deltas are dropped past it) |
 | `TRIBOS_JOB_CANCEL_GRACE_S` | 20 | after this long a cancelled agentic job's task is cancelled outright |
-| `TRIBOS_PROJECTS_DIR` | next to the clinical memory store | project store |
+| `TRIBOS_PROJECTS_DIR` | next to the research memory store | project store |
 | `TRIBOS_MCP_TOOLS` | built-in read-only list | MCP registry-tool allowlist |
 | `TRIBOS_MCP_MAX_CONCURRENT` | 2 | concurrent MCP `tools/call` per user |
 | `TRIBOS_MCP_ALLOWED_ORIGINS` | (none) | extra allowed `Origin` values for `/mcp` |
 | `TRIBOS_MCP_RESEARCH_TIMEOUT_S` | 900 | `tribos_research` timeout |
 | `TRIBOS_A2A_BLOCKING_TIMEOUT_S` | 300 | blocking `SendMessage` wait |
+| `TRIBOS_PUBLIC_URL` | (request base URL) | base URL in the A2A Agent Card |
 
 Jobs and run controls assume one server process per jobs directory. Startup recovery marks every running job
 interrupted.

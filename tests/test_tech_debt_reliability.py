@@ -363,7 +363,7 @@ def test_health_lists_disabled_routers(api, monkeypatch):
         async def async_check_service_readiness(self) -> dict[str, Any]:
             return {"mcp_remote_active": False, "direct_adapters": {}}
 
-    monkeypatch.setattr(backend_main, "BioContextMCPClient", _Probe)
+    monkeypatch.setattr(backend_main, "_readiness_probe", _Probe().async_check_service_readiness)
     monkeypatch.setitem(backend_main._health_cache, "readiness", None)
     monkeypatch.setitem(backend_main.DISABLED_ROUTERS, "app.backend.routers.fake", "ImportError")
     body = client.get("/api/health").json()

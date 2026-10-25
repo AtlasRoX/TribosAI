@@ -112,6 +112,11 @@ READER_PATH_KWARGS = ("filepath_or_buffer", "path_or_buffer", "path_or_buf", "pa
 
 _READ_MODES = {"r", "rb", "rt", "br", "tr"}
 _FORMAT_DUNDER = re.compile(r"\{[^{}]*__")
+# Default-deny: any write_*/to_*/save*/dump*/read_*/load*/from_file* style call (networkx write_edgelist /
+# read_adjlist, nx.*, obj.save(), ...) not already covered by the explicit writer/reader lists above. A literal
+# path argument that escapes the work directory is rejected here; a computed one is caught by the runtime open
+# guard in runner.py, the real boundary.
+_IO_NAME_RE = re.compile(r"^(write_|to_|save|savez|dump|read_|load|from_file)", re.I)
 
 
 def safe_relative_path(value: str) -> bool:
@@ -145,7 +150,6 @@ def _is_input_files_item(node: ast.AST) -> bool:
 class _Checker(ast.NodeVisitor):
     def __init__(self, input_names: set[str]) -> None:
         self.input_names = input_names
-        self._legacy_h5ad = any(str(n).endswith(".h5ad") for n in input_names)
         self.violations: list[str] = []
 
     def flag(self, node: ast.AST, message: str) -> None:
@@ -158,7 +162,7 @@ class _Checker(ast.NodeVisitor):
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
             root = _root(alias.name)
-            if root not in ALLOWED_MODULE_ROOTS and not (self._legacy_h5ad and root == "anndata"):
+            if root not in ALLOWED_MODULE_ROOTS:
                 self.flag(node, f"import of '{alias.name}' is not allowed")
         self.generic_visit(node)
 
@@ -166,7 +170,7 @@ class _Checker(ast.NodeVisitor):
         root = _root(node.module)
         if node.level:
             self.flag(node, "relative imports are not allowed")
-        elif root not in ALLOWED_MODULE_ROOTS and not (self._legacy_h5ad and root == "anndata"):
+        elif root not in ALLOWED_MODULE_ROOTS:
             self.flag(node, f"import from '{node.module}' is not allowed")
         for alias in node.names:
             if alias.name.startswith("__") or alias.name in BANNED_NAMES or alias.name in BANNED_ATTRIBUTES:
@@ -223,6 +227,10 @@ class _Checker(ast.NodeVisitor):
         reader = attr or name
         if reader and (reader in READER_FUNCTIONS or reader in READER_CLASSES):
             self._check_reader(node, reader)
+        io_name = attr or name
+        if (io_name and _IO_NAME_RE.match(io_name) and io_name not in WRITER_ATTRIBUTES
+                and io_name not in READER_FUNCTIONS and io_name not in READER_CLASSES):
+            self._check_io_default_deny(node, io_name)
         if attr in ("format", "format_map") and isinstance(func, ast.Attribute):
             recv = func.value
             if isinstance(recv, ast.Constant) and isinstance(recv.value, str) and "__" in recv.value:
@@ -267,6 +275,23 @@ class _Checker(ast.NodeVisitor):
         if reader in READER_CLASSES and not _is_input_files_item(path_node):
             self.flag(node, f"{reader}() needs a literal relative path or an INPUT_FILES entry")
         # A computed path for a reader function is checked again at runtime by the wrapped reader in the child.
+
+    def _check_io_default_deny(self, node: ast.Call, io_name: str) -> None:
+        """A path-like string literal that escapes the work dir, passed in any argument of an I/O-named call
+        outside the explicit lists (nx.write_edgelist(G, path) takes the path second). Computed paths pass here
+        and are refused at runtime by the guarded open() in the child."""
+        candidates = list(node.args) + [k.value for k in node.keywords]
+        for arg in candidates:
+            if not (isinstance(arg, ast.Constant) and isinstance(arg.value, str)):
+                continue
+            value = arg.value.strip()
+            if not value or value.lstrip().startswith(("{", "[", "<")):
+                continue  # literal JSON/HTML/XML content, not a path
+            looks_like_path = ("://" in value or value.startswith("~") or ":" in value[:3]
+                               or "/" in value or "\\" in value)
+            if looks_like_path and not safe_relative_path(value):
+                self.flag(node, f"{io_name}() may only read or write files inside the work directory")
+                return
 
     def _check_writer(self, node: ast.Call, attr: str) -> None:
         path_node = node.args[0] if node.args else next((k.value for k in node.keywords if k.arg in _PATH_KWARGS), None)

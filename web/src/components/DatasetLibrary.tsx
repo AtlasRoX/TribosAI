@@ -2,17 +2,19 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, Copy, Database, LoaderCircle, Pencil, ShieldCheck, Trash2, X } from "lucide-react";
+import { Check, Copy, Database, LoaderCircle, Pencil, Trash2, X } from "lucide-react";
 import styles from "./Datasets.module.css";
-import type { DatasetRecord } from "@/types/datasets";
+import type { DatasetLimits, DatasetRecord, UploadKind } from "@/types/datasets";
 import { KindIcon, ProvenanceForm, useFocusTrap } from "@/components/ProvenanceForm";
 import {
-  CLIENT_SIZE_LIMITS,
-  CONSENT_LABELS,
+  DEFAULT_DATASET_LIMITS,
+  KIND_NAMES,
   deleteDataset,
   dimsOf,
   formatBytes,
+  isAnalysable,
   listDatasets,
+  sourceLabel,
   type AuthHeaders,
 } from "@/services/datasetService";
 
@@ -26,27 +28,17 @@ export interface DatasetLibraryProps {
   onDeleted?: (id: string) => void;
   onUpdated?: (record: DatasetRecord) => void;
   onClose: () => void;
+  /** Accepted extensions and size caps (GET /api/datasets/limits), for the empty-library hint. */
+  limits?: DatasetLimits;
 }
 
-const KIND_SHORT = { h5ad: "h5ad", table: "table", sbml: "SBML" } as const;
+const KIND_SHORT: Record<string, string> = { table: "table", hdf5: "HDF5", mat: ".mat", legacy: "legacy" };
 
-function geoCell(r: DatasetRecord) {
-  const acc = r.provenance.geo_accession;
-  if (!acc) return <span className={styles.hint}>–</span>;
-  if (r.geo_verification?.status === "verified") {
-    return (
-      <span className={styles.badgeVerified} title={r.geo_verification.title || undefined}>
-        <ShieldCheck style={{ width: 11, height: 11 }} aria-hidden="true" />
-        {acc}
-      </span>
-    );
-  }
-  const why = r.geo_verification?.status === "not_found" ? "not found on GEO" : "unverified";
-  return (
-    <span className={styles.badgeDeclared} title={why}>
-      {acc} · {why}
-    </span>
-  );
+/** "CSV, TSV and XLSX tables (up to 100 MB), …" from the server's limits. */
+function acceptedSummary(limits: DatasetLimits): string {
+  const byKind = new Map<UploadKind, string[]>();
+  for (const [ext, kind] of Object.entries(limits.extensions)) byKind.set(kind, [...(byKind.get(kind) || []), ext]);
+  return Array.from(byKind, ([kind, exts]) => `${KIND_NAMES[kind]} (${exts.join(", ")}, up to ${Math.round(limits.max_bytes[kind] / 1048576)} MB)`).join("; ");
 }
 
 /** Drawer listing the user's uploads with attach, provenance edit and delete. */
@@ -59,6 +51,7 @@ export function DatasetLibrary({
   onDeleted,
   onUpdated,
   onClose,
+  limits = DEFAULT_DATASET_LIMITS,
 }: DatasetLibraryProps) {
   const [records, setRecords] = useState<DatasetRecord[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -145,9 +138,7 @@ export function DatasetLibrary({
             </div>
           ) : records.length === 0 ? (
             <div className={styles.empty}>
-              No uploads yet. Attach an AnnData <code>.h5ad</code> (up to {CLIENT_SIZE_LIMITS.h5ad / 1048576} MB), a numeric{" "}
-              <code>.csv</code>/<code>.tsv</code> expression matrix (up to {CLIENT_SIZE_LIMITS.table / 1048576} MB), or an SBML model{" "}
-              <code>.xml</code>/<code>.sbml</code> (up to {CLIENT_SIZE_LIMITS.sbml / 1048576} MB) from the paperclip in the composer.
+              No uploads yet. Attach a numeric dataset from the paperclip in the composer: {acceptedSummary(limits)}.
             </div>
           ) : (
             <table className={styles.table}>
@@ -159,8 +150,7 @@ export function DatasetLibrary({
                   <th scope="col">Size</th>
                   <th scope="col">sha256</th>
                   <th scope="col">Uploaded</th>
-                  <th scope="col">Consent</th>
-                  <th scope="col">GEO</th>
+                  <th scope="col">Source</th>
                   <th scope="col">
                     <span className="sr-only">Actions</span>
                   </th>
@@ -169,16 +159,17 @@ export function DatasetLibrary({
               <tbody>
                 {records.map((r) => {
                   const attached = attachedIds.includes(r.id);
-                  const warnings = r.validation?.warnings || [];
+                  const analysable = isAnalysable(r);
+                  const warnings = [...(r.validation?.warnings || []), ...(analysable ? [] : [r.unsupported_reason || "This upload is no longer analysed."])];
                   return (
                     <tr key={r.id}>
                       <td className={styles.nameCell} title={`${r.display_name} (${r.id})${warnings.length ? `\n${warnings.join("\n")}` : ""}`}>
-                        <span className={styles[`kind_${r.kind}`]} style={{ marginRight: 6, verticalAlign: "-2px" }}>
+                        <span className={styles[`kind_${r.kind}`] || styles.kind_legacy} style={{ marginRight: 6, verticalAlign: "-2px" }}>
                           <KindIcon kind={r.kind} size={13} />
                         </span>
                         {r.display_name}
                       </td>
-                      <td data-label="Kind">{KIND_SHORT[r.kind]}</td>
+                      <td data-label="Kind">{KIND_SHORT[r.kind] ?? r.legacy_kind ?? r.kind}</td>
                       <td data-label="Dims">{dimsOf(r) || "–"}</td>
                       <td data-label="Size">{formatBytes(r.size_bytes)}</td>
                       <td data-label="sha256">
@@ -195,8 +186,7 @@ export function DatasetLibrary({
                         </button>
                       </td>
                       <td data-label="Uploaded">{new Date(r.uploaded_at).toLocaleString()}</td>
-                      <td data-label="Consent">{CONSENT_LABELS[r.provenance.consent_status] || r.provenance.consent_status}</td>
-                      <td data-label="GEO">{geoCell(r)}</td>
+                      <td data-label="Source">{sourceLabel(r.provenance?.source)}</td>
                       <td>
                         <div className={styles.rowActions}>
                           {confirming === r.id ? (
@@ -219,8 +209,14 @@ export function DatasetLibrary({
                                 type="button"
                                 className={`${styles.buttonPrimary} ${styles.small}`}
                                 onClick={() => onAttach(r)}
-                                disabled={attached || attachDisabled}
-                                title={attachDisabled && !attached ? "Up to 5 datasets per question" : undefined}
+                                disabled={attached || attachDisabled || !analysable}
+                                title={
+                                  !analysable
+                                    ? r.unsupported_reason || "This upload is no longer analysed; delete it to free the space."
+                                    : attachDisabled && !attached
+                                      ? "Up to 5 datasets per question"
+                                      : undefined
+                                }
                               >
                                 {attached ? "Attached" : "Attach"}
                               </button>
@@ -258,6 +254,7 @@ export function DatasetLibrary({
         <ProvenanceForm
           mode="edit"
           record={editing}
+          limits={limits}
           backendUrl={backendUrl}
           authHeaders={authHeaders}
           onClose={() => setEditing(null)}

@@ -4,9 +4,10 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Ban, Brain, ChevronDown, FolderOpen, FolderPlus, RefreshCw, Search, Trash2, X } from "lucide-react";
 import type { AuthHeaders } from "@/services/datasetService";
 import { createProject, deleteFact, getProjectMemory, listProjects, patchFact } from "@/services/agentService";
+import { errorMessage, errorStatus } from "@/services/apiClient";
 import type { MemoryFact, Project } from "@/types/agentic";
 import { dateText, factText, sourceText } from "./ProjectMemoryArtifact";
-import { Pill, fmt, isNum, str, styles } from "./ui";
+import { Pill, fmt, isNum, styles } from "./ui";
 
 /** Research project picker (F16). The selected project's id is sent as project_id with agentic requests. */
 export function ProjectSelector({
@@ -30,14 +31,16 @@ export function ProjectSelector({
   const [memoryOpen, setMemoryOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
   const authRef = useRef(authHeaders);
-  authRef.current = authHeaders;
+  useEffect(() => {
+    authRef.current = authHeaders;
+  });
 
   const load = useCallback(async () => {
     try {
-      setProjects(await listProjects(backendUrl, authRef.current));
+      setProjects(await listProjects(backendUrl, (extra) => authRef.current(extra)));
       setError(null);
-    } catch (err: any) {
-      setError(err?.status === 404 ? "Projects are not available on this server." : err?.message || "Projects could not be loaded.");
+    } catch (err: unknown) {
+      setError(errorStatus(err) === 404 ? "Projects are not available on this server." : errorMessage(err, "Projects could not be loaded."));
     } finally {
       setLoaded(true);
     }
@@ -78,8 +81,8 @@ export function ProjectSelector({
       setDescription("");
       onChange(p.id, p);
       setError(null);
-    } catch (err: any) {
-      setError(err?.message || "The project could not be created.");
+    } catch (err: unknown) {
+      setError(errorMessage(err, "The project could not be created."));
     } finally {
       setCreating(false);
     }
@@ -212,43 +215,49 @@ export function ProjectMemoryDrawer({
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const authRef = useRef(authHeaders);
-  authRef.current = authHeaders;
   const closeRef = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
+  useEffect(() => {
+    authRef.current = authHeaders;
+    onCloseRef.current = onClose;
+  });
 
-  const load = useCallback(
-    async (q: string) => {
-      setLoading(true);
-      try {
-        setFacts(await getProjectMemory(backendUrl, authRef.current, projectId, q));
-        setError(null);
-      } catch (err: any) {
-        setError(err?.message || "Project memory could not be loaded.");
-      } finally {
-        setLoading(false);
-      }
-    },
+  // Fetches without touching `loading` first, so the mount effect sets state only from the async result.
+  const fetchFacts = useCallback(
+    (q: string) =>
+      getProjectMemory(backendUrl, (extra) => authRef.current(extra), projectId, q)
+        .then(
+          (list) => {
+            setFacts(list);
+            setError(null);
+          },
+          (err: unknown) => setError(errorMessage(err, "Project memory could not be loaded."))
+        )
+        .finally(() => setLoading(false)),
     [backendUrl, projectId]
   );
+  const load = (q: string) => {
+    setLoading(true);
+    void fetchFacts(q);
+  };
 
   useEffect(() => {
-    void load("");
+    void fetchFacts("");
     closeRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onCloseRef.current();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [load]);
+  }, [fetchFacts]);
 
   const invalidate = async (f: MemoryFact) => {
     setBusyId(f.id);
     try {
-      await patchFact(backendUrl, authHeaders, projectId, f.id, { invalid: true });
+      await patchFact(backendUrl, authHeaders, projectId, f.id, { invalidate: true, reason: "Marked as no longer true by the user." });
       setFacts((list) => list.map((x) => (x.id === f.id ? { ...x, invalid: true, invalid_at: x.invalid_at || new Date().toISOString() } : x)));
-    } catch (err: any) {
-      setError(err?.message || "The fact could not be invalidated.");
+    } catch (err: unknown) {
+      setError(errorMessage(err, "The fact could not be invalidated."));
     } finally {
       setBusyId(null);
     }
@@ -260,8 +269,8 @@ export function ProjectMemoryDrawer({
     try {
       await deleteFact(backendUrl, authHeaders, projectId, f.id);
       setFacts((list) => list.filter((x) => x.id !== f.id));
-    } catch (err: any) {
-      setError(err?.message || "The fact could not be deleted.");
+    } catch (err: unknown) {
+      setError(errorMessage(err, "The fact could not be deleted."));
     } finally {
       setBusyId(null);
     }
@@ -297,10 +306,10 @@ export function ProjectMemoryDrawer({
           className={styles.steerRow}
           onSubmit={(e) => {
             e.preventDefault();
-            void load(query);
+            load(query);
           }}
         >
-          <input className={styles.input} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search facts (e.g. EGFR)" aria-label="Search project facts" />
+          <input className={styles.input} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search facts (e.g. Reynolds number)" aria-label="Search project facts" />
           <button type="submit" className={styles.btn}>
             <Search style={{ width: 12, height: 12 }} aria-hidden="true" /> Search
           </button>

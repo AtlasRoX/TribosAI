@@ -10,8 +10,9 @@ import json
 import logging
 import os
 import re
+import time
 import uuid
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Any
 
 from dotenv import load_dotenv
@@ -28,7 +29,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from starlette.background import BackgroundTask
 
 from app.backend.auth import auth_disabled, get_current_user
-from app.backend.limits import UserConcurrencyLimiter
+from app.backend.limits import RecentRequestIds, UserConcurrencyLimiter
 from app.backend.routers.datasets import router as datasets_router
 from app.backend.routers.export import router as export_router
 from app.backend.security import SecurityMiddleware, cors_origins, insecure_allowed
@@ -37,6 +38,7 @@ from tribos.agents.authoritative_orchestrator import (
     get_authoritative_orchestrator,
 )
 from tribos.config import get_bool, validate_environment
+from tribos.config.settings import get_float, get_int
 from tribos.utils.llm.llm_factory import (
     DEFAULT_ORCHESTRATOR_MODEL,
     get_supported_models,
@@ -47,7 +49,6 @@ from tribos.utils.memory import get_research_memory_engine
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("tribos.backend")
-BioContextMCPClient: Any = None  # Legacy stub for test monkeypatches
 
 
 def _package_version(default: str = "1.0.0") -> str:
@@ -97,6 +98,12 @@ app = FastAPI(
     lifespan=_lifespan,
 )
 
+# The last middleware added runs first. SecurityMiddleware (body-size limits, Origin check on state-changing
+# requests, Host allow-list and loopback-only clients when authentication is disabled; app/backend/security.py,
+# SEC-002, SEC-004, CFG-001) sits inside CORS, so its own 400/403/413 answers carry the CORS headers for an allowed
+# origin and the browser shows their message instead of "backend unreachable" (LOG-36). A refused Origin still gets
+# no CORS headers.
+app.add_middleware(SecurityMiddleware)
 # CORS: explicit origin allow-list (wildcard origins are dropped: with credentials they would admit any page)
 _cors_origins = cors_origins()
 app.add_middleware(
@@ -107,9 +114,6 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "MCP-Protocol-Version", "Mcp-Session-Id", "Last-Event-ID"],
     expose_headers=["Content-Disposition"],
 )
-# Outermost: body-size limits, Origin check on state-changing requests, Host allow-list and loopback-only clients
-# when authentication is disabled (app/backend/security.py; SEC-002, SEC-004, CFG-001).
-app.add_middleware(SecurityMiddleware)
 
 app.include_router(datasets_router)
 app.include_router(export_router)
@@ -124,6 +128,7 @@ for _router_module in (
     "app.backend.routers.projects",
     "app.backend.routers.mcp",
     "app.backend.routers.a2a",
+    "app.backend.routers.vision",
 ):
     try:
         app.include_router(importlib.import_module(_router_module).router)
@@ -146,13 +151,18 @@ _DATASET_ID_RE = re.compile(r"ds_[0-9a-f]{12}")
 MAX_MESSAGE_CHARS = 20_000
 MAX_THREAD_ID_CHARS = 200
 SSE_HEARTBEAT_SECONDS = float(os.getenv("TRIBOS_SSE_HEARTBEAT_S", "15"))
-HEALTH_CACHE_SECONDS = float(os.getenv("TRIBOS_HEALTH_CACHE_S", "60"))
 
 # Each orchestration runs many tools and model calls; one user cannot start an unbounded number at once.
 _chat_slots = UserConcurrencyLimiter(int(os.getenv("TRIBOS_MAX_CONCURRENT_CHATS_PER_USER", "2")))
 _CHAT_BUSY_DETAIL = "You already have the maximum number of questions running; wait for one to finish."
 # Title generation calls the model too; over this per-user limit a request gets the heuristic title instead.
 _title_slots = UserConcurrencyLimiter(int(os.getenv("TRIBOS_MAX_CONCURRENT_TITLES_PER_USER", "2")))
+# client_request_id of each user's running questions: a retried POST of a question that is still running (the web
+# client's JSON fallback after a dropped stream) gets 409 instead of starting a second run on a second slot.
+_running_requests = RecentRequestIds()
+_DUPLICATE_DETAIL = (
+    "This question is already running (same client_request_id); wait for it to finish instead of sending it again."
+)
 
 
 def _internal_error(request_id: str) -> str:
@@ -178,7 +188,8 @@ class AgentOptions(BaseModel):
     require_plan_approval: bool = Field(default=False, description="Pause for the user's approval before running the plan")
     allow_clarification: bool = Field(default=True, description="Ask a clarifying question when the request is ambiguous")
     enable_counter_evidence: bool = True
-    enable_hypotheses: bool = True
+    # None (the default): hypotheses run when the question calls for them; true forces them, false switches them off.
+    enable_hypotheses: bool | None = None
     enable_code_analysis: bool = True
     budget: AgentBudgetOptions | None = None
 
@@ -189,6 +200,13 @@ class AgentOptions(BaseModel):
         return data
 
 
+class ImageContext(BaseModel):
+    """One attached image, as text: its file name and the transcription the user reviewed."""
+
+    name: str = Field("image", max_length=120)
+    text: str = Field(..., min_length=1, max_length=8000)
+
+
 class ChatRequest(BaseModel):
     """Chat request schema."""
     message: str = Field(..., min_length=1, max_length=MAX_MESSAGE_CHARS, description="User query or prompt")
@@ -196,7 +214,7 @@ class ChatRequest(BaseModel):
     model: str | None = Field(
         DEFAULT_ORCHESTRATOR_MODEL,
         max_length=200,
-        description="Model identifier, e.g. 'nvidia/nemotron-3-super-120b-a12b' or 'gpt-4o'",
+        description="Model identifier, e.g. 'nvidia/nemotron-3.5-super-vl-120b-a12b' or 'gpt-4o'",
     )
     enable_web_search: bool | None = Field(
         True,
@@ -213,6 +231,23 @@ class ChatRequest(BaseModel):
     )
     project_id: str | None = Field(default=None, max_length=64, description="Research project (prj_...) for project memory")
     agent_options: AgentOptions | None = Field(default=None, description="Per-request agentic settings")
+    image_context: list[ImageContext] | None = Field(
+        default=None, max_length=10, description="Transcriptions of images attached to the question (POST /api/vision/read)"
+    )
+    client_request_id: str | None = Field(
+        default=None,
+        max_length=100,
+        pattern=r"^[A-Za-z0-9_.:-]+$",
+        description="Client-generated id of this question, reused by retries: a duplicate POST while the first is "
+        "still running is refused with 409 (chat), or answered with the job already created (POST /api/jobs)",
+    )
+
+    @property
+    def full_message(self) -> str:
+        """The question as solved: the typed message plus the attached images' (reviewed) transcriptions."""
+        items = (self.image_context or [])[: int(get_int("TRIBOS_VISION_MAX_IMAGES"))]
+        block = _image_context_block([i.model_dump() for i in items]) if items else ""
+        return f"{self.message}\n\n{block}" if block else self.message
 
     @field_validator("framework")
     @classmethod
@@ -252,6 +287,22 @@ class ChatRequest(BaseModel):
         return self
 
 
+def _image_context_block(items: list[dict[str, Any]]) -> str:
+    """tribos.vision's transcription block, imported here so the API starts without the image-input feature (BRK-7);
+    without it the same layout is built inline, since the user reviewed this text and it must not be dropped."""
+    try:
+        from tribos.vision.reader import image_context_block
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("tribos.vision unavailable (%s); formatting the image transcriptions inline", type(exc).__name__)
+        parts = []
+        for i, item in enumerate(items, 1):
+            text = str(item.get("text") or "").strip()[:8000]
+            if text:
+                parts.append(f"Attached image {i} ({str(item.get('name') or f'image {i}')[:120]}), transcribed:\n{text}")
+        return "\n\n".join(parts)
+    return image_context_block(items)
+
+
 def check_caller_api_key(value: str | None) -> str | None:
     """A caller key that looks like a template value ('your-key', 'sk-...') is refused (422) instead of being
     silently replaced by the server's key (SEC-003). Blank means no key."""
@@ -271,17 +322,14 @@ _TITLE_PREAMBLE_RES = [
     re.compile(r"^(?:i'm\s+looking\s+for|i\s+am\s+looking\s+for|tell\s+me\s+about|give\s+me\s+a\s+summary\s+of|can\s+we\s+look\s+at|about)\s+", re.I),
 ]
 
+# Spellings kept as written in a heuristic title (matched case-insensitively): STEM acronyms, standards bodies and
+# tools whose capitalisation str.capitalize() would break.
 _ACRONYMS = {
-    "DNA", "RNA", "mRNA", "tRNA", "siRNA", "shRNA", "snRNA", "lncRNA",
-    "KRAS", "EGFR", "TP53", "BRCA1", "BRCA2", "BRAF", "MYC", "HER2", "HER3",
-    "ALK", "ROS1", "RET", "MET", "NTRK", "NTRK1", "NTRK2", "NTRK3",
-    "PIK3CA", "PTEN", "AKT1", "CDK4", "CDK6", "RB1", "APC", "VHL",
-    "PD-1", "PD-L1", "CTLA-4", "LAG-3", "TIM-3", "TIGIT",
-    "NSCLC", "SCLC", "CRC", "PDAC", "HCC", "RCC", "TNBC", "GBM", "AML", "CML", "ALL", "CLL",
-    "ODE", "SBML", "SED-ML", "PDB", "GEO", "MCP", "API", "DAG",
-    "ChEMBL", "PrimeKG", "CIViC", "ClinVar", "gnomAD", "COSMIC", "TCGA",
-    "UniProt", "OpenTargets", "KEGG", "PubMed", "Ensembl",
-    "G12D", "G12C", "G12V", "G12A", "G12S", "G12R", "Q61H", "Q61K", "Q61L", "T790M", "C797S", "V600E",
+    "ODE", "ODEs", "PDE", "PDEs", "DAE", "SDE", "FEM", "FEA", "FVM", "FDM", "CFD", "DNS", "LES", "RANS", "BEM",
+    "FFT", "DFT", "DCT", "SVD", "PCA", "LU", "QR", "RK4", "MCMC", "GMRES", "BFGS", "L-BFGS", "LQR", "PID", "MPC",
+    "SI", "CGS", "CODATA", "NIST", "ISO", "IEEE", "ASME", "IEC", "ASTM", "OEIS", "arXiv", "zbMATH", "LaTeX", "SymPy",
+    "SciPy", "NumPy", "MATLAB", "HDF5", "CSV", "API", "MCP", "DAG", "GPU", "CPU", "AC", "DC", "RF", "RLC", "EMF",
+    "NMR", "MRI", "QED", "QCD", "LHC", "CMB", "UV", "IR", "LED", "PV", "MEMS", "CAD", "CAE", "2D", "3D",
 }
 _LOWER_ACRONYMS = {a.lower(): a for a in _ACRONYMS}
 _MINOR_WORDS = {"a", "an", "the", "and", "but", "or", "for", "nor", "on", "at", "to", "from", "by", "with", "in", "of", "vs", "versus"}
@@ -379,26 +427,24 @@ class ResetRequest(BaseModel):
     thread_id: str = Field(..., min_length=1, max_length=MAX_THREAD_ID_CHARS)
 
 
-# Upstream readiness probes are cached so the unauthenticated health route cannot be used to drive outbound traffic.
+# Optional upstream readiness probe: an async callable returning {"mcp_remote_active": bool, "direct_adapters":
+# {name: {"status", "latency_ms", "error"}}}. None (the default) reports the local status only. Results are cached for
+# TRIBOS_HEALTH_CACHE_S so the unauthenticated health route cannot be used to drive outbound traffic.
+_readiness_probe: Callable[[], Awaitable[dict[str, Any]]] | None = None
 _health_cache: dict[str, Any] = {"at": 0.0, "readiness": None}
 
 
 async def _service_readiness() -> dict[str, Any]:
-    global _health_cache
     cached = _health_cache.get("readiness")
-    if cached is not None:
+    if cached is not None and time.monotonic() - float(_health_cache.get("at") or 0.0) < get_float("TRIBOS_HEALTH_CACHE_S"):
         return cached
-    if BioContextMCPClient is not None:
+    res: dict[str, Any] = {"mcp_remote_active": False, "direct_adapters": {}}
+    if _readiness_probe is not None:
         try:
-            client = BioContextMCPClient()
-            if hasattr(client, "async_check_service_readiness"):
-                res = await client.async_check_service_readiness()
-                _health_cache["readiness"] = res
-                return res
-        except Exception:
-            pass
-    res = {"status": "alive", "service": "Tribos Engineering R&D API", "mcp_remote_active": False, "direct_adapters": {}}
-    _health_cache["readiness"] = res
+            res = await _readiness_probe()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Readiness probe failed: %s", type(exc).__name__)
+    _health_cache.update(at=time.monotonic(), readiness=res)
     return res
 
 
@@ -492,7 +538,7 @@ async def health_details(user_id: str = Depends(get_current_user)) -> dict[str, 
             **{k: {**v} for k, v in _provider_flags().items()},
             "default_orchestrator": DEFAULT_ORCHESTRATOR_MODEL,
         },
-        "biocontext_service_readiness": _detailed_readiness(observed_readiness),
+        "service_readiness": _detailed_readiness(observed_readiness),
         "disabled_routers": dict(DISABLED_ROUTERS),
         "config_problems": len(validate_environment()),
     }
@@ -531,6 +577,27 @@ async def list_frameworks() -> dict[str, Any]:
     }
 
 
+class RoutePreviewRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=MAX_MESSAGE_CHARS)
+
+
+@app.post("/api/route/preview")
+async def route_preview(req: RoutePreviewRequest, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
+    """The approach Auto would choose for a draft question, before it is sent: the router's deterministic path only
+    (no model call, no retrieval), so it is fast enough to update while the user types."""
+    from tribos.agentic import router
+    from tribos.agents import query_planner
+
+    query = req.message.strip()
+    ctx = await query_planner.build_query_context(
+        query=query, clean_query=query, registry=None, enable_web_search=False, attachments=[], attachment_errors=[],
+        user_id=user_id, thread_id="route-preview", model_name="", api_key=None, budget_s=1.5,
+    )
+    decision = await router.choose_framework(query, ctx)
+    return {"label": decision.display_label, "approach": decision.approach or decision.framework,
+            "rule": decision.rule, "reason": decision.reason}
+
+
 @app.get("/api/effort-levels")
 async def list_effort_levels() -> dict[str, Any]:
     """Available reasoning and thinking effort levels (low, medium, high, ultra)."""
@@ -567,7 +634,7 @@ async def list_agents() -> dict[str, Any]:
                 "id": "axiom",
                 "name": "Axiom",
                 "domain": "Symbolic Mathematics & Computer Algebra",
-                "description": "Exact symbolic computer algebra with SymPy: equation solving, calculus, ODE dsolve, linear algebra, identity proofs, and LaTeX formatting.",
+                "description": "Exact symbolic computer algebra with SymPy: equation solving, calculus, optimization, inequalities, transforms, vector calculus, number theory, recurrences, probability, ODE dsolve, linear algebra, identity proofs, LaTeX formatting, and a verified end-to-end math agent.",
                 "tools": [
                     "axiom_simplify",
                     "axiom_solve",
@@ -576,6 +643,17 @@ async def list_agents() -> dict[str, Any]:
                     "axiom_linalg",
                     "axiom_verify_identity",
                     "axiom_latex",
+                    "axiom_solve_problem",
+                    "axiom_nsolve",
+                    "axiom_optimize",
+                    "axiom_inequality",
+                    "axiom_tangent",
+                    "axiom_vector_calculus",
+                    "axiom_transform",
+                    "axiom_nintegrate",
+                    "axiom_number_theory",
+                    "axiom_recurrence",
+                    "axiom_probability",
                 ],
             },
             {
@@ -600,6 +678,7 @@ async def list_agents() -> dict[str, Any]:
                 "tools": [
                     "calcula_run_python",
                     "calcula_describe_dataset",
+                    "calcula_statistics",
                 ],
             },
             {
@@ -653,7 +732,8 @@ async def get_thread_memory_endpoint(thread_id: str = ThreadIdPath, user_id: str
 
 @app.get("/api/memory/entities")
 async def get_entities_vault_endpoint(user_id: str = Depends(get_current_user)) -> dict[str, Any]:
-    """Retrieve biological entities referenced in the authenticated user's memories."""
+    """Retrieve the entities (concepts, equations, quantities, materials, systems) referenced in the authenticated
+    user's memories."""
     engine = get_research_memory_engine()
     entities = await asyncio.to_thread(engine.get_entity_vault, user_id)
     return {"entities": entities, "count": len(entities)}
@@ -751,11 +831,11 @@ async def chat_endpoint(req: ChatRequest, user_id: str = Depends(get_current_use
     thread_id = req.thread_id or str(uuid.uuid4())
     model_id = req.model or DEFAULT_ORCHESTRATOR_MODEL
 
-    _chat_slots.acquire_or_429(user_id, _CHAT_BUSY_DETAIL)
+    release = _acquire_chat(user_id, req.client_request_id)
     try:
         orch = get_authoritative_orchestrator()
         orch_res = await orch.execute_inquiry(
-            query=req.message,
+            query=req.full_message,
             thread_id=thread_id,
             model_name=model_id,
             enable_web_search=req.enable_web_search if req.enable_web_search is not None else True,
@@ -773,7 +853,7 @@ async def chat_endpoint(req: ChatRequest, user_id: str = Depends(get_current_use
             status_code=500, detail=_internal_error(request_id), headers={"X-Request-ID": request_id}
         ) from e
     finally:
-        _chat_slots.release(user_id)
+        release()
 
 
 async def sse_frames(queue: "asyncio.Queue[dict[str, Any]]", heartbeat_s: float) -> AsyncGenerator[str, None]:
@@ -793,7 +873,7 @@ async def sse_frames(queue: "asyncio.Queue[dict[str, Any]]", heartbeat_s: float)
             return
 
 
-def _release_once(user_id: str) -> Callable[[], None]:
+def _release_once(user_id: str, client_request_id: str | None = None) -> Callable[[], None]:
     released = False
 
     def release() -> None:
@@ -801,8 +881,24 @@ def _release_once(user_id: str) -> Callable[[], None]:
         if not released:
             released = True
             _chat_slots.release(user_id)
+            if client_request_id:
+                _running_requests.pop(user_id, client_request_id)
 
     return release
+
+
+def _acquire_chat(user_id: str, client_request_id: str | None) -> Callable[[], None]:
+    """Claim the question's client_request_id (409 while it is already running) and a chat slot (429 over the
+    per-user limit); returns the idempotent release for both."""
+    if client_request_id and not _running_requests.claim(user_id, client_request_id):
+        raise HTTPException(status_code=409, detail=_DUPLICATE_DETAIL)
+    try:
+        _chat_slots.acquire_or_429(user_id, _CHAT_BUSY_DETAIL)
+    except HTTPException:
+        if client_request_id:
+            _running_requests.pop(user_id, client_request_id)
+        raise
+    return _release_once(user_id, client_request_id)
 
 
 @app.post("/api/chat/stream")
@@ -817,8 +913,7 @@ async def chat_stream_endpoint(req: ChatRequest, user_id: str = Depends(get_curr
     model_id = req.model or DEFAULT_ORCHESTRATOR_MODEL
     framework_id = _request_framework(req)
 
-    _chat_slots.acquire_or_429(user_id, _CHAT_BUSY_DETAIL)
-    release = _release_once(user_id)
+    release = _acquire_chat(user_id, req.client_request_id)
 
     async def event_generator() -> AsyncGenerator[str, None]:
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
@@ -832,7 +927,7 @@ async def chat_stream_endpoint(req: ChatRequest, user_id: str = Depends(get_curr
             try:
                 orch = get_authoritative_orchestrator()
                 orch_res = await orch.execute_inquiry(
-                    query=req.message,
+                    query=req.full_message,
                     thread_id=thread_id,
                     model_name=model_id,
                     enable_web_search=req.enable_web_search if req.enable_web_search is not None else True,

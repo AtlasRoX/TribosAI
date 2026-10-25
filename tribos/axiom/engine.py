@@ -18,117 +18,9 @@ from typing import Any, Literal
 
 import mpmath
 import sympy as sp
-from sympy.parsing.sympy_parser import (
-    convert_xor,
-    implicit_multiplication_application,
-    parse_expr,
-    standard_transformations,
-)
 
-TRANSFORMATIONS = standard_transformations + (
-    implicit_multiplication_application,
-    convert_xor,
-)
-
-_FORBIDDEN_RE = re.compile(r"__|import|eval|exec|getattr|setattr|delattr|globals|locals|open|os\.|sys\.|subprocess", re.I)
-
-_SAFE_LOCALS: dict[str, Any] = {
-    # Constants
-    "pi": sp.pi,
-    "E": sp.E,
-    "e": sp.E,
-    "I": sp.I,
-    "oo": sp.oo,
-    "inf": sp.oo,
-    "infinity": sp.oo,
-    "GoldenRatio": sp.GoldenRatio,
-    "EulerGamma": sp.EulerGamma,
-    "Catalan": sp.Catalan,
-    # Elementary functions
-    "sin": sp.sin,
-    "cos": sp.cos,
-    "tan": sp.tan,
-    "cot": sp.cot,
-    "sec": sp.sec,
-    "csc": sp.csc,
-    "asin": sp.asin,
-    "acos": sp.acos,
-    "atan": sp.atan,
-    "atan2": sp.atan2,
-    "acot": sp.acot,
-    "asec": sp.asec,
-    "acsc": sp.acsc,
-    "arcsin": sp.asin,
-    "arccos": sp.acos,
-    "arctan": sp.atan,
-    "sinh": sp.sinh,
-    "cosh": sp.cosh,
-    "tanh": sp.tanh,
-    "coth": sp.coth,
-    "asinh": sp.asinh,
-    "acosh": sp.acosh,
-    "atanh": sp.atanh,
-    "exp": sp.exp,
-    "log": sp.log,
-    "ln": sp.log,
-    "sqrt": sp.sqrt,
-    "cbrt": sp.cbrt,
-    "root": sp.root,
-    "Abs": sp.Abs,
-    "abs": sp.Abs,
-    "sign": sp.sign,
-    "floor": sp.floor,
-    "ceiling": sp.ceiling,
-    "ceil": sp.ceiling,
-    "re": sp.re,
-    "im": sp.im,
-    "conjugate": sp.conjugate,
-    "arg": sp.arg,
-    # Combinatorics & special functions
-    "factorial": sp.factorial,
-    "binomial": sp.binomial,
-    "gamma": sp.gamma,
-    "loggamma": sp.loggamma,
-    "digamma": sp.digamma,
-    "polygamma": sp.polygamma,
-    "beta": sp.beta,
-    "erf": sp.erf,
-    "erfc": sp.erfc,
-    "erfi": sp.erfi,
-    "zeta": sp.zeta,
-    "besselj": sp.besselj,
-    "bessely": sp.bessely,
-    "besseli": sp.besseli,
-    "besselk": sp.besselk,
-    "legendre": sp.legendre,
-    "hermite": sp.hermite,
-    "chebyshevt": sp.chebyshevt,
-    "chebyshevu": sp.chebyshevu,
-    "laguerre": sp.laguerre,
-    "Heaviside": sp.Heaviside,
-    "DiracDelta": sp.DiracDelta,
-    "LambertW": sp.LambertW,
-    # Calculus & algebra constructors
-    "Derivative": sp.Derivative,
-    "diff": sp.diff,
-    "Integral": sp.Integral,
-    "integrate": sp.integrate,
-    "Sum": sp.Sum,
-    "summation": sp.summation,
-    "Product": sp.Product,
-    "Limit": sp.Limit,
-    "limit": sp.limit,
-    "Function": sp.Function,
-    "Symbol": sp.Symbol,
-    "Rational": sp.Rational,
-    "Integer": sp.Integer,
-    "Float": sp.Float,
-    "Matrix": sp.Matrix,
-    "Eq": sp.Eq,
-    "Piecewise": sp.Piecewise,
-    "Max": sp.Max,
-    "Min": sp.Min,
-}
+from .safe_expr import SAFE_NAMES as _SAFE_LOCALS
+from .safe_expr import TRANSFORMATIONS, check_math_text, parse_math
 
 _ASSUMPTION_KEYS = frozenset({
     "real",
@@ -178,13 +70,8 @@ def _build_assumption_symbols(assumptions: dict[str, str] | None) -> dict[str, s
 
 
 def _check_safe_string(text: str) -> str:
-    if not isinstance(text, str) or not text.strip():
-        raise ValueError("Expression must be a non-empty string.")
-    if len(text) > 8000:
-        raise ValueError("Expression exceeds maximum length (8000 characters).")
-    if _FORBIDDEN_RE.search(text):
-        raise ValueError("Expression contains forbidden tokens or dunder attributes.")
-    return text.strip()
+    """The NFKC-normalised ASCII text, or ValueError (see safe_expr.check_math_text)."""
+    return check_math_text(text)
 
 
 def safe_parse_expr(
@@ -192,7 +79,9 @@ def safe_parse_expr(
     local_dict: dict[str, Any] | None = None,
     assumptions: dict[str, str] | None = None,
 ) -> sp.Expr:
-    """Safely parse a mathematical expression string into a SymPy expression without arbitrary eval."""
+    """Parse a mathematical expression string into a SymPy expression through the allowlist parser (safe_expr): the
+    text is normalised, the generated code is validated (no attribute access, dunders or unlisted calls), and only
+    then evaluated without builtins."""
     cleaned = _check_safe_string(expression)
     env = dict(_SAFE_LOCALS)
     if assumptions:
@@ -200,13 +89,7 @@ def safe_parse_expr(
     if local_dict:
         env.update(local_dict)
     try:
-        return parse_expr(
-            cleaned,
-            local_dict=env,
-            global_dict={"__builtins__": {}},
-            transformations=TRANSFORMATIONS,
-            evaluate=True,
-        )
+        return parse_math(cleaned, env)
     except Exception as exc:
         raise ValueError(f"Could not parse mathematical expression {cleaned!r}: {exc}") from exc
 
@@ -230,6 +113,9 @@ def safe_parse_equation(
     parsed = safe_parse_expr(cleaned, local_dict=local_dict, assumptions=assumptions)
     if isinstance(parsed, sp.Equality):
         return parsed.lhs, parsed.rhs, parsed
+    if isinstance(parsed, sp.core.relational.Relational):
+        # "lhs < rhs" has a solution set, not roots: say which tool solves it instead of failing on lhs - rhs.
+        raise ValueError(f"{equation!r} is an inequality, not an equation; solve it with axiom_inequality.")
     return parsed, sp.Integer(0), sp.Eq(parsed, sp.Integer(0))
 
 
@@ -308,7 +194,9 @@ def _is_real_value(val: sp.Basic) -> bool:
         cval = complex(val.evalf(30))
         return abs(cval.imag) < 1e-12
     except Exception:
-        return True
+        # A value that cannot be evaluated is not known to be real (it may be a complex root); a symbol declared real
+        # was already accepted above.
+        return False
 
 
 def axiom_solve(
@@ -347,8 +235,16 @@ def axiom_solve(
     if not target_syms:
         raise ValueError("No variables found to solve for.")
 
-    raw_solutions = sp.solve(residual_exprs, target_syms, dict=True)
     want_real = str(domain or "complex").strip().lower() in ("real", "reals", "r")
+    if want_real:
+        # Solve over real symbols, not only filter afterwards: Abs(x - 3) = 5 has no complex-domain method at all.
+        real_map = {s: sp.Symbol(s.name, real=True) for s in target_syms if s.is_real is None}
+        if real_map:
+            residual_exprs = [r.subs(real_map) for r in residual_exprs]
+            target_syms = [real_map.get(s, s) for s in target_syms]
+    raw_solutions = sp.solve(residual_exprs, target_syms, dict=True)
+    if len(residual_exprs) == 1 and len(target_syms) == 1:
+        raw_solutions = _complete_polynomial_roots(residual_exprs[0], target_syms[0], want_real, raw_solutions)
 
     solutions_out: list[dict[str, str]] = []
     solutions_latex: list[dict[str, str]] = []
@@ -384,6 +280,7 @@ def axiom_solve(
         residuals_out.append(sol_residuals)
 
     verified = bool(len(solutions_out) > 0 and all_verified)
+    complete, solution_set = _solution_completeness(residual_exprs, target_syms, want_real, len(solutions_out))
     if len(target_syms) == 1:
         var_key = str(target_syms[0])
         latex_summary = ", ".join(
@@ -406,8 +303,62 @@ def axiom_solve(
         "latex": latex_summary,
         "verified": verified,
         "residuals": residuals_out,
+        # verified: every listed solution satisfies every equation. complete: the list is the whole solution set
+        # (False when solveset finds an infinite family solve truncated, None when it could not decide).
+        "complete": complete,
+        "solution_set": solution_set,
         "canonical_id": cid,
     }
+
+
+def _complete_polynomial_roots(
+    expr: sp.Expr, sym: sp.Symbol, want_real: bool, found: list[dict[sp.Basic, sp.Basic]]
+) -> list[dict[sp.Basic, sp.Basic]]:
+    """solve() returns nothing (or too little) for polynomials without a radical solution, e.g. x^5 - x - 1. Their
+    roots are still exact as CRootOf objects; use those whenever solve() found fewer distinct roots than exist."""
+    try:
+        num, den = sp.fraction(sp.together(expr))
+        if not num.is_polynomial(sym) or num.free_symbols - {sym}:
+            return found
+        core = sp.Poly(sp.sqf_part(num), sym)
+        if core.degree() < 1:
+            return found
+        expected = core.count_roots() if want_real else core.degree()
+        if len(found) >= expected:
+            return found
+        roots = core.real_roots() if want_real else core.all_roots()
+        return [{sym: r} for r in dict.fromkeys(roots) if not den.has(sym) or den.subs(sym, r) != 0]
+    except Exception:
+        return found
+
+
+def _solution_completeness(
+    residuals: list[sp.Expr], syms: list[sp.Symbol], want_real: bool, n_found: int
+) -> tuple[bool | None, str | None]:
+    """Whether solve() returned the whole solution set of a single univariate equation.
+
+    Polynomials are complete by construction; other equations are cross-checked with solveset, which returns
+    periodic families (ImageSet) that solve() silently truncates, e.g. sin(x) = 0 -> [0, pi].
+    """
+    if len(residuals) != 1 or len(syms) != 1:
+        return None, None
+    expr, sym = residuals[0], syms[0]
+    try:
+        if expr.is_polynomial(sym):
+            return True, None
+    except Exception:
+        pass
+    try:
+        sset = sp.solveset(expr, sym, domain=sp.S.Reals if want_real else sp.S.Complexes)
+    except Exception:
+        return None, None
+    if isinstance(sset, sp.FiniteSet):
+        return len(sset) <= n_found, str(sset)
+    if sset is sp.S.EmptySet:
+        return n_found == 0, str(sset)
+    if isinstance(sset, sp.ConditionSet):
+        return None, str(sset)
+    return False, str(sset)  # ImageSet / Union / Interval: infinitely many solutions
 
 
 def _to_mpmath_bound(expr: sp.Expr) -> Any:
@@ -416,6 +367,164 @@ def _to_mpmath_bound(expr: sp.Expr) -> Any:
     if expr == -sp.oo:
         return -mpmath.inf
     return float(expr.evalf(30))
+
+
+# Independent numeric checks ----------------------------------------------------------------------------------------
+# A closed form is only reported as verified when a second, numerical method agrees with it. Free parameters are
+# pinned to fixed generic values so multivariate results are checked too instead of being waved through.
+
+_PARAM_VALUES = (0.61, 0.83, 1.29, 1.47, 0.37, 1.91, 0.53, 1.13)
+
+
+def _fix_parameters(syms: set[sp.Basic], var_sym: sp.Symbol | None = None) -> dict[sp.Symbol, sp.Basic]:
+    others = sorted((s for s in syms if isinstance(s, sp.Symbol) and s != var_sym), key=lambda s: s.name)
+    return {s: sp.Rational(str(_PARAM_VALUES[i % len(_PARAM_VALUES)])) for i, s in enumerate(others)}
+
+
+def _num(expr: sp.Basic, subs: dict[sp.Symbol, Any]) -> complex | None:
+    """expr evaluated to 30 digits (adaptive precision, so cancellation near a limit point is handled); None if
+    it is not a finite number."""
+    try:
+        val = complex(expr.evalf(30, subs=subs) if subs else expr.evalf(30))
+    except Exception:
+        return None
+    return val if math.isfinite(val.real) and math.isfinite(val.imag) else None
+
+
+def _quad(integrand: sp.Expr, var_sym: sp.Symbol, low: sp.Expr, up: sp.Expr) -> complex | None:
+    if integrand.free_symbols - {var_sym} or low.free_symbols or up.free_symbols:
+        return None
+    try:
+        f_mp = sp.lambdify(var_sym, integrand, modules="mpmath")
+        with mpmath.workdps(30):
+            val = complex(mpmath.quad(f_mp, [_to_mpmath_bound(low), _to_mpmath_bound(up)]))
+    except Exception:
+        return None
+    return val if math.isfinite(val.real) and math.isfinite(val.imag) else None
+
+
+def _zero_check(expr: sp.Expr, what: str) -> tuple[bool, str]:
+    """Is expr identically zero? Cheap symbolic normal forms first, then simplify, then generic sample points."""
+    try:
+        if sp.expand(expr) == 0 or sp.cancel(expr) == 0 or sp.simplify(expr) == 0 or sp.trigsimp(sp.simplify(expr)) == 0:
+            return True, f"symbolic: {what}"
+    except Exception:
+        pass
+    syms = sorted(expr.free_symbols, key=lambda s: s.name)
+    evaluated = 0
+    for offset in range(4):
+        pt = {s: sp.Rational(str(_PARAM_VALUES[(i + offset) % len(_PARAM_VALUES)])) for i, s in enumerate(syms)}
+        val = _num(expr, pt)
+        if val is None:
+            continue
+        if abs(val) > 1e-12:
+            return False, f"numeric counterexample: {what} fails"
+        evaluated += 1
+    if evaluated >= 2:
+        return True, f"numeric (sample points): {what}"
+    return False, "not checked"
+
+
+def _check_derivative(expr: sp.Expr, result: sp.Expr, var_sym: sp.Symbol, order: int) -> bool:
+    if order > 8:
+        return False
+    params = _fix_parameters(expr.free_symbols, var_sym)
+    f_mp = sp.lambdify(var_sym, expr.subs(params), modules="mpmath")
+    res = result.subs(params)
+    for test_x in ("0.73", "1.37", "2.11", "-0.59"):
+        sym_d = _num(res, {var_sym: sp.Rational(test_x)})
+        if sym_d is None:
+            continue
+        try:
+            with mpmath.workdps(40):
+                num_d = complex(mpmath.diff(f_mp, mpmath.mpf(test_x), n=order))
+        except Exception:
+            continue
+        if not (math.isfinite(num_d.real) and math.isfinite(num_d.imag)):
+            continue
+        return abs(num_d - sym_d) <= 1e-6 * max(1.0, abs(sym_d))
+    return False
+
+
+def _check_limit(expr: sp.Expr, var_sym: sp.Symbol, point: sp.Expr, direction: str, result: sp.Expr) -> bool:
+    """Evaluate expr ever closer to the limit point from each requested side and compare with the result."""
+    params = _fix_parameters(expr.free_symbols | result.free_symbols, var_sym)
+    f = expr.subs(params)
+    infinite = result in (sp.oo, -sp.oo)
+    target = None if infinite else _num(result.subs(params), {})
+    if not infinite and target is None:
+        return False
+    if point in (sp.oo, -sp.oo):
+        sign = 1 if point == sp.oo else -1
+        paths = [[sp.Integer(sign * 10**6), sp.Integer(sign * 10**9)]]
+    else:
+        x0 = point.subs(params)
+        if x0.free_symbols:
+            return False
+        sides = {"+": [1], "-": [-1]}.get(direction, [1, -1])
+        paths = [[x0 + s * sp.Rational(1, 10**6), x0 + s * sp.Rational(1, 10**9)] for s in sides]
+    for far, near in paths:
+        v_near, v_far = _num(f, {var_sym: near}), _num(f, {var_sym: far})
+        if v_near is None:
+            return False
+        if infinite:
+            sign = 1 if result == sp.oo else -1
+            if not (sign * v_near.real > 1e3 and v_far is not None and abs(v_near) >= abs(v_far)):
+                return False
+        elif abs(v_near - target) > 1e-3 * max(1.0, abs(target)):
+            return False
+    return True
+
+
+def _check_series(expr: sp.Expr, poly: sp.Expr, var_sym: sp.Symbol, point: sp.Expr, n_terms: int) -> bool:
+    """A truncated expansion of order n must agree with expr to O(h^n) near the expansion point."""
+    if point.free_symbols or point in (sp.oo, -sp.oo):
+        return False
+    params = _fix_parameters(expr.free_symbols, var_sym)
+    f, p = expr.subs(params), poly.subs(params)
+    errs = []
+    for h in (sp.Rational(1, 100), sp.Rational(1, 1000)):
+        fv, pv = _num(f, {var_sym: point + h}), _num(p, {var_sym: point + h})
+        if fv is None or pv is None:
+            return False
+        errs.append((abs(fv - pv), max(1.0, abs(fv)), float(h)))
+    return all(err <= 10.0 * scale * h ** (n_terms - 0.5) for err, scale, h in errs)
+
+
+def _check_sum(expr: sp.Expr, var_sym: sp.Symbol, low: sp.Expr, up: sp.Expr, result: sp.Expr) -> tuple[bool, str]:
+    """Closed form vs direct partial sums (symbolic upper bound), direct summation, or mpmath.nsum (infinite)."""
+    try:
+        bound_syms = up.free_symbols - {var_sym}
+        if low.is_integer and low.is_number and len(bound_syms) == 1:
+            n_sym = next(iter(bound_syms))
+            params = _fix_parameters(expr.free_symbols | result.free_symbols, var_sym)
+            params.pop(n_sym, None)
+            term = expr.subs(params)
+            lo = int(low)
+            for big_n in range(lo, lo + 6):
+                direct = sp.Add(*[term.subs(var_sym, k) for k in range(lo, big_n + 1)])
+                diff_val = _num(result.subs(params).subs(n_sym, big_n) - direct, {})
+                if diff_val is None or abs(diff_val) > 1e-9 * max(1.0, abs(_num(direct, {}) or 1.0)):
+                    return False, "closed form disagrees with direct partial sums"
+            return True, "closed form matches direct partial sums for 6 values of the bound"
+        params = _fix_parameters(expr.free_symbols | result.free_symbols, var_sym)
+        term = expr.subs(params)
+        target = _num(result.subs(params), {})
+        if target is None or not (low.is_number and (up.is_number or up == sp.oo)):
+            return False, "not checked"
+        if up == sp.oo:
+            f_mp = sp.lambdify(var_sym, term, modules="mpmath")
+            with mpmath.workdps(30):
+                approx = complex(mpmath.nsum(f_mp, [int(low), mpmath.inf]))
+            ok = abs(approx - target) <= 1e-8 * max(1.0, abs(target))
+            return ok, "mpmath.nsum cross-check" if ok else "mpmath.nsum disagrees with the closed form"
+        if int(up) - int(low) <= 5000:
+            direct = _num(sp.Add(*[term.subs(var_sym, k) for k in range(int(low), int(up) + 1)]), {})
+            ok = direct is not None and abs(direct - target) <= 1e-9 * max(1.0, abs(target))
+            return ok, "direct summation" if ok else "direct summation disagrees with the closed form"
+    except Exception:
+        pass
+    return False, "not checked"
 
 
 def axiom_calculus(
@@ -434,6 +543,8 @@ def axiom_calculus(
 
     numeric_value: float | None = None
     verified = False
+    method = "not checked"
+    one_sided: dict[str, str] | None = None
     result_str = ""
     latex_str = ""
 
@@ -441,22 +552,8 @@ def axiom_calculus(
         res_expr = sp.diff(expr, var_sym, int(order))
         result_str = str(res_expr)
         latex_str = sp.latex(res_expr)
-        # Cross-check univariate derivative at a safe numerical point via mpmath.diff
-        if expr.free_symbols <= {var_sym} and int(order) <= 4:
-            for test_x in (0.73, 1.37, 2.11):
-                try:
-                    f_mp = sp.lambdify(var_sym, expr, modules="mpmath")
-                    num_d = complex(mpmath.diff(f_mp, test_x, n=int(order)))
-                    sym_d = complex(res_expr.subs(var_sym, test_x).evalf(30))
-                    if math.isfinite(num_d.real) and math.isfinite(sym_d.real):
-                        err = abs(num_d - sym_d)
-                        tol = 1e-6 * max(1.0, abs(sym_d))
-                        verified = err <= tol
-                        break
-                except Exception:
-                    continue
-        else:
-            verified = True
+        verified = _check_derivative(expr, res_expr, var_sym, int(order))
+        method = "mpmath.diff at sample points" if verified else "numeric derivative check failed or not applicable"
 
     elif op == "integrate":
         if lower is not None and upper is not None:
@@ -465,39 +562,28 @@ def axiom_calculus(
             res_expr = sp.integrate(expr, (var_sym, low_expr, up_expr))
             result_str = str(res_expr)
             latex_str = sp.latex(res_expr)
-            # Numeric quadrature cross-check via mpmath.quad when bounds & integrand have no extra free symbols
-            extra_syms = (expr.free_symbols - {var_sym}) | low_expr.free_symbols | up_expr.free_symbols
-            if not extra_syms:
-                try:
-                    sym_num = complex(res_expr.evalf(30))
-                    if abs(sym_num.imag) < 1e-12 and math.isfinite(sym_num.real):
-                        numeric_value = float(sym_num.real)
-                except Exception:
-                    pass
-                try:
-                    f_mp = sp.lambdify(var_sym, expr, modules="mpmath")
-                    a_mp = _to_mpmath_bound(low_expr)
-                    b_mp = _to_mpmath_bound(up_expr)
-                    quad_val = complex(mpmath.quad(f_mp, [a_mp, b_mp]))
-                    if abs(quad_val.imag) < 1e-9 and math.isfinite(quad_val.real):
-                        quad_float = float(quad_val.real)
-                        if numeric_value is None:
-                            numeric_value = quad_float
-                        else:
-                            err = abs(numeric_value - quad_float)
-                            verified = err <= 1e-5 * max(1.0, abs(quad_float))
-                except Exception:
-                    pass
+            # Free parameters (integrand or bounds) are pinned to fixed sample values so the closed form can still be
+            # cross-checked against mpmath.quad; numeric_value is only reported for a parameter-free integral.
+            params = _fix_parameters(expr.free_symbols | low_expr.free_symbols | up_expr.free_symbols, var_sym)
+            pinned = res_expr.subs(params)  # also resolves Piecewise convergence conditions on the parameters
+            sym_val = None if pinned.has(sp.Integral) else _num(pinned, {})
+            if not params and sym_val is not None and abs(sym_val.imag) < 1e-12:
+                numeric_value = float(sym_val.real)
+            quad_val = _quad(expr.subs(params), var_sym, low_expr.subs(params), up_expr.subs(params))
+            if quad_val is not None:
+                if numeric_value is None and not params and abs(quad_val.imag) < 1e-9:
+                    numeric_value = float(quad_val.real)
+                if sym_val is not None:
+                    verified = abs(sym_val - quad_val) <= 1e-5 * max(1.0, abs(quad_val))
+                    method = "mpmath.quad cross-check" + (" (parameters pinned)" if params else "")
         else:
             res_expr = sp.integrate(expr, var_sym)
             result_str = str(res_expr)
             latex_str = sp.latex(res_expr)
-            # Verify indefinite integral by differentiating back
-            try:
-                back_diff = sp.simplify(sp.diff(res_expr, var_sym) - expr)
-                verified = bool(back_diff == 0 or sp.trigsimp(back_diff) == 0)
-            except Exception:
-                verified = False
+            # Verify indefinite integral by differentiating back (symbolically, then numerically)
+            if not res_expr.has(sp.Integral):
+                back = sp.diff(res_expr, var_sym) - expr
+                verified, method = _zero_check(back, "d/dx of the antiderivative equals the integrand")
 
     elif op == "limit":
         raw_pt = str(point if point is not None else "0").strip()
@@ -509,17 +595,32 @@ def axiom_calculus(
             direction = "-"
             raw_pt = raw_pt[:-1].strip()
         pt_expr = safe_parse_expr(raw_pt, local_dict={variable: var_sym})
-        res_expr = sp.limit(expr, var_sym, pt_expr, dir=direction)
-        result_str = str(res_expr)
-        latex_str = sp.latex(res_expr)
-        if not res_expr.free_symbols:
-            try:
-                cval = complex(res_expr.evalf(30))
-                if abs(cval.imag) < 1e-12 and math.isfinite(cval.real):
+        try:
+            res_expr = sp.limit(expr, var_sym, pt_expr, dir=direction)
+        except ValueError as exc:  # sympy: "The limit does not exist since left hand limit = ..."
+            if direction != "+-" or "does not exist" not in str(exc):
+                raise
+            res_expr = sp.zoo
+        if direction == "+-" and res_expr is sp.zoo and pt_expr.is_finite:
+            # Two different one-sided limits (1/x at 0, sign(x) at 0): the two-sided limit does not exist.
+            left = sp.limit(expr, var_sym, pt_expr, dir="-")
+            right = sp.limit(expr, var_sym, pt_expr, dir="+")
+            if left != right:
+                one_sided = {"left": str(left), "right": str(right)}
+                result_str = f"does not exist (left limit {left}, right limit {right})"
+                latex_str = rf"\text{{does not exist: }} \lim_{{{sp.latex(var_sym)}\to {sp.latex(pt_expr)}^-}} = {sp.latex(left)},\ \lim_{{{sp.latex(var_sym)}\to {sp.latex(pt_expr)}^+}} = {sp.latex(right)}"
+                verified = _check_limit(expr, var_sym, pt_expr, "-", left) and _check_limit(expr, var_sym, pt_expr, "+", right)
+                method = "both one-sided limits checked numerically; they differ" if verified else "one-sided limits not confirmed"
+        if one_sided is None:
+            result_str = str(res_expr)
+            latex_str = sp.latex(res_expr)
+            if not res_expr.free_symbols:
+                cval = _num(res_expr, {})
+                if cval is not None and abs(cval.imag) < 1e-12:
                     numeric_value = float(cval.real)
-            except Exception:
-                pass
-        verified = not isinstance(res_expr, sp.Limit)
+            if not isinstance(res_expr, sp.Limit):
+                verified = _check_limit(expr, var_sym, pt_expr, direction, res_expr)
+                method = "numeric approach from each side" if verified else "numeric approach did not confirm the limit"
 
     elif op == "series":
         pt_expr = safe_parse_expr(str(point if point is not None else "0"), local_dict={variable: var_sym})
@@ -528,7 +629,8 @@ def axiom_calculus(
         poly = ser.removeO()
         result_str = str(poly)
         latex_str = sp.latex(ser)
-        verified = True
+        verified = _check_series(expr, poly, var_sym, pt_expr, n_terms)
+        method = "truncation error scales as h^n" if verified else "truncation error check failed or not applicable"
 
     elif op == "sum":
         low_expr = safe_parse_expr(str(lower if lower is not None else "1"), local_dict={variable: var_sym})
@@ -538,15 +640,11 @@ def axiom_calculus(
         result_str = str(res_simplified)
         latex_str = sp.latex(res_simplified)
         if not res_simplified.free_symbols:
-            try:
-                cval = complex(res_simplified.evalf(30))
-                if abs(cval.imag) < 1e-12 and math.isfinite(cval.real):
-                    numeric_value = float(cval.real)
-                    verified = True
-            except Exception:
-                pass
-        else:
-            verified = not isinstance(res_simplified, sp.Sum)
+            cval = _num(res_simplified, {})
+            if cval is not None and abs(cval.imag) < 1e-12:
+                numeric_value = float(cval.real)
+        if not res_simplified.has(sp.Sum):
+            verified, method = _check_sum(expr, var_sym, low_expr, up_expr, res_simplified)
     else:
         raise ValueError(f"Unsupported calculus operation: {operation!r}")
 
@@ -571,6 +669,94 @@ def axiom_calculus(
         "latex": latex_str,
         "numeric_value": numeric_value,
         "verified": verified,
+        "verification": method,
+        "one_sided": one_sided,
+        "canonical_id": cid,
+    }
+
+
+def axiom_nsolve(
+    equation: str,
+    variable: str | None = None,
+    lower: float = -10.0,
+    upper: float = 10.0,
+    samples: int = 400,
+) -> dict[str, Any]:
+    """Real roots of a univariate equation on [lower, upper]: sign-change and |f| local-minimum scan, refined with
+    mpmath.findroot, each root kept only if its residual vanishes (which drops poles such as tan(x) = 0 at pi/2).
+
+    The numeric fallback when no closed form exists (x = cos(x), x*exp(x) = 3). A scan cannot prove that it found
+    every root, so `complete` is always None."""
+    lhs, rhs, _ = safe_parse_equation(equation)
+    f_expr = lhs - rhs
+    free = sorted(f_expr.free_symbols, key=lambda s: s.name)
+    if variable:
+        sym = next((s for s in free if s.name == variable), sp.Symbol(variable))
+    elif len(free) == 1:
+        sym = free[0]
+    else:
+        raise ValueError(f"Specify the variable: the equation has free symbols {[s.name for s in free]}.")
+    if f_expr.free_symbols - {sym}:
+        raise ValueError("Numeric root finding needs every parameter to have a value; only the unknown may be free.")
+    lo, hi = float(lower), float(upper)
+    if not (math.isfinite(lo) and math.isfinite(hi) and hi > lo):
+        raise ValueError("The search interval needs finite bounds with lower < upper.")
+    n = max(20, min(5000, int(samples)))
+    f_mp = sp.lambdify(sym, f_expr, modules="mpmath")
+
+    def fval(x: float) -> float | None:
+        try:
+            v = complex(f_mp(mpmath.mpf(x)))
+        except Exception:
+            return None
+        return v.real if math.isfinite(v.real) and abs(v.imag) <= 1e-9 * max(1.0, abs(v.real)) else None
+
+    xs = [lo + (hi - lo) * i / n for i in range(n + 1)]
+    ys = [fval(x) for x in xs]
+    seeds: list[tuple[float, float] | float] = []
+    for i in range(n):
+        a, b = ys[i], ys[i + 1]
+        if a is None or b is None:
+            continue
+        if a == 0:
+            seeds.append(xs[i])
+        elif a * b < 0:
+            seeds.append((xs[i], xs[i + 1]))
+        elif 0 < i and ys[i - 1] is not None and abs(a) <= abs(ys[i - 1]) and abs(a) <= abs(b):  # type: ignore[arg-type]
+            seeds.append(xs[i])  # local minimum of |f|: a tangent (even-multiplicity) root may sit here
+    roots: list[sp.Float] = []
+    tol = 1e-9
+    with mpmath.workdps(30):
+        for seed in seeds:
+            try:
+                if isinstance(seed, tuple):
+                    r = mpmath.findroot(f_mp, seed, solver="illinois")
+                else:
+                    r = mpmath.findroot(f_mp, mpmath.mpf(seed))
+                r = complex(r)
+            except Exception:
+                continue
+            if abs(r.imag) > 1e-12 or not (lo - 1e-9 <= r.real <= hi + 1e-9):
+                continue
+            res = _num(f_expr, {sym: sp.Float(r.real, 30)})
+            if res is None or abs(res) > tol * max(1.0, abs(r.real)):
+                continue
+            if all(abs(float(r.real) - float(q)) > 1e-7 * max(1.0, abs(r.real)) for q in roots):
+                roots.append(sp.Float(r.real, 15))
+    roots.sort()
+    residuals = [float(abs(_num(f_expr, {sym: q}) or 0.0)) for q in roots]
+    cid = _canonical_id("axiom_nsolve", {"equation": equation, "variable": sym.name, "interval": [lo, hi], "roots": [str(r) for r in roots]})
+    return {
+        "equation": str(sp.Eq(lhs, rhs)),
+        "variable": sym.name,
+        "roots": [str(r) for r in roots],
+        "residuals": residuals,
+        "interval": [lo, hi],
+        "samples": n,
+        "method": "sign-change / |f| minimum scan + mpmath.findroot refinement, residual-checked",
+        "verified": bool(roots) and all(r <= tol for r in residuals),
+        "complete": None,
+        "note": "Real roots only; roots outside the interval or closer together than the grid spacing may be missed.",
         "canonical_id": cid,
     }
 
@@ -584,15 +770,16 @@ def _normalize_ode_primes(text: str, func_name: str, var_name: str) -> str:
         primes = len(match.group(1))
         return f"Derivative({func_name}({var_name}), {var_name}, {primes})" if primes > 1 else f"Derivative({func_name}({var_name}), {var_name})"
 
-    out = re.sub(rf"\b{f_esc}('+)+\s*\(\s*{v_esc}\s*\)", _repl_with_arg, text)
+    # (?<![A-Za-z_]) rather than \b: "2y" and "3y'" have no word boundary between the coefficient and the name
+    out = re.sub(rf"(?<![A-Za-z_]){f_esc}('+)+\s*\(\s*{v_esc}\s*\)", _repl_with_arg, text)
 
     def _repl_bare_prime(match: re.Match[str]) -> str:
         primes = len(match.group(1))
         return f"Derivative({func_name}({var_name}), {var_name}, {primes})" if primes > 1 else f"Derivative({func_name}({var_name}), {var_name})"
 
-    out = re.sub(rf"\b{f_esc}('+)+", _repl_bare_prime, out)
+    out = re.sub(rf"(?<![A-Za-z_]){f_esc}('+)+", _repl_bare_prime, out)
     # Also replace bare func_name not followed by '(' with func_name(var_name)
-    out = re.sub(rf"\b{f_esc}\b(?!\s*\()", f"{func_name}({var_name})", out)
+    out = re.sub(rf"(?<![A-Za-z_]){f_esc}\b(?!\s*\()", f"{func_name}({var_name})", out)
     return out
 
 
@@ -686,33 +873,39 @@ def axiom_linalg(
     rows, cols = M.rows, M.cols
     is_square = rows == cols
 
-    det_str: str | None = str(sp.simplify(M.det())) if is_square else None
+    op = str(operation).strip().lower()
+    numeric = not M.free_symbols
+    det_val: sp.Expr | None = sp.simplify(M.det()) if is_square else None
+    det_str: str | None = str(det_val) if det_val is not None else None
     trace_str: str | None = str(sp.simplify(M.trace())) if is_square else None
     rank_val: int = int(M.rank())
     eigen_dict: dict[str, int] | None = None
-    if is_square:
+    # Eigenvalues are a side summary: computed for numeric matrices up to 4x4 or when asked for. A symbolic 4x4
+    # goes through the quartic formula and can stall a tool call that only wanted a determinant.
+    if is_square and (op in ("eigen", "charpoly") or (numeric and rows <= 4)):
         try:
             eigen_dict = {str(sp.simplify(k)): int(v) for k, v in M.eigenvals().items()}
         except Exception:
             eigen_dict = None
 
-    op = str(operation).strip().lower()
     verified = False
     result_out: Any = None
     latex_out = ""
+    free_params: list[str] = []
 
     if op == "det":
         if not is_square:
             raise ValueError("Determinant requires a square matrix.")
-        d = sp.simplify(M.det())
+        d = det_val
         result_out = str(d)
         latex_out = sp.latex(d)
-        verified = True
+        # Independent second algorithm (Berkowitz vs the default Bareiss elimination)
+        verified = bool(sp.simplify(M.det(method="berkowitz") - d) == 0)
 
     elif op == "inv":
         if not is_square:
             raise ValueError("Matrix inverse requires a square matrix.")
-        if sp.simplify(M.det()) == 0:
+        if det_val == 0:
             raise ValueError("Matrix is singular (determinant is 0) and cannot be inverted.")
         inv_M = sp.simplify(M.inv())
         prod = sp.simplify(M * inv_M - sp.eye(rows))
@@ -757,7 +950,9 @@ def axiom_linalg(
         svals = [sp.simplify(s) for s in M.singular_values()]
         result_out = {"singular_values": [str(s) for s in svals]}
         latex_out = sp.latex(svals)
-        verified = True
+        # sum(sigma_i^2) equals the squared Frobenius norm, trace(M^H M)
+        frob = (M.H * M).trace()
+        verified = bool(sp.simplify(sp.Add(*[s**2 for s in svals]) - frob) == 0)
 
     elif op == "nullspace":
         ns = M.nullspace()
@@ -780,8 +975,16 @@ def axiom_linalg(
         cp_expr = sp.expand(cp.as_expr())
         result_out = str(cp_expr)
         latex_out = sp.latex(cp_expr)
-        # Verify trace and determinant coefficients
-        verified = True
+        # Cayley-Hamilton: p(M) = 0, plus the trace and determinant coefficients
+        coeffs = cp.all_coeffs()
+        p_of_m = sp.zeros(rows, rows)
+        for c in coeffs:
+            p_of_m = p_of_m * M + c * sp.eye(rows)
+        verified = bool(
+            sp.simplify(p_of_m) == sp.zeros(rows, rows)
+            and sp.simplify(coeffs[1] + M.trace()) == 0
+            and sp.simplify(coeffs[-1] - (-1) ** rows * det_val) == 0
+        )
 
     elif op == "solve":
         if rhs is None:
@@ -789,11 +992,17 @@ def axiom_linalg(
         if len(rhs) != rows:
             raise ValueError(f"RHS vector length ({len(rhs)}) must match matrix row count ({rows}).")
         b_vec = sp.Matrix([safe_parse_expr(str(x)) for x in rhs])
-        x_sol = sp.simplify(M.LUsolve(b_vec))
+        # Gauss-Jordan handles singular and non-square systems: a unique solution, a parametric family, or none.
+        try:
+            x_sol, params = M.gauss_jordan_solve(b_vec)
+        except ValueError as exc:
+            raise ValueError(f"Linear system is inconsistent (no solution): {exc}") from exc
+        x_sol = sp.simplify(x_sol)
         residual = sp.simplify(M * x_sol - b_vec)
         verified = bool(residual == sp.zeros(rows, 1))
         result_out = [str(x_sol[i, 0]) for i in range(cols)]
         latex_out = sp.latex(x_sol)
+        free_params = [str(t) for t in params]
 
     else:
         raise ValueError(f"Unsupported linear algebra operation: {operation!r}")
@@ -809,8 +1018,42 @@ def axiom_linalg(
         "trace": trace_str,
         "rank": rank_val,
         "verified": verified,
+        "free_parameters": free_params,
         "canonical_id": cid,
     }
+
+
+def _sample_value(sym: sp.Symbol, regime: int, rng: random.Random) -> sp.Basic:
+    """A random test value for sym that respects its assumptions. Unconstrained symbols rotate through positive
+    reals, negative reals and complex values: an identity that only holds for positive reals (sqrt(x^2) = x,
+    log(x*y) = log(x) + log(y)) is not a general identity, and positive-only sampling would wrongly accept it."""
+    def r(lo: float, hi: float) -> sp.Rational:
+        return sp.Rational(str(round(rng.uniform(lo, hi), 6)))
+
+    if sym.is_integer:
+        lo = 1 if sym.is_positive else (0 if sym.is_nonnegative else -6)
+        hi = -1 if sym.is_negative else 9
+        return sp.Integer(rng.randint(min(lo, hi), max(lo, hi)))
+    if sym.is_positive:
+        return r(0.25, 2.75)
+    if sym.is_nonnegative:
+        return r(0.0, 2.75)
+    if sym.is_negative:
+        return -r(0.25, 2.75)
+    if sym.is_real or regime < 2:
+        return r(0.25, 2.75) if regime % 2 == 0 else -r(0.25, 2.75)
+    return r(-2.0, 2.0) + sp.I * r(-1.5, 1.5)
+
+
+def _is_symbolic_zero(diff_expr: sp.Expr) -> bool:
+    try:
+        if sp.expand(diff_expr) == 0 or sp.cancel(diff_expr) == 0:
+            return True
+        if sp.simplify(diff_expr) == 0:
+            return True
+        return bool(sp.simplify(sp.trigsimp(sp.expand_trig(diff_expr))) == 0)
+    except Exception:
+        return False
 
 
 def axiom_verify_identity(
@@ -818,93 +1061,90 @@ def axiom_verify_identity(
     rhs: str,
     variables: list[str] | None = None,
     num_points: int = 8,
+    assumptions: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Verify whether lhs == rhs symbolically and via random-point numerical evaluation using mpmath."""
-    lhs_expr = safe_parse_expr(lhs)
-    rhs_expr = safe_parse_expr(rhs)
+    """Verify whether lhs == rhs symbolically and at random points (positive, negative and complex values unless
+    assumptions restrict a symbol's domain)."""
+    lhs_expr = safe_parse_expr(lhs, assumptions=assumptions)
+    rhs_expr = safe_parse_expr(rhs, assumptions=assumptions)
     diff_expr = lhs_expr - rhs_expr
+    symbolic_zero = _is_symbolic_zero(diff_expr)
 
-    symbolic_zero = False
-    try:
-        simp = sp.simplify(diff_expr)
-        if simp == 0:
-            symbolic_zero = True
-        else:
-            trig_s = sp.trigsimp(sp.expand_trig(diff_expr))
-            if sp.simplify(trig_s) == 0:
-                symbolic_zero = True
-    except Exception:
-        symbolic_zero = False
-
+    by_name = {s.name: s for s in (lhs_expr.free_symbols | rhs_expr.free_symbols) if isinstance(s, sp.Symbol)}
     if variables:
-        syms = [sp.Symbol(str(v).strip()) for v in variables if str(v).strip()]
+        syms = [by_name.get(str(v).strip(), sp.Symbol(str(v).strip())) for v in variables if str(v).strip()]
     else:
-        syms = sorted(lhs_expr.free_symbols | rhs_expr.free_symbols, key=lambda s: s.name)
+        syms = sorted(by_name.values(), key=lambda s: s.name)
 
     seed_bytes = hashlib.sha256(f"{lhs}=={rhs}".encode()).digest()
     rng = random.Random(int.from_bytes(seed_bytes[:8], "big"))
 
     max_numeric_error = 0.0
-    counterexample: dict[str, float] | None = None
+    counterexample: dict[str, Any] | None = None
+    counterexample_regime: str | None = None
+    positive_failure = False
     tested = 0
     attempts = 0
-    target_points = max(1, int(num_points))
+    target_points = max(3, int(num_points))
+    regimes = ("positive reals", "negative reals", "complex")
 
     if not syms:
-        try:
-            val_l = complex(lhs_expr.evalf(30))
-            val_r = complex(rhs_expr.evalf(30))
+        val_l, val_r = _num(lhs_expr, {}), _num(rhs_expr, {})
+        if val_l is not None and val_r is not None:
             err = abs(val_l - val_r)
-            scale = max(1.0, abs(val_l), abs(val_r))
             max_numeric_error = float(err)
             tested = 1
-            if err > 1e-8 * scale:
+            if err > 1e-8 * max(1.0, abs(val_l), abs(val_r)):
                 counterexample = {}
-        except Exception:
-            pass
+                positive_failure = True
     else:
         while tested < target_points and attempts < target_points * 6:
+            regime = attempts % 3
             attempts += 1
-            pt = {sym: round(rng.uniform(0.25, 2.75), 6) for sym in syms}
-            try:
-                val_l = complex(lhs_expr.subs(pt).evalf(30))
-                val_r = complex(rhs_expr.subs(pt).evalf(30))
-                if not (
-                    math.isfinite(val_l.real)
-                    and math.isfinite(val_l.imag)
-                    and math.isfinite(val_r.real)
-                    and math.isfinite(val_r.imag)
-                ):
-                    continue
-                tested += 1
-                err = abs(val_l - val_r)
-                scale = max(1.0, abs(val_l), abs(val_r))
-                if err > max_numeric_error:
-                    max_numeric_error = float(err)
-                if err > 1e-7 * scale and counterexample is None:
-                    counterexample = {sym.name: float(val) for sym, val in pt.items()}
-            except Exception:
+            pt = {sym: _sample_value(sym, regime, rng) for sym in syms}
+            val_l, val_r = _num(lhs_expr, pt), _num(rhs_expr, pt)
+            if val_l is None or val_r is None:
                 continue
+            tested += 1
+            err = abs(val_l - val_r)
+            max_numeric_error = max(max_numeric_error, float(err))
+            if err > 1e-7 * max(1.0, abs(val_l), abs(val_r)):
+                if all(bool(v.is_real) and v > 0 for v in pt.values()):
+                    positive_failure = True
+                if counterexample is None:
+                    counterexample = {
+                        s.name: (float(v) if v.is_real else str(sp.nsimplify(v))) for s, v in pt.items()
+                    }
+                    counterexample_regime = regimes[regime]
 
     if counterexample is not None:
         equivalent = False
+        evidence = "refuted"
     elif symbolic_zero:
         equivalent = True
+        evidence = "symbolic"
     else:
         equivalent = bool(tested > 0 and max_numeric_error < 1e-7)
+        evidence = "numerical" if equivalent else "inconclusive"
 
-    latex_str = f"{sp.latex(lhs_expr)} {'=' if equivalent else '\\neq'} {sp.latex(rhs_expr)}"
+    relation = "=" if equivalent else r"\neq"
+    latex_str = f"{sp.latex(lhs_expr)} {relation} {sp.latex(rhs_expr)}"
     cid = _canonical_id(
         "axiom_verify_identity",
-        {"lhs": lhs, "rhs": rhs, "equivalent": equivalent, "symbolic_zero": symbolic_zero},
+        {"lhs": lhs, "rhs": rhs, "assumptions": assumptions or {}, "equivalent": equivalent, "symbolic_zero": symbolic_zero},
     )
     return {
         "lhs": str(lhs_expr),
         "rhs": str(rhs_expr),
         "equivalent": equivalent,
         "symbolic_zero": symbolic_zero,
+        # symbolic: exact proof by simplification; numerical: agreement at every sample point only (evidence, not a
+        # proof); refuted: a counterexample was found; inconclusive: no sample point could be evaluated.
+        "evidence": evidence,
+        "holds_on_positive_reals": (not positive_failure) if counterexample is not None else None,
         "max_numeric_error": max_numeric_error,
         "counterexample": counterexample,
+        "counterexample_domain": counterexample_regime,
         "points_tested": tested,
         "latex": latex_str,
         "canonical_id": cid,
@@ -919,6 +1159,7 @@ class AxiomEngine:
     calculus = staticmethod(axiom_calculus)
     dsolve = staticmethod(axiom_dsolve)
     linalg = staticmethod(axiom_linalg)
+    nsolve = staticmethod(axiom_nsolve)
     verify_identity = staticmethod(axiom_verify_identity)
     latex = staticmethod(axiom_latex)
 
@@ -933,6 +1174,7 @@ __all__ = [
     "axiom_dsolve",
     "axiom_latex",
     "axiom_linalg",
+    "axiom_nsolve",
     "axiom_simplify",
     "axiom_solve",
     "axiom_verify_identity",

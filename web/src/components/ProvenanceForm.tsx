@@ -2,24 +2,19 @@
 
 import React, { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Dna, FileSpreadsheet, GitBranch, LoaderCircle, ShieldCheck, X } from "lucide-react";
+import { Archive, FileSpreadsheet, Grid3x3, Layers, LoaderCircle, X } from "lucide-react";
 import styles from "./Datasets.module.css";
-import type { ConsentStatus, DatasetKind, DatasetProvenance, DatasetRecord, GeoVerification } from "@/types/datasets";
+import type { DatasetLimits, DatasetProvenance, DatasetRecord, DatasetSource } from "@/types/datasets";
 import {
-  CONSENT_LABELS,
-  DatasetApiError,
   SOURCE_LABELS,
   formatBytes,
+  isOfferedSource,
   kindForFile,
-  lookupGeo,
   patchProvenance,
   uploadDataset,
   type AuthHeaders,
   type UploadHandle,
 } from "@/services/datasetService";
-
-const GSE_RE = /^GSE\d{1,9}$/;
-const IRB_RE = /^[A-Za-z0-9._\-/ ]*$/;
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
@@ -63,14 +58,26 @@ export function useFocusTrap(ref: React.RefObject<HTMLElement | null>, active: b
   }, [active, ref]);
 }
 
-export function KindIcon({ kind, size = 14 }: { kind: DatasetKind; size?: number }) {
+export function KindIcon({ kind, size = 14 }: { kind: string; size?: number }) {
   const s = { width: size, height: size };
-  if (kind === "sbml") return <GitBranch style={s} aria-hidden="true" />;
   if (kind === "table") return <FileSpreadsheet style={s} aria-hidden="true" />;
-  return <Dna style={s} aria-hidden="true" />;
+  if (kind === "hdf5") return <Layers style={s} aria-hidden="true" />;
+  if (kind === "mat") return <Grid3x3 style={s} aria-hidden="true" />;
+  // Legacy (biomedical-release) uploads and any kind this client does not know.
+  return <Archive style={s} aria-hidden="true" />;
 }
 
-const KIND_LABELS: Record<DatasetKind, string> = { h5ad: "AnnData (.h5ad)", table: "Expression table", sbml: "SBML model" };
+const KIND_LABELS: Record<string, string> = {
+  table: "Table",
+  hdf5: "HDF5 file",
+  mat: "MATLAB .mat file",
+  legacy: "Legacy upload (no longer analysed)",
+};
+
+/** The display label of any stored kind, including legacy and unknown values. */
+export function kindLabel(kind: string): string {
+  return KIND_LABELS[kind] ?? kind;
+}
 
 export interface ProvenanceFormProps {
   mode: "upload" | "edit";
@@ -78,36 +85,30 @@ export interface ProvenanceFormProps {
   record?: DatasetRecord | null;
   backendUrl: string;
   authHeaders: AuthHeaders;
+  /** Accepted extensions and size caps (GET /api/datasets/limits); the static defaults otherwise. */
+  limits?: DatasetLimits;
   onClose: () => void;
   onSaved: (record: DatasetRecord) => void;
 }
 
 type Phase = "editing" | "uploading" | "validating" | "done";
 
-/** Server warnings plus a note when a declared GEO accession could not be confirmed. */
+/** Server validation warnings worth showing before the dataset is attached. */
 function uploadNotes(record: DatasetRecord): string[] {
-  const notes = [...(record.validation?.warnings || [])];
-  const acc = record.provenance?.geo_accession;
-  const status = record.geo_verification?.status;
-  if (acc && status === "not_found") notes.push(`${acc} was not found on NCBI GEO; it is stored as declared (unverified).`);
-  if (acc && status === "lookup_failed") notes.push(`The NCBI GEO check for ${acc} failed; it is stored as declared (unverified).`);
-  return notes;
+  return [...(record.validation?.warnings || [])];
 }
 
 /** Modal collecting uploader-declared provenance, then uploading (or PATCHing) with inline server reasons. */
-export function ProvenanceForm({ mode, file, record, backendUrl, authHeaders, onClose, onSaved }: ProvenanceFormProps) {
+export function ProvenanceForm({ mode, file, record, backendUrl, authHeaders, limits, onClose, onSaved }: ProvenanceFormProps) {
   const initial = record?.provenance;
-  const kind: DatasetKind | null = record?.kind ?? (file ? kindForFile(file.name) : null);
-  const [source, setSource] = useState<DatasetProvenance["source"]>(initial?.source ?? (kind === "sbml" ? "biomodels" : "in_house"));
-  const [geoAccession, setGeoAccession] = useState(initial?.geo_accession ?? "");
-  const [organism, setOrganism] = useState(initial?.organism ?? "");
-  const [consent, setConsent] = useState<ConsentStatus>(initial?.consent_status ?? (kind === "sbml" ? "not_human_subjects" : "unknown"));
-  const [irbId, setIrbId] = useState(initial?.irb_protocol_id ?? "");
+  const kind: string | null = record?.kind ?? (file ? kindForFile(file.name, limits) : null);
+  // A biomedical-release source (GEO, CELLxGENE, BioModels) is not offered; editing such a record picks a current one.
+  const [source, setSource] = useState<DatasetSource>(
+    isOfferedSource(initial?.source) ? initial.source : initial?.source ? "public_repository" : "experiment"
+  );
+  const [domain, setDomain] = useState(initial?.domain ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
-  const [orientation, setOrientation] = useState<"cells_by_genes" | "genes_by_cells">(initial?.table_orientation ?? "cells_by_genes");
   const [attest, setAttest] = useState(mode === "edit" ? Boolean(initial?.attests_no_direct_identifiers) : false);
-  const [geo, setGeo] = useState<GeoVerification | null>(record?.geo_verification?.status !== "not_requested" ? record?.geo_verification ?? null : null);
-  const [geoBusy, setGeoBusy] = useState(false);
   const [phase, setPhase] = useState<Phase>("editing");
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -126,35 +127,15 @@ export function ProvenanceForm({ mode, file, record, backendUrl, authHeaders, on
     if (!busy) close();
   });
 
-  const geoValid = !geoAccession || GSE_RE.test(geoAccession.trim().toUpperCase());
-  const irbValid = IRB_RE.test(irbId);
-  const canSubmit = attest && geoValid && irbValid && !busy && (mode === "edit" || Boolean(file && kind));
-
-  const verifyGeo = async () => {
-    const acc = geoAccession.trim().toUpperCase();
-    if (!GSE_RE.test(acc)) return;
-    setGeoBusy(true);
-    try {
-      const result = await lookupGeo(backendUrl, authHeaders, acc);
-      setGeo(result);
-      if (result.status === "verified" && result.taxon && !organism.trim()) setOrganism(result.taxon);
-    } catch (e) {
-      setGeo({ status: "lookup_failed", accession: acc });
-      if (e instanceof DatasetApiError && e.status === 401) setError(e.message);
-    } finally {
-      setGeoBusy(false);
-    }
-  };
+  const canSubmit = attest && !busy && (mode === "edit" || Boolean(file && kind));
 
   const provenance = (): DatasetProvenance => ({
     source,
-    geo_accession: geoAccession.trim() ? geoAccession.trim().toUpperCase() : null,
-    organism: organism.trim() || null,
-    consent_status: consent,
-    irb_protocol_id: consent === "irb_approved" && irbId.trim() ? irbId.trim() : null,
+    domain: domain.trim() || null,
     description: description.trim() || null,
     attests_no_direct_identifiers: attest,
-    table_orientation: kind === "table" ? orientation : null,
+    // Column units declared earlier are kept; the form does not edit them.
+    ...(initial?.units && Object.keys(initial.units).length ? { units: initial.units } : {}),
   });
 
   const submit = async (e: React.FormEvent) => {
@@ -193,30 +174,6 @@ export function ProvenanceForm({ mode, file, record, backendUrl, authHeaders, on
     }
   };
 
-  const geoNote = (() => {
-    if (!geo || geo.status === "not_requested") return null;
-    if (geo.status === "verified") {
-      return (
-        <div className={styles.geoResult} data-status="verified" role="status">
-          <ShieldCheck style={{ width: 12, height: 12, verticalAlign: "-1px" }} aria-hidden="true" /> {geo.accession} verified on NCBI GEO:{" "}
-          {geo.title}
-          {[geo.taxon, geo.n_samples != null ? `${geo.n_samples} samples` : null, geo.pdat ? `released ${geo.pdat}` : null]
-            .filter(Boolean)
-            .map((t) => ` · ${t}`)
-            .join("")}
-          {geo.organism_matches === false ? " · differs from the declared organism" : ""}
-        </div>
-      );
-    }
-    return (
-      <div className={styles.geoResult} data-status={geo.status} role="status">
-        {geo.status === "not_found"
-          ? `${geo.accession || "This accession"} was not found on NCBI GEO; it will be stored as declared.`
-          : "GEO lookup failed; the accession will be stored as declared (unverified)."}
-      </div>
-    );
-  })();
-
   if (typeof document === "undefined") return null;
   return createPortal(
     <div
@@ -232,7 +189,7 @@ export function ProvenanceForm({ mode, file, record, backendUrl, authHeaders, on
               {mode === "edit" ? "Edit provenance" : "Dataset provenance"}
             </h2>
             <p className={styles.dialogSub}>
-              Provenance is declared by you and shown to the model as uploader-declared. Only a GEO accession can be verified.
+              Provenance is declared by you and shown to the model as uploader-declared; it is not verified.
             </p>
           </div>
           <button type="button" className={styles.iconButton} onClick={close} aria-label="Close" disabled={phase === "validating"}>
@@ -245,7 +202,7 @@ export function ProvenanceForm({ mode, file, record, backendUrl, authHeaders, on
             {kind && <KindIcon kind={kind} size={16} />}
             <strong>{record?.display_name || file?.name}</strong>
             <span className={styles.hint}>
-              {[kind ? KIND_LABELS[kind] : null, file ? formatBytes(file.size) : record ? formatBytes(record.size_bytes) : null]
+              {[kind ? kindLabel(kind) : null, file ? formatBytes(file.size) : record ? formatBytes(record.size_bytes) : null]
                 .filter(Boolean)
                 .join(" · ")}
             </span>
@@ -254,7 +211,7 @@ export function ProvenanceForm({ mode, file, record, backendUrl, authHeaders, on
           <fieldset className={styles.field} disabled={locked}>
             <legend className={styles.label}>Source</legend>
             <div className={styles.segmented}>
-              {(Object.keys(SOURCE_LABELS) as DatasetProvenance["source"][]).map((s) => (
+              {(Object.keys(SOURCE_LABELS) as DatasetSource[]).map((s) => (
                 <button key={s} type="button" className={styles.segment} aria-pressed={source === s} onClick={() => setSource(s)}>
                   {SOURCE_LABELS[s]}
                 </button>
@@ -262,96 +219,20 @@ export function ProvenanceForm({ mode, file, record, backendUrl, authHeaders, on
             </div>
           </fieldset>
 
-          {(source === "geo" || geoAccession) && (
-            <div className={styles.field}>
-              <label className={styles.label} htmlFor={`${ids}-geo`}>
-                GEO series accession
-              </label>
-              <div className={styles.inline}>
-                <input
-                  id={`${ids}-geo`}
-                  className={styles.input}
-                  value={geoAccession}
-                  onChange={(e) => {
-                    setGeoAccession(e.target.value);
-                    setGeo(null);
-                  }}
-                  placeholder="GSE132465"
-                  aria-invalid={!geoValid}
-                  aria-describedby={`${ids}-geo-hint`}
-                  disabled={locked}
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-                <button
-                  type="button"
-                  className={styles.button}
-                  onClick={verifyGeo}
-                  disabled={locked || geoBusy || !geoAccession.trim() || !geoValid}
-                >
-                  {geoBusy ? <LoaderCircle className={styles.spin} style={{ width: 14, height: 14 }} aria-hidden="true" /> : null}
-                  Verify
-                </button>
-              </div>
-              <span id={`${ids}-geo-hint`} className={styles.hint}>
-                {geoValid ? "Checked against NCBI GEO on upload; a failed check never blocks the upload." : "Use the form GSE followed by digits."}
-              </span>
-              {geoNote}
-            </div>
-          )}
-
-          <div className={styles.fieldRow}>
-            <div className={styles.field}>
-              <label className={styles.label} htmlFor={`${ids}-org`}>
-                Organism
-              </label>
-              <input
-                id={`${ids}-org`}
-                className={styles.input}
-                value={organism}
-                onChange={(e) => setOrganism(e.target.value)}
-                placeholder="Homo sapiens"
-                maxLength={120}
-                disabled={locked}
-              />
-            </div>
-            <div className={styles.field}>
-              <label className={styles.label} htmlFor={`${ids}-consent`}>
-                Consent / IRB status
-              </label>
-              <select
-                id={`${ids}-consent`}
-                className={styles.select}
-                value={consent}
-                onChange={(e) => setConsent(e.target.value as ConsentStatus)}
-                disabled={locked}
-              >
-                {(Object.keys(CONSENT_LABELS) as ConsentStatus[]).map((c) => (
-                  <option key={c} value={c}>
-                    {CONSENT_LABELS[c]}
-                  </option>
-                ))}
-              </select>
-            </div>
+          <div className={styles.field}>
+            <label className={styles.label} htmlFor={`${ids}-domain`}>
+              Field
+            </label>
+            <input
+              id={`${ids}-domain`}
+              className={styles.input}
+              value={domain}
+              onChange={(e) => setDomain(e.target.value)}
+              placeholder="Structural mechanics, fluid dynamics, control…"
+              maxLength={120}
+              disabled={locked}
+            />
           </div>
-
-          {consent === "irb_approved" && (
-            <div className={styles.field}>
-              <label className={styles.label} htmlFor={`${ids}-irb`}>
-                IRB protocol id
-              </label>
-              <input
-                id={`${ids}-irb`}
-                className={styles.input}
-                value={irbId}
-                onChange={(e) => setIrbId(e.target.value)}
-                maxLength={64}
-                aria-invalid={!irbValid}
-                disabled={locked}
-              />
-              {!irbValid && <span className={styles.hint}>Letters, digits, spaces and . _ - / only.</span>}
-            </div>
-          )}
 
           <div className={styles.field}>
             <label className={styles.label} htmlFor={`${ids}-desc`}>
@@ -363,40 +244,14 @@ export function ProvenanceForm({ mode, file, record, backendUrl, authHeaders, on
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               maxLength={4000}
-              placeholder="Tissue, assay, processing steps…"
+              placeholder="Instrument, test conditions, units, processing steps…"
               disabled={locked}
             />
           </div>
 
-          {kind === "table" && mode === "upload" && (
-            <fieldset className={styles.field} disabled={locked}>
-              <legend className={styles.label}>Table orientation</legend>
-              <div className={styles.radioRow}>
-                <label>
-                  <input
-                    type="radio"
-                    name={`${ids}-orient`}
-                    checked={orientation === "cells_by_genes"}
-                    onChange={() => setOrientation("cells_by_genes")}
-                  />
-                  Rows are cells, columns are genes
-                </label>
-                <label>
-                  <input
-                    type="radio"
-                    name={`${ids}-orient`}
-                    checked={orientation === "genes_by_cells"}
-                    onChange={() => setOrientation("genes_by_cells")}
-                  />
-                  Rows are genes, columns are cells
-                </label>
-              </div>
-            </fieldset>
-          )}
-
           <label className={styles.checkbox}>
             <input type="checkbox" checked={attest} onChange={(e) => setAttest(e.target.checked)} disabled={locked} required />
-            <span>I confirm this file contains no directly identifying patient information (names, dates of birth, record numbers, addresses).</span>
+            <span>I confirm this file contains no personal data that identifies anyone (names, contact details, ID numbers).</span>
           </label>
 
           {phase === "uploading" && (

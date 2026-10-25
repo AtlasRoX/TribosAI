@@ -41,7 +41,10 @@ FRAMEWORKS = ("auto", "authoritative-react-compiler", "agentic-plan-execute", "m
 # TRIBOS_* names read outside tribos/ and app/ (tests, docker compose): not typos, not in the registry.
 EXTERNAL_NAMES = frozenset({
     "TRIBOS_LIVE_TESTS",  # tests/conftest.py: run @pytest.mark.network cases
+    "TRIBOS_API_PORT",  # docker/compose.yml: host port of the API container
+    "TRIBOS_API_BIND",  # docker/compose.yml: host address the API port is published on (default 127.0.0.1)
     "TRIBOS_WEB_PORT",  # docker/compose.yml: host port of the web container
+    "TRIBOS_WEB_BIND",  # docker/compose.yml: host address the web port is published on (default 127.0.0.1)
 })
 
 _UNSET: Any = object()
@@ -85,6 +88,8 @@ GROUPS: dict[str, str] = {
     "Uploads and datasets": "TRIBOS_UPLOAD",
     "Simulation and single-cell analysis": "",
     "Code sandbox": "TRIBOS_SANDBOX",
+    "Mathematics agent": "TRIBOS_MATH",
+    "Image input (OCR and vision)": "TRIBOS_VISION",
     "Evaluations": "TRIBOS_EVAL",
     "Streamlit frontend": "",
     "Testing": "",
@@ -107,6 +112,8 @@ _SRC = "Data sources"
 _UP = "Uploads and datasets"
 _SIM = "Simulation and single-cell analysis"
 _SBX = "Code sandbox"
+_MATH = "Mathematics agent"
+_VIS = "Image input (OCR and vision)"
 _EVAL = "Evaluations"
 _ST = "Streamlit frontend"
 _TEST = "Testing"
@@ -144,6 +151,9 @@ _SETTINGS: Sequence[Setting] = (
     Setting("TRIBOS_MAX_CONCURRENT_TITLES_PER_USER", "int", 2, "Model-generated thread titles per user at once (over it a heuristic title is used).", _API, min=1),
     Setting("TRIBOS_STRICT_ROUTERS", "bool", False, "Fail startup when an optional API router cannot be imported instead of disabling it.", _API),
     Setting("TRIBOS_STRICT_CONFIG", "bool", False, "Fail startup when configuration validation reports a problem instead of only logging it.", _API),
+    Setting("TRIBOS_MAX_BODY_MB", "float", 2.0, "Largest request body in MB (larger requests get 413).", _API, min=0.01),
+    Setting("TRIBOS_MAX_EXPORT_BODY_MB", "float", 16.0, "Largest request body in MB for the export and report endpoints.", _API, min=0.01),
+    Setting("TRIBOS_PUBLIC_URL", "str", None, "Public base URL of the API (e.g. https://tribos.example.org) used in the A2A Agent Card; default: the request's own base URL.", _API),
     # --- MCP and A2A -----------------------------------------------------------------------------------------------
     Setting("TRIBOS_MCP_ALLOWED_ORIGINS", "list", None, "Extra comma-separated origins the MCP endpoint accepts besides TRIBOS_CORS_ORIGINS.", _MCP),
     Setting("TRIBOS_MCP_MAX_CONCURRENT", "int", 2, "Concurrent MCP research calls per user.", _MCP, min=1),
@@ -243,17 +253,36 @@ _SETTINGS: Sequence[Setting] = (
     Setting("TRIBOS_CROSSREF_MAILTO", "str", None, "Contact e-mail for the Crossref polite pool (citation integrity checks).", _SRC),
     Setting("TRIBOS_PROVENANCE_PROBES", "str", "auto", "Live source-version probes for run manifests: off, auto (off under pytest) or on.", _SRC, choices=SWITCH, aliases=SWITCH_ALIASES),
     # --- Uploads and datasets --------------------------------------------------------------------------------------
-    Setting("TRIBOS_UPLOAD_MAX_MB_H5AD", "float", 500.0, "Largest .h5ad upload in MB.", _UP),
+    Setting("TRIBOS_UPLOAD_MAX_MB_H5AD", "float", 500.0, "Deprecated: fallback for TRIBOS_UPLOAD_MAX_MB_HDF5.", _UP),
     Setting("TRIBOS_UPLOAD_MAX_MB_CSV", "float", 100.0, "Largest table (CSV/TSV) upload in MB.", _UP),
     Setting("TRIBOS_UPLOAD_MAX_MB_HDF5", "float", 500.0, "Largest HDF5 (.h5/.hdf5) upload in MB.", _UP),
+    Setting("TRIBOS_UPLOAD_MAX_MB_MAT", "float", 100.0, "Largest MATLAB (.mat) upload in MB.", _UP),
     Setting("TRIBOS_UPLOAD_MAX_TOTAL_MB", "float", 2048.0, "Total upload storage per user in MB.", _UP),
     Setting("TRIBOS_UPLOAD_MAX_DATASETS", "int", 50, "Uploaded datasets kept per user.", _UP),
     # --- Code sandbox ----------------------------------------------------------------------------------------------
-    Setting("TRIBOS_SANDBOX", "bool", False, "Enable the code-execution sandbox tool (on/1/true/yes).", _SBX),
+    Setting("TRIBOS_SANDBOX", "bool", True, "Code-execution sandbox tool; on by default, off/0/false/no disables it.", _SBX),
     Setting("TRIBOS_SANDBOX_TIMEOUT_S", "int", 60, "Seconds one sandboxed execution may run.", _SBX, min=5, max=110),
     Setting("TRIBOS_SANDBOX_MEMORY_MB", "int", 2048, "Memory limit of one sandboxed execution in MB.", _SBX, min=256, max=16384),
+    # --- Mathematics agent -----------------------------------------------------------------------------------------
+    Setting("TRIBOS_MATH_AGENT", "bool", True, "Run the verified mathematics agent (bounded ReAct loop over the Axiom tools with an independent verifier) on mathematical questions.", _MATH),
+    Setting("TRIBOS_MATH_AGENT_MAX_STEPS", "int", 12, "Tool calls one mathematics-agent run may make.", _MATH, min=2, max=40),
+    Setting("TRIBOS_MATH_AGENT_MAX_REPAIRS", "int", 4, "Local repairs of one failed step before the agent switches strategy.", _MATH, min=0, max=10),
+    Setting("TRIBOS_MATH_TRAJECTORY_DIR", "path", None, "Append every mathematics-agent trajectory here as JSONL (tool calls, observations, verification labels) for evaluation and fine-tuning data.", _MATH),
+    Setting("TRIBOS_SAGEMATH_PATH", "str", None, "SageMath executable, or `wsl:<wsl.exe arguments>` to run it inside WSL; discovered on PATH and in WSL when unset.", _MATH),
+    # --- Image input (OCR and vision) --------------------------------------------------------------------------------
+    Setting("TRIBOS_VISION", "bool", True, "Accept images attached to questions (POST /api/vision/read); they are read into text before the question is solved.", _VIS),
+    Setting("TRIBOS_VISION_OCR_MATH", "bool", True, "Load Indra OCR's math models so formulas are read as LaTeX (about 60% slower OCR on math lines).", _VIS),
+    Setting("TRIBOS_VISION_PROVIDER", "str", "nim", "Vision model that corrects the OCR draft: `nim` (NVIDIA NIM, TRIBOS_VISION_MODEL), `ollama` (a local model through Ollama), or `ocr` (Indra OCR only; the image never leaves this machine).", _VIS, choices=("nim", "ollama", "ocr")),
+    Setting("TRIBOS_VISION_MODEL", "str", "nvidia/nemotron-3.5-super-vl-120b-a12b", "NVIDIA NIM vision model for `nim` (must be in the allowed model list).", _VIS),
+    Setting("TRIBOS_VISION_OLLAMA_MODEL", "str", None, "Ollama vision model for `ollama` (e.g. qwen2.5vl:7b); the first installed vision-family model when unset.", _VIS),
+    Setting("TRIBOS_VISION_OLLAMA_URL", "str", "http://127.0.0.1:11434", "Base URL of the local Ollama server.", _VIS),
+    Setting("TRIBOS_VISION_TIMEOUT_S", "int", 300, "Seconds one vision-model transcription may take (CPU inference of a 7B model can need minutes).", _VIS, min=10, max=1800),
+    Setting("TRIBOS_VISION_MAX_MB", "int", 10, "Largest image upload in MB.", _VIS, min=1, max=50),
+    Setting("TRIBOS_VISION_MAX_IMAGES", "int", 4, "Images one question may carry.", _VIS, min=1, max=10),
+    Setting("TRIBOS_VISION_MAX_PAGES", "int", 4, "Pages of an attached PDF that are read (each like one image).", _VIS, min=1, max=20),
     # --- Evaluations -----------------------------------------------------------------------------------------------
     Setting("TRIBOS_EVAL_CACHE", "path", None, "Downloaded benchmark datasets cache (default ~/.cache/tribos/evals).", _EVAL),
+    Setting("TRIBOS_EVAL_JUDGE_MODEL", "str", None, "Model id of the evaluation judge; also added to the models callers may select.", _EVAL),
     Setting("TRIBOS_EVAL_TOKEN", "str", None, "Bearer token the eval runner sends to a remote Tribos API.", _EVAL, secret=True),
     Setting("TRIBOS_CASSETTE_PROMPTS", "bool", False, "Store full normalised prompts in recorded eval cassettes (easier miss diagnosis, larger files).", _EVAL),
     Setting("HF_TOKEN", "str", None, "Hugging Face user access token for gated benchmark downloads (GPQA Diamond).", _EVAL, secret=True),
@@ -468,11 +497,73 @@ def _problem(setting: Setting, raw: str) -> str | None:
     return None
 
 
-def validate_environment(environ: Mapping[str, str] | None = None) -> list[str]:
-    """Human-readable configuration problems: unparsable or out-of-range numbers, unknown choices, non-boolean
-    flags, and TRIBOS_* variables that no code reads (likely typos, with a suggestion). Never raises."""
+MIN_TOKEN_CHARS = 32
+MIN_JWT_SECRET_BYTES = 32
+
+
+def secret_problems(environ: Mapping[str, str] | None = None) -> list[str]:
+    """Weak bearer secrets (SEC-009): TRIBOS_API_TOKENS entries whose token is shorter than 32 characters, and a
+    TRIBOS_JWT_SECRET (HS256) shorter than 32 bytes. Entries are named by position; values are never included."""
     env = os.environ if environ is None else environ
     problems: list[str] = []
+    entries = [p.strip() for p in (env.get("TRIBOS_API_TOKENS") or "").split(",") if p.strip()]
+    short = [str(i) for i, pair in enumerate(entries, 1) if len(pair.rpartition(":")[0]) < MIN_TOKEN_CHARS]
+    if short:
+        problems.append(f"TRIBOS_API_TOKENS entr{'y' if len(short) == 1 else 'ies'} {', '.join(short)} of {len(entries)} "
+                        f"ha{'s' if len(short) == 1 else 've'} a token shorter than {MIN_TOKEN_CHARS} characters; "
+                        "use long random tokens (e.g. `python -c \"import secrets; print(secrets.token_urlsafe(32))\"`)")
+    secret = (env.get("TRIBOS_JWT_SECRET") or "").strip()
+    if secret and len(secret.encode("utf-8")) < MIN_JWT_SECRET_BYTES:
+        problems.append(f"TRIBOS_JWT_SECRET is shorter than {MIN_JWT_SECRET_BYTES} bytes, too weak for HS256")
+    return problems
+
+
+# Old product name (CI-6): environment variables and default state directories that are no longer read.
+LEGACY_PREFIX = "PHRONESIS_"
+LEGACY_DIRS = (".phronesis_memory", ".phronesis_runs", ".phronesis_uploads")
+_WORKSPACE_ROOT = Path(__file__).resolve().parents[2]  # the same root as tribos.utils.paths.WORKSPACE_ROOT
+
+
+def legacy_problems(environ: Mapping[str, str] | None = None, *, check_dirs: bool = True) -> list[str]:
+    """Leftovers of the rename to Tribos: PHRONESIS_* variables (with their TRIBOS_* name) and .phronesis_* state
+    directories in the default locations (the workspace root and the current directory), which Tribos ignores."""
+    env = os.environ if environ is None else environ
+    problems: list[str] = []
+    for name in sorted(env):
+        if not name.upper().startswith(LEGACY_PREFIX):
+            continue
+        new = "TRIBOS_" + name[len(LEGACY_PREFIX):].upper()
+        target = f"rename it to {new}" if new in REGISTRY else f"no {new} setting exists, so remove it"
+        problems.append(f"{name} is set but is no longer read (Phronesis was renamed to Tribos); {target}")
+    if check_dirs:
+        roots = dict.fromkeys((_WORKSPACE_ROOT, Path.cwd().resolve()))
+        for root in roots:
+            for legacy in LEGACY_DIRS:
+                path = root / legacy
+                try:
+                    found = path.is_dir()
+                except OSError:
+                    found = False
+                if found:
+                    current = ".tribos_" + legacy.split("_", 1)[1]
+                    problems.append(f"legacy state directory {path} is ignored; move its contents to {root / current} "
+                                    "(or set TRIBOS_DATA_DIR)")
+    return problems
+
+
+def validate_environment(environ: Mapping[str, str] | None = None) -> list[str]:
+    """Human-readable configuration problems: unparsable or out-of-range numbers, unknown choices, non-boolean
+    flags, TRIBOS_* variables that no code reads (likely typos, with a suggestion) and weak bearer secrets.
+    Never raises. Leftovers of the Phronesis rename (PHRONESIS_* variables; .phronesis_* directories when reading os.environ)
+    are logged once as warnings but not returned, so TRIBOS_STRICT_CONFIG=1 does not refuse to start over them."""
+    env = os.environ if environ is None else environ
+    problems: list[str] = []
+    try:
+        problems.extend(secret_problems(env))
+        for message in legacy_problems(env, check_dirs=environ is None):
+            _warn_once("legacy", message, f"Configuration: {message}")
+    except Exception as exc:  # noqa: BLE001 - validation must never break startup
+        problems.append(f"configuration check failed ({type(exc).__name__})")
     for name, setting in REGISTRY.items():
         value = env.get(name)
         if value is None or not value.strip():

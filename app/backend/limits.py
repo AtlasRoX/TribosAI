@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import weakref
+from collections import OrderedDict
+from typing import Any
 
 from fastapi import HTTPException
 
@@ -38,6 +41,67 @@ class UserConcurrencyLimiter:
 
     def active(self, user_id: str) -> int:
         return self._active.get(user_id, 0)
+
+
+class RecentRequestIds:
+    """Client request ids per user with an optional value (e.g. the job a request created), so a retried POST is
+    recognised as the same request.
+
+    Bounded in memory: entries expire after ttl_s (a guard against leaks; callers pop them when the request ends),
+    each user keeps at most per_user ids (oldest dropped first) and at most max_users users are tracked (least
+    recently used dropped first).
+    """
+
+    def __init__(self, ttl_s: float = 3 * 3600.0, per_user: int = 32, max_users: int = 4096) -> None:
+        self.ttl_s = float(ttl_s)
+        self.per_user = max(1, int(per_user))
+        self.max_users = max(1, int(max_users))
+        self._items: OrderedDict[str, OrderedDict[str, tuple[float, Any]]] = OrderedDict()
+
+    def _user(self, user_id: str, create: bool) -> OrderedDict[str, tuple[float, Any]] | None:
+        items = self._items.get(user_id)
+        if items is None:
+            if not create:
+                return None
+            items = self._items[user_id] = OrderedDict()
+            while len(self._items) > self.max_users:
+                self._items.popitem(last=False)
+        self._items.move_to_end(user_id)
+        now = time.monotonic()
+        for key in [k for k, (expires, _v) in items.items() if expires <= now]:
+            del items[key]
+        return items
+
+    def get(self, user_id: str, request_id: str) -> Any | None:
+        items = self._user(user_id, create=False)
+        entry = items.get(request_id) if items is not None else None
+        return entry[1] if entry is not None else None
+
+    def put(self, user_id: str, request_id: str, value: Any = True) -> None:
+        items = self._user(user_id, create=True)
+        assert items is not None
+        items[request_id] = (time.monotonic() + self.ttl_s, value)
+        items.move_to_end(request_id)
+        while len(items) > self.per_user:
+            items.popitem(last=False)
+
+    def claim(self, user_id: str, request_id: str) -> bool:
+        """Record request_id as running; False when it already is (a duplicate)."""
+        if self.get(user_id, request_id) is not None:
+            return False
+        self.put(user_id, request_id)
+        return True
+
+    def pop(self, user_id: str, request_id: str) -> None:
+        items = self._items.get(user_id)
+        if items is None:
+            return
+        items.pop(request_id, None)
+        if not items:
+            self._items.pop(user_id, None)
+
+    def __len__(self) -> int:
+        return sum(len(v) for v in self._items.values())
 
 
 class UserSemaphores:

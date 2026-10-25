@@ -1,0 +1,210 @@
+/* Numerical verification of an analytical ODE solution (design tokens only, both themes). */
+.checks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 8px;
+}
+
+.check {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+}
+
+.checkLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+
+.checkIcon {
+  flex-shrink: 0;
+  color: var(--status-warn, #d29922);
+}
+
+.check[data-ok] .checkIcon {
+  color: var(--nvidia-green);
+}
+
+.checkValue {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-heading);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.formula {
+  color: var(--text-muted);
+  font-family: var(--font-serif, "Cambria Math", "STIX Two Math", Georgia, serif);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.alt {
+  color: var(--text-faint);
+}
+
+.unit {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.energy {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 6px 20px;
+  margin: 0;
+}
+
+.energy div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.energy dt {
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+
+.energy dd {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-heading);
+  font-variant-numeric: tabular-nums;
+}
+
+.output {
+  margin: 0;
+  padding: 10px 12px;
+  max-height: 260px;
+  overflow: auto;
+  border-radius: 8px;
+  background: var(--bg-code);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.units {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+}
+
+.units button {
+  padding: 1px 8px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.units button[aria-pressed="true"] {
+  background: var(--bg-surface-active);
+  color: var(--text-heading);
+  font-weight: 600;
+}
+
+.rerun {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rerunGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 8px;
+}
+
+.rerunField {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.rerunField input {
+  padding: 5px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: var(--bg-surface);
+  color: var(--text-heading);
+  font: inherit;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.rerunField input[aria-invalid="true"] {
+  border-color: var(--status-bad, #d1242f);
+}
+
+.rerunActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+}
+
+.rerunActions > :first-child {
+  margin-right: auto;
+}
+
+.btn,
+.btnGhost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.btn {
+  border: 1px solid transparent;
+  background: var(--text-heading);
+  color: var(--bg-primary);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btnGhost {
+  align-self: flex-start;
+  border: 1px solid var(--border-subtle);
+  background: none;
+  color: var(--text-muted);
+}
+
+.btnGhost:hover {
+  color: var(--text-heading);
+  border-color: var(--border-strong);
+}
+
+.units button:focus-visible,
+.btn:focus-visible,
+.btnGhost:focus-visible,
+.rerunField input:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring, 0 0 0 3px rgba(167, 179, 255, 0.35));
+}

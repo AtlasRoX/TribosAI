@@ -133,10 +133,10 @@ async def test_llm_planner_cannot_override_hard_guards(monkeypatch, tmp_path):
     assert [e["label"] for e in qc["entities"]] == ["Navier-Stokes equations"]  # Banach is not in the question
     assert all(not e["ids"] for e in qc["entities"])
 
-    bm = await orch.execute_inquiry("Simulate BIOMD0000000010 for 50 seconds.", thread_id="t-guard2", enable_web_search=False)
+    bm = await orch.execute_inquiry("Simulate the damped oscillator for 50 seconds.", thread_id="t-guard2", enable_web_search=False)
     assert bm.query_context["planner"] == "llm" and not called(calls, "synapta_kegg_pathways")[1:]
     sims = called(calls, "dynamis_simulate_ode") or called(calls, "vivarix_simulate_time_course")
-    assert sims and (sims[-1].get("biomodel_id") == "BIOMD0000000010" or "t_span" in sims[-1] or sims[-1].get("model_name") == "damped_oscillator")
+    assert sims and sims[-1].get("model_name") == "damped_oscillator" and tuple(sims[-1]["t_span"]) == (0.0, 50.0)
 
 
 # =============================================================================
@@ -184,7 +184,7 @@ def _raise(**_kw):
 async def test_planner_degrades_gracefully(factory, planner):
     ctx = await _ctx(NO_ENTITY_Q, llm_factory=factory)
     assert ctx.planner == planner
-    assert ctx.decisions["synapta"].run is False and ctx.decisions["archivon"].run is True
+    assert not ctx.should_run("synapta") and ctx.decisions["archivon"].run is True
     if planner == "llm":
         assert "literature" in ctx.intents and "safety" not in ctx.intents
         ent = ctx.entities[0]

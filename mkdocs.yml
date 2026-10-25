@@ -92,7 +92,6 @@ nav:
       - Cloud Deployment: cloud/CLOUD_DEPLOYMENT.md
       - Azure Deployment: developer/AZURE_DEPLOYMENT.md
       - SonarCloud Setup: developer/SONARCLOUD_SETUP.md
-      - Streamlit Security: developer/STREAMLIT_SECURITY.md
       - DevOps Manual: ops/DevOps.md
       - CodeOps Manual: ops/CodeOps.md
       - Documentation Guide: ops/Documentation_intro.md

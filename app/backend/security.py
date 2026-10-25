@@ -28,6 +28,8 @@ from typing import Any
 
 from starlette.exceptions import HTTPException
 
+from tribos.config.settings import get_float
+
 logger = logging.getLogger("tribos.backend.security")
 
 Scope = dict[str, Any]
@@ -40,27 +42,20 @@ DEFAULT_CORS_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000"
 _STATE_CHANGING = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1", "[::1]")
 _LARGE_BODY_PREFIXES = ("/api/export/", "/api/runs/rerun")
-_UNCOUNTED = (("POST", "/api/datasets"),)  # multipart upload: streamed with its own limits in the datasets router
+# Multipart uploads with their own limits (checked in their routers): datasets and question images.
+_UNCOUNTED = (("POST", "/api/datasets"), ("POST", "/api/vision/read"))
 
 
 def _truthy(value: str | None) -> bool:
     return (value or "").strip().lower() in ("1", "true", "yes", "on")
 
 
-def _mb(name: str, default: float) -> int:
-    try:
-        value = float(os.getenv(name, "") or default)
-    except ValueError:
-        value = default
-    return int(max(0.01, value) * 1024 * 1024)
-
-
 def max_body_bytes(method: str, path: str) -> int | None:
     if (method, path.rstrip("/")) in _UNCOUNTED:
         return None
     if any(path.startswith(p) for p in _LARGE_BODY_PREFIXES):
-        return _mb("TRIBOS_MAX_EXPORT_BODY_MB", 16.0)
-    return _mb("TRIBOS_MAX_BODY_MB", 2.0)
+        return int(get_float("TRIBOS_MAX_EXPORT_BODY_MB", 16.0) * 1024 * 1024)
+    return int(get_float("TRIBOS_MAX_BODY_MB", 2.0) * 1024 * 1024)
 
 
 def cors_origins() -> list[str]:

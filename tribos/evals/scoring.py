@@ -353,9 +353,10 @@ def parse_sympy_expr(raw: str) -> Any:
         from sympy.parsing.sympy_parser import (
             convert_xor,
             implicit_multiplication_application,
-            parse_expr,
             standard_transformations,
         )
+
+        from tribos.axiom.safe_expr import parse_math
 
         local_dict: dict[str, Any] = {
             "pi": sympy.pi,
@@ -381,7 +382,8 @@ def parse_sympy_expr(raw: str) -> Any:
         }
         # If 'E' is not used as a variable (like Young's modulus E*I), allow exp(1) when written as 'e'
         transformations = standard_transformations + (implicit_multiplication_application, convert_xor)
-        return parse_expr(cleaned, local_dict=local_dict, transformations=transformations, evaluate=True)
+        # Candidate answers are model output: the allowlist parser, never a bare parse_expr (which has builtins).
+        return parse_math(cleaned, local_dict, transformations)
     except Exception:  # noqa: BLE001
         return None
 

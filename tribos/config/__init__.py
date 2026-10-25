@@ -11,6 +11,8 @@ from .settings import (
     get_list,
     get_path,
     get_str,
+    legacy_problems,
+    secret_problems,
     validate_environment,
 )
 
@@ -25,5 +27,7 @@ __all__ = [
     "get_list",
     "get_path",
     "get_str",
+    "legacy_problems",
+    "secret_problems",
     "validate_environment",
 ]

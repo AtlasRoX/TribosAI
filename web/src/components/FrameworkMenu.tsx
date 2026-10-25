@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef } from "react";
-import { Check, ChevronRight, X } from "lucide-react";
+import { Check, X } from "lucide-react";
 import type { FrameworkOption } from "@/types/chat";
 import styles from "./FrameworkMenu.module.css";
 
@@ -41,7 +41,7 @@ const GUIDE: Record<string, GuideEntry> = {
       "Breaks the question into sub-questions, plans the tool calls it needs and runs them in parallel, then checks every claim against counter-evidence.",
     steps: [
       "Splits a compound question into up to five sub-questions, simplest first.",
-      "Plans up to 12 tool calls (literature, trials, targets, drugs, variants, omics) and runs independent ones in parallel; re-plans once if results fall short.",
+      "Plans up to 12 tool calls (symbolic algebra, numerical computation, simulation, reference data, literature) and runs independent ones in parallel; re-plans once if results fall short.",
       "Searches for evidence that contradicts the draft and fills gaps with follow-up searches.",
       "Verifies each claim against the retrieved sources before the answer is final.",
     ],
@@ -56,11 +56,11 @@ const GUIDE: Record<string, GuideEntry> = {
       "A manager agent keeps a task ledger and delegates each part to a domain specialist, re-planning as results come in.",
     steps: [
       "The supervisor writes a plan and a ledger of open tasks.",
-      "Delegates up to six tasks to specialists (literature, targets, chemistry, omics, simulation), each running up to three tool calls.",
+      "Delegates up to six tasks to specialists (symbolic math, numerical computation, simulation, reference data, literature), each running up to three tool calls.",
       "Re-plans up to twice when a specialist comes back empty or findings conflict.",
       "Combines the findings; counter-evidence search and claim verification then run as usual.",
     ],
-    bestFor: ["Open-ended assessments", "Evaluating a drug target", "Landscapes and overviews"],
+    bestFor: ["Open-ended assessments", "Evaluating a design trade-off", "Landscapes and overviews"],
     autoPicks: "Open-ended questions spanning several domains without explicit sub-questions.",
     note: "Falls back to a fixed plan if the model cannot produce one.",
     depth: 3,
@@ -133,61 +133,6 @@ function Meter({ label, level, words }: { label: string; level: Level; words: [s
         ))}
       </span>
       <span className={styles.meterWord}>{words[level - 1]}</span>
-    </div>
-  );
-}
-
-/** The compact architecture menu above the composer's selector pill. */
-export function FrameworkMenu({
-  options,
-  selected,
-  onSelect,
-  onOpenGuide,
-}: {
-  options: FrameworkOption[];
-  selected: string;
-  onSelect: (id: string) => void;
-  onOpenGuide: () => void;
-}) {
-  return (
-    <div className={styles.menu} role="listbox" aria-label="Orchestration architecture">
-      {options.map((fw) => {
-        const isSelected = selected === fw.id;
-        const Icon = fw.icon;
-        return (
-          <React.Fragment key={fw.id}>
-            <button
-              type="button"
-              role="option"
-              aria-selected={isSelected}
-              disabled={!fw.available}
-              className={styles.option}
-              data-selected={isSelected || undefined}
-              onClick={() => fw.available && onSelect(fw.id)}
-              title={fw.available ? fw.description : "Not offered by this backend"}
-            >
-              <span className={styles.optionIcon} style={{ color: fw.badgeColor }}>
-                <Icon style={{ width: 15, height: 15 }} aria-hidden="true" />
-              </span>
-              <span className={styles.optionText}>
-                <span className={styles.optionTitle}>
-                  {fw.title}
-                  {fw.recommended && <span className={styles.recommended}>Recommended</span>}
-                </span>
-                <span className={styles.optionTagline}>
-                  {fw.available ? FRAMEWORK_TAGLINES[fw.id] || fw.description : "Not offered by this backend"}
-                </span>
-              </span>
-              {isSelected && <Check className={styles.check} aria-hidden="true" />}
-            </button>
-            {fw.recommended && <div className={styles.divider} role="separator" />}
-          </React.Fragment>
-        );
-      })}
-      <button type="button" className={styles.guideLink} onClick={onOpenGuide}>
-        How each one works
-        <ChevronRight style={{ width: 13, height: 13 }} aria-hidden="true" />
-      </button>
     </div>
   );
 }

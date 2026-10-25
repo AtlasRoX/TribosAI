@@ -41,6 +41,42 @@
   --chip-hue: #f59e0b;
 }
 
+.chip[data-type="mass"] {
+  --chip-hue: #38bdf8;
+}
+
+.chip[data-type="damping"] {
+  --chip-hue: #818cf8;
+}
+
+.chip[data-type="stiffness"] {
+  --chip-hue: #fb923c;
+}
+
+.chip[data-type="force"] {
+  --chip-hue: #f87171;
+}
+
+.chip[data-type="frequency"] {
+  --chip-hue: #c084fc;
+}
+
+.chip[data-type="displacement"],
+.chip[data-type="length"] {
+  --chip-hue: #34d399;
+}
+
+.chip[data-type="velocity"],
+.chip[data-type="acceleration"] {
+  --chip-hue: #e879f9;
+}
+
+.chip[data-type="pressure"],
+.chip[data-type="energy"],
+.chip[data-type="power"] {
+  --chip-hue: #facc15;
+}
+
 .chip[data-type="constant"] {
   --chip-hue: #2dd4bf;
 }

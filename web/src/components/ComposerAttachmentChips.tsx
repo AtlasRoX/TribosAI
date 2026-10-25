@@ -1,6 +1,6 @@
 "use client";
 
-import { ShieldCheck, X } from "lucide-react";
+import { X } from "lucide-react";
 import type { MessageAttachment } from "@/types/datasets";
 import { KindIcon } from "@/components/ProvenanceForm";
 import styles from "./Datasets.module.css";
@@ -10,13 +10,9 @@ export interface ComposerAttachmentChipsProps {
   onRemove: (id: string) => void;
 }
 
-export function ProvenanceBadge({ verified }: { verified?: boolean }) {
-  return verified ? (
-    <span className={styles.badgeVerified} title="GEO accession confirmed against NCBI GEO">
-      <ShieldCheck style={{ width: 11, height: 11 }} aria-hidden="true" />
-      GEO verified
-    </span>
-  ) : (
+/** Provenance is always declared by the uploader; nothing about it is verified. */
+export function ProvenanceBadge() {
+  return (
     <span className={styles.badgeDeclared} title="Provenance declared by the uploader, not verified">
       declared
     </span>
@@ -33,7 +29,7 @@ export function AttachmentChipBody({ a }: { a: MessageAttachment }) {
         {a.display_name}
       </span>
       {a.dims && <span className={styles.chipDims}>{a.dims}</span>}
-      <ProvenanceBadge verified={a.geo_verified} />
+      <ProvenanceBadge />
     </>
   );
 }

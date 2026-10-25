@@ -6,6 +6,7 @@ Registers `calcula_run_python`, `calcula_describe_dataset`, and the legacy alias
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from typing import Any
 
@@ -16,10 +17,26 @@ CALCULA_RUN_TOOL = "calcula_run_python"
 CALCULA_DESCRIBE_TOOL = "calcula_describe_dataset"
 
 
+MAX_CODE_CHARS = 20000
+MAX_INPUT_DATA_CHARS = 2_000_000
+
+
 class AnalysisRunInput(BaseModel):
-    code: str = Field(..., min_length=1, max_length=20000, description="Python computation or analysis code; set `result` to the answer values")
+    # A script longer than this almost always carries pasted data; data goes through `inputs` instead.
+    code: str = Field(..., min_length=1, max_length=MAX_CODE_CHARS, description="Python computation or analysis code; set `result` to the answer values. Do not paste data into the code: pass earlier results through `inputs`")
     dataset_ids: list[str] = Field(default_factory=list, max_length=5, description="Optional attached dataset ids (ds_...) the code reads")
     timeout_s: int = Field(default=60, ge=5, le=110)
+    inputs: dict[str, Any] | None = Field(default=None, description="JSON values the code reads as the variable `inputs` (e.g. {\"sim\": \"$n2.time_series\"}); use it for earlier results instead of pasting numbers into the code")
+
+    @field_validator("inputs")
+    @classmethod
+    def _inputs_size(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        if value is None:
+            return value
+        size = len(json.dumps(value, default=str))
+        if size > MAX_INPUT_DATA_CHARS:
+            raise ValueError(f"inputs are {size} characters of JSON; the limit is {MAX_INPUT_DATA_CHARS}")
+        return value
 
     @field_validator("dataset_ids")
     @classmethod
@@ -45,7 +62,9 @@ class CalculaDescribeDatasetInput(BaseModel):
         return str(value)
 
 
-def _run_python_impl(tool_name: str, code: str, dataset_ids: list[str] | None = None, timeout_s: int = 60) -> Any:
+def _run_python_impl(
+    tool_name: str, code: str, dataset_ids: list[str] | None = None, timeout_s: int = 60, data: dict[str, Any] | None = None
+) -> Any:
     from tribos.agentic.sandbox import (
         current_scope,
         resolve_inputs,
@@ -78,9 +97,12 @@ def _run_python_impl(tool_name: str, code: str, dataset_ids: list[str] | None = 
         {i.name: i.path for i in inputs},
         timeout_s=min(int(timeout_s), sandbox_timeout_s()),
         memory_mb=sandbox_memory_mb(),
+        data=data,
     )
     report["inputs"] = [{"dataset_id": i.dataset_id, "name": i.name, "kind": i.kind} for i in inputs]
-    digest = hashlib.sha256(f"{code}:{dataset_ids}".encode()).hexdigest()[:10]
+    # The computation id covers the data passed in, so the same script over other inputs is another computation.
+    data_key = json.dumps(data, sort_keys=True, default=str) if data is not None else ""
+    digest = hashlib.sha256(f"{code}:{dataset_ids}:{data_key}".encode()).hexdigest()[:10]
     cid = f"comp:{tool_name}:{digest}"
     report["canonical_id"] = cid
     status = report.get("status")
@@ -105,14 +127,16 @@ def _run_python_impl(tool_name: str, code: str, dataset_ids: list[str] | None = 
     return ToolResult(success=False, tool_name=tool_name, data=report, error=str(detail)[:600], error_type=error_type)
 
 
-def run_analysis(code: str, dataset_ids: list[str] | None = None, timeout_s: int = 60) -> Any:
+def run_analysis(code: str, dataset_ids: list[str] | None = None, timeout_s: int = 60,
+                 inputs: dict[str, Any] | None = None) -> Any:
     """Executor for analysis_run_python (and backward-compatible callers)."""
-    return _run_python_impl(TOOL_NAME, code, dataset_ids or [], timeout_s)
+    return _run_python_impl(TOOL_NAME, code, dataset_ids or [], timeout_s, inputs)
 
 
-def run_calcula_python(code: str, dataset_ids: list[str] | None = None, timeout_s: int = 60) -> Any:
+def run_calcula_python(code: str, dataset_ids: list[str] | None = None, timeout_s: int = 60,
+                       inputs: dict[str, Any] | None = None) -> Any:
     """Executor for calcula_run_python."""
-    return _run_python_impl(CALCULA_RUN_TOOL, code, dataset_ids or [], timeout_s)
+    return _run_python_impl(CALCULA_RUN_TOOL, code, dataset_ids or [], timeout_s, inputs)
 
 
 def _describe_resolved_file(inp: Any) -> dict[str, Any]:

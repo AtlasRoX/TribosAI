@@ -78,18 +78,133 @@ class AxiomVerifyIdentityInput(BaseModel):
     rhs: str = Field(..., min_length=1, max_length=4000, description="Right-hand side expression")
     variables: list[str] | None = Field(default=None, description="Variables to sample; inferred from free symbols when omitted")
     num_points: int = Field(default=8, ge=1, le=64, description="Number of random points for numerical cross-checking")
+    assumptions: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "Symbol domains, e.g. {'x': 'positive'}. Without them symbols are sampled over positive, negative and "
+            "complex values, so identities valid only for positive reals (log(x*y) = log(x) + log(y)) are refuted"
+        ),
+    )
 
 
 class AxiomLatexInput(BaseModel):
     expression: str = Field(..., min_length=1, max_length=4000, description="Mathematical expression or equation to convert to canonical SymPy and LaTeX")
 
 
+class AxiomNsolveInput(BaseModel):
+    equation: str = Field(..., min_length=1, max_length=4000, description="Univariate equation 'lhs = rhs' or expression (= 0), e.g. 'x = cos(x)'")
+    variable: str | None = Field(default=None, max_length=64, description="Unknown; inferred when the equation has one free symbol")
+    lower: float = Field(default=-10.0, description="Lower end of the real search interval")
+    upper: float = Field(default=10.0, description="Upper end of the real search interval")
+    samples: int = Field(default=400, ge=20, le=5000, description="Grid points of the sign-change scan")
+
+
+class AxiomOptimizeInput(BaseModel):
+    expression: str = Field(..., min_length=1, max_length=4000, description="Objective f(x), e.g. 'x^2 - 4x + 1'")
+    variable: str = Field(default="x", min_length=1, max_length=64, description="Variable")
+    lower: str | None = Field(default=None, description="Lower end of the interval (omit for -oo)")
+    upper: str | None = Field(default=None, description="Upper end of the interval (omit for oo)")
+    lower_open: bool = Field(default=False, description="Exclude the lower end (x > lower)")
+    upper_open: bool = Field(default=False, description="Exclude the upper end (x < upper)")
+
+
+class AxiomInequalityInput(BaseModel):
+    inequality: str = Field(..., min_length=3, max_length=4000, description="One univariate inequality, e.g. 'x^2 - 4 > 0' or '(x-1)/(x+2) <= 0'")
+    variable: str | None = Field(default=None, max_length=64, description="Variable; inferred when there is one")
+
+
+class AxiomTangentInput(BaseModel):
+    expression: str = Field(..., min_length=1, max_length=4000, description="Function f(x)")
+    point: str = Field(..., min_length=1, max_length=200, description="x-coordinate a of the point of tangency")
+    variable: str = Field(default="x", min_length=1, max_length=64, description="Variable")
+
+
+class AxiomVectorCalculusInput(BaseModel):
+    operation: Literal["gradient", "divergence", "curl", "laplacian", "hessian", "jacobian"] = Field(..., description="Operation")
+    expression: str | None = Field(default=None, max_length=4000, description="Scalar field (gradient, laplacian, hessian)")
+    components: list[str] | None = Field(default=None, max_length=6, description="Vector field components (divergence, curl, jacobian)")
+    variables: list[str] | None = Field(default=None, max_length=6, description="Coordinates, default ['x', 'y', 'z']")
+
+
+class AxiomTransformInput(BaseModel):
+    expression: str = Field(..., min_length=1, max_length=4000, description="f(t) for laplace, F(s) for inverse_laplace, f(x) for fourier")
+    transform: Literal["laplace", "inverse_laplace", "fourier"] = Field(..., description="Transform")
+    variable: str | None = Field(default=None, max_length=64, description="Input variable (t / s / x by default)")
+    transform_variable: str | None = Field(default=None, max_length=64, description="Output variable (s / t / k by default)")
+
+
+class AxiomNintegrateInput(BaseModel):
+    expression: str = Field(..., min_length=1, max_length=4000, description="Integrand")
+    lower: str = Field(..., description="Lower bound (may be -oo)")
+    upper: str = Field(..., description="Upper bound (may be oo)")
+    variable: str = Field(default="x", min_length=1, max_length=64, description="Integration variable")
+
+
+class AxiomNumberTheoryInput(BaseModel):
+    operation: Literal["factorize", "isprime", "gcd", "lcm", "divisors", "totient", "mod_pow", "mod_inverse", "crt", "next_prime", "diophantine"] = Field(..., description="Operation")
+    numbers: list[int | str] = Field(..., min_length=1, max_length=20, description="Integers: [n], [a, b, ...], [base, exponent], residues for crt, [a, b, c] for a*x + b*y = c")
+    modulus: int | str | list[int | str] | None = Field(default=None, description="Modulus (mod_pow, mod_inverse) or list of moduli (crt)")
+
+
+class AxiomRecurrenceInput(BaseModel):
+    recurrence: str = Field(..., min_length=3, max_length=2000, description="e.g. 'a(n) = a(n-1) + a(n-2)'")
+    initial: dict[str, int | float | str] = Field(..., description="Initial values, e.g. {'a(0)': 0, 'a(1)': 1}")
+    function: str = Field(default="a", min_length=1, max_length=32, description="Sequence name")
+    variable: str = Field(default="n", min_length=1, max_length=32, description="Index variable")
+
+
+class AxiomProbabilityInput(BaseModel):
+    distribution: Literal["normal", "binomial", "poisson", "exponential", "uniform", "geometric", "bernoulli"] = Field(..., description="Distribution")
+    parameters: list[int | float | str] = Field(..., min_length=1, max_length=3, description="normal [mu, sigma], binomial [n, p], poisson [lambda], exponential [rate], uniform [a, b], geometric [p], bernoulli [p]")
+    query: Literal["probability", "mean", "variance", "std", "pdf", "cdf", "quantile"] = Field(..., description="Quantity")
+    lower: int | float | str | None = Field(default=None, description="probability: lower bound of X")
+    upper: int | float | str | None = Field(default=None, description="probability: upper bound of X")
+    lower_inclusive: bool = Field(default=True, description="X >= lower (True) or X > lower")
+    upper_inclusive: bool = Field(default=True, description="X <= upper (True) or X < upper")
+    value: int | float | str | None = Field(default=None, description="pdf / cdf point, or the probability for quantile")
+
+
+class CalculaStatisticsInput(BaseModel):
+    operation: Literal["describe", "ttest_1samp", "ttest_ind", "ttest_rel", "linregress", "pearson", "confidence_interval"] = Field(..., description="Operation")
+    data: list[float] = Field(..., min_length=2, max_length=100000, description="Sample (x values for regression/correlation)")
+    data2: list[float] | None = Field(default=None, max_length=100000, description="Second sample, or y values")
+    mu0: float = Field(default=0.0, description="Hypothesised mean for ttest_1samp")
+    confidence: float = Field(default=0.95, gt=0, lt=1, description="Confidence level for confidence_interval")
+
+
+class AxiomSolveProblemInput(BaseModel):
+    problem: str = Field(
+        ...,
+        min_length=1,
+        max_length=4000,
+        description="A complete mathematical question in words, LaTeX or plain math, e.g. 'Find all real x with x^3 = 2x + 1'",
+    )
+
+
+class AxiomSageMathInput(BaseModel):
+    code: str = Field(..., min_length=1, max_length=60000, description="SageMath / Python mathematical computation or derivation code")
+    timeout_s: int = Field(default=60, ge=5, le=180, description="Execution timeout cutoff in seconds")
+
+
 __all__ = [
+    "AxiomInequalityInput",
+    "AxiomNintegrateInput",
+    "AxiomNumberTheoryInput",
+    "AxiomOptimizeInput",
+    "AxiomProbabilityInput",
+    "AxiomRecurrenceInput",
+    "AxiomTangentInput",
+    "AxiomTransformInput",
+    "AxiomVectorCalculusInput",
+    "CalculaStatisticsInput",
     "AxiomCalculusInput",
     "AxiomDsolveInput",
     "AxiomLatexInput",
     "AxiomLinalgInput",
+    "AxiomNsolveInput",
+    "AxiomSageMathInput",
     "AxiomSimplifyInput",
     "AxiomSolveInput",
+    "AxiomSolveProblemInput",
     "AxiomVerifyIdentityInput",
 ]

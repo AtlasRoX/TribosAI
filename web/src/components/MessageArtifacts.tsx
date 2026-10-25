@@ -1,6 +1,8 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useId, useRef, useState } from "react";
+import { onUi } from "@/lib/uiEvents";
+import { BookOpen, ChevronDown, Cpu, FlaskConical, ShieldCheck } from "lucide-react";
 import type { ExecutionArtifacts, TaskOutcome } from "@/types/chat";
 import { artifactDisclosure } from "@/lib/artifactDisclosure";
 import { DerivationArtifact } from "@/components/DerivationArtifact";
@@ -8,6 +10,8 @@ import { ArtifactRenderFallback, ErrorBoundary } from "@/components/ErrorBoundar
 import { EvidenceSources } from "@/components/EvidenceSources";
 import { LiteratureArtifact } from "@/components/LiteratureArtifact";
 import { ReferenceDataArtifact } from "@/components/ReferenceDataArtifact";
+import { ReproductionFiles } from "@/components/ReproductionFiles";
+import { OdeVerificationArtifact } from "@/components/OdeVerificationArtifact";
 import { SimulationArtifact } from "@/components/SimulationArtifact";
 import { AgentDialogueArtifact } from "@/components/agentic/AgentDialogueArtifact";
 import { AgentRunPanel } from "@/components/agentic/AgentRunPanel";
@@ -15,15 +19,14 @@ import { CalibrationArtifact } from "@/components/agentic/CalibrationArtifact";
 import { ClaimConfidenceArtifact } from "@/components/agentic/ClaimConfidenceArtifact";
 import { EvidenceConflictsArtifact } from "@/components/agentic/EvidenceConflictsArtifact";
 import { HypothesesArtifact } from "@/components/agentic/HypothesesArtifact";
+import { MathAgentArtifact } from "@/components/agentic/MathAgentArtifact";
 import { PlanGraphArtifact } from "@/components/agentic/PlanGraphArtifact";
 import { PlanApprovalArtifact, ProjectMemoryArtifact } from "@/components/agentic/ProjectMemoryArtifact";
 import { SandboxAnalysisArtifact } from "@/components/agentic/SandboxAnalysisArtifact";
 import { CardDisclosureContext } from "@/components/agentic/ui";
+import { FEATURE_ARTIFACTS } from "@/components/artifacts/registry";
+import styles from "./MessageArtifacts.module.css";
 
-/**
- * Each card has its own boundary, so one faulty artifact never takes down the conversation or its sibling cards; a
- * card that throws is replaced by a visible "could not be displayed" note with the raw data (UI-006, UI-001).
- */
 function ArtifactBoundary({
   name,
   data,
@@ -32,7 +35,6 @@ function ArtifactBoundary({
 }: {
   name: string;
   data?: unknown;
-  /** Default open state from the disclosure policy (lib/artifactDisclosure). */
   open?: boolean;
   children: React.ReactNode;
 }) {
@@ -43,10 +45,6 @@ function ArtifactBoundary({
   );
 }
 
-/**
- * Structured result cards shown under an answer: decisions first, then symbolic derivations, physical reference data,
- * scholarly literature, numerical simulations, sandboxed computations, trust checks, and the run itself.
- */
 export function MessageArtifacts({
   artifacts,
   question,
@@ -56,8 +54,26 @@ export function MessageArtifacts({
   question?: string | null;
   taskStatus?: TaskOutcome | null;
 }) {
+  const [chosenTab, setChosenTab] = useState<string | null>(null);
+  const [inspectorOpen, setInspectorOpen] = useState<boolean>(true);
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const deckRef = useRef<HTMLElement>(null);
+  const deckId = useId();
+  // "Checked: ..." under the answer opens this deck's Verification tab.
+  useEffect(
+    () =>
+      onUi("tribos:evidence-tab", ({ tab, messageId }) => {
+        const mine = deckRef.current?.closest("[data-message-id]")?.getAttribute("data-message-id");
+        if (!deckRef.current || (messageId && mine !== messageId)) return;
+        setChosenTab(tab);
+        setInspectorOpen(true);
+        requestAnimationFrame(() => deckRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+      }),
+    []
+  );
   if (!artifacts) return null;
   const open = artifactDisclosure({ question, taskStatus, artifacts });
+
   const derivationData = artifacts.derivation ?? artifacts.axiom;
   const derivationKey = artifacts.derivation ? "derivation" : "axiom";
   const referenceData = artifacts.reference_data ?? artifacts.physis;
@@ -73,15 +89,98 @@ export function MessageArtifacts({
   );
   const archivonData = artifacts.archivon ?? (!hasGradedLiterature ? artifacts.literature : undefined);
 
+  // Group secondary/inspection items to prevent vertical card sprawl
+  const hasLiterature = Boolean((hasGradedLiterature && artifacts.literature) || archivonData);
+  const hasHypotheses = Boolean(artifacts.hypotheses);
+  const hasVerification = Boolean(artifacts.claim_confidence || artifacts.evidence_conflicts);
+  const hasDiagnostics = Boolean(
+    artifacts.agent_run || artifacts.agent_plan || artifacts.agent_dialogue || artifacts.project_memory || artifacts.plan_approval
+  );
+
+  const secondarySections: Array<{
+    id: "literature" | "hypotheses" | "verification" | "diagnostics";
+    label: string;
+    icon: React.ReactNode;
+    badge?: string | number;
+  }> = [];
+
+  if (hasLiterature) {
+    const totalArticles =
+      (artifacts.literature?.graded_articles?.length ?? 0) +
+      (artifacts.literature?.excluded_articles?.length ?? 0) ||
+      artifacts.literature?.passages?.length ||
+      artifacts.archivon?.passages?.length;
+    secondarySections.push({
+      id: "literature",
+      label: "Literature",
+      icon: <BookOpen style={{ width: 14, height: 14 }} aria-hidden="true" />,
+      badge: totalArticles ? String(totalArticles) : undefined,
+    });
+  }
+  if (hasHypotheses) {
+    const hypCount = artifacts.hypotheses?.hypotheses?.length;
+    secondarySections.push({
+      id: "hypotheses",
+      label: "Hypotheses",
+      icon: <FlaskConical style={{ width: 14, height: 14 }} aria-hidden="true" />,
+      badge: hypCount ? String(hypCount) : undefined,
+    });
+  }
+  if (hasVerification) {
+    // A probability is shown only when the claim-confidence model produced one for the whole answer; a computed
+    // answer shows how many of its written statements the checks confirmed instead (never the agent's benchmark
+    // precision, which describes its final expression only).
+    const score = artifacts.claim_confidence?.answer_confidence;
+    const checks = (artifacts.claim_confidence as { statement_checks?: { extracted?: number; passed?: number } } | undefined)
+      ?.statement_checks;
+    secondarySections.push({
+      id: "verification",
+      label: "Verification",
+      icon: <ShieldCheck style={{ width: 14, height: 14 }} aria-hidden="true" />,
+      badge:
+        typeof score === "number"
+          ? `${Math.round(score * 100)}%`
+          : checks?.extracted
+            ? `${checks.passed ?? 0}/${checks.extracted}`
+            : undefined,
+    });
+  }
+  if (hasDiagnostics) {
+    secondarySections.push({
+      id: "diagnostics",
+      label: "Plan & trace",
+      icon: <Cpu style={{ width: 14, height: 14 }} aria-hidden="true" />,
+    });
+  }
+
+  // The reader's tab while it exists; otherwise the first section.
+  const activeTab = secondarySections.some((s) => s.id === chosenTab) ? chosenTab : secondarySections[0]?.id;
+  const focusTab = (index: number) => {
+    const next = (index + secondarySections.length) % secondarySections.length;
+    setChosenTab(secondarySections[next].id);
+    tabRefs.current[next]?.focus();
+  };
+  const onTabKey = (e: React.KeyboardEvent, index: number) => {
+    const moves: Record<string, number> = { ArrowRight: index + 1, ArrowLeft: index - 1, Home: 0, End: secondarySections.length - 1 };
+    if (e.key in moves) {
+      e.preventDefault();
+      focusTab(moves[e.key]);
+    }
+  };
+
   return (
     <>
-      {/* Needs the reader's decision */}
-      {artifacts.plan_approval && (
-        <ArtifactBoundary name="plan_approval" open={open["plan_approval"]} data={artifacts.plan_approval}>
-          <PlanApprovalArtifact data={artifacts.plan_approval} />
+      {/* 1. Direct core analytical and physical results (a plan approval is a record of the run: Plan & trace) */}
+      {artifacts.math_agent && (
+        <ArtifactBoundary name="math_agent" open={open["math_agent"]} data={artifacts.math_agent}>
+          <MathAgentArtifact data={artifacts.math_agent} />
         </ArtifactBoundary>
       )}
-      {/* Symbolic derivations, physical constants & reference data, and scholarly literature */}
+      {artifacts.ode_verification && (
+        <ArtifactBoundary name="ode_verification" open={open["ode_verification"]} data={artifacts.ode_verification}>
+          <OdeVerificationArtifact data={artifacts.ode_verification} />
+        </ArtifactBoundary>
+      )}
       {derivationData && (
         <ArtifactBoundary name={derivationKey} open={open[derivationKey]} data={derivationData}>
           <DerivationArtifact data={derivationData} />
@@ -92,17 +191,6 @@ export function MessageArtifacts({
           <ReferenceDataArtifact data={referenceData} />
         </ArtifactBoundary>
       )}
-      {hasGradedLiterature && artifacts.literature && (
-        <ArtifactBoundary name="literature" open={open["literature"]} data={artifacts.literature}>
-          <EvidenceSources data={artifacts.literature} />
-        </ArtifactBoundary>
-      )}
-      {archivonData && (
-        <ArtifactBoundary name="archivon" open={open["archivon"] ?? open["literature"]} data={archivonData}>
-          <LiteratureArtifact data={archivonData} />
-        </ArtifactBoundary>
-      )}
-      {/* Numerical simulation, sandboxed computation, and model calibration */}
       {(simData || simScan) && (
         <ArtifactBoundary name={simKey} open={open[simKey]} data={simData ?? simScan}>
           <SimulationArtifact data={simData} scan={simScan} />
@@ -118,42 +206,137 @@ export function MessageArtifacts({
           <CalibrationArtifact data={artifacts.model_calibration} />
         </ArtifactBoundary>
       )}
-      {artifacts.hypotheses && (
-        <ArtifactBoundary name="hypotheses" open={open["hypotheses"]} data={artifacts.hypotheses}>
-          <HypothesesArtifact data={artifacts.hypotheses} />
-        </ArtifactBoundary>
-      )}
-      {/* How far the answer can be trusted */}
-      {artifacts.evidence_conflicts && (
-        <ArtifactBoundary name="evidence_conflicts" open={open["evidence_conflicts"]} data={artifacts.evidence_conflicts}>
-          <EvidenceConflictsArtifact data={artifacts.evidence_conflicts} />
-        </ArtifactBoundary>
-      )}
-      {artifacts.claim_confidence && (
-        <ArtifactBoundary name="claim_confidence" open={open["claim_confidence"]} data={artifacts.claim_confidence}>
-          <ClaimConfidenceArtifact data={artifacts.claim_confidence} />
-        </ArtifactBoundary>
-      )}
-      {/* How the agent worked */}
-      {artifacts.agent_run && (
-        <ArtifactBoundary name="agent_run" open={open["agent_run"]} data={artifacts.agent_run}>
-          <AgentRunPanel data={artifacts.agent_run} routing={artifacts.framework_routing} />
-        </ArtifactBoundary>
-      )}
-      {artifacts.agent_plan && (
-        <ArtifactBoundary name="agent_plan" open={open["agent_plan"]} data={artifacts.agent_plan}>
-          <PlanGraphArtifact data={artifacts.agent_plan} />
-        </ArtifactBoundary>
-      )}
-      {artifacts.agent_dialogue && (
-        <ArtifactBoundary name="agent_dialogue" open={open["agent_dialogue"]} data={artifacts.agent_dialogue}>
-          <AgentDialogueArtifact data={artifacts.agent_dialogue} />
-        </ArtifactBoundary>
-      )}
-      {artifacts.project_memory && (
-        <ArtifactBoundary name="project_memory" open={open["project_memory"]} data={artifacts.project_memory}>
-          <ProjectMemoryArtifact data={artifacts.project_memory} />
-        </ArtifactBoundary>
+      {FEATURE_ARTIFACTS.map(({ key, Component }) => {
+        const data = (artifacts as Record<string, unknown>)[key];
+        return data ? (
+          <ArtifactBoundary key={key} name={key} open={open[key]} data={data}>
+            <Component data={data} artifacts={artifacts as Record<string, unknown>} />
+          </ArtifactBoundary>
+        ) : null;
+      })}
+
+      <ReproductionFiles artifacts={artifacts} />
+
+      {/* 3. Supporting evidence: a tab row over the cards, so secondary detail never sprawls down the page */}
+      {secondarySections.length > 0 && (
+        <section ref={deckRef} className={styles.deck} aria-label="Supporting evidence">
+          <div className={styles.bar}>
+            <span className={styles.heading}>Evidence</span>
+            <div className={styles.tabs} role="tablist" aria-label="Supporting evidence sections">
+              {secondarySections.map((sec, index) => {
+                const isActive = activeTab === sec.id;
+                return (
+                  <button
+                    key={sec.id}
+                    ref={(el) => {
+                      tabRefs.current[index] = el;
+                    }}
+                    type="button"
+                    role="tab"
+                    id={`${deckId}-tab-${sec.id}`}
+                    aria-selected={isActive}
+                    aria-controls={`${deckId}-panel`}
+                    tabIndex={isActive ? 0 : -1}
+                    className={`${styles.tab} ${isActive ? styles.tabActive : ""}`}
+                    onClick={() => {
+                      setChosenTab(sec.id);
+                      setInspectorOpen(true);
+                    }}
+                    onKeyDown={(e) => onTabKey(e, index)}
+                  >
+                    {sec.icon}
+                    <span>{sec.label}</span>
+                    {sec.badge && <span className={styles.count}>{sec.badge}</span>}
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              type="button"
+              className={styles.toggle}
+              onClick={() => setInspectorOpen((prev) => !prev)}
+              aria-expanded={inspectorOpen}
+              aria-controls={`${deckId}-panel`}
+            >
+              {inspectorOpen ? "Hide" : "Show"}
+              <ChevronDown
+                className={`${styles.chev} ${inspectorOpen ? styles.chevOpen : ""}`}
+                style={{ width: 14, height: 14 }}
+                aria-hidden="true"
+              />
+            </button>
+          </div>
+
+          {inspectorOpen && (
+            <div id={`${deckId}-panel`} role="tabpanel" aria-labelledby={`${deckId}-tab-${activeTab}`} className={styles.panel}>
+              {activeTab === "literature" && (
+                <>
+                  {hasGradedLiterature && artifacts.literature && (
+                    <ArtifactBoundary name="literature" open={open["literature"]} data={artifacts.literature}>
+                      <EvidenceSources data={artifacts.literature} />
+                    </ArtifactBoundary>
+                  )}
+                  {archivonData && (
+                    <ArtifactBoundary name="archivon" open={open["archivon"]} data={archivonData}>
+                      <LiteratureArtifact data={archivonData} />
+                    </ArtifactBoundary>
+                  )}
+                </>
+              )}
+
+              {activeTab === "hypotheses" && artifacts.hypotheses && (
+                <ArtifactBoundary name="hypotheses" open={open["hypotheses"]} data={artifacts.hypotheses}>
+                  <HypothesesArtifact data={artifacts.hypotheses} />
+                </ArtifactBoundary>
+              )}
+
+              {activeTab === "verification" && (
+                <>
+                  {artifacts.evidence_conflicts && (
+                    <ArtifactBoundary name="evidence_conflicts" open={open["evidence_conflicts"]} data={artifacts.evidence_conflicts}>
+                      <EvidenceConflictsArtifact data={artifacts.evidence_conflicts} />
+                    </ArtifactBoundary>
+                  )}
+                  {artifacts.claim_confidence && (
+                    <ArtifactBoundary name="claim_confidence" open={open["claim_confidence"]} data={artifacts.claim_confidence}>
+                      <ClaimConfidenceArtifact data={artifacts.claim_confidence} />
+                    </ArtifactBoundary>
+                  )}
+                </>
+              )}
+
+              {activeTab === "diagnostics" && (
+                <>
+                  {artifacts.plan_approval && (
+                    <ArtifactBoundary name="plan_approval" open={false} data={artifacts.plan_approval}>
+                      <PlanApprovalArtifact data={artifacts.plan_approval} />
+                    </ArtifactBoundary>
+                  )}
+                  {artifacts.agent_run && (
+                    <ArtifactBoundary name="agent_run" open={open["agent_run"]} data={artifacts.agent_run}>
+                      <AgentRunPanel data={artifacts.agent_run} routing={artifacts.framework_routing} />
+                    </ArtifactBoundary>
+                  )}
+                  {artifacts.agent_plan && (
+                    <ArtifactBoundary name="agent_plan" open={open["agent_plan"]} data={artifacts.agent_plan}>
+                      <PlanGraphArtifact data={artifacts.agent_plan} />
+                    </ArtifactBoundary>
+                  )}
+                  {artifacts.agent_dialogue && (
+                    <ArtifactBoundary name="agent_dialogue" open={open["agent_dialogue"]} data={artifacts.agent_dialogue}>
+                      <AgentDialogueArtifact data={artifacts.agent_dialogue} />
+                    </ArtifactBoundary>
+                  )}
+                  {artifacts.project_memory && (
+                    <ArtifactBoundary name="project_memory" open={open["project_memory"]} data={artifacts.project_memory}>
+                      <ProjectMemoryArtifact data={artifacts.project_memory} />
+                    </ArtifactBoundary>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </section>
       )}
     </>
   );

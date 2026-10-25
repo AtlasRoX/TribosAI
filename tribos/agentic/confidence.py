@@ -63,6 +63,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from ..agents.evidence_need import is_closed_computation
+from ..sources.keys import normalize_evidence_key, same_document
 from ..verify.verifier import truncate_words
 from .budget import BudgetExhausted
 from .calibration_stats import logistic
@@ -70,6 +72,7 @@ from .config import env_flag
 from .guardrails import SPOTLIGHT_RULE, neutralise, spotlight
 from .llm import AgentLLMUnavailable
 from .nli import (  # noqa: F401 - claim_key re-exported
+    cited_keys,
     claim_key,
     collect_documents,
     find_scores,
@@ -115,13 +118,25 @@ DEFAULT_WEIGHTS: dict[str, float] = {
 # Below the high band: the most a claim without strong support (NLI entailment or an exact match) can score.
 WEAK_SUPPORT_CAP = 0.74
 
+# How much each verifier claim type counts in the answer-level confidence: stated results (a derivation, a figure)
+# weigh most, unspecific statements and absence claims least.
 CLAIM_TYPE_WEIGHTS: dict[str, float] = {
-    "clinical": 1.5,
+    "mathematical": 1.5,
+    "quantitative": 1.5,
+    "empirical": 1.5,  # the verifier's label for a measured or reported result
+    "cited": 1.2,  # the verifier's label for a statement resting on a cited source
     "mechanistic": 1.2,
     "computational": 1.0,
     "absence": 0.6,
     "statement": 0.8,
 }
+# The verifier still labels a figure-bearing outcome claim about a study "clinical"; it is a quantitative result.
+_CLAIM_TYPE_ALIASES = {"clinical": "quantitative"}
+
+
+def claim_type_weight(claim_type: str) -> float:
+    kind = _CLAIM_TYPE_ALIASES.get(claim_type, claim_type)
+    return CLAIM_TYPE_WEIGHTS.get(kind, CLAIM_TYPE_WEIGHTS["statement"])
 
 _HEDGE_RE = re.compile(
     r"\b(?:may|might|could|possibly|possible|perhaps|likely|unlikely|suggests?|suggested|suggesting|appears?|"
@@ -356,7 +371,7 @@ def _grade_weight(doc: dict[str, Any]) -> float:
         return _WEB_GRADE
     if label:
         try:
-            from ..lithoscribe.evidence_grading import STUDY_TYPE_LABELS, STUDY_TYPE_POLICY
+            from ..archivon.grading import STUDY_TYPE_LABELS, STUDY_TYPE_POLICY
 
             for st, (lab, _s, _p) in STUDY_TYPE_LABELS.items():
                 if str(lab).lower() == str(label).lower():
@@ -367,15 +382,30 @@ def _grade_weight(doc: dict[str, Any]) -> float:
 
 
 def source_grades(tool_results: dict[str, Any]) -> dict[str, float]:
+    """Evidence grade per document key, under every identifier of the document (tribos.sources.keys)."""
     grades: dict[str, float] = {}
     for d in collect_documents(tool_results):
-        grades[d["source_key"]] = max(grades.get(d["source_key"], 0.0), _grade_weight(d))
+        weight = _grade_weight(d)
+        for key in dict.fromkeys([d["source_key"], *(d.get("keys") or [])]):
+            grades[key] = max(grades.get(key, 0.0), weight)
     return grades
+
+
+def documents_by_key(tool_results: dict[str, Any]) -> dict[str, str]:
+    """Document text per key, under every identifier of the document."""
+    out: dict[str, str] = {}
+    for d in collect_documents(tool_results):
+        for key in dict.fromkeys([d["source_key"], *(d.get("keys") or [])]):
+            out.setdefault(key, d["text"])
+    return out
 
 
 def _key_grade(key: str, grades: dict[str, float]) -> float:
     if key in grades:
         return grades[key]
+    canon = normalize_evidence_key(key)
+    if canon in grades:
+        return grades[canon]
     if key.startswith("tool:"):
         return _TOOL_GRADE
     if key.startswith("web:"):
@@ -399,29 +429,36 @@ def _conflict_rows(state: AgentState) -> list[dict[str, Any]]:
     return out
 
 
-_ID_IN_CLAIM_RE = re.compile(r"\bPMID:?\s*(\d{1,9})\b|\b(NCT\d{8})\b|\b(10\.\d{4,9}/[-._;()/:A-Za-z0-9]+)", re.IGNORECASE)
 _DOC_NUM_RE = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)(?![\d])")
+# A cited identifier's digits ("arXiv:2312.04511", "Zbl 1234.56789") are not figures the claim states.
+_CITED_ID_TOKEN_RE = re.compile(r"\b(?:arXiv|Zbl|MR|PMID|DOI):?\s*[\w./-]+|\b10\.\d{4,9}/\S+", re.IGNORECASE)
+
+
+def _names_source(key: str, source_key: str, low_doc: str) -> bool:
+    """The cited key is the source's own key (same document), or its identifier appears in the source text."""
+    if same_document(key, source_key):
+        return True
+    prefix, _, value = key.partition(":")
+    value = value.lower()
+    if not value:
+        return False
+    # A bare number (PMID, MR) counts only next to its prefix; arXiv ids and DOIs are distinctive on their own.
+    lead = rf"{prefix.lower()}\W{{0,4}}" if value.isdigit() else r"(?<![\w.])"
+    return re.search(rf"{lead}{re.escape(value)}(?![\w])", low_doc) is not None
 
 
 def exact_match(text: str, source_key: str, doc_text: str) -> bool:
-    """The claim names its supporting source's identifier (PMID/NCT/DOI, as the source key or in the source text)
-    and every figure it states appears in that source's text."""
+    """The claim names its supporting source's identifier (arXiv/DOI/Zbl/MR/PMID, as the source key or in the
+    source text) and every figure it states appears in that source's text."""
     if not source_key or not doc_text:
         return False
     from ..verify.verifier import bare_numbers
 
     low_doc = doc_text.lower()
-    named = False
-    for pmid, nct, doi in _ID_IN_CLAIM_RE.findall(text or ""):
-        if pmid and (source_key == f"PMID:{pmid}" or re.search(rf"pmid\W{{0,4}}{pmid}(?!\d)", low_doc)):
-            named = True
-        elif nct and (nct.lower() in source_key.lower() or nct.lower() in low_doc):
-            named = True
-        elif doi and (doi.rstrip(".,;)").lower() in source_key.lower() or doi.rstrip(".,;)").lower() in low_doc):
-            named = True
-    if not named:
+    if not any(_names_source(k, source_key, low_doc) for k in cited_keys(text or "")):
         return False
-    stripped = re.sub(r"\b(?:grade|phase|stage|cycle)\s*[0-9IVX]+(?:\s*/\s*[0-9IVX]+)?\b", " ", text or "", flags=re.IGNORECASE)
+    stripped = re.sub(r"\b(?:grade|phase|stage|cycle)\s*[0-9IVX]+(?:\s*/\s*[0-9IVX]+)?\b", " ",
+                      _CITED_ID_TOKEN_RE.sub(" ", text or ""), flags=re.IGNORECASE)
     figures = bare_numbers(re.sub(r"(?<=\d),(?=\d{3}(?!\d))", "", stripped))
     if not figures:
         return False
@@ -440,6 +477,13 @@ def exact_match(text: str, source_key: str, doc_text: str) -> bool:
 
 def _defect_claims(state: AgentState) -> list[str]:
     return [str(_get(d, "claim", "") or "") for d in (_get(state.verification, "defects", None) or []) if _get(d, "claim", "")]
+
+
+def _conflict_on_support(row: dict[str, Any], supporting: list[str]) -> bool:
+    """A counter-evidence row comes from one of the claim's supporting documents (under any identifier: the
+    verifier's PMID/DOI keys, the passage keys, arXiv with or without a version)."""
+    keys = [str(row.get("source_key") or ""), *(str(k) for k in row.get("keys") or [])]
+    return any(k and s and (k == s or same_document(k, s)) for k in keys for s in supporting)
 
 
 def claim_features(
@@ -466,13 +510,15 @@ def claim_features(
         low and (low in d.lower() or d.lower()[:200] in text.lower() or _overlap(text, d) >= 0.6) for d in defect_claims
     )
     conflict = any(_overlap(text, str(r.get("claim") or "")) >= 0.4 for r in conflicts) or any(
-        r.get("source_key") and r.get("source_key") in supporting and _overlap(text, str(r.get("claim") or "")) >= 0.2 for r in conflicts
+        _conflict_on_support(r, supporting) and _overlap(text, str(r.get("claim") or "")) >= 0.2 for r in conflicts
     )
     exact = False
     if status == "supported" and not defect:
         passages = claim.get("evidence_passages") or {}
+        docs = docs_by_key or {}
         for key in claim.get("evidence_keys") or []:
-            doc = " ".join(t for t in ((docs_by_key or {}).get(key, ""), passages.get(key, "")) if t)
+            doc_text = docs.get(key) or docs.get(normalize_evidence_key(key), "")
+            doc = " ".join(t for t in (doc_text, passages.get(key, "")) if t)
             if exact_match(text, key, doc):
                 exact = True
                 break
@@ -567,7 +613,7 @@ def _summarise(
         r["band"] = band(r["confidence"], tau)
         r["backed_off"] = r["band"] == "low" and band(r["confidence"]) != "low"
         backed_off += int(r["backed_off"])
-        w = CLAIM_TYPE_WEIGHTS.get(r["claim_type"], CLAIM_TYPE_WEIGHTS["statement"])
+        w = claim_type_weight(r["claim_type"])
         total_w += w
         acc += w * r["confidence"]
         f = r["features"]
@@ -609,11 +655,80 @@ def _summarise(
     }
 
 
+COMPUTED_LABEL = "Verified by independent computation"
+
+
+def computation_confidence(math_art: dict[str, Any], verification: Any = None) -> dict[str, Any]:
+    """The claim_confidence artifact of a calculation the mathematics agent verified.
+
+    The agent's measured precision (tribos/axiom/calibration.json: how often its verified answers were correct on a
+    held-out benchmark) describes its final answer expression only. The written answer around it (derivation steps,
+    derived quantities, tables, interpretation) was produced by the writer model and is checked separately
+    (tribos.verify.math_claims), so no whole-answer probability is derived from that precision: `answer_confidence`
+    is None and the measured figure is reported as `component_confidence`, with its scope, benchmark and n."""
+    measured = math_art.get("confidence") or {}
+    p = measured.get("p_correct")
+    checks = [c for c in ((math_art.get("verification") or {}).get("checks") or []) if c.get("passed")]
+    coverage = dict(getattr(verification, "coverage", None) or {}) if verification is not None else {}
+    failed = int(coverage.get("failed") or 0)
+    label = (
+        "Computed result verified; some written statements contradicted" if failed
+        else COMPUTED_LABEL if coverage.get("evaluated") else "Computed result verified; written statements not checked"
+    )
+    component = None
+    if isinstance(p, (int, float)):
+        component = {
+            "scope": "the mathematics agent's final answer expression (not the surrounding explanation)",
+            "p_correct": round(float(p), 4),
+            "lower_95": measured.get("lower_95"),
+            "n": measured.get("n"),
+            "benchmark": measured.get("fitted_on") or "held-out mathematics benchmark",
+            "meaning": "fraction of verified answers that were correct on a held-out benchmark of single problems",
+        }
+    return {
+        "answer_confidence": None,
+        "component_confidence": component,
+        "method": "computational_verification",
+        "label": label,
+        "statement_checks": coverage,
+        "calibration": {
+            "source": measured.get("fitted_on") or "none",
+            "status": "measured" if p is not None else "uncalibrated",
+            "calibrated": p is not None,
+            "label": label,
+            "note": (
+                f"The final answer expression: verified answers were correct in {float(p):.0%} of {measured.get('n')} "
+                f"held-out problems (95% lower bound {float(measured.get('lower_95') or 0):.0%}). This does not cover "
+                "the written derivation or other statements, which are checked one by one."
+                if p is not None else "No held-out calibration is available for verified answers."
+            ),
+            "bands": {"high": HIGH_BAND, "medium": MEDIUM_BAND},
+        },
+        "basis": [str(c.get("name")) for c in checks][:8],
+        "nli_backend": "none",
+        "supported_fraction": None,
+        "claims": [],
+    }
+
+
 async def compute_claim_confidence(
     state: AgentState, publish: Callable[[dict[str, Any]], None] | None = None
 ) -> dict[str, Any]:
     """The claim_confidence artifact. `publish(artifact)` receives the deterministic-feature artifact before the
     optional stated-confidence model call, so a failed or slow call still leaves an artifact."""
+    math_art = state.artifacts.get("math_agent")
+    # The answer rests on computation when it is a closed calculation, or when an independent numerical check of the
+    # verified solution passed (zero residual, the initial conditions hold): literature support does not measure it.
+    check = state.artifacts.get("ode_verification") or {}
+    numerically_confirmed = bool(check) and check.get("residual_max", 1.0) < 1e-6 and all(
+        abs(ic["stated"] - ic["analytical"]) < 1e-9 for ic in check.get("initial_conditions") or [{"stated": 0, "analytical": 1}]
+    )
+    if (is_closed_computation(state.ctx) or numerically_confirmed) and isinstance(math_art, dict) \
+            and math_art.get("status") == "verified":
+        artifact = computation_confidence(math_art, getattr(state, "verification", None))
+        if publish is not None:
+            publish(artifact)
+        return artifact
     cal = load_calibration()
     T, _tau, weights = cal["temperature"], cal["conformal_threshold"], cal["weights"]
     claims = gather_claims(state)
@@ -627,7 +742,7 @@ async def compute_claim_confidence(
     grades = source_grades(state.tool_results)
     conflicts = _conflict_rows(state)
     defects = _defect_claims(state)
-    docs_by_key = {d["source_key"]: d["text"] for d in collect_documents(state.tool_results)}
+    docs_by_key = documents_by_key(state.tool_results)
 
     rows: list[dict[str, Any]] = []
     excerpts: dict[str, str] = {}
@@ -647,8 +762,9 @@ async def compute_claim_confidence(
             }
         )
         src = (feats["supporting_sources"] or c.get("evidence_keys") or [None])[0]
-        if src and src in docs_by_key:
-            excerpts[c["claim_id"]] = docs_by_key[src][:400]
+        src_text = (docs_by_key.get(src) or docs_by_key.get(normalize_evidence_key(src))) if src else None
+        if src_text:
+            excerpts[c["claim_id"]] = src_text[:400]
 
     method = method_tag(cal)
     nli_backend = state.bag.get("nli_backend") or "none"

@@ -309,7 +309,7 @@ def test_health_probe_is_cached(api, monkeypatch):
             calls.append(1)
             return {"mcp_remote_active": False, "direct_adapters": {}}
 
-    monkeypatch.setattr(backend_main, "BioContextMCPClient", _Probe)
+    monkeypatch.setattr(backend_main, "_readiness_probe", _Probe().async_check_service_readiness)
     monkeypatch.setitem(backend_main._health_cache, "readiness", None)
     assert client.get("/api/health").status_code == 200
     assert client.get("/api/health").status_code == 200

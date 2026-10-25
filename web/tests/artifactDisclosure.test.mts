@@ -10,12 +10,19 @@ const STEM_EXCLUSION_QUERY =
   "alternative.\nKeep the answer under 400 words.\nNo symbolic derivation, simulation, physical constants or hypothesis generation is " +
   "needed. Do not rewrite the answer without new evidence.";
 
-test("literature, plan review, sandbox analysis and calibration open whenever present", () => {
+test("plan review, sandbox analysis and calibration open whenever present", () => {
   const open = artifactDisclosure({
     question: "anything",
-    artifacts: { literature: {}, plan_approval: {}, sandbox_analysis: { status: "ok" }, model_calibration: {} },
+    artifacts: { plan_approval: {}, sandbox_analysis: { status: "ok" }, model_calibration: {} },
   });
-  assert.deepEqual(open, { literature: true, plan_approval: true, sandbox_analysis: true, model_calibration: true });
+  assert.deepEqual(open, { plan_approval: true, sandbox_analysis: true, model_calibration: true });
+});
+
+test("the literature list opens when the question asks for literature, and stays a summary line otherwise", () => {
+  const arithmetic = artifactDisclosure({ question: "Evaluate 3/4 + 2 - 8 exactly", artifacts: { literature: {}, archivon: {} } });
+  assert.deepEqual(arithmetic, { literature: false, archivon: false });
+  const review = artifactDisclosure({ question: "Which papers report the drag coefficient of a sphere?", artifacts: { literature: {} } });
+  assert.equal(review.literature, true);
 });
 
 test("domain cards open only when the question asks for that evidence", () => {

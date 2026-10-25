@@ -144,6 +144,24 @@ def _default_text(node: Optional[ast.AST], source: str, consts: Optional[Dict[st
     return f"`{seg}`" if seg else None
 
 
+def _loop_reads_env(loop: ast.For, var_id: str) -> bool:
+    """True when the loop body passes the loop variable to os.getenv / os.environ.get / os.environ[...] / a
+    registry accessor, i.e. the string literals the loop iterates over are environment-variable names."""
+    for node in ast.walk(loop):
+        if isinstance(node, ast.Call):
+            fname = _func_name(node.func)
+            first = node.args[0] if node.args else None
+            if isinstance(first, ast.Name) and first.id == var_id and (
+                fname in DEFAULT_HELPERS or fname in NO_DEFAULT_HELPERS
+                or (fname in ("getenv", "get") and isinstance(node.func, ast.Attribute))
+            ):
+                return True
+        elif isinstance(node, ast.Subscript) and _is_os_environ(node.value):
+            if isinstance(node.slice, ast.Name) and node.slice.id == var_id:
+                return True
+    return False
+
+
 def scan() -> Dict[str, Var]:
     found: Dict[str, Var] = {}
 
@@ -201,6 +219,13 @@ def scan() -> Dict[str, Var]:
             elif isinstance(node, ast.Compare) and len(node.ops) == 1 and isinstance(node.ops[0], (ast.In, ast.NotIn)):
                 if node.comparators and _is_os_environ(node.comparators[0]):
                     add(name_of(node.left), None, where)
+            elif isinstance(node, ast.For) and isinstance(node.target, ast.Name):
+                # `for var in ("NAME_A", "NAME_B"): value = os.getenv(var)` - the literals are read indirectly.
+                names = [elt.value for elt in getattr(node.iter, "elts", [])
+                         if isinstance(elt, ast.Constant) and isinstance(elt.value, str)]
+                if names and _loop_reads_env(node, node.target.id):
+                    for literal in names:
+                        add(literal, None, where)
     missing = [n for n in REQUIRED if n not in found]
     if missing:
         raise SystemExit(f"required variables not found in the code: {', '.join(missing)}")

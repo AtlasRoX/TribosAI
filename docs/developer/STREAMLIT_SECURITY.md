@@ -1,5 +1,8 @@
 # Streamlit Security Implementation Guide — Tribos
 
+> **Obsolete.** The Streamlit applications (`app/frontend/`) were removed; uploads are handled by the API. See
+> "Upload Security" in [the developer guide](README.md). This page is kept for history only.
+
 > **Tribos** — Biomedical Research Assistant  
 > **Made by ChronoStrider Engineering**
 

@@ -30,10 +30,14 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from ..sources.keys import (  # passage_source_key is re-exported (hypothesis)
+    passage_keys,
+    passage_source_key,
+)
 from .budget import BudgetExhausted
 from .guardrails import spotlight
 from .llm import AgentLLMUnavailable
-from .plan_graph import excluded_by_question
+from .plan_graph import excluded_by_question, executes_code, is_simulation_tool, simulation_banned
 from .tool_retrieval import tokenize, tool_card
 
 logger = logging.getLogger(__name__)
@@ -41,6 +45,9 @@ logger = logging.getLogger(__name__)
 LITERATURE_TOOL = "archivon_literature_search"
 LEGACY_LITERATURE_TOOL = "lithoscribe_literature_synthesis"
 WEB_TOOL = "websurfer_search"
+# Analyses a turn leaves out when nobody asked for them (not_requested_modules). gaps.MODULE_PATTERNS is keyed by
+# the same names, so a draft sentence about one of them is never treated as an evidence gap.
+MODULE_SIMULATION = "numerical simulation"
 
 
 @dataclass(frozen=True)
@@ -51,6 +58,10 @@ class SpecialistSpec:
     domains: frozenset[str]
     prefixes: tuple[str, ...]
     tags: frozenset[str]
+    # A group for tools another package may register (biomedical sources): a tool joins it only by its domain or name
+    # prefix, never by shared tags alone, so the STEM tools are never routed to it. No such tool is registered by
+    # default, so these specialists do not appear unless one is.
+    domain_only: bool = False
 
 
 SPECIALIST_SPECS: tuple[SpecialistSpec, ...] = (
@@ -91,8 +102,8 @@ SPECIALIST_SPECS: tuple[SpecialistSpec, ...] = (
             "numerical roots. Procedure: 1) formulate the explicit equations, parameters, and initial/boundary conditions from "
             "the context; 2) run the one numerical computation requested; 3) report numerical values with tolerances and units."
         ),
-        domains=frozenset({"dynamis", "numerical"}),
-        prefixes=("dynamis",),
+        domains=frozenset({"dynamis", "numerical", "vivarix"}),  # the vivarix_* tools are Dynamis aliases
+        prefixes=("dynamis", "vivarix"),
         tags=frozenset({"simulation", "ode", "pde", "equilibrium", "steady_state", "parameter_scan", "optimize",
                         "fit", "calibration", "root_find", "scipy", "dynamics", "kinetics", "bifurcation"}),
     ),
@@ -134,18 +145,21 @@ SPECIALIST_SPECS: tuple[SpecialistSpec, ...] = (
         domains=frozenset({"synapta", "target", "disease_targets", "primekg", "variants"}),
         prefixes=("synapta", "opentargets", "primekg", "variant"),
         tags=frozenset({"target", "disease", "association", "pathway", "kegg", "primekg", "variant", "clinvar"}),
+        domain_only=True,
     ),
     SpecialistSpec(
         name="simulation",
         label="Simulation specialist",
         role=(
-            "Simulate mechanistic biological models on Vivarix: time-course trajectories, steady states, and parameter "
-            "scans. Procedure: 1) inspect the model's species and parameters; 2) simulate the experiment the researcher "
-            "asked for; 3) report numerical endpoints and steady states with their units."
+            "Run dynamical simulations through the Vivarix compatibility tools, which drive the Dynamis ODE engine: "
+            "time-course trajectories, steady states and parameter scans of an explicit dynamical system. Procedure: "
+            "1) state the equations, parameters and initial conditions being simulated; 2) run the simulation the "
+            "researcher asked for; 3) report numerical endpoints and steady states with their units."
         ),
-        domains=frozenset({"vivarix", "simulation"}),
-        prefixes=("vivarix",),
-        tags=frozenset({"simulation", "copasi", "biomodels", "ode", "steady_state", "scan"}),
+        domains=frozenset({"simulation"}),
+        prefixes=(),
+        tags=frozenset({"simulation", "ode", "steady_state", "scan"}),
+        domain_only=True,  # the Vivarix aliases belong to the numerical specialist; no registered tool lands here
     ),
     SpecialistSpec(
         name="omics",
@@ -158,6 +172,7 @@ SPECIALIST_SPECS: tuple[SpecialistSpec, ...] = (
         domains=frozenset({"lumicell", "omics"}),
         prefixes=("lumicell", "gtex", "gwas", "depmap", "string", "reactome"),
         tags=frozenset({"single_cell", "scanpy", "anndata", "clustering", "expression", "gwas", "ppi"}),
+        domain_only=True,
     ),
     SpecialistSpec(
         name="chemistry",
@@ -170,6 +185,7 @@ SPECIALIST_SPECS: tuple[SpecialistSpec, ...] = (
         domains=frozenset({"chembl", "openfda", "pubchem", "structure"}),
         prefixes=("chembl", "openfda", "pubchem", "structure"),
         tags=frozenset({"drug", "fda", "safety", "mechanism", "structure", "chembl", "pubchem"}),
+        domain_only=True,
     ),
 )
 
@@ -204,6 +220,8 @@ def classify_tool(entry: Any) -> str | None:
     for spec in SPECIALIST_SPECS:
         score = 3 * (domain in spec.domains)
         score += 2 * any(name.startswith(p) for p in spec.prefixes)
+        if spec.domain_only and not score:
+            continue
         score += len(tags & spec.tags)
         if score > best_score:
             best, best_score = spec.name, score
@@ -231,8 +249,7 @@ def _switched_off(ctx: Any, key: str) -> bool:
 
 
 def simulation_forbidden(ctx: Any) -> bool:
-    constraints = getattr(ctx, "simulation_constraints", None)
-    return bool(getattr(ctx, "suppress_simulation", False) or getattr(constraints, "simulation_forbidden", False))
+    return simulation_banned(ctx)
 
 
 def tool_allowed(ctx: Any, entry: Any) -> tuple[bool, str]:
@@ -240,12 +257,11 @@ def tool_allowed(ctx: Any, entry: Any) -> tuple[bool, str]:
     if entry is None:
         return False, "tool is not registered"
     domain = (getattr(entry, "domain", "") or "").lower()
-    name = (getattr(entry, "name", "") or "").lower()
     if domain in _EXCLUDED_DOMAINS:
         return False, "sandboxed analysis runs only through the analyst phase"
-    if name in ("calcula_run_python", "analysis_run_python") and (getattr(ctx, "extras", None) or {}).get("code_analysis_forbidden"):
+    if executes_code(entry, entry) and (getattr(ctx, "extras", None) or {}).get("code_analysis_forbidden"):
         return False, "the researcher asked for no code execution"
-    if (domain in ("dynamis", "vivarix") or name.startswith(("dynamis_simulate", "vivarix")) or classify_tool(entry) == "numerical") and simulation_forbidden(ctx):
+    if (is_simulation_tool(entry, entry) or classify_tool(entry) == "numerical") and simulation_forbidden(ctx):
         return False, "the researcher asked for no simulation"
     excluded = excluded_by_question(entry, ctx)
     if excluded:
@@ -253,6 +269,9 @@ def tool_allowed(ctx: Any, entry: Any) -> tuple[bool, str]:
     key = tool_source_key(entry)
     if key == "websurfer" and not getattr(ctx, "enable_web_search", True):
         return False, "web search is switched off"
+    need = getattr(ctx, "evidence_need", None)
+    if key in ("archivon", "lithoscribe", "websurfer") and need is not None and need.skip_retrieval:
+        return False, need.reason
     allowlist = getattr(ctx, "source_allowlist", None)
     if allowlist is not None and key not in allowlist:
         # Accept archivon <-> lithoscribe alias when source_allowlist uses either name
@@ -277,6 +296,28 @@ def simulation_requested(ctx: Any, tool_results: dict[str, Any] | None = None) -
     return any(str(k).startswith(("dynamis", "vivarix")) for k in (tool_results or {}))
 
 
+# Sub-question foci (decompose.FOCI) answered by derivation or computation rather than by literature.
+DERIVATION_FOCI = frozenset({"math", "physics", "computation"})
+# Planner intents (agents.query_planner.INTENTS) of a self-contained derivation, proof or calculation; "explain" and
+# "estimate" may go with them. Any other intent (literature, design, comparison, data_analysis, ...) needs sources.
+DERIVATION_INTENTS = frozenset({"derive", "solve", "prove", "compute", "simulate", "simulation", "steady_state"})
+_COMPANION_INTENTS = frozenset({"explain", "estimate"})
+
+
+def is_pure_derivation(state: Any) -> bool:
+    """Whether the question is a pure mathematics or physics derivation or calculation: every sub-question has a
+    math, physics or computation focus, or the planner's intents are derivation intents only (derive, solve, prove,
+    compute, simulate, with at most explain or estimate). A question that also asks for literature never is."""
+    ctx = getattr(state, "ctx", None)
+    intents = {str(i) for i in (getattr(ctx, "intents", None) or ())}
+    if "literature" in intents:
+        return False
+    foci = {str(getattr(q, "focus", "") or "").lower() for q in (getattr(state, "sub_questions", None) or [])}
+    if foci and foci <= DERIVATION_FOCI:
+        return True
+    return bool(intents & DERIVATION_INTENTS) and intents <= DERIVATION_INTENTS | _COMPANION_INTENTS
+
+
 def single_cell_requested(ctx: Any, tool_results: dict[str, Any] | None = None) -> bool:
     """Legacy helper retained for compatibility: whether dataset/single-cell analysis was requested."""
     if (getattr(ctx, "extras", None) or {}).get("single_cell_forbidden"):
@@ -288,7 +329,7 @@ def not_requested_modules(ctx: Any, tool_results: dict[str, Any] | None = None) 
     """Analyses the researcher did not ask for and that did not run: never a gap, never a limitation."""
     out: list[str] = []
     if not simulation_requested(ctx, tool_results):
-        out.append("numerical ODE simulation")
+        out.append(MODULE_SIMULATION)
     return out
 
 
@@ -413,42 +454,11 @@ def iter_passages(tool_results: dict[str, Any]) -> Iterator[tuple[str, dict[str,
                 yield key, p
 
 
-def passage_source_key(p: dict[str, Any], fallback: str = "") -> str:
-    """The verifier's source key for a passage: ARXIV:<id>, DOI:<doi>, ZBL:<id>, MR:<id>, PMID:<n> or the result key."""
-    if p.get("arxiv_id") or p.get("arxiv"):
-        return f"ARXIV:{p.get('arxiv_id') or p.get('arxiv')}"
-    if p.get("pmid"):
-        return f"PMID:{p['pmid']}"
-    if p.get("zbl") or p.get("zbmath_id"):
-        return f"ZBL:{p.get('zbl') or p.get('zbmath_id')}"
-    if p.get("mr") or p.get("mr_id"):
-        return f"MR:{p.get('mr') or p.get('mr_id')}"
-    if p.get("ads") or p.get("bibcode"):
-        return f"ADS:{p.get('ads') or p.get('bibcode')}"
-    if p.get("doi"):
-        return f"DOI:{str(p['doi']).lower()}"
-    if p.get("paper_id"):
-        pid = str(p["paper_id"])
-        return pid if ":" in pid else f"ARXIV:{pid}"
-    return fallback
-
-
 def passage_identity(p: dict[str, Any]) -> str:
+    """The passage's document key (tribos.sources.keys) and a digest of its text: one passage of one document."""
     text = re.sub(r"\s+", " ", str(p.get("passage_text") or p.get("abstract") or p.get("snippet") or "")).strip().lower()
-    digest = hashlib.sha1(text[:400].encode("utf-8")).hexdigest()[:16]
-    if p.get("arxiv_id") or p.get("arxiv"):
-        ident = f"arxiv:{str(p.get('arxiv_id') or p.get('arxiv')).lower()}"
-    elif p.get("pmid"):
-        ident = f"pmid:{p['pmid']}"
-    elif p.get("zbl") or p.get("zbmath_id"):
-        ident = f"zbl:{str(p.get('zbl') or p.get('zbmath_id')).lower()}"
-    elif p.get("doi"):
-        ident = f"doi:{str(p['doi']).lower()}"
-    elif p.get("paper_id"):
-        ident = f"paper:{str(p['paper_id']).lower()}"
-    else:
-        ident = ""
-    return f"{ident}|{digest}"
+    digest = hashlib.sha1(text[:400].encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
+    return f"{passage_source_key(p).lower()}|{digest}"
 
 
 def seen_passages(tool_results: dict[str, Any]) -> set[str]:
@@ -498,20 +508,15 @@ def evidence_digest(state: Any, max_items: int = 14, chars: int = 280) -> tuple[
     keys: list[str] = []
     seen: set[str] = set()
     for rkey, p in iter_passages(state.tool_results):
-        skey = passage_source_key(p, rkey)
-        if skey in seen:
-            continue
-        seen.add(skey)
+        pkeys = passage_keys(p)
+        skey = pkeys[0] if pkeys else rkey
+        if skey in seen or seen & set(pkeys):
+            continue  # the same document under another of its identifiers
+        seen.update([skey, *pkeys])
         text = re.sub(r"\s+", " ", str(p.get("passage_text") or ""))[:chars]
         setting = p.get("grade_label") or p.get("experimental_setting") or ""
         lines.append(f"[{skey}] ({setting}) {text}" if setting else f"[{skey}] {text}")
-        keys.append(skey)
-        if p.get("pmid"):
-            keys.append(f"PMID:{p['pmid']}")
-        if p.get("arxiv_id") or p.get("arxiv"):
-            keys.append(f"ARXIV:{p.get('arxiv_id') or p.get('arxiv')}")
-        if p.get("doi"):
-            keys.append(f"DOI:{p['doi']}")
+        keys.extend(k for k in dict.fromkeys([skey, *pkeys]) if k)
         if len(lines) >= max_items:
             break
     for rkey, res in list(state.tool_results.items()):
@@ -531,6 +536,23 @@ def _filtered_result(res: Any, data: dict[str, Any]) -> Any:
     except AttributeError:  # not a pydantic ToolResult
         res.data = data
         return res
+
+
+def literature_call_args(registry: Any, tool: str, query: str, max_results: int, keywords: list[str] | None = None) -> dict[str, Any]:
+    """The literature tool's own arguments for a query and a result count: archivon_literature_search takes
+    max_results, the legacy alias max_articles (and ranking keywords). Read from the tool's input schema, so an
+    argument the tool does not take is never sent (and silently dropped)."""
+    entry = registry.get_entry(tool) if hasattr(registry, "get_entry") else None
+    fields = set(getattr(getattr(entry, "input_schema", None), "model_fields", None) or ())
+    if not fields:
+        fields = {"query", "max_articles", "keywords"} if tool == LEGACY_LITERATURE_TOOL else {"query", "max_results"}
+    args: dict[str, Any] = {"query": query[:300]}
+    count_field = next((f for f in ("max_results", "max_articles") if f in fields), None)
+    if count_field:
+        args[count_field] = max_results
+    if keywords and "keywords" in fields:
+        args["keywords"] = [k for k in keywords if k][:8]
+    return args
 
 
 async def fetch_new_literature(
@@ -553,10 +575,9 @@ async def fetch_new_literature(
     when given, receives the search outcome: status ok | empty | error, returned, new, kept, and incomplete when the
     engine skipped or cut searches for time.
     """
-    lit_tool = resolve_literature_tool(getattr(state, "registry", None), state)
-    kwargs: dict[str, Any] = {"query": query[:300], "max_articles": max_articles}
-    if keywords:
-        kwargs["keywords"] = [k for k in keywords if k][:8]
+    registry = getattr(state, "registry", None)
+    lit_tool = resolve_literature_tool(registry, state)
+    kwargs = literature_call_args(registry, lit_tool, query, max_articles, keywords)
     res = await state.call_tool(lit_tool, phase=phase, purpose=purpose, store=False, **kwargs)
     data = getattr(res, "data", None)
     st = stats if stats is not None else {}
@@ -670,9 +691,10 @@ def query_entities(ctx: Any) -> dict[str, list[str]]:
         "constants": c_constants,
         "quantities": c_quantities,
         "all": clean([*c_concepts, *c_equations, *c_materials, *c_systems, *c_constants, *c_quantities]),
-        # Legacy aliases so existing callers continue to work seamlessly
+        # Legacy keys still read by the topology fallbacks. "drugs" is never an equation or a concept: a drug-shaped
+        # template ("<x> adverse events") must not be built from "Navier-Stokes equations".
         "genes": c_concepts,
-        "drugs": c_materials or c_equations,
+        "drugs": c_materials,
         "diseases": c_systems,
     }
 
@@ -695,7 +717,10 @@ __all__ = [
     "model_failing",
     "not_requested_modules",
     "fetch_new_web",
+    "is_pure_derivation",
     "iter_passages",
+    "literature_call_args",
+    "MODULE_SIMULATION",
     "named_tool_allowed",
     "passage_identity",
     "passage_source_key",

@@ -242,12 +242,37 @@ def _digest_vivarix(data: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _digest_dynamis(data: dict[str, Any]) -> dict[str, Any]:
+    """A Dynamis run: the system, the integrator and its tolerances (what a re-run needs), and the reported results."""
+    out = _digest_vivarix(data)
+    for key in ("model_name", "canonical_id", "state_variables", "t_span", "parameters", "fixed_point", "eigenvalues",
+                "stability", "verified"):
+        if data.get(key) not in (None, {}, []):
+            out[key] = data[key]
+    solver = data.get("solver") if isinstance(data.get("solver"), dict) else {}
+    solver = {k: solver.get(k, data.get(k)) for k in ("method", "rtol", "atol", "t_span")}
+    if any(v is not None for v in solver.values()):
+        out["solver"] = {k: v for k, v in solver.items() if v is not None}
+    return out
+
+
+def _digest_physis_constants(data: dict[str, Any]) -> dict[str, Any]:
+    """Physis constants: each value with its unit, uncertainty and source (the CODATA release)."""
+    rows = [c for c in data.get("constants") or [] if isinstance(c, dict)]
+    return {
+        "constants": [{k: c.get(k) for k in ("name", "symbol", "value", "unit", "uncertainty")} for c in rows[:20]],
+        "source": _sorted_unique(c.get("source") for c in rows),
+    }
+
+
 def _digest_lithoscribe(data: dict[str, Any]) -> dict[str, Any]:
     passages = [p for p in data.get("ranked_passages") or [] if isinstance(p, dict)]
     return {
         "pmids": _sorted_unique(p.get("pmid") for p in passages),
         "arxiv_ids": _sorted_unique(p.get("arxiv_id") or p.get("arxiv") for p in passages),
         "dois": _sorted_unique(str(p.get("doi") or "").lower() for p in passages),
+        "zbl_ids": _sorted_unique(p.get("zbl_id") or p.get("zbl") or p.get("zbmath_id") for p in passages),
+        "mr_ids": _sorted_unique(p.get("mr_id") or p.get("mr") for p in passages),
         "n_passages": len(passages),
         "evidence_sufficiency": data.get("evidence_sufficiency"),
     }
@@ -380,9 +405,10 @@ def _digest_primekg(data: dict[str, Any]) -> dict[str, Any]:
 _DIGESTERS = {
     "vivarix_simulate_time_course": _digest_vivarix,
     "vivarix_compute_steady_state": _digest_vivarix,
-    "dynamis_simulate_ode": _digest_vivarix,
-    "dynamis_parameter_scan": _digest_vivarix,
-    "dynamis_find_equilibrium": _digest_vivarix,
+    "dynamis_simulate_ode": _digest_dynamis,
+    "dynamis_parameter_scan": _digest_dynamis,
+    "dynamis_equilibrium": _digest_dynamis,
+    "physis_constants": _digest_physis_constants,
     "lithoscribe_literature_synthesis": _digest_lithoscribe,
     "archivon_literature_search": _digest_lithoscribe,
     "synapta_opentargets_search": _digest_synapta_search,
@@ -789,6 +815,7 @@ class RunRecorder:
         dataset_path = getattr(ctx, "analysis_dataset_path", None) or getattr(ctx, "dataset_path", None)
         attachments = getattr(ctx, "attachments", None) or []
         decisions = getattr(ctx, "decisions", None) or {}
+        need = getattr(ctx, "evidence_need", None)
         self.routing = json_safe({
             "primary_target": getattr(ctx, "primary_target", None),
             "requested_biomodel_id": getattr(ctx, "biomodel_id", None),
@@ -802,6 +829,8 @@ class RunRecorder:
             "decisions": {
                 str(k): bool(getattr(v, "run", False)) for k, v in (decisions.items() if isinstance(decisions, dict) else [])
             },
+            # Why literature and web search ran or not, and the words or parse that decided it.
+            "evidence_need": need.to_dict() if need is not None else None,
         })
 
     def set_memory_context(self, *, n_evidence: int, n_instructions: int, memory_summary: str) -> None:

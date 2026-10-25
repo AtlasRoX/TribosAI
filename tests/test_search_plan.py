@@ -1,7 +1,9 @@
-"""Search planning: concepts from the question, compiled EuropePMC tiers, and the planner model's plan validated."""
+"""Search planning: concepts from the question, compiled plain scholarly query tiers, and the planner model's plan
+validated."""
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import pytest
@@ -63,17 +65,22 @@ async def test_web_query_is_the_question_not_padded_with_mechanism_words():
     assert "kinetics" not in plan.web_query
 
 
-def test_europepmc_tiers():
-    plan = SearchPlan(question_type="diagnosis", concepts=[["sepsis"], ["septic shock"]])
-    queries = plan.europepmc_queries(year=2026)
+def test_scholarly_query_tiers_are_plain_text():
+    # The Archivon sources (arXiv, Semantic Scholar, OpenAlex, Crossref, zbMATH, ADS) parse no EuropePMC field syntax.
+    plan = SearchPlan(question_type="proof", concepts=[["Banach fixed-point theorem", "contraction mapping principle"],
+                                                       ["complete metric space"]])
+    queries = plan.scholarly_queries(year=2026)
     by_label = {q["label"]: q for q in queries}
     landmark, recent = by_label["landmark"], by_label["recent"]
-    assert landmark["sort"] == "CITED desc" and landmark["tier"] == 1 and recent["sort"] is None
-    assert 'TITLE:"sepsis"' in landmark["query"] and "PUB_YEAR:[2014 TO 2026]" in landmark["query"]
-    assert "TITLE:diagnos*" in landmark["query"]  # diagnosis papers name it in the title; prefix stays unquoted
-    assert 'TITLE_ABS:"sepsis"' in recent["query"] and "PUB_YEAR:[2023 TO 2026]" in recent["query"]
+    assert landmark["tier"] == 1 and recent["tier"] == 1 and recent["from_year"] == 2023
+    assert landmark["query"] == "Banach fixed-point theorem complete metric space proof"  # "theorem" is already there
+    assert recent["query"] == "Banach fixed-point theorem complete metric space"
+    assert by_label["synonyms"]["query"] == "contraction mapping principle complete metric space"
+    assert by_label["relaxed"]["query"] == "Banach fixed-point theorem"
     assert {q["tier"] for q in queries} == {1, 2, 3}
-    assert SearchPlan(concepts=[]).europepmc_queries() == []
+    for q in queries:
+        assert not re.search(r"\b[A-Z_]{3,}:|\*|\"", q["query"]), q["query"]
+    assert SearchPlan(concepts=[]).scholarly_queries() == []
 
 
 def test_planner_plan_may_add_synonyms_but_not_answers():
@@ -124,7 +131,7 @@ class LiteratureSynthesisEngine:
 
 
 class _Client:
-    """EuropePMC stand-in: answers by query label so tier order can be checked."""
+    """Literature source stand-in: answers by query sort so tier order can be checked."""
 
     def __init__(self, by_sort: dict[Any, list[str]]):
         self.by_sort, self.calls = by_sort, []
@@ -137,13 +144,14 @@ class _Client:
 
 @pytest.mark.asyncio
 async def test_planned_search_interleaves_tiers_and_widens_only_when_needed():
-    plan = SearchPlan(question_type="diagnosis", concepts=[["sepsis"]])
-    client = _Client({"CITED desc": ["L1", "L2", "L3"], None: ["R1", "R2"]})
+    plan = SearchPlan(question_type="modelling", concepts=[["Lorenz attractor"], ["Lyapunov exponent"]])
+    client = _Client({"cited_by_count:desc": ["L1", "L2", "L3"], "publication_year:desc": ["R1", "R2"]})
     engine = LiteratureSynthesisEngine(biocontext_client=client)
-    found, err = await engine._planned_search(plan.europepmc_queries(year=2026), max_articles=8)
+    found, err = await engine._planned_search(plan.scholarly_queries(year=2026), max_articles=8)
     assert list(found)[:4] == ["L1", "R1", "L2", "R2"] and err is None
-    assert {sort for _, sort in client.calls} == {"CITED desc", None} and len(client.calls) == 2  # tier 1 sufficed
+    assert {sort for _, sort in client.calls} == {"cited_by_count:desc", "publication_year:desc"}
+    assert len(client.calls) == 2  # tier 1 sufficed
 
     sparse = _Client({})
-    await LiteratureSynthesisEngine(biocontext_client=sparse)._planned_search(plan.europepmc_queries(year=2026), 8)
-    assert len(sparse.calls) == len(plan.europepmc_queries(year=2026))  # nothing found: every tier was tried
+    await LiteratureSynthesisEngine(biocontext_client=sparse)._planned_search(plan.scholarly_queries(year=2026), 8)
+    assert len(sparse.calls) == len(plan.scholarly_queries(year=2026))  # nothing found: every tier was tried

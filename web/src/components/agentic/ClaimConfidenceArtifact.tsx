@@ -176,8 +176,27 @@ export function ClaimConfidenceArtifact({ data }: { data: ConfidenceData }) {
         Scores (0–1) estimate how well the retrieved evidence backs each claim; they are not probabilities that a claim is
         true. {calibrationProvenance(cal as Record<string, unknown>)}
       </p>
+      {(() => {
+        // A computed answer: the agent's measured precision covers its final expression only; the written statements
+        // are counted from the deterministic checks.
+        const comp = (data as { component_confidence?: Record<string, unknown> | null }).component_confidence;
+        const checks = (data as { statement_checks?: Record<string, number> }).statement_checks;
+        if (!comp && !checks) return null;
+        return (
+          <p className={styles.note} style={{ marginTop: 0, marginBottom: 8 }}>
+            {comp && isNum(comp.p_correct)
+              ? `Final answer expression: ${Math.round(Number(comp.p_correct) * 100)}% of the mathematics agent's verified answers were correct on a held-out benchmark (n=${String(comp.n ?? "?")}). This covers that expression only. `
+              : ""}
+            {checks && typeof checks.extracted === "number"
+              ? `Written statements: ${checks.passed ?? 0} of ${checks.extracted} checked and holding` +
+                (checks.failed ? `, ${checks.failed} contradicted` : "") +
+                (checks.inconclusive ? `, ${checks.inconclusive} not checkable` : "") + "."
+              : ""}
+          </p>
+        );
+      })()}
       {claims.length === 0 ? (
-        <p className={styles.muted}>No claims were scored.</p>
+        <p className={styles.muted}>No claims were scored against literature.</p>
       ) : (
         groups.map((g) => (
           <div key={g.band} className={styles.section}>

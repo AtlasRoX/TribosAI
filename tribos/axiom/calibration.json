@@ -1,0 +1,41 @@
+{
+  "benchmark": "math-eval-v1",
+  "fitted_on": "holdout3 set, first run with the code frozen",
+  "fitted_at": "2026-10-24T10:20:17.102139+00:00",
+  "n": 48,
+  "statuses": {
+    "verified": {
+      "n": 43,
+      "correct": 43,
+      "confidence": 0.9778,
+      "lower_95": 0.918
+    },
+    "partially_verified": {
+      "n": 1,
+      "correct": 1,
+      "confidence": 0.6667,
+      "lower_95": 0.2065
+    },
+    "unverified": {
+      "n": 2,
+      "correct": 0,
+      "confidence": 0.25,
+      "lower_95": 0.0
+    },
+    "failed": {
+      "n": 2,
+      "correct": 0,
+      "confidence": 0.25,
+      "lower_95": 0.0
+    }
+  },
+  "cross_fitted": {
+    "ece": 0.0625,
+    "brier": 0.0219,
+    "n": 48
+  },
+  "accuracy": 0.9167,
+  "verified_precision": 1.0,
+  "verified_coverage": 0.8958,
+  "note": "P(answer correct | final status), Laplace-smoothed (k + 1) / (n + 2) with a Wilson 95% lower bound. Fit only on a held-out set run once with the code frozen; refit after changing the parser, policy or verifier."
+}

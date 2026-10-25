@@ -442,6 +442,40 @@ html.light .welcome-emblem {
   margin-bottom: 6px;
 }
 
+/* Math (KaTeX). Sized to sit with 15px body text; display equations scroll sideways on narrow screens instead of
+   overflowing the column, with room so tall limits and \boxed borders are not clipped. */
+.markdown-content .katex {
+  font-size: 1.1em;
+}
+
+.markdown-content .katex-display {
+  margin: 12px 0 16px;
+  padding: 6px 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.markdown-content .katex-display > .katex {
+  font-size: 1.15em;
+}
+
+.markdown-content td .katex,
+.markdown-content th .katex {
+  white-space: nowrap;
+}
+
+/* A formula KaTeX cannot parse shows its source quietly, like code, instead of in alarm red. */
+.markdown-content .katex-error {
+  color: var(--text-muted) !important;
+  background: var(--bg-code);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  white-space: pre-wrap;
+}
+
 .inline-code {
   font-family: var(--font-mono);
   font-size: 0.86em;
@@ -1392,6 +1426,7 @@ html.light .welcome-emblem {
   line-height: 1.55;
   color: var(--text-muted);
   overflow-wrap: anywhere;
+  white-space: pre-line; /* list-like details (sub-questions, plan steps) keep one item per line */
 }
 
 .thinking-reasoning {
@@ -1496,6 +1531,7 @@ html.light .welcome-emblem {
 }
 
 .composer {
+  position: relative; /* anchors the slash-command menu and the formula editor */
   max-width: 768px;
   margin: 0 auto;
   display: flex;
@@ -1896,6 +1932,22 @@ kbd {
   color: var(--warning);
 }
 
+/* Under one answer: what this browser did not keep of it. Informational, so quiet and aligned with the text. */
+.message-storage-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 14px 0 0;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.message-storage-note svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+
 .storage-notice-dismiss {
   background: none;
   border: none;
@@ -1904,4 +1956,476 @@ kbd {
   text-decoration: underline;
   cursor: pointer;
   font: inherit;
+}
+
+/* Page-wide drop target shown while an image is dragged over the window. */
+.image-drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--bg-primary) 72%, transparent);
+  backdrop-filter: blur(2px);
+  pointer-events: none;
+  animation: image-drop-in 0.12s ease-out;
+}
+
+.image-drop-target {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: min(560px, 100%);
+  padding: 40px 24px;
+  border: 2px dashed var(--border-strong);
+  border-radius: 16px;
+  background: var(--bg-surface);
+  color: var(--text-heading);
+  text-align: center;
+}
+
+.image-drop-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.image-drop-hint {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+@keyframes image-drop-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .image-drop-overlay {
+    animation: none;
+  }
+}
+
+/* Under the composer text: the approach Auto would take and the units in the draft. */
+.composer-assist {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 0 2px;
+}
+
+.composer-assist:empty {
+  display: none;
+}
+
+/* The answer's place while the run works: skeleton lines with a slow shimmer, replaced by the first words. */
+.answer-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 6px 0 4px;
+}
+
+.answer-skeleton span {
+  display: block;
+  height: 11px;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    var(--bg-surface-active) 0%,
+    var(--bg-surface-hover) 40%,
+    var(--bg-surface-active) 80%
+  );
+  background-size: 300% 100%;
+  animation: answer-shimmer 1.8s ease-in-out infinite;
+}
+
+@keyframes answer-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -50% 0;
+  }
+}
+
+.answer-arrive {
+  animation: answer-arrive 0.25s ease-out;
+}
+
+@keyframes answer-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* A card whose numbers a click in the answer points to (tribos:highlight). */
+.value-flash {
+  animation: value-flash 1.6s ease-out;
+}
+
+@keyframes value-flash {
+  0%,
+  30% {
+    background: color-mix(in srgb, var(--nvidia-green) 22%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .answer-skeleton span,
+  .answer-arrive,
+  .value-flash {
+    animation: none;
+  }
+}
+
+/* Under the live activity panel while the search runs: stop it and answer from what was gathered. */
+.skip-search-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 4px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.skip-search-btn:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  color: var(--text-heading);
+}
+
+.skip-search-btn:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+/* Display equations: a copy menu on hover or focus (LaTeX source, or MathML for Word). */
+.markdown-content .math-block {
+  position: relative;
+}
+
+.markdown-content .math-copy {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-surface);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.markdown-content .math-block:hover .math-copy,
+.markdown-content .math-copy:focus-within {
+  opacity: 1;
+}
+
+.markdown-content .math-copy button {
+  padding: 2px 8px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.markdown-content .math-copy button:hover,
+.markdown-content .math-copy button:focus-visible {
+  outline: none;
+  background: var(--bg-surface-hover);
+  color: var(--text-heading);
+}
+
+/* A number the run computed: dotted underline; a click shows where it was computed. */
+.markdown-content mark.value-link {
+  padding: 0;
+  background: none;
+  color: inherit;
+  border-bottom: 1px dotted color-mix(in srgb, var(--nvidia-green) 70%, transparent);
+  cursor: pointer;
+}
+
+.markdown-content mark.value-link:hover,
+.markdown-content mark.value-link:focus-visible {
+  outline: none;
+  border-bottom-style: solid;
+  background: color-mix(in srgb, var(--nvidia-green) 10%, transparent);
+  border-radius: 3px;
+}
+
+@media (hover: none) {
+  .markdown-content .math-copy {
+    opacity: 1;
+  }
+}
+
+/* Contents of a long answer: a sticky pill with the section in view; opens to the full list. */
+.answer-toc {
+  position: sticky;
+  top: 8px;
+  z-index: 5;
+  margin: 0 0 10px;
+}
+
+.answer-toc-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  padding: 4px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+}
+
+.answer-toc-toggle > span:nth-child(2) {
+  overflow: hidden;
+  color: var(--text-heading);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.answer-toc-count {
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.answer-toc-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 260px;
+  max-width: min(420px, 90vw);
+  max-height: 50vh;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  box-shadow: var(--card-shadow);
+  list-style: none;
+}
+
+.answer-toc-list button {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.answer-toc-list button:hover,
+.answer-toc-list button[data-current] {
+  background: var(--bg-surface-hover);
+  color: var(--text-heading);
+}
+
+/* "Improve this section": quiet until the heading is hovered or focused. */
+.markdown-content .section-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.markdown-content .section-improve {
+  margin-left: auto;
+  padding: 1px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: none;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.markdown-content .section-heading:hover .section-improve,
+.markdown-content .section-improve:focus-visible,
+.markdown-content .section-improve[aria-expanded="true"] {
+  opacity: 1;
+}
+
+.markdown-content .section-feedback {
+  display: flex;
+  gap: 6px;
+  margin: -4px 0 12px;
+}
+
+.markdown-content .section-feedback input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg-surface);
+  color: var(--text-heading);
+  font: inherit;
+  font-size: 13px;
+}
+
+.markdown-content .section-feedback button {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--text-heading);
+  color: var(--bg-primary);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.markdown-content .section-feedback button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+@media (hover: none) {
+  .markdown-content .section-improve {
+    opacity: 1;
+  }
+}
+
+/* The "Checked: ..." line as a link to the answer's Verification tab. */
+.verify-state-link {
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.verify-state-link:hover span {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* First-run tour: a spotlight on the step's control and a small card beside it. */
+.tour-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+}
+
+.tour-spot {
+  position: fixed;
+  border-radius: 14px;
+  box-shadow: 0 0 0 9999px color-mix(in srgb, #000 45%, transparent);
+  transition: all 0.2s ease;
+  pointer-events: none;
+}
+
+.tour-dim {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, #000 45%, transparent);
+}
+
+.tour-card {
+  position: fixed;
+  width: 320px;
+  padding: 14px 16px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--bg-surface);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.3);
+  animation: palette-in 0.15s ease-out;
+}
+
+.tour-step {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.tour-title {
+  margin-top: 2px;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+.tour-body {
+  margin: 6px 0 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.tour-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.tour-skip,
+.tour-next {
+  padding: 5px 12px;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.tour-skip {
+  border: 1px solid var(--border-subtle);
+  background: none;
+  color: var(--text-muted);
+}
+
+.tour-skip:first-child {
+  margin-right: auto;
+}
+
+.tour-next {
+  border: 1px solid transparent;
+  background: var(--text-heading);
+  color: var(--bg-primary);
+}
+
+@keyframes palette-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tour-spot,
+  .tour-card {
+    transition: none;
+    animation: none;
+  }
 }

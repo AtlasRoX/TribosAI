@@ -2,10 +2,18 @@
 
 import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Library, Paperclip, Upload } from "lucide-react";
-import type { MessageAttachment } from "@/types/datasets";
+import type { DatasetLimits, MessageAttachment } from "@/types/datasets";
 import { DatasetLibrary } from "@/components/DatasetLibrary";
 import { ProvenanceForm } from "@/components/ProvenanceForm";
-import { ACCEPT_ATTR, precheckFile, toAttachment, type AuthHeaders } from "@/services/datasetService";
+import {
+  DEFAULT_DATASET_LIMITS,
+  acceptAttr,
+  extensionList,
+  fetchDatasetLimits,
+  precheckFile,
+  toAttachment,
+  type AuthHeaders,
+} from "@/services/datasetService";
 import styles from "./Datasets.module.css";
 
 export interface ComposerAttachButtonProps {
@@ -39,6 +47,19 @@ export function ComposerAttachButton({
   const inputRef = useRef<HTMLInputElement>(null);
   const full = attached.length >= MAX_ATTACHED;
   const headers: AuthHeaders = (extra) => authHeaders(extra);
+  // The server's accepted extensions and size caps; the built-in defaults until (or unless) it answers.
+  const [limits, setLimits] = useState<DatasetLimits>(DEFAULT_DATASET_LIMITS);
+  const headersRef = useRef(authHeaders);
+  useEffect(() => {
+    headersRef.current = authHeaders;
+  });
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetchDatasetLimits(backendUrl, (extra) => headersRef.current(extra), controller.signal).then((l) => {
+      if (!controller.signal.aborted) setLimits(l);
+    });
+    return () => controller.abort();
+  }, [backendUrl]);
 
   useEffect(() => {
     if (!menuOpen && !notice) return;
@@ -84,7 +105,7 @@ export function ComposerAttachButton({
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-    const problem = precheckFile(file);
+    const problem = precheckFile(file, limits);
     if (problem) {
       setNotice(`${file.name}: ${problem}`);
       return;
@@ -104,8 +125,8 @@ export function ComposerAttachButton({
         disabled={disabled}
         aria-haspopup="menu"
         aria-expanded={menuOpen}
-        aria-label={attached.length ? `Attach a dataset (${attached.length} attached)` : "Attach a dataset or model"}
-        title="Attach a dataset (.h5ad, .csv, .tsv) or SBML model"
+        aria-label={attached.length ? `Attach a dataset (${attached.length} attached)` : "Attach a dataset"}
+        title={`Attach a dataset (${extensionList(limits)})`}
         data-active={attached.length > 0 ? "true" : undefined}
         style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
       >
@@ -143,7 +164,7 @@ export function ComposerAttachButton({
             From library…
           </button>
           <div className={styles.menuHint}>
-            {full ? `Up to ${MAX_ATTACHED} datasets per question.` : ".h5ad, .csv/.tsv matrices, SBML .xml/.sbml"}
+            {full ? `Up to ${MAX_ATTACHED} datasets per question.` : extensionList(limits)}
           </div>
         </div>
       )}
@@ -154,12 +175,13 @@ export function ComposerAttachButton({
         </div>
       )}
 
-      <input ref={inputRef} type="file" accept={ACCEPT_ATTR} className={styles.hiddenInput} onChange={pickFile} tabIndex={-1} aria-hidden="true" />
+      <input ref={inputRef} type="file" accept={acceptAttr(limits)} className={styles.hiddenInput} onChange={pickFile} tabIndex={-1} aria-hidden="true" />
 
       {pendingFile && (
         <ProvenanceForm
           mode="upload"
           file={pendingFile}
+          limits={limits}
           backendUrl={backendUrl}
           authHeaders={headers}
           onClose={() => setPendingFile(null)}
@@ -176,6 +198,7 @@ export function ComposerAttachButton({
           authHeaders={headers}
           attachedIds={attached.map((a) => a.id)}
           attachDisabled={full}
+          limits={limits}
           onAttach={(record) => onAttach(toAttachment(record))}
           onDeleted={onDeleted}
           onUpdated={onUpdated ? (record) => onUpdated(toAttachment(record)) : undefined}

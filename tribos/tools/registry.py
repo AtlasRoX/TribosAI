@@ -1,5 +1,5 @@
 """
-Biomedical Tool Registry for Tribos, inspired by ToolUniverse (2025).
+Tool Registry for Tribos (mathematics, physics and engineering tools), inspired by ToolUniverse (2025).
 Provides a searchable, validated, and resilient tool registry with canonical entity identifiers,
 strict timeouts, typed error states, and health monitoring.
 """
@@ -43,13 +43,13 @@ class ErrorType(str, Enum):
 
 
 class ToolResult(BaseModel):
-    """Standardized output model for every biomedical tool execution."""
+    """Standardized output model for every tool execution."""
     success: bool = Field(..., description="Whether tool execution completed successfully without defect")
     tool_name: str = Field(..., description="Name of the executed tool")
     data: Any = Field(default=None, description="Structured output payload or execution artifact")
     canonical_ids: dict[str, str] = Field(
         default_factory=dict,
-        description="Canonical identifiers resolved (e.g. ensembl_id, uniprot_id, biomodel_id, efo_id, pmid, doi)",
+        description="Canonical identifiers resolved (e.g. computation_id, doi, arxiv_id, zbl_id, nist_constant, mp_id)",
     )
     error: str | None = Field(default=None, description="Human-readable error description if failed")
     error_type: ErrorType | None = Field(default=None, description="Typed failure classification")
@@ -68,10 +68,14 @@ class ToolResult(BaseModel):
 
 
 class ToolUniverseEntry(BaseModel):
-    """Registry entry metadata for a biomedical tool."""
+    """Registry entry metadata for a tool."""
     name: str = Field(..., description="Unique tool name")
     description: str = Field(..., description="Detailed description of tool capabilities")
-    domain: str = Field(..., description="Specialist agent domain: synapta | vivarix | lumicell | lithoscribe | general")
+    domain: str = Field(
+        ...,
+        description="Specialist agent domain: archivon | axiom | dynamis | physis | analysis (Calcula) | websurfer | "
+        "lithoscribe / vivarix (legacy aliases) | general",
+    )
     adapter_type: AdapterType = Field(..., description="Direct API adapter vs Local engine vs MCP")
     input_schema: type[BaseModel] = Field(..., description="Pydantic input schema class")
     output_schema: type[BaseModel] | None = Field(default=None, description="Expected structured output schema")
@@ -135,7 +139,7 @@ async def _await_maybe(value: Any) -> Any:
 
 class ToolRegistry:
     """
-    Searchable Tool Registry managing all biomedical tools across Tribos.
+    Searchable Tool Registry managing all tools across Tribos.
     Validates inputs, injects timeouts, enforces structured errors, and tracks health.
     """
 
@@ -184,12 +188,12 @@ class ToolRegistry:
         return [c for _, c in matched]
 
     async def execute(self, tool_name: str, *args: Any, **kwargs: Any) -> ToolResult:
-        if args and isinstance(args[0], dict):
-            kwargs = {**args[0], **kwargs}
         """
         Execute tool with input validation, timeout enforcement, and typed ToolResult output.
         Every call, whatever its outcome, is reported to the active run recorder.
         """
+        if args and isinstance(args[0], dict):
+            kwargs = {**args[0], **kwargs}
         started_at = datetime.now(UTC).isoformat()
         t0 = time.perf_counter()
         trace: dict[str, Any] = {}
@@ -466,6 +470,94 @@ class WebSurferSearchInput(BaseModel):
     max_results: int = Field(default=3, ge=1, le=20)
 
 
+def _alias_system(model_label: str | None, sbml_path: str | None) -> tuple[dict[str, Any] | None, str]:
+    """The Dynamis preset a legacy vivarix_* call names (its model_label), or why there is none.
+
+    These aliases once ran BioModels/SBML models in COPASI. Tribos has no SBML engine, so only a call naming a
+    Dynamis preset ("lorenz", "damped oscillator") is simulated; a BioModels id, an SBML file or nothing is a
+    validation error, never a stand-in system reported as the requested model (LOG-2)."""
+    from tribos.dynamis import ODE_PRESETS
+
+    from ..agents.orchestration.gather import resolve_dynamis_preset
+
+    if sbml_path:
+        return None, "SBML model simulation is not available in Tribos."
+    key = resolve_dynamis_preset(model_label) if model_label else None
+    if key is None:
+        presets = ", ".join(k.replace("_", " ") for k in ODE_PRESETS)
+        return None, (
+            "BioModels/SBML simulation is not available in Tribos, and no Dynamis system was named. Use "
+            f"dynamis_simulate_ode with the ODE right-hand sides, or name one of the presets ({presets}) as model_label."
+        )
+    return {"name": key, **ODE_PRESETS[key]}, ""
+
+
+def _alias_rejection(tool_name: str, reason: str) -> ToolResult:
+    return ToolResult(
+        success=False,
+        tool_name=tool_name,
+        error=reason,
+        error_type=ErrorType.VALIDATION_ERROR,
+        metadata={"reason_code": "MODEL_REQUIRED", "alias_of": "dynamis"},
+    )
+
+
+def _alias_result(res: Any, tool_name: str, system: dict[str, Any]) -> Any:
+    if isinstance(res, ToolResult):
+        res.metadata = {**(res.metadata or {}), "alias_of": res.tool_name, "dynamis_system": system["name"]}
+        res.tool_name = tool_name
+    return res
+
+
+def _vivarix_sim_alias(dyn_exec: Callable[..., Any]) -> Callable[..., Any]:
+    def run(duration: float = 60.0, intervals: int = 40, parameter_overrides: dict[str, float] | None = None,
+            sbml_path: str | None = None, model_label: str | None = None, **_kw: Any) -> Any:
+        system, reason = _alias_system(model_label, sbml_path)
+        if system is None:
+            return _alias_rejection("vivarix_simulate_time_course", reason)
+        res = dyn_exec(model_name=system["name"], t_span=(0.0, float(duration)), num_points=int(intervals) + 1,
+                       parameters=parameter_overrides or None)
+        return _alias_result(res, "vivarix_simulate_time_course", system)
+
+    return run
+
+
+def _vivarix_scan_alias(dyn_scan_exec: Callable[..., Any]) -> Callable[..., Any]:
+    def run(parameter_name: str = "", start_val: float = 1.0, end_val: float = 10.0, num_steps: int = 5,
+            duration: float = 60.0, intervals: int = 100, sbml_path: str | None = None, model_label: str | None = None,
+            **_kw: Any) -> Any:
+        system, reason = _alias_system(model_label, sbml_path)
+        if system is None:
+            return _alias_rejection("vivarix_parameter_scan", reason)
+        if parameter_name not in (system.get("parameters") or {}):
+            return _alias_rejection(
+                "vivarix_parameter_scan",
+                f"{parameter_name!r} is not a parameter of the {system['name'].replace('_', ' ')} system "
+                f"(parameters: {', '.join(system.get('parameters') or {}) or 'none'}).",
+            )
+        res = dyn_scan_exec(
+            rhs=system["rhs"], initial_state=system["initial_state"], parameter=parameter_name,
+            scan_range=(float(start_val), float(end_val)), num_points=int(num_steps), t_span=(0.0, float(duration)),
+            base_parameters=system.get("parameters"),
+        )
+        return _alias_result(res, "vivarix_parameter_scan", system)
+
+    return run
+
+
+def _vivarix_steady_alias(dyn_eq_exec: Callable[..., Any]) -> Callable[..., Any]:
+    def run(parameter_overrides: dict[str, float] | None = None, sbml_path: str | None = None,
+            model_label: str | None = None, **_kw: Any) -> Any:
+        system, reason = _alias_system(model_label, sbml_path)
+        if system is None:
+            return _alias_rejection("vivarix_compute_steady_state", reason)
+        params = {**(system.get("parameters") or {}), **(parameter_overrides or {})}
+        res = dyn_eq_exec(rhs=system["rhs"], guess=system["initial_state"], parameters=params or None)
+        return _alias_result(res, "vivarix_compute_steady_state", system)
+
+    return run
+
+
 def register_default_tools(registry: ToolRegistry) -> None:
     """Register all builtin STEM tools and extensions into the ToolUniverse registry."""
     from ..tools.web_search import FreeWebSearchClient
@@ -512,12 +604,16 @@ def register_default_tools(registry: ToolRegistry) -> None:
             executor=lambda **kwargs: arch_exec(**kwargs) if arch_exec else None,
         )
 
-    if registry.get_entry("dynamis_simulate_ode") is not None and registry.get_entry("vivarix_simulate_time_course") is None:
-        dyn_exec = registry.get_executor("dynamis_simulate_ode")
+    # Legacy vivarix_* names run a named Dynamis preset (model_label) or are rejected; see _alias_system.
+    dyn_exec = registry.get_executor("dynamis_simulate_ode")
+    if dyn_exec is not None and registry.get_entry("vivarix_simulate_time_course") is None:
         registry.register(
             ToolUniverseEntry(
                 name="vivarix_simulate_time_course",
-                description="Backward-compatible alias for Dynamis ODE simulation.",
+                description=(
+                    "Backward-compatible alias for Dynamis ODE simulation of a named preset (model_label); BioModels "
+                    "and SBML models are not available."
+                ),
                 domain="vivarix",
                 adapter_type=AdapterType.LOCAL_COMPUTE,
                 input_schema=VivarixSimInput,
@@ -525,18 +621,15 @@ def register_default_tools(registry: ToolRegistry) -> None:
                 timeout_seconds=45.0,
                 tags=["simulation", "ode", "kinetics"],
             ),
-            executor=lambda biomodel_id="BIOMD0000000010", duration=60.0, intervals=40, **kw: (
-                dyn_exec(model_name="damped_oscillator", t_span=(0.0, duration), num_points=intervals)
-                if dyn_exec else None
-            ),
+            executor=_vivarix_sim_alias(dyn_exec),
         )
 
-    if registry.get_entry("dynamis_parameter_scan") is not None and registry.get_entry("vivarix_parameter_scan") is None:
-        dyn_scan_exec = registry.get_executor("dynamis_parameter_scan")
+    dyn_scan_exec = registry.get_executor("dynamis_parameter_scan")
+    if dyn_scan_exec is not None and registry.get_entry("vivarix_parameter_scan") is None:
         registry.register(
             ToolUniverseEntry(
                 name="vivarix_parameter_scan",
-                description="Backward-compatible alias for Dynamis parameter scan.",
+                description="Backward-compatible alias for a Dynamis parameter scan of a named preset (model_label).",
                 domain="vivarix",
                 adapter_type=AdapterType.LOCAL_COMPUTE,
                 input_schema=VivarixParamScanInput,
@@ -544,26 +637,15 @@ def register_default_tools(registry: ToolRegistry) -> None:
                 timeout_seconds=120.0,
                 tags=["parameter_scan", "sensitivity"],
             ),
-            executor=lambda biomodel_id="BIOMD0000000010", parameter_name="omega", start_val=1.0, end_val=10.0, num_steps=5, duration=60.0, **kw: (
-                dyn_scan_exec(
-                    rhs={"x": "v", "v": "-2*zeta*omega*v - omega^2*x"},
-                    initial_state={"x": 1.0, "v": 0.0},
-                    parameter=parameter_name,
-                    scan_range=(start_val, end_val),
-                    num_points=num_steps,
-                    t_span=(0.0, duration),
-                    base_parameters={"zeta": 0.15, "omega": 2.0},
-                )
-                if dyn_scan_exec else None
-            ),
+            executor=_vivarix_scan_alias(dyn_scan_exec),
         )
 
-    if registry.get_entry("dynamis_equilibrium") is not None and registry.get_entry("vivarix_compute_steady_state") is None:
-        dyn_eq_exec = registry.get_executor("dynamis_equilibrium")
+    dyn_eq_exec = registry.get_executor("dynamis_equilibrium")
+    if dyn_eq_exec is not None and registry.get_entry("vivarix_compute_steady_state") is None:
         registry.register(
             ToolUniverseEntry(
                 name="vivarix_compute_steady_state",
-                description="Backward-compatible alias for Dynamis equilibrium solver.",
+                description="Backward-compatible alias for the Dynamis equilibrium solver on a named preset (model_label).",
                 domain="vivarix",
                 adapter_type=AdapterType.LOCAL_COMPUTE,
                 input_schema=VivarixSteadyStateInput,
@@ -571,13 +653,7 @@ def register_default_tools(registry: ToolRegistry) -> None:
                 timeout_seconds=30.0,
                 tags=["steady_state", "equilibrium"],
             ),
-            executor=lambda biomodel_id="BIOMD0000000010", **kw: (
-                dyn_eq_exec(
-                    rhs={"x": "v", "v": "-2*0.15*2.0*v - 4.0*x"},
-                    guess={"x": 0.1, "v": 0.1},
-                )
-                if dyn_eq_exec else None
-            ),
+            executor=_vivarix_steady_alias(dyn_eq_exec),
         )
 
 
@@ -603,7 +679,7 @@ def get_tool_registry() -> ToolRegistry:
         register_default_tools(candidate)
         _REGISTRY_COMPLETE = True
     except Exception as e:
-        logger.warning("Failed to register default biomedical tools (will retry): %s", e)
+        logger.warning("Failed to register default tools (will retry): %s", e)
         if _GLOBAL_REGISTRY is not None and len(_GLOBAL_REGISTRY.list_tools()) >= len(candidate.list_tools()):
             return _GLOBAL_REGISTRY
     _GLOBAL_REGISTRY = candidate

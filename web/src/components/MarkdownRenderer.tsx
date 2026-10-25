@@ -8,7 +8,12 @@ import rehypeKatex from "rehype-katex";
 import { Check, Copy, ExternalLink, Terminal } from "lucide-react";
 import { CitationRef } from "@/components/CitationRef";
 import { rehypeCitations, rehypeIdentifierLinkGuard } from "@/lib/citations";
+import { KATEX_OPTIONS, preprocessMarkdown } from "@/lib/markdownNormalize";
+import { rehypeMathBlocks, rehypeValueLinks, type LinkedValue } from "@/lib/mathInteractions";
+import { emitUi } from "@/lib/uiEvents";
+import { sectionSlug } from "@/lib/sections";
 import {
+  linkWebMarkers,
   rehypeStripUnsafe,
   remarkHtmlBreaks,
   safeUrlTransform,
@@ -23,6 +28,144 @@ interface MarkdownRendererProps {
   citations?: CitationMap;
   /** Live text: finished blocks are memoized so each new token re-parses only the last block. */
   streaming?: boolean;
+  /** Computed values the answer may quote: matching numbers become links to where they were computed. */
+  linkedValues?: LinkedValue[];
+  /** A finished answer: section headings offer "Improve this section" (a targeted follow-up). */
+  sectionActions?: boolean;
+}
+
+function headingText(children: React.ReactNode): string {
+  if (typeof children === "string" || typeof children === "number") return String(children);
+  if (Array.isArray(children)) return children.map(headingText).join("");
+  if (React.isValidElement(children)) return headingText((children.props as { children?: React.ReactNode }).children);
+  return "";
+}
+
+/** A section heading: anchored for the contents bar; with actions, a short note asks for a revision of this section. */
+function SectionHeading({ level, actions, children }: { level: 2 | 3; actions: boolean; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState("");
+  const title = headingText(children).trim();
+  const Tag = level === 2 ? "h2" : "h3";
+  const send = () => {
+    const text = note.trim();
+    if (!text) return;
+    emitUi("tribos:ask", {
+      text: `Revise only the section "${title}" of your previous answer: ${text}. Keep every other section as it is, and recheck any number the change affects.`,
+      send: true,
+    });
+    setOpen(false);
+    setNote("");
+  };
+  return (
+    <>
+      <Tag data-section={sectionSlug(title)} className={actions ? "section-heading" : undefined}>
+        {children}
+        {actions && (
+          <button
+            type="button"
+            className="section-improve"
+            onClick={() => setOpen((o) => !o)}
+            aria-expanded={open}
+            title="Something wrong or missing here? Ask for a revision of this section only"
+          >
+            Improve this section
+          </button>
+        )}
+      </Tag>
+      {actions && open && (
+        <form
+          className="section-feedback"
+          onSubmit={(e) => {
+            e.preventDefault();
+            send();
+          }}
+        >
+          <input
+            autoFocus
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder={`What should change in "${title.slice(0, 40)}"? e.g. "the phase sign is wrong"`}
+            aria-label={`Feedback on the section ${title}`}
+            onKeyDown={(e) => e.key === "Escape" && setOpen(false)}
+          />
+          <button type="submit" disabled={!note.trim()}>
+            Revise
+          </button>
+        </form>
+      )}
+    </>
+  );
+}
+
+/** A display equation with a copy menu: the LaTeX source, or MathML that Word turns into an equation on paste. */
+function MathBlock({ latex, children }: { latex: string; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [copied, setCopied] = useState<"" | "latex" | "word">("");
+  const copy = async (kind: "latex" | "word") => {
+    const text = kind === "latex" ? latex : ref.current?.querySelector("math")?.outerHTML || latex;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(kind);
+      window.setTimeout(() => setCopied(""), 1500);
+    } catch {
+      // clipboard unavailable (insecure context): nothing to report beyond the unchanged label
+    }
+  };
+  return (
+    <div className="math-block" ref={ref}>
+      {children}
+      {latex && (
+        <span className="math-copy" role="group" aria-label="Copy this equation">
+          <button type="button" onClick={() => void copy("latex")} title="Copy the LaTeX source">
+            {copied === "latex" ? "Copied" : "LaTeX"}
+          </button>
+          <button type="button" onClick={() => void copy("word")} title="Copy as MathML; paste into Word for an editable equation">
+            {copied === "word" ? "Copied" : "Word"}
+          </button>
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** A number the run computed: a click scrolls to and highlights the card row that holds it. */
+function ValueLink({ valueKey, title, children }: { valueKey: string; title?: string; children: React.ReactNode }) {
+  const show = (from: HTMLElement) => {
+    const scope = from.closest("[data-message-id]") ?? document;
+    const find = () => scope.querySelector<HTMLElement>(`[data-value-key="${CSS.escape(valueKey)}"]`);
+    const flash = (el: HTMLElement) => {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.remove("value-flash");
+      void el.offsetWidth; // restart the animation on a repeated click
+      el.classList.add("value-flash");
+    };
+    const target = find();
+    if (target) return flash(target);
+    // The card is collapsed: open the cards, then point at the row once it renders.
+    window.dispatchEvent(new CustomEvent("tribos:cards", { detail: { open: true } }));
+    window.setTimeout(() => {
+      const later = find();
+      if (later) flash(later);
+    }, 120);
+  };
+  return (
+    <mark
+      className="value-link"
+      title={title}
+      role="button"
+      tabIndex={0}
+      onClick={(e) => show(e.currentTarget)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          show(e.currentTarget);
+        }
+      }}
+    >
+      {children}
+    </mark>
+  );
 }
 
 type HastNode = {
@@ -124,67 +267,71 @@ function ScrollableTable({ layout, children }: { layout?: string; children: Reac
   );
 }
 
+/** Smallest scale a display equation is shrunk to before it scrolls instead: below this it is hard to read. */
+const MIN_EQUATION_SCALE = 0.72;
+
 /**
- * Preprocesses markdown text to ensure clean rendering:
- * 1. Normalizes raw HTML line breaks (<br>, <br/>) to valid XHTML (<br />)
- * 2. Ensures prominent unheadered section titles (e.g. "Translational & Therapeutic Implications") get proper H3 headers
- * 3. Adds spacing around tables to prevent markdown parser boundary errors
+ * Fits display equations to the column: one a little too wide is scaled down (to MIN_EQUATION_SCALE at most), so a
+ * long derivation line reads without a scrollbar; only a still wider one scrolls. Refitted when the column resizes.
  */
-function preprocessMarkdown(raw: string): string {
-  if (!raw) return "";
-
-  let processed = raw;
-
-  // 0. Normalize legacy agent and project names to official Tribos designations
-  processed = processed
-    .replace(/\bTalk2KnowledgeGraphs?\b/gi, "Physis")
-    .replace(/\bTalk2BioModels?\b/gi, "Dynamis")
-    .replace(/\bTalk2Cells?\b/gi, "Calcula")
-    .replace(/\bTalk2Scholars?\b/gi, "Archivon")
-    .replace(/\bSynapta\b/gi, "Physis")
-    .replace(/\bVivarix\b/gi, "Dynamis")
-    .replace(/\bLumicell\b/gi, "Calcula")
-    .replace(/\bLithoscribe\b/gi, "Archivon")
-    .replace(/\bTalk2AI[-_ ]?Agents[-_ ]?4[-_ ]?Pharma\b/gi, "Tribos")
-    .replace(/\bAI[-_ ]?Agents[-_ ]?4[-_ ]?Pharma\b/gi, "Tribos");
-
-  // 1. Strip unselected placeholder sections like "No domain-specific findings were collected..."
-  processed = processed.replace(
-    /(?:^|\n)#{1,4}\s*[^#\n]*(?:Archivon|Axiom|Dynamis|Calcula|Physis|Synapta|Vivarix|Lumicell|Lithoscribe)[^\n]*\n+No domain-specific findings were collected[^\n]*\n*/gi,
-    "\n"
-  );
-
-  // 2. Strip any robotic naming convention boilerplate footers
-  processed = processed.replace(
-    /(?:^|\n)\*?_?All agent references follow the official naming convention[^\n]*\*?_?/gi,
-    ""
-  );
-
-  // 2b. Internal hypothesis-tier labels ("`[PREDICTION: PROPOSED HYPOTHESIS - MODERATE EVIDENCE]`") read as plain words
-  processed = processed.replace(
-    /`?\[PREDICTION:\s*PROPOSED HYPOTHESIS\s*-\s*([^\]]+)\]`?/gi,
-    (_m, tier: string) => `Hypothesis (${tier.trim().toLowerCase()})`
-  );
-
-  // 3. Normalize line breaks; remarkHtmlBreaks turns exactly this tag into a hard break (other HTML is dropped)
-  processed = processed.replace(/<br\s*\/?>/gi, "<br />");
-
-  // 4. Ensure clean line separation after table rows
-  processed = processed.replace(/(\|[^\n]+\|)\n(?=[A-Za-z#])/g, "$1\n\n");
-
-  return processed;
+function useFitDisplayMath(ref: React.RefObject<HTMLDivElement | null>, content: string) {
+  useEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+    const fit = () => {
+      root.querySelectorAll<HTMLElement>(".katex-display").forEach((box) => {
+        const math = box.firstElementChild as HTMLElement | null;
+        if (!math) return;
+        math.style.fontSize = "";
+        const available = box.clientWidth;
+        const needed = math.scrollWidth;
+        if (!available || needed <= available) return;
+        const scale = Math.max(MIN_EQUATION_SCALE, (available - 2) / needed);
+        math.style.fontSize = `${(parseFloat(getComputedStyle(math).fontSize) * scale).toFixed(2)}px`;
+      });
+    };
+    fit();
+    let live = true;
+    // KaTeX fonts load after the first paint and change every equation's width.
+    document.fonts?.ready.then(() => live && fit()).catch(() => undefined);
+    if (typeof ResizeObserver === "undefined") return () => { live = false; };
+    let width = root.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (root.clientWidth === width) return;
+      width = root.clientWidth;
+      fit();
+    });
+    observer.observe(root);
+    return () => {
+      live = false;
+      observer.disconnect();
+    };
+  }, [ref, content]);
 }
 
 const REMARK_PLUGINS: NonNullable<MarkdownOptions["remarkPlugins"]> = [remarkGfm, remarkMath, remarkHtmlBreaks];
-const REHYPE_KATEX_PLUGIN: [typeof rehypeKatex, { throwOnError: boolean; strict: boolean }] = [
-  rehypeKatex,
-  { throwOnError: false, strict: false },
-];
+const REHYPE_KATEX_PLUGIN: [typeof rehypeKatex, typeof KATEX_OPTIONS] = [rehypeKatex, KATEX_OPTIONS];
+const MATH_BLOCK_KEY = "math-block";
 
-function useMarkdownComponents(citations?: CitationMap): Components {
+function useMarkdownComponents(citations?: CitationMap, sectionActions = false): Components {
   return useMemo<Components>(
     () => ({
-      code({ className, children, ...props }) {
+      h2({ children }) {
+        return (
+          <SectionHeading level={2} actions={sectionActions}>
+            {children}
+          </SectionHeading>
+        );
+      },
+      h3({ children }) {
+        return (
+          <SectionHeading level={3} actions={false}>
+            {children}
+          </SectionHeading>
+        );
+      },
+      // `node` is the hast element react-markdown passes along; it must not reach the DOM as an attribute.
+      code({ className, children, node: _node, ...props }) {
         const match = /language-(\w+)/.exec(className || "");
         const isInline = !match && !String(children).includes("\n");
 
@@ -200,6 +347,28 @@ function useMarkdownComponents(citations?: CitationMap): Components {
         const language = match ? match[1] : "code";
 
         return <CodeBlock language={language} code={codeText} />;
+      },
+      div({ children, className, node: _node, ...props }) {
+        const latex = (props as Record<string, unknown>)["data-latex"];
+        if (typeof className === "string" && className.split(" ").includes(MATH_BLOCK_KEY)) {
+          return <MathBlock latex={typeof latex === "string" ? latex : ""}>{children}</MathBlock>;
+        }
+        return (
+          <div className={className} {...props}>
+            {children}
+          </div>
+        );
+      },
+      mark({ children, className, node: _node, ...props }) {
+        const key = (props as Record<string, unknown>)["data-value-key"];
+        if (typeof className === "string" && className.includes("value-link") && typeof key === "string") {
+          return (
+            <ValueLink valueKey={key} title={typeof props.title === "string" ? props.title : undefined}>
+              {children}
+            </ValueLink>
+          );
+        }
+        return <mark className={className}>{children}</mark>;
       },
       table({ children, ...props }) {
         const layout = (props as Record<string, unknown>)["data-layout"];
@@ -233,12 +402,13 @@ function useMarkdownComponents(citations?: CitationMap): Components {
         );
       },
     }),
-    [citations]
+    [citations, sectionActions]
   );
 }
 
 const STREAMING_REHYPE_PLUGINS: NonNullable<MarkdownOptions["rehypePlugins"]> = [
   REHYPE_KATEX_PLUGIN,
+  rehypeMathBlocks,
   rehypeStripUnsafe,
   rehypeIdentifierLinkGuard,
   rehypeReadableTables,
@@ -276,23 +446,26 @@ function StreamingMarkdown({ content }: { content: string }) {
   );
 }
 
-function MarkdownRendererImpl({ content, citations, streaming = false }: MarkdownRendererProps) {
+function MarkdownRendererImpl({ content, citations, streaming = false, linkedValues, sectionActions = false }: MarkdownRendererProps) {
+  // A stable key for the values, so a new array with the same numbers does not re-parse the answer.
+  const valuesKey = JSON.stringify(linkedValues || []);
   const cleanedContent = useMemo(() => {
-    let text = preprocessMarkdown(content);
+    let text = preprocessMarkdown(content, { streaming });
     if (citations?.entries) {
       const urlEntries = Object.values(citations.entries).filter((e) => e && e.type === "url" && e.url);
       if (urlEntries.length > 0) {
         const primary = urlEntries[0];
         const title = primary.title || "Web Source";
-        text = text.replace(/\[(?:web\s*search|web)\]/gi, `[${title}](${primary.url})`);
+        text = linkWebMarkers(text, title, String(primary.url));
       }
     }
     return text;
-  }, [content, citations]);
+  }, [content, citations, streaming]);
   // Raw HTML is never rendered (skipHtml + rehypeStripUnsafe); trusted transforms run after the strip.
   const rehypePlugins = useMemo<NonNullable<MarkdownOptions["rehypePlugins"]>>(
     () => [
       REHYPE_KATEX_PLUGIN,
+      rehypeMathBlocks,
       rehypeStripUnsafe,
       // Links whose text names an identifier but point elsewhere show their real destination (UI-018).
       [rehypeIdentifierLinkGuard, { map: citations }] as [typeof rehypeIdentifierLinkGuard, { map?: CitationMap }],
@@ -300,14 +473,17 @@ function MarkdownRendererImpl({ content, citations, streaming = false }: Markdow
         ? [[rehypeCitations, { map: citations }] as [typeof rehypeCitations, { map: CitationMap }]]
         : []),
       rehypeReadableTables,
+      [rehypeValueLinks, { values: JSON.parse(valuesKey) as LinkedValue[] }] as [typeof rehypeValueLinks, { values: LinkedValue[] }],
     ],
-    [citations]
+    [citations, valuesKey]
   );
-  const components = useMarkdownComponents(citations);
+  const components = useMarkdownComponents(citations, sectionActions && !streaming);
+  const contentRef = useRef<HTMLDivElement>(null);
+  useFitDisplayMath(contentRef, streaming ? "" : cleanedContent);
   const rendered = useMemo(
     () =>
       streaming ? null : (
-        <div className="markdown-content">
+        <div className="markdown-content" ref={contentRef}>
           <ReactMarkdown
             skipHtml
             remarkPlugins={REMARK_PLUGINS}

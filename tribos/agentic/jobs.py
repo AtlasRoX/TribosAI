@@ -425,6 +425,8 @@ class JobManager:
         self._signals: dict[str, asyncio.Event] = {}
         self._seq: dict[str, int] = {}
         self._secrets: dict[str, dict[str, Any]] = {}
+        # Jobs deleted while queued or running: their task may still emit events, which are dropped. An id leaves the
+        # set when its task ends, so the set holds at most the jobs in flight.
         self._deleted: set = set()
         self.recovered = self.store.mark_interrupted()
         if self.recovered:
@@ -469,6 +471,7 @@ class JobManager:
                 logger.exception("Job worker %d failed on %s", index, job_id)
             finally:
                 self._tasks.pop(job_id, None)
+                self._deleted.discard(job_id)
                 queue.task_done()
 
     # Events -------------------------------------------------------------------------------------------------
@@ -630,7 +633,8 @@ class JobManager:
             task = self._tasks.get(job_id)
             if task is not None and not task.done():
                 task.cancel()
-        self._deleted.add(job_id)
+            # Only a job a worker may still pick up or finish can emit late events; a finished job's id is not kept.
+            self._deleted.add(job_id)
         self._seq.pop(job_id, None)
         self._secrets.pop(job_id, None)
         return self.store.delete(job_id, user_id)

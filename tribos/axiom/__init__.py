@@ -1,4 +1,5 @@
-"""Axiom: symbolic mathematics specialist package powered by SymPy and mpmath."""
+"""Axiom: symbolic mathematics specialist package powered by SymPy and mpmath, plus the verified mathematics
+agent (problem parser, bounded tool loop, independent verifier) built on it."""
 
 from .engine import (
     TRANSFORMATIONS,
@@ -8,6 +9,7 @@ from .engine import (
     axiom_dsolve,
     axiom_latex,
     axiom_linalg,
+    axiom_nsolve,
     axiom_simplify,
     axiom_solve,
     axiom_verify_identity,
@@ -19,6 +21,7 @@ from .schemas import (
     AxiomDsolveInput,
     AxiomLatexInput,
     AxiomLinalgInput,
+    AxiomNsolveInput,
     AxiomSimplifyInput,
     AxiomSolveInput,
     AxiomVerifyIdentityInput,
@@ -30,6 +33,7 @@ __all__ = [
     "AxiomEngine",
     "AxiomLatexInput",
     "AxiomLinalgInput",
+    "AxiomNsolveInput",
     "AxiomSimplifyInput",
     "AxiomSolveInput",
     "AxiomSymbolicEngine",
@@ -39,6 +43,7 @@ __all__ = [
     "axiom_dsolve",
     "axiom_latex",
     "axiom_linalg",
+    "axiom_nsolve",
     "axiom_simplify",
     "axiom_solve",
     "axiom_verify_identity",

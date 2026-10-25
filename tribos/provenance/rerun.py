@@ -38,11 +38,15 @@ _REMOTE_ADAPTERS = {"DIRECT_REST", "DIRECT_GRAPHQL", "REMOTE_MCP"}
 # Replay policy (SEC-001): one definition shared by the MCP endpoint and both re-run endpoints
 # -----------------------------------------------------------------------------
 
-# Tools that write, upload, execute code, dock/generate (paid GPU calls), calibrate against uploaded data or
-# export are never run as a direct, LLM-free RPC, whatever registry or client asks for them.
-UNSAFE_TOOL_RE = re.compile(r"(upload|write|delete|remove|dock|generate|run_python|sandbox|calibrat|export)", re.I)
+# Tools that write, upload, execute code (Python, SageMath or any other interpreter), dock/generate (paid GPU
+# calls), calibrate against uploaded data or export are never run as a direct, LLM-free RPC, whatever registry or
+# client asks for them (SEC-6: axiom_sagemath / calcula_run_sagemath run model-written Sage code).
+UNSAFE_TOOL_RE = re.compile(
+    r"(upload|write|delete|remove|dock|generate|run_python|run_code|sage|exec|script|sandbox|calibrat|export)", re.I
+)
 # Registry tags that mark a tool as reading per-user data or executing code.
-UNSAFE_TOOL_TAGS = frozenset({"upload", "uploads", "user_data", "sandbox", "code_execution", "write"})
+UNSAFE_TOOL_TAGS = frozenset({"upload", "uploads", "user_data", "sandbox", "code_execution", "executes_code", "code",
+                              "write", "sage", "sagemath"})
 # Input keys that name server files. A client manifest may only carry `dataset_path`, and only inside the typed
 # dataset roots (the same policy as a path typed into a question); every other path-valued input is refused.
 _PATH_KEY_RE = re.compile(r"(^|_)(path|paths|file|files|dir|directory|filename)$", re.I)

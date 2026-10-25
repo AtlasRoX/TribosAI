@@ -10,8 +10,8 @@ a `SourceName`:
 - `version_label`: the row label of its data release in the report's reproducibility table.
 
 Strings are the ones the call sites already produced; where two old maps disagreed for the same source, each
-field keeps the string its call site printed (for example `lithoscribe` reads "Europe PMC" in prose while its
-approval label is "Literature search (Europe PMC, Semantic Scholar)").
+field keeps the string its call site printed. The legacy literature key `lithoscribe` names the Archivon search,
+which queries arXiv, Semantic Scholar, OpenAlex, Crossref, zbMATH Open and NASA ADS (not Europe PMC).
 """
 
 from __future__ import annotations
@@ -30,15 +30,29 @@ class SourceName:
     aliases: tuple[str, ...] = ()
 
 
+# The sources Archivon queries (tribos.archivon.engine.ALL_SOURCES).
+_ARCHIVON_SOURCES = "arXiv, Semantic Scholar, OpenAlex, Crossref, zbMATH Open, NASA ADS"
+
 _ENTRIES: tuple[SourceName, ...] = (
     # Tribos agents.
+    SourceName("archivon", "Literature search", "Scholarly literature search (" + _ARCHIVON_SOURCES + ")",
+               agent="Archivon", component="Archivon"),
+    SourceName("axiom", "Axiom symbolic algebra", "Symbolic computer algebra (Axiom, SymPy, SageMath)",
+               agent="Axiom", component="Axiom"),
+    SourceName("dynamis", "Dynamis simulation", "Dynamical simulation (Dynamis, SciPy)",
+               agent="Dynamis", component="Dynamis"),
+    SourceName("calcula", "Calcula computing", "Sandboxed scientific Python computation (Calcula)",
+               agent="Calcula", component="Calcula"),
+    SourceName("physis", "Physis physics engine", "Physical constants and dimensional analysis (Physis)",
+               agent="Physis", component="Physis"),
+    SourceName("websurfer", "web search", "Web search", agent="WebSurfer", component="WebSurfer"),
+    SourceName("vivarix", "Dynamis simulation", "Dynamical simulation (Dynamis, SciPy)",
+               agent="Dynamis", component="Dynamis"),
+    # Legacy key of the literature agent: the same Archivon search, under the same names.
+    SourceName("lithoscribe", "Literature search", "Scholarly literature search (" + _ARCHIVON_SOURCES + ")",
+               agent="Archivon", component="Archivon"),
     SourceName("synapta", "OpenTargets/KEGG", "Target-disease associations and pathways (OpenTargets, KEGG)",
                agent="Synapta", component="Synapta"),
-    SourceName("lithoscribe", "Europe PMC", "Literature search (Europe PMC, Semantic Scholar)",
-               agent="Lithoscribe", component="Lithoscribe"),
-    SourceName("websurfer", "web search", "Web search", agent="WebSurfer", component="WebSurfer"),
-    SourceName("vivarix", "COPASI simulation", "Kinetic model simulation (Vivarix, COPASI)",
-               agent="Vivarix", component="Vivarix"),
     SourceName("lumicell", "single-cell analysis", "Single-cell analysis of the attached dataset (Lumicell, Scanpy)",
                agent="Lumicell", component="Lumicell"),
     # Evidence sources (EvidenceSource.key) and the agent their evidence is attributed to.

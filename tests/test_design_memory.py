@@ -111,7 +111,7 @@ def test_unverified_turn_stores_tool_evidence_provisional_and_simulation_is_neve
     by_type = {r["memory_type"]: r for r in _nodes(mem, "bob")}
     assert by_type[MemoryType.RETRIEVED_EVIDENCE.value]["verification_status"] == VerificationStatus.VERIFIED_EMPIRICAL.value
     assert by_type[MemoryType.COMPUTED_RESULT.value]["verification_status"] == VerificationStatus.PROVISIONAL.value
-    assert "not clinical evidence" in by_type[MemoryType.COMPUTED_RESULT.value]["content"]
+    assert "model output" in by_type[MemoryType.COMPUTED_RESULT.value]["content"]
     pkg = mem.get_context_package("t2", user_id="bob")
     assert not pkg.computed_artifacts  # never recalled as verified computed evidence
     # ...but the model id a verified turn observed is still an observed identifier for the verifier.

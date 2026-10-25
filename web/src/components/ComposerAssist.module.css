@@ -1,0 +1,180 @@
+/* Composer helpers: slash commands, approach preview, unit hints, formula insert (design tokens, both themes). */
+.menu {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: calc(100% + 6px);
+  z-index: 30;
+  max-height: 300px;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-surface);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  list-style: none;
+}
+
+.menuItem {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menuItem[data-active] {
+  background: var(--bg-surface-hover);
+}
+
+.cmd {
+  min-width: 92px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text-heading);
+}
+
+.cmdHint {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.assistRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-height: 0;
+}
+
+.route,
+.units {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.unit {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg-surface-active);
+  color: var(--text-muted);
+}
+
+.unit b {
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+.faint {
+  color: var(--text-faint);
+}
+
+.latex {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: calc(100% + 6px);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-surface);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+}
+
+.latexHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+.latexToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.latexInput {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-code);
+  color: var(--text-body);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.latexPreview {
+  min-height: 34px;
+  padding: 4px 6px;
+  overflow-x: auto;
+  font-size: 13px;
+}
+
+.latexActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+}
+
+.latexActions > :first-child {
+  margin-right: auto;
+}
+
+.btn,
+.btnGhost {
+  padding: 5px 12px;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.btn {
+  border: 1px solid transparent;
+  background: var(--text-heading);
+  color: var(--bg-primary);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btnGhost {
+  border: 1px solid var(--border-subtle);
+  background: none;
+  color: var(--text-muted);
+}
+
+.menuItem:focus-visible,
+.btn:focus-visible,
+.btnGhost:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring, 0 0 0 3px rgba(167, 179, 255, 0.35));
+}

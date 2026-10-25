@@ -6,7 +6,10 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import * as safety from "../src/lib/markdownSafety.ts";
+import { normalizeDisplayMath } from "../src/lib/markdownNormalize.ts";
 import * as cite from "../src/lib/citations.ts";
 
 const { rehypeStripUnsafe, remarkHtmlBreaks, safeUrl, safeUrlTransform, splitStreamingBlocks } = safety;
@@ -111,4 +114,70 @@ test("citations are still linked after the unsafe-content strip", () => {
 test("streaming blocks split at blank lines but never inside a code fence", () => {
   const blocks = splitStreamingBlocks("# Title\n\nPara one\n\n```\ncode\n\nmore code\n```\n\nTail");
   assert.deepEqual(blocks, ["# Title", "Para one", "```\ncode\n\nmore code\n```", "Tail"]);
+});
+
+// Display math as the model writes it: `$$\begin{aligned}` with the fence on the content line, rows ending in `\\`.
+const ALIGNED_ANSWER = String.raw`**Step 1 — Brackets:**
+$$\begin{aligned}
+\frac{5}{6}\times\frac{12}{5} &= \frac{5\times 12}{6\times 5} &&\text{(multiply)}\\
+&= \frac{60}{30}\\
+&= 2
+\end{aligned}$$
+Equivalently, by cancellation: $\frac{5}{5}\times\frac{12}{6} = 2$.
+
+**Step 4:**
+$$\begin{aligned}
+\frac{3}{4} + 2 &= \frac{11}{4}\\[4pt]
+\frac{11}{4} - 8 &= -\frac{21}{4}
+\end{aligned}$$
+
+**Final exact value:**
+$$\boxed{-\frac{21}{4} = -5.25}$$
+
+| Check | Result |
+|---|---|
+| Exponent | $8$ |`;
+
+function renderMath(markdown: string): string {
+  return renderToStaticMarkup(
+    createElement(
+      ReactMarkdown as any,
+      { skipHtml: true, remarkPlugins: [remarkGfm, remarkMath], rehypePlugins: [[rehypeKatex, { throwOnError: false, strict: false }]] },
+      markdown
+    )
+  );
+}
+
+test("aligned display math with the fence on the content line renders without KaTeX errors", () => {
+  assert.match(renderMath(ALIGNED_ANSWER), /katex-error/); // the raw answer is what broke the page
+  const html = renderMath(normalizeDisplayMath(ALIGNED_ANSWER));
+  assert.doesNotMatch(html, /katex-error/);
+  assert.equal((html.match(/class="katex-display"/g) || []).length, 3);
+  assert.match(html, /<p>Equivalently, by cancellation:/); // prose after a block is prose again, not math
+  assert.match(html, /<table>/);
+});
+
+test("rows inside a math block are never wrapped as standalone formulas", () => {
+  const out = normalizeDisplayMath(String.raw`$$\begin{aligned}
+\frac{a}{b} &= c\\
+\end{aligned}$$`);
+  assert.equal(out, String.raw`$$
+\begin{aligned}
+\frac{a}{b} &= c\\
+\end{aligned}
+$$`);
+});
+
+test("bare formulas and bare aligned environments get delimiters; code, tables and inline math stay as written", () => {
+  const formula = String.raw`v = \frac{d}{t}`;
+  assert.equal(normalizeDisplayMath(formula), `\n$$\n${formula}\n$$\n`);
+  const env = String.raw`\begin{aligned}
+x &= \frac{1}{2}\\
+\end{aligned}`;
+  assert.equal(normalizeDisplayMath(env), `\n$$\n${env}\n$$\n`);
+  const code = "```\n" + String.raw`v = \frac{d}{t}` + "\n$$\n```";
+  assert.equal(normalizeDisplayMath(code), code);
+  assert.equal(normalizeDisplayMath("| a | $$x$$ |"), "| a | $$x$$ |");
+  const inline = String.raw`Inline $x = \frac{1}{2}$ stays.`;
+  assert.equal(normalizeDisplayMath(inline), inline);
 });

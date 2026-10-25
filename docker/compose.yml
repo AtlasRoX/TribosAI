@@ -4,8 +4,12 @@
 #
 # Secrets and settings come from ../.env (gitignored; see the README for the variables: OPENAI_API_KEY,
 # NVIDIA_API_KEY, TRIBOS_API_TOKENS or TRIBOS_AUTH_MODE=disabled, ...). Paths below are relative to
-# this file. All backend state (runs, jobs, memory, projects, caches, PrimeKG) lives on the `tribos-data`
-# volume mounted at /data.
+# this file. All backend state (runs, jobs, memory, projects, caches) lives on the `tribos-data` volume mounted
+# at /data.
+#
+# Both ports are published on 127.0.0.1 only, so the API and the web app are reachable from this machine and not
+# from the network. To expose them (behind a TLS proxy, with TRIBOS_API_TOKENS or TRIBOS_JWT_SECRET set and never
+# with TRIBOS_AUTH_MODE=disabled), set TRIBOS_API_BIND / TRIBOS_WEB_BIND, e.g. TRIBOS_API_BIND=0.0.0.0.
 
 name: tribos
 
@@ -25,7 +29,8 @@ services:
     volumes:
       - tribos-data:/data
     ports:
-      - "${TRIBOS_API_PORT:-8000}:8000"
+      # Loopback only by default (TRIBOS_ALLOW_INSECURE=1 relies on this); see the header for TRIBOS_API_BIND.
+      - "${TRIBOS_API_BIND:-127.0.0.1}:${TRIBOS_API_PORT:-8000}:8000"
     restart: unless-stopped
 
   web:
@@ -39,7 +44,7 @@ services:
     image: tribos-web:local
     # No env_file here: the web server needs no secrets, and NEXT_PUBLIC_* values are fixed at build time.
     ports:
-      - "${TRIBOS_WEB_PORT:-3000}:3000"
+      - "${TRIBOS_WEB_BIND:-127.0.0.1}:${TRIBOS_WEB_PORT:-3000}:3000"
     depends_on:
       backend:
         condition: service_healthy

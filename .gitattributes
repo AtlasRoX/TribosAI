@@ -1,0 +1,43 @@
+# Normalise line endings: text files are stored with LF and checked out with LF on every platform, so Windows
+# checkouts produce no LF->CRLF warnings and the Docker images and shell scripts keep LF.
+* text=auto eol=lf
+
+# Windows scripts keep CRLF.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary files: never normalised or diffed as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.bmp binary
+*.tif binary
+*.tiff binary
+*.ico binary
+*.pdf binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+*.h5 binary
+*.hdf5 binary
+*.h5ad binary
+*.mat binary
+*.parquet binary
+*.xlsx binary
+*.db binary
+*.sqlite binary
+*.sqlite3 binary
+*.npy binary
+*.npz binary
+*.pkl binary
+*.pt binary
+*.onnx binary
+*.zip binary
+*.gz binary
+*.tgz binary
+*.tar binary
+*.docx binary

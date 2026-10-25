@@ -18,9 +18,11 @@ user's task id is TaskNotFound (-32001). Streaming and push notifications are no
 
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
@@ -37,6 +39,9 @@ from app.backend.routers.mcp import (
 )
 from tribos.agentic import config as agent_config
 from tribos.agentic.jobs import JOB_ID_RE, JobError, get_job_manager
+from tribos.config.settings import get_str
+
+logger = logging.getLogger("tribos.backend.a2a")
 
 router = APIRouter(tags=["a2a"])
 
@@ -84,6 +89,14 @@ _SKILLS: list[dict[str, Any]] = [
 
 
 def _base_url(request: Request) -> str:
+    """TRIBOS_PUBLIC_URL when it is an http(s) URL, else the request's own base URL. The Card is public and cacheable,
+    so its URLs should not follow whatever Host header a caller sends."""
+    public = str(get_str("TRIBOS_PUBLIC_URL") or "").strip().rstrip("/")
+    if public:
+        parts = urlsplit(public)
+        if parts.scheme in ("http", "https") and parts.netloc:
+            return public
+        logger.warning("Ignoring TRIBOS_PUBLIC_URL: it is not an http(s) URL")
     return str(request.base_url).rstrip("/")
 
 

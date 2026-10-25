@@ -184,8 +184,9 @@ async def test_evidence_source_runs_end_to_end(isolated, monkeypatch, tmp_path):
     system, human = next(c for c in sink["calls"] if "routing plan" not in c[0].content)  # the synthesis call
     # draft.py appends the effort level's deliberation instruction (medium by default) to the system prompt.
     assert system.content.startswith(SYNTHESIS_SYSTEM_PROMPT)
-    assert system.content.endswith("[EFFORT LEVEL: MEDIUM / BALANCED]\nConduct standard scientific reasoning. "
-                                   "Balance depth with clarity, highlighting core evidence, mechanisms, and caveats.")
+    assert system.content.endswith("[EFFORT LEVEL: MEDIUM / BALANCED]\nConduct standard scientific and engineering reasoning. "
+                                   "Balance depth with clarity: state the governing equations and assumptions, show the key steps, "
+                                   "and note the validity regime and main caveats.")
     assert f'<trial nct_id="{NCT}">' in human.content
     assert human.content.index("<fake_registry>") < human.content.index("<biodiscovery_ranking>")
     assert "TEST-SCOPE-NOTE: registry searched" in human.content
@@ -222,7 +223,7 @@ async def test_evidence_source_fallback_markdown_when_model_unavailable(isolated
     orch, _ = make_offline_orchestrator(monkeypatch, tmp_path, extra_tools=_trial_tool())
     res = await orch.execute_inquiry("Which osimertinib trial records exist?", thread_id="t-fb", enable_web_search=False)
     assert f"#### Test registry\n- {NCT}" in res.response
-    assert res.response.index("#### Test registry") < res.response.index("DiscoveryAgent")
+    assert res.response.index("#### Test registry") < res.response.index("#### Evidence limitations")
 
 
 def _trial_result() -> dict[str, ToolResult]:
@@ -309,15 +310,14 @@ def test_evidence_doc_provider_and_claim_support(isolated):
 
     hooks.register_evidence_doc_provider("trials", provider)
     hooks.register_verification_check("spy", spy)
-    response = (
-        f"{NCT} was a phase 1 trial assessing the effect of itraconazole on AZD9291 pharmacokinetics.\n\n"
-        f"| NCT ID | Phase |\n|---|---|\n| {NCT} | PHASE1 |"
-    )
+    count = _trial_data()["trials"][0]["enrollment_count"]
+    # A measured figure in a table row is grounded in the provider's record and reported under the provider's key.
+    response = f"| Record | Measured enrollment |\n|---|---|\n| {NCT} | {count} |"
     report = TribosVerifier().verify_response("itraconazole AZD9291", response, _trial_result())
     assert seen["keys"] == [f"NCT:{NCT}"]
-    assert seen["table_rows"] == ["| NCT ID | Phase |", f"| {NCT} | PHASE1 |"]
+    assert seen["table_rows"] == ["| Record | Measured enrollment |", f"| {NCT} | {count} |"]
     assert report.claim_support and report.claim_support[0]["evidence_key"] == f"NCT:{NCT}"
-    assert not [d for d in report.defects if d.category == "CLINICAL_CLAIM"]
+    assert not [d for d in report.defects if d.category == "UNSUPPORTED_CLAIM"]
 
 
 def test_registered_check_defects_are_scored(isolated):
@@ -337,8 +337,8 @@ def test_synthesis_system_prompt_composition(isolated):
     hooks.register_prompt_rule("r1", "First test rule.")
     hooks.register_prompt_rule("r2", "Second test rule.")
     prompt = get_synthesis_system_prompt()
-    assert "- Discovery: an evidence-weighted hypothesis ranking computed from the outputs above\n- Lithoscribe also searches a test registry\n" in prompt
-    assert "</grounding_rules>\n\n<additional_rules>\n9. First test rule.\n10. Second test rule.\n</additional_rules>\n" in prompt
+    assert "- Discovery: an evidence-weighted hypothesis ranking and experimental validation protocols\n- Lithoscribe also searches a test registry\n" in prompt
+    assert "</grounding_rules>\n\n<additional_rules>\n8. First test rule.\n9. Second test rule.\n</additional_rules>\n" in prompt
     for word in ("openai", "nvidia", "langgraph"):
         assert word not in prompt.lower()
 

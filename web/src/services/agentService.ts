@@ -2,16 +2,24 @@
 // (docs/plans/agentic-system.md §2 F13, F15, F16). Every call takes the backend URL and the page's
 // authHeaders helper, like datasetService, so the bearer token is only ever sent to the committed URL.
 
-import { ApiError, apiFetch, delay, readSseEvents, requestJson, type AuthHeaders, type SseFrame } from "./apiClient.ts";
+import { ApiError, apiFetch, delay, errorStatus, readSseEvents, requestJson, type AuthHeaders, type SseFrame } from "./apiClient.ts";
 import type {
   AgentOptions,
   AgentOptionsSettings,
   ApproveBody,
   CreateJobResponse,
+  FactReviewStatus,
   FrameworksResponse,
   JobSummary,
   MemoryFact,
+  NewFactInput,
   Project,
+  ProjectActivityEvent,
+  ProjectFile,
+  ProjectInput,
+  ProjectMember,
+  ProjectPatchInput,
+  ProjectRole,
   RunControlState,
 } from "@/types/agentic";
 
@@ -37,10 +45,6 @@ function listFrom<T>(body: unknown, keys: string[]): T[] {
   }
   return [];
 }
-
-// ---------------------------------------------------------------------------------------------------------------
-// Frameworks and request options
-// ---------------------------------------------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------------------------------------------
 // Frameworks and request options
@@ -159,10 +163,12 @@ export function toAgentOptions(s: AgentOptionsSettings): AgentOptions {
     require_plan_approval: s.require_plan_approval,
     allow_clarification: s.allow_clarification,
     enable_counter_evidence: s.enable_counter_evidence,
-    enable_hypotheses: s.enable_hypotheses,
     enable_code_analysis: s.enable_code_analysis,
     effort_level: s.effort_level || "medium",
   };
+  // On means "when the question calls for them" (the server decides); only an explicit "off" is sent. Sending true
+  // would force a hypothesis tournament on every question, a calculation included.
+  if (!s.enable_hypotheses) out.enable_hypotheses = false;
   if (s.budgetEnabled) out.budget = { ...s.budget };
   return out;
 }
@@ -188,6 +194,15 @@ export function steerRun(backendUrl: string, authHeaders: AuthHeaders, runId: st
     method: "POST",
     headers: json(authHeaders),
     body: JSON.stringify({ message }),
+  });
+}
+
+/** Skips a running evidence step ("search": the literature and web search); the answer uses what was gathered. */
+export function skipRunStep(backendUrl: string, authHeaders: AuthHeaders, runId: string, what = "search"): Promise<unknown> {
+  return request(`${backendUrl}/api/agent/runs/${enc(runId)}/skip`, {
+    method: "POST",
+    headers: json(authHeaders),
+    body: JSON.stringify({ what }),
   });
 }
 
@@ -250,11 +265,38 @@ function unwrapJobEvent(ev: unknown): unknown {
 }
 
 /**
+ * A background job's terminal "error" event: the server's reason the job failed or was cancelled, with the
+ * request id to quote when it failed on the server (LOG-35).
+ */
+export class JobFailedError extends Error {
+  requestId?: string;
+  cancelled: boolean;
+  constructor(detail: string, options: { requestId?: string; cancelled?: boolean } = {}) {
+    super(detail);
+    this.name = "JobFailedError";
+    this.requestId = options.requestId;
+    this.cancelled = !!options.cancelled;
+  }
+}
+
+function jobFailedFrom(ev: Record<string, unknown>): JobFailedError {
+  const requestId = typeof ev.request_id === "string" && ev.request_id ? ev.request_id : undefined;
+  const cancelled = ev.cancelled === true;
+  let detail = typeof ev.detail === "string" && ev.detail.trim() ? ev.detail.trim() : cancelled ? "The job was cancelled." : "The job failed on the server.";
+  if (requestId && !detail.includes(requestId)) detail = `${detail} (request id ${requestId})`;
+  return new JobFailedError(detail, { requestId, cancelled });
+}
+
+/**
  * Follows a job's event log: replays events after `after`, then follows live ones until done/error.
  * Events carry the chat stream's types. onEvent returns true to stop. Resolves when the stream ends.
  *
  * A dropped or stalled connection is reopened with `after=<last seen seq>`, so no event is replayed twice
  * and none is missed. An HTTP error (401, 404, ...) is final and thrown at once.
+ *
+ * "error" events are not passed to onEvent. The current attempt's error is terminal: it is thrown as a
+ * JobFailedError carrying the server's message once the server ends the stream. A replayed error that a later
+ * "queued" job event follows belongs to an earlier attempt of a resumed job and is ignored.
  */
 export async function streamJobEvents(
   backendUrl: string,
@@ -269,6 +311,8 @@ export async function streamJobEvents(
   const baseDelay = options.reconnectDelayMs ?? 1000;
   let last = Math.max(0, Math.floor(after));
   let failures = 0;
+  // The latest error event; cleared when a resume starts a new attempt. Kept across reconnects.
+  let failed: JobFailedError | null = null;
   for (;;) {
     let progressed = false;
     let stopped = false;
@@ -286,7 +330,14 @@ export async function streamJobEvents(
             last = seq;
             progressed = true;
           }
-          if (onEvent(unwrapJobEvent(ev))) {
+          const event = unwrapJobEvent(ev);
+          const e = (event && typeof event === "object" ? event : {}) as Record<string, unknown>;
+          if (e.type === "error") {
+            failed = jobFailedFrom(e);
+            return false;
+          }
+          if (e.type === "job" && e.status === "queued") failed = null;
+          if (onEvent(event)) {
             stopped = true;
             return true;
           }
@@ -294,10 +345,12 @@ export async function streamJobEvents(
         },
         { stallMs: options.stallMs }
       );
+      if (failed && !stopped) throw failed;
       // A clean end with nothing new means the job is no longer active and its log is drained.
       if (stopped || !progressed) return;
       failures = 0;
     } catch (err) {
+      if (err instanceof JobFailedError) throw err;
       if (signal?.aborted || stopped) throw err;
       if (err instanceof ApiError && err.status > 0) throw err;
       if (progressed) failures = 0;
@@ -312,13 +365,51 @@ export async function streamJobEvents(
 // Projects and project memory (F16)
 // ---------------------------------------------------------------------------------------------------------------
 
-/** Accepts `id` or `project_id` from the API. */
-function normalizeProject(raw: unknown): Project | null {
+/**
+ * A project route this server does not implement (contract C1 is newer than the server): FastAPI's own 404 for an
+ * unknown path ({"detail": "Not Found"}), 405 for a method the path lacks, or 501. The UI hides that part with a
+ * short notice instead of an error. A project-level 404 ("Project not found") is a real answer and stays an ApiError.
+ */
+export class FeatureUnavailableError extends ApiError {
+  feature: string;
+  constructor(feature: string, cause?: unknown) {
+    super(errorStatus(cause) || 501, `This server does not support ${feature} yet.`, { cause });
+    this.name = "FeatureUnavailableError";
+    this.feature = feature;
+  }
+}
+
+/** True for an error meaning "this route does not exist on the server" (see FeatureUnavailableError). */
+export function isFeatureMissing(err: unknown): boolean {
+  if (err instanceof FeatureUnavailableError) return true;
+  const status = errorStatus(err);
+  if (status === 405 || status === 501) return true;
+  if (status !== 404) return false;
+  const detail = err instanceof ApiError ? err.detail.trim() : "";
+  return detail === "" || detail === "Not Found";
+}
+
+/** A project request whose missing route becomes a FeatureUnavailableError naming `feature`. */
+async function projectRequest<T>(feature: string, url: string, init: RequestInit): Promise<T> {
+  try {
+    return await request<T>(url, init);
+  } catch (err) {
+    if (isFeatureMissing(err)) throw new FeatureUnavailableError(feature, err);
+    throw err;
+  }
+}
+
+const ROLES = new Set(["owner", "editor", "viewer"]);
+
+/** Accepts `id` or `project_id` from the API; drops a role the client does not know. */
+export function normalizeProject(raw: unknown): Project | null {
   if (!raw || typeof raw !== "object") return null;
   const p = raw as Record<string, unknown>;
   const id = typeof p.id === "string" ? p.id : typeof p.project_id === "string" ? p.project_id : "";
   if (!id) return null;
-  return { ...p, id, name: typeof p.name === "string" && p.name ? p.name : id } as Project;
+  const out = { ...p, id, name: typeof p.name === "string" && p.name ? p.name : id } as Project;
+  if (out.role !== undefined && !ROLES.has(String(out.role))) delete out.role;
+  return out;
 }
 
 function normalizeFact(raw: unknown): MemoryFact | null {
@@ -328,25 +419,71 @@ function normalizeFact(raw: unknown): MemoryFact | null {
   return id ? ({ ...f, id } as MemoryFact) : null;
 }
 
+function normalizeMember(raw: unknown): ProjectMember | null {
+  if (!raw || typeof raw !== "object") return null;
+  const m = raw as Record<string, unknown>;
+  if (typeof m.user_id !== "string" || !m.user_id) return null;
+  return { ...m, user_id: m.user_id, role: ROLES.has(String(m.role)) ? (m.role as ProjectRole) : "viewer" } as ProjectMember;
+}
+
+function normalizeFile(raw: unknown): ProjectFile | null {
+  if (!raw || typeof raw !== "object") return null;
+  const f = raw as Record<string, unknown>;
+  const id = typeof f.dataset_id === "string" ? f.dataset_id : typeof f.id === "string" ? f.id : "";
+  return id ? ({ ...f, dataset_id: id } as ProjectFile) : null;
+}
+
+function normalizeEvent(raw: unknown, i: number): ProjectActivityEvent | null {
+  if (!raw || typeof raw !== "object") return null;
+  const e = raw as Record<string, unknown>;
+  if (typeof e.action !== "string" || !e.action) return null;
+  const id = typeof e.id === "string" || typeof e.id === "number" ? String(e.id) : `ev_${i}`;
+  return { ...e, id, action: e.action, at: (e.at as string | number) ?? "" } as ProjectActivityEvent;
+}
+
+/** Fields of a project body that servers older than contract C1 refuse (422, extra="forbid"). */
+const NEWER_PROJECT_FIELDS = ["instructions", "icon", "color"] as const;
+
+function definedFields<T extends object>(obj: T): Partial<T> {
+  return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined)) as Partial<T>;
+}
+
 export async function listProjects(backendUrl: string, authHeaders: AuthHeaders): Promise<Project[]> {
   const body = await request<unknown>(`${backendUrl}/api/projects`, { headers: authHeaders() });
   return listFrom<unknown>(body, ["projects", "items"]).map(normalizeProject).filter((p): p is Project => p !== null);
 }
 
+/**
+ * Creates a project. A server older than contract C1 refuses icon/colour/instructions with 422; the project is then
+ * created with its name and description only and comes back marked `appearance_local` (the caller keeps the icon and
+ * colour in the browser). The legacy (name, description) signature still works.
+ */
 export async function createProject(
   backendUrl: string,
   authHeaders: AuthHeaders,
-  name: string,
+  input: ProjectInput | string,
   description = ""
 ): Promise<Project> {
-  const body = await request<{ project?: unknown } | null>(`${backendUrl}/api/projects`, {
-    method: "POST",
-    headers: json(authHeaders),
-    body: JSON.stringify({ name, description }),
-  });
-  const p = normalizeProject(body?.project ?? body);
-  if (!p) throw new ApiError(0, "The server did not return the new project.");
-  return p;
+  const full: ProjectInput = typeof input === "string" ? { name: input, description } : input;
+  const body = definedFields({ ...full, description: full.description ?? "" });
+  const post = async (b: object) => {
+    const res = await request<{ project?: unknown } | null>(`${backendUrl}/api/projects`, {
+      method: "POST",
+      headers: json(authHeaders),
+      body: JSON.stringify(b),
+    });
+    const p = normalizeProject(res?.project ?? res);
+    if (!p) throw new ApiError(0, "The server did not return the new project.");
+    return p;
+  };
+  try {
+    return await post(body);
+  } catch (err) {
+    const newer = NEWER_PROJECT_FIELDS.filter((k) => body[k] !== undefined && body[k] !== "");
+    if (errorStatus(err) !== 422 || !newer.length) throw err;
+    const p = await post({ name: body.name, description: body.description ?? "" });
+    return { ...p, icon: p.icon ?? full.icon, color: p.color ?? full.color, appearance_local: true };
+  }
 }
 
 export async function getProject(backendUrl: string, authHeaders: AuthHeaders, projectId: string): Promise<Project | null> {
@@ -354,32 +491,183 @@ export async function getProject(backendUrl: string, authHeaders: AuthHeaders, p
   return normalizeProject(body?.project ?? body);
 }
 
-export function patchProject(
+/**
+ * PATCH /api/projects/{id} (owner or editor). On a server older than contract C1, icon and colour fall back to the
+ * browser (the result is marked `appearance_local`) and instructions raise FeatureUnavailableError.
+ */
+export async function patchProject(
   backendUrl: string,
   authHeaders: AuthHeaders,
   projectId: string,
-  patch: { name?: string; description?: string }
-): Promise<unknown> {
-  return request(`${backendUrl}/api/projects/${enc(projectId)}`, {
-    method: "PATCH",
-    headers: json(authHeaders),
-    body: JSON.stringify(patch),
-  });
+  patch: ProjectPatchInput
+): Promise<Project | null> {
+  const body = definedFields(patch);
+  const send = async (b: object) => {
+    const res = await request<{ project?: unknown } | null>(`${backendUrl}/api/projects/${enc(projectId)}`, {
+      method: "PATCH",
+      headers: json(authHeaders),
+      body: JSON.stringify(b),
+    });
+    return normalizeProject(res?.project ?? res);
+  };
+  try {
+    return await send(body);
+  } catch (err) {
+    const newer = NEWER_PROJECT_FIELDS.filter((k) => body[k] !== undefined);
+    if (errorStatus(err) !== 422 || !newer.length) throw err;
+    if (body.instructions !== undefined) throw new FeatureUnavailableError("project instructions", err);
+    const legacy = definedFields({ name: body.name, description: body.description });
+    const p = Object.keys(legacy).length ? await send(legacy) : null;
+    return {
+      ...(p ?? { id: projectId, name: body.name ?? projectId }),
+      icon: body.icon ?? p?.icon,
+      color: body.color ?? p?.color,
+      appearance_local: true,
+    };
+  }
 }
 
 export function deleteProject(backendUrl: string, authHeaders: AuthHeaders, projectId: string): Promise<unknown> {
   return request(`${backendUrl}/api/projects/${enc(projectId)}`, { method: "DELETE", headers: authHeaders() });
 }
 
+// Members (the owner manages them; a member may remove themself to leave)
+
+export async function listProjectMembers(backendUrl: string, authHeaders: AuthHeaders, projectId: string): Promise<ProjectMember[]> {
+  const body = await projectRequest<unknown>("project members", `${backendUrl}/api/projects/${enc(projectId)}/members`, {
+    headers: authHeaders(),
+  });
+  return listFrom<unknown>(body, ["members", "items"]).map(normalizeMember).filter((m): m is ProjectMember => m !== null);
+}
+
+export function addProjectMember(
+  backendUrl: string,
+  authHeaders: AuthHeaders,
+  projectId: string,
+  userId: string,
+  role: Exclude<ProjectRole, "owner">
+): Promise<unknown> {
+  return projectRequest("project members", `${backendUrl}/api/projects/${enc(projectId)}/members`, {
+    method: "POST",
+    headers: json(authHeaders),
+    body: JSON.stringify({ user_id: userId, role }),
+  });
+}
+
+export function updateProjectMemberRole(
+  backendUrl: string,
+  authHeaders: AuthHeaders,
+  projectId: string,
+  userId: string,
+  role: Exclude<ProjectRole, "owner">
+): Promise<unknown> {
+  return projectRequest("project members", `${backendUrl}/api/projects/${enc(projectId)}/members/${enc(userId)}`, {
+    method: "PATCH",
+    headers: json(authHeaders),
+    body: JSON.stringify({ role }),
+  });
+}
+
+export function removeProjectMember(backendUrl: string, authHeaders: AuthHeaders, projectId: string, userId: string): Promise<unknown> {
+  return projectRequest("project members", `${backendUrl}/api/projects/${enc(projectId)}/members/${enc(userId)}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+}
+
+// Files (datasets of the caller's library, attached to every run in the project)
+
+export async function listProjectFiles(backendUrl: string, authHeaders: AuthHeaders, projectId: string): Promise<ProjectFile[]> {
+  const body = await projectRequest<unknown>("project files", `${backendUrl}/api/projects/${enc(projectId)}/files`, {
+    headers: authHeaders(),
+  });
+  return listFrom<unknown>(body, ["files", "items"]).map(normalizeFile).filter((f): f is ProjectFile => f !== null);
+}
+
+export function addProjectFile(backendUrl: string, authHeaders: AuthHeaders, projectId: string, datasetId: string): Promise<unknown> {
+  return projectRequest("project files", `${backendUrl}/api/projects/${enc(projectId)}/files`, {
+    method: "POST",
+    headers: json(authHeaders),
+    body: JSON.stringify({ dataset_id: datasetId }),
+  });
+}
+
+export function removeProjectFile(backendUrl: string, authHeaders: AuthHeaders, projectId: string, datasetId: string): Promise<unknown> {
+  return projectRequest("project files", `${backendUrl}/api/projects/${enc(projectId)}/files/${enc(datasetId)}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+}
+
+// Memory (facts and their review)
+
+export interface ProjectMemoryOptions {
+  reviewStatus?: FactReviewStatus;
+  includeInvalid?: boolean;
+  limit?: number;
+}
+
 export async function getProjectMemory(
   backendUrl: string,
   authHeaders: AuthHeaders,
   projectId: string,
-  query = ""
+  query = "",
+  options: ProjectMemoryOptions = {}
 ): Promise<MemoryFact[]> {
-  const q = query.trim() ? `?query=${enc(query.trim())}` : "";
+  const params = new URLSearchParams();
+  if (query.trim()) params.set("query", query.trim());
+  if (options.reviewStatus) params.set("review_status", options.reviewStatus);
+  if (options.includeInvalid) params.set("include_invalid", "true");
+  if (options.limit) params.set("limit", String(options.limit));
+  const q = params.toString() ? `?${params}` : "";
   const body = await request<unknown>(`${backendUrl}/api/projects/${enc(projectId)}/memory${q}`, { headers: authHeaders() });
-  return listFrom<unknown>(body, ["facts", "items", "memory", "recalled"]).map(normalizeFact).filter((f): f is MemoryFact => f !== null);
+  const facts = listFrom<unknown>(body, ["facts", "items", "memory", "recalled"])
+    .map(normalizeFact)
+    .filter((f): f is MemoryFact => f !== null);
+  // A server without the review filter ignores it: drop the facts whose explicit status differs.
+  return options.reviewStatus ? facts.filter((f) => !f.review_status || f.review_status === options.reviewStatus) : facts;
+}
+
+export async function addFact(backendUrl: string, authHeaders: AuthHeaders, projectId: string, fact: NewFactInput): Promise<MemoryFact | null> {
+  const body = await projectRequest<unknown>("adding facts", `${backendUrl}/api/projects/${enc(projectId)}/memory`, {
+    method: "POST",
+    headers: json(authHeaders),
+    body: JSON.stringify(definedFields(fact)),
+  });
+  return normalizeFact((body as { fact?: unknown } | null)?.fact ?? body);
+}
+
+/** Approve (verified by the reviewer) or reject (invalidated) a fact; owner or editor. */
+export async function reviewFact(
+  backendUrl: string,
+  authHeaders: AuthHeaders,
+  projectId: string,
+  factId: string,
+  decision: "approve" | "reject",
+  note?: string
+): Promise<MemoryFact | null> {
+  const body = await projectRequest<unknown>("fact review", `${backendUrl}/api/projects/${enc(projectId)}/memory/${enc(factId)}/review`, {
+    method: "POST",
+    headers: json(authHeaders),
+    body: JSON.stringify(definedFields({ decision, note: note?.trim() || undefined })),
+  });
+  return normalizeFact((body as { fact?: unknown } | null)?.fact ?? body);
+}
+
+/** Every version of a fact, oldest first. */
+export async function getFactHistory(backendUrl: string, authHeaders: AuthHeaders, projectId: string, factId: string): Promise<MemoryFact[]> {
+  const body = await projectRequest<unknown>("fact history", `${backendUrl}/api/projects/${enc(projectId)}/memory/${enc(factId)}/history`, {
+    headers: authHeaders(),
+  });
+  return listFrom<unknown>(body, ["versions", "history", "items"]).map(normalizeFact).filter((f): f is MemoryFact => f !== null);
+}
+
+/** PATCH /api/projects/{id}/memory/{fact_id}; the server rejects unknown fields. */
+export interface FactPatch {
+  invalidate?: boolean;
+  reason?: string;
+  object?: string;
+  confidence?: number;
 }
 
 export function patchFact(
@@ -387,7 +675,8 @@ export function patchFact(
   authHeaders: AuthHeaders,
   projectId: string,
   factId: string,
-  patch: { invalid?: boolean; object?: string; confidence?: number }
+  // The server field is `invalidate` (FactPatch in app/backend/routers/projects.py), with an optional reason (BRK-8).
+  patch: FactPatch
 ): Promise<unknown> {
   return request(`${backendUrl}/api/projects/${enc(projectId)}/memory/${enc(factId)}`, {
     method: "PATCH",
@@ -403,14 +692,30 @@ export function deleteFact(backendUrl: string, authHeaders: AuthHeaders, project
   });
 }
 
+// Activity
+
+export async function getProjectActivity(
+  backendUrl: string,
+  authHeaders: AuthHeaders,
+  projectId: string,
+  limit = 50
+): Promise<ProjectActivityEvent[]> {
+  const body = await projectRequest<unknown>("project activity", `${backendUrl}/api/projects/${enc(projectId)}/activity?limit=${limit}`, {
+    headers: authHeaders(),
+  });
+  return listFrom<unknown>(body, ["events", "items", "activity"])
+    .map(normalizeEvent)
+    .filter((e): e is ProjectActivityEvent => e !== null);
+}
+
 export interface TitleResponse {
   title: string;
   method: "ai" | "heuristic";
 }
 
 /**
- * Request an intelligent, biomedical-aware dynamic conversation title from the backend.
- * Falls back to local heuristic extraction if network or model fails.
+ * Asks the backend for a short conversation title (a model call, or its heuristic when the model fails).
+ * The caller keeps the instant local title when this request fails.
  */
 export function fetchConversationTitle(
   backendUrl: string,

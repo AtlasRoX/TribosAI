@@ -3,6 +3,8 @@
 import React, { useId, useState } from "react";
 import { AlertTriangle, ChevronRight, CircleAlert, CircleCheck, CircleDashed, CircleX, Hourglass } from "lucide-react";
 import { decodeEntities } from "@/lib/entities";
+import { MarkdownRenderer } from "./MarkdownRenderer";
+import { emitUi } from "@/lib/uiEvents";
 import { claimSummary, taskHeadline, verificationState } from "@/lib/verificationState";
 import type { ClaimCheck, ClaimStatus, TaskOutcome, TaskStatus, VerificationReport } from "@/types/chat";
 
@@ -10,7 +12,7 @@ interface VerificationNoticeProps {
   report?: VerificationReport | null;
 }
 
-const BANNER_RE = /^\s*> ⚠️ \*\*Scientific Verification Notice\*\*[\s\S]*?(?:\n\s*\n|$)/;
+const BANNER_RE = /^\s*> ⚠️ \*\*(?:Scientific Verification Notice|Verification found errors)\*\*[\s\S]*?(?:\n\s*\n|$)/;
 
 /** The API keeps an honest text banner at the top of unverified answers; the UI shows this notice instead. */
 export function stripVerificationBanner(content: string): string {
@@ -22,13 +24,14 @@ const CLAIM_LABEL: Record<ClaimStatus, string> = {
   contradicted: "contradicted",
   unsupported: "unsupported",
   not_checked: "not checked",
+  inconclusive: "not checkable",
 };
 
 // Re-exported for existing importers; the implementation lives in a plain module.
 export { decodeEntities };
 
 function claimCounts(claims: ClaimCheck[]): Record<ClaimStatus, number> {
-  const counts: Record<ClaimStatus, number> = { supported: 0, contradicted: 0, unsupported: 0, not_checked: 0 };
+  const counts: Record<ClaimStatus, number> = { supported: 0, contradicted: 0, unsupported: 0, not_checked: 0, inconclusive: 0 };
   for (const c of claims) if (c.status in counts) counts[c.status] += 1;
   return counts;
 }
@@ -39,13 +42,34 @@ function claimCounts(claims: ClaimCheck[]): Record<ClaimStatus, number> {
  * Every answer gets an explicit state (UI-003): "not checked" (no report, or the placeholder report of direct replies),
  * "checked"/"verified" as a quiet line, or the warning below when claims failed.
  */
+/**
+ * A mathematical claim's text is "context: LaTeX" (or a table row with its own $...$): the LaTeX is typeset, so the
+ * reader sees the statement as written in the answer rather than its source.
+ */
+function MathClaimText({ text }: { text: string }) {
+  const i = text.indexOf(": ");
+  const context = i > 0 ? text.slice(0, i) : "";
+  const body = i > 0 ? text.slice(i + 2) : text;
+  const content = body.includes("$") || body.includes("|") ? body : `$${body}$`;
+  return (
+    <span className="verify-claim-text">
+      {context && <span>{context}: </span>}
+      <MarkdownRenderer content={content} />
+    </span>
+  );
+}
+
 /** One checked claim: status, text, why, and the evidence keys it was matched to. */
 function ClaimItem({ c }: { c: ClaimCheck }) {
   const miscited = c.cited_source_supported === false;
   return (
     <li data-status={c.status} data-miscited={miscited || undefined}>
       <span className="verify-claim-status">{miscited && c.status === "supported" ? "miscited" : CLAIM_LABEL[c.status] || c.status}</span>
-      <span className="verify-claim-text">{decodeEntities(c.claim_text)}</span>
+      {c.claim_type === "mathematical" ? (
+        <MathClaimText text={decodeEntities(c.claim_text)} />
+      ) : (
+        <span className="verify-claim-text">{decodeEntities(c.claim_text)}</span>
+      )}
       {c.reason && <span className="verify-claim-reason">{decodeEntities(c.reason)}</span>}
       {miscited && <span className="verify-claim-reason">The cited source did not support this; another retrieved source did.</span>}
       {c.evidence?.length ? (
@@ -68,12 +92,31 @@ export function VerificationNotice({ report }: VerificationNoticeProps) {
   const listId = useId();
   const state = verificationState(report);
   if (state.kind !== "problems" || !report) {
-    const Icon = state.kind === "not_checked" ? CircleDashed : CircleCheck;
+    const Icon = state.kind === "not_checked" || state.kind === "not_evaluated" ? CircleDashed : CircleCheck;
+    if (state.kind === "not_checked" || state.kind === "not_evaluated") {
+      return (
+        <div className="task-status verify-state" data-verification={state.kind} role="status">
+          <Icon style={{ width: 13, height: 13, flexShrink: 0 }} aria-hidden={true} />
+          <span>{state.text}</span>
+        </div>
+      );
+    }
+    // A checked answer: the line opens the Verification tab under this answer (what was checked, how confident).
     return (
-      <div className="task-status verify-state" data-verification={state.kind} role="status">
+      <button
+        type="button"
+        className="task-status verify-state verify-state-link"
+        data-verification={state.kind}
+        title="Show what was checked"
+        onClick={(e) => {
+          const messageId = e.currentTarget.closest("[data-message-id]")?.getAttribute("data-message-id") || undefined;
+          emitUi("tribos:evidence-tab", { tab: "verification", messageId });
+        }}
+      >
         <Icon style={{ width: 13, height: 13, flexShrink: 0 }} aria-hidden={true} />
         <span>{state.text}</span>
-      </div>
+        <ChevronRight style={{ width: 12, height: 12, flexShrink: 0, opacity: 0.6 }} aria-hidden={true} />
+      </button>
     );
   }
   const allClaims: ClaimCheck[] = Array.isArray(report.claims) ? report.claims : [];
@@ -84,7 +127,13 @@ export function VerificationNotice({ report }: VerificationNoticeProps) {
   const counts = claimCounts(claims);
   // The per-claim summary already gives the share; the score is only shown when there are no claim checks.
   const score = !claims.length && typeof report.verification_score === "number" ? `grounding ${report.verification_score.toFixed(2)}` : null;
-  const flagged = claims.filter((c) => c.status !== "supported" || c.cited_source_supported === false);
+  // Contradicted statements first (wrong values), then unsupported ones; claims the checks could not decide are listed
+  // apart, since "not checkable" is not a finding against the answer.
+  const rank = (c: ClaimCheck) => (c.status === "contradicted" ? 0 : c.status === "unsupported" ? 1 : 2);
+  const flagged = claims
+    .filter((c) => (c.status !== "supported" && c.status !== "inconclusive") || c.cited_source_supported === false)
+    .sort((a, b) => rank(a) - rank(b));
+  const inconclusive = claims.filter((c) => c.status === "inconclusive");
   const supported = claims.filter((c) => c.status === "supported" && c.cited_source_supported !== false);
 
   let summary: string;
@@ -149,6 +198,18 @@ export function VerificationNotice({ report }: VerificationNoticeProps) {
               </ul>
             </details>
           )}
+          {inconclusive.length > 0 && (
+            <details className="verify-supported" style={{ padding: "0 12px 8px" }}>
+              <summary className="verify-claim-reason" style={{ display: "list-item", cursor: "pointer" }}>
+                {inconclusive.length} statement{inconclusive.length === 1 ? "" : "s"} the checks could not decide
+              </summary>
+              <ul className="verify-claims">
+                {inconclusive.map((c) => (
+                  <ClaimItem key={c.claim_id} c={c} />
+                ))}
+              </ul>
+            </details>
+          )}
           {supported.length > 0 && (
             <details className="verify-supported" style={{ padding: "0 12px 8px" }}>
               <summary className="verify-claim-reason" style={{ display: "list-item", cursor: "pointer" }}>
@@ -196,6 +257,61 @@ function taskTitle(status: TaskStatus, op: string): string {
   return TASK_LABEL[status] || status;
 }
 
+const DELIVERABLE_LABEL: Record<string, string> = {
+  verified: "checked",
+  addressed: "answered, not checked",
+  failed_check: "value contradicted by the checks",
+  missing: "not addressed",
+};
+
+/** Recovered attempts (history), unresolved failures (with their effect) and the requested items, under the status. */
+function TaskDetails({ outcome }: { outcome: TaskOutcome }) {
+  const recovered = outcome.recovered_failures || [];
+  const unresolved = outcome.unresolved_failures || [];
+  const items = outcome.deliverables || [];
+  if (!recovered.length && !unresolved.length && !items.length) return null;
+  const count = (s: string) => items.filter((i) => i.status === s).length;
+  const parts = [
+    count("verified") && `${count("verified")} checked`,
+    count("addressed") && `${count("addressed")} answered, not checked`,
+    count("failed_check") && `${count("failed_check")} contradicted`,
+    count("missing") && `${count("missing")} not addressed`,
+  ].filter(Boolean);
+  return (
+    <div className="task-status-reason" style={{ display: "block", marginTop: 4 }}>
+      {unresolved.length > 0 && (
+        <ul style={{ margin: "2px 0", paddingLeft: 18 }} aria-label="Failed steps">
+          {unresolved.map((f, i) => (
+            <li key={i}>
+              {f.step} failed{f.error ? ` (${f.error})` : ""}: {f.effect}
+            </li>
+          ))}
+        </ul>
+      )}
+      {recovered.length > 0 && (
+        <div>
+          {recovered.length} failed attempt{recovered.length === 1 ? " was" : "s were"} recovered by a retry (
+          {recovered.map((r) => `${r.step} → ${r.recovered_by}`).join("; ")}).
+        </div>
+      )}
+      {items.length > 0 && (
+        <details>
+          <summary style={{ cursor: "pointer" }}>
+            Requested items: {parts.join(" · ")}
+          </summary>
+          <ul style={{ margin: "2px 0", paddingLeft: 18 }}>
+            {items.map((d, i) => (
+              <li key={i} data-status={d.status}>
+                {d.item}: {DELIVERABLE_LABEL[d.status] || d.status}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
 /** Whether the operation the user asked for actually ran (audit F02); shown apart from evidence grounding. */
 export function TaskStatusNotice({ outcome }: { outcome?: TaskOutcome | null }) {
   const headline = taskHeadline(outcome);
@@ -214,8 +330,11 @@ export function TaskStatusNotice({ outcome }: { outcome?: TaskOutcome | null }) 
     return (
       <div className="task-status" data-status="completed" role="status">
         <Icon style={{ width: 13, height: 13, flexShrink: 0 }} aria-hidden={true} />
-        <span>{TASK_LABEL.completed}</span>
-        {operations && <span className="task-status-op">{operations}</span>}
+        <div style={{ minWidth: 0 }}>
+          <span>{TASK_LABEL.completed}</span>
+          {operations && <span className="task-status-op">{operations}</span>}
+          <TaskDetails outcome={outcome} />
+        </div>
       </div>
     );
   }
@@ -245,7 +364,11 @@ export function TaskStatusNotice({ outcome }: { outcome?: TaskOutcome | null }) 
               </ul>
             </div>
           )}
-          {operations && <div className="task-status-op">Ran within this request: {operations}</div>}
+          {/* The reason usually names what completed ("Time course computed."); repeat it only when it does not. */}
+          {operations && !String(outcome.reason || "").toLowerCase().includes(operations.toLowerCase()) && (
+            <div className="task-status-op">Completed: {operations}</div>
+          )}
+          <TaskDetails outcome={outcome} />
         </div>
       </div>
     );

@@ -9,6 +9,22 @@ export interface FinalizableThought {
   elapsed_seconds?: number;
 }
 
+const TERMINAL = new Set(["done", "error", "skipped"]);
+
+/**
+ * The step to keep when an update for the same step id arrives. A step that already finished is not turned back into
+ * a running one by an event that is not newer (a delayed or replayed "running" update arriving after the "done"); a
+ * step the backend really reopens carries a later elapsed time and replaces it.
+ */
+export function mergeThought<T extends FinalizableThought>(existing: T | undefined, incoming: T): T {
+  if (!existing) return incoming;
+  const finished = TERMINAL.has(String(existing.status || ""));
+  if (finished && incoming.status === "running" && (incoming.elapsed_seconds ?? 0) <= (existing.elapsed_seconds ?? 0)) {
+    return existing;
+  }
+  return incoming;
+}
+
 /**
  * Once a run is done no step may keep spinning. A step still marked "running" never reported its end (cut off by a
  * budget or timeout, or its closing event was lost), so it becomes "unreported", never "done" (UI-013): a check mark

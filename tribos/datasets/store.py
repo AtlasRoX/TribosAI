@@ -27,6 +27,7 @@ from pathlib import Path
 
 from .models import (
     DATASET_ID_RE,
+    UPLOAD_KINDS,
     DatasetKind,
     DatasetProvenanceIn,
     DatasetRecord,
@@ -94,15 +95,26 @@ def _env_mb(name: str, default_mb: float) -> int:
 
 def kind_cap_bytes(kind: DatasetKind) -> int:
     if kind == DatasetKind.HDF5:
-        return _env_mb("TRIBOS_UPLOAD_MAX_MB_HDF5", _env_mb("TRIBOS_UPLOAD_MAX_MB_H5AD", 500) // _MB)
-    if kind in (DatasetKind.TABLE, DatasetKind.MAT):
+        # TRIBOS_UPLOAD_MAX_MB_H5AD is the biomedical release's name for the same cap (.h5ad files are HDF5).
+        return _env_mb("TRIBOS_UPLOAD_MAX_MB_HDF5", _env_mb("TRIBOS_UPLOAD_MAX_MB_H5AD", 500) / _MB)
+    if kind == DatasetKind.MAT:
+        return _env_mb("TRIBOS_UPLOAD_MAX_MB_MAT", 100)
+    if kind == DatasetKind.TABLE:
         return _env_mb("TRIBOS_UPLOAD_MAX_MB_CSV", 100)
     return 100 * _MB
 
 
 def max_upload_bytes() -> int:
     """The largest single upload any kind allows; the API rejects larger Content-Length before parsing."""
-    return max(kind_cap_bytes(k) for k in DatasetKind)
+    return max(kind_cap_bytes(k) for k in UPLOAD_KINDS)
+
+
+def upload_limits() -> dict[str, dict[str, object]]:
+    """Accepted extensions -> kind, and the byte cap of each kind (GET /api/datasets/limits)."""
+    return {
+        "extensions": {ext: kind.value for ext, kind in EXTENSION_KINDS.items()},
+        "max_bytes": {kind.value: kind_cap_bytes(kind) for kind in UPLOAD_KINDS},
+    }
 
 
 def total_cap_bytes() -> int:
@@ -223,12 +235,12 @@ class DatasetStore:
                     logger.debug("Orphan sweep skipped %s: %s", entry.name, exc)
 
     # -- quota ----------------------------------------------------------------
-    def usage_bytes(self, user_id: str) -> int:
-        udir = self.user_dir(user_id)
-        if not udir.exists():
-            return 0
+    # Only datasets the user can list (and so delete) count toward the quota: in-progress uploads, directories being
+    # deleted and unreadable manifests do not, so a user can always free what is counted against them.
+    @staticmethod
+    def _dir_bytes(path: Path) -> int:
         total = 0
-        for dirpath, _dirs, files in os.walk(udir):
+        for dirpath, _dirs, files in os.walk(path):
             for name in files:
                 try:
                     total += os.path.getsize(os.path.join(dirpath, name))
@@ -236,21 +248,13 @@ class DatasetStore:
                     pass
         return total
 
+    def usage_bytes(self, user_id: str) -> int:
+        return sum(self._dir_bytes(ds_dir) for ds_dir, _record in self._listed(user_id))
+
     def _committed_usage_bytes(self, user_id: str, own_dir: Path) -> int:
-        udir = self.user_dir(user_id)
-        if not udir.exists():
-            return 0
-        total = 0
-        for entry in udir.iterdir():
-            if not entry.is_dir() or not (entry == own_dir or (entry / _MANIFEST).exists()):
-                continue
-            for dirpath, _dirs, files in os.walk(entry):
-                for name in files:
-                    try:
-                        total += os.path.getsize(os.path.join(dirpath, name))
-                    except OSError:
-                        pass
-        return total
+        """Listed datasets plus the upload being committed (whose manifest is not written yet)."""
+        listed = [ds_dir for ds_dir, _record in self._listed(user_id) if ds_dir != own_dir]
+        return sum(self._dir_bytes(d) for d in listed) + (self._dir_bytes(own_dir) if own_dir.is_dir() else 0)
 
     def _user_lock(self, user_id: str) -> threading.Lock:
         with self._locks_guard:
@@ -363,7 +367,8 @@ class DatasetStore:
             logger.warning("Unreadable dataset manifest in %s: %s", ds_dir.name, exc)
             return None
 
-    def list(self, user_id: str) -> builtins.list[DatasetRecord]:
+    def _listed(self, user_id: str) -> builtins.list[tuple[Path, DatasetRecord]]:
+        """(directory, record) of every dataset whose manifest reads back, legacy kinds included."""
         udir = self.user_dir(user_id)
         if not udir.exists():
             return []
@@ -372,8 +377,11 @@ class DatasetStore:
             if entry.is_dir() and DATASET_ID_RE.match(entry.name) and (entry / _MANIFEST).exists():
                 record = self._read_manifest(entry)
                 if record is not None and record.id == entry.name:
-                    out.append(record)
-        return sorted(out, key=lambda r: r.uploaded_at, reverse=True)
+                    out.append((entry, record))
+        return out
+
+    def list(self, user_id: str) -> builtins.list[DatasetRecord]:
+        return sorted((r for _d, r in self._listed(user_id)), key=lambda r: r.uploaded_at, reverse=True)
 
     def get(self, user_id: str, ds_id: str) -> DatasetRecord:
         ds_dir = self._dataset_dir(user_id, ds_id)
@@ -391,6 +399,12 @@ class DatasetStore:
         for ds_id in ids:
             try:
                 record = self.get(user_id, ds_id)
+                if not record.analysable:
+                    errors.append(
+                        f"Attached dataset {record.id} is a legacy {record.legacy_kind or 'biomedical'} upload that "
+                        "Tribos no longer analyses"
+                    )
+                    continue
                 analysis_path, model_path = self.file_paths(user_id, record)
                 if not (analysis_path or model_path):
                     raise DatasetNotFound(ds_id)

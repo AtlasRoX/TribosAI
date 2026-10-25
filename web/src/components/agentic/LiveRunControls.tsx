@@ -136,7 +136,8 @@ export function ApprovalCard({
                   id={id}
                   type="checkbox"
                   checked={!!enabled[k]}
-                  disabled={busy}
+                  // The server can only switch planned sources off; one the plan skipped stays off (its reason says why).
+                  disabled={busy || (!isDag && src.run === false)}
                   onChange={(e) => setEnabled((p) => ({ ...p, [k]: e.target.checked }))}
                 />
                 <span className={enabled[k] ? undefined : styles.toggleOff}>
@@ -168,7 +169,7 @@ export function ApprovalCard({
         value={note}
         maxLength={2000}
         onChange={(e) => setNote(e.target.value)}
-        placeholder="Optional note to the agent (e.g. focus on phase 3 trials)"
+        placeholder="Optional note to the agent (e.g. keep it symbolic, or use SI units)"
         aria-label="Optional note with your decision"
         disabled={busy}
       />

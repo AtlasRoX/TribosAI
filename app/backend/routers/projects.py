@@ -20,7 +20,7 @@ import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.backend.auth import get_current_user
 from tribos.utils.memory.project_store import (
@@ -37,16 +37,24 @@ FactIdPath = Path(..., min_length=4, max_length=64)
 
 
 class ProjectCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(..., min_length=1, max_length=200)
     description: str = Field(default="", max_length=2000)
 
 
 class ProjectPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=2000)
 
 
 class FactPatch(BaseModel):
+    # Unknown fields are a client bug (e.g. {"valid": false} instead of {"invalidate": true}, BRK-8): refuse them with
+    # 422 instead of answering 200 with nothing changed.
+    model_config = ConfigDict(extra="forbid")
+
     invalidate: bool = Field(default=False, description="Mark the fact no longer valid (kept in the history)")
     reason: str = Field(default="", max_length=300)
     object: str | None = Field(default=None, min_length=1, max_length=500)

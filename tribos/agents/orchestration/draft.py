@@ -2,21 +2,35 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
 from datetime import UTC, datetime
 from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from ...agentic.budget import BudgetExhausted, RunDeadlineExceeded
 from ...agentic.control import RunCancelled
+from ..evidence_need import CLOSED_COMPUTATION_ANSWER_NOTE, is_closed_computation
+from ..result_keys import (
+    AXIOM,
+    CALCULA,
+    DYNAMIS,
+    DYNAMIS_EQUILIBRIUM,
+    DYNAMIS_SCAN,
+    distinct_results,
+)
 from .context import RunContext, logger, orchestrator_module
 
 
 class DraftBudgetStop(RuntimeError):
     """The run budget could not admit the first draft: the answer is the deterministic evidence summary."""
+
+
+class EmptyDraftError(RuntimeError):
+    """The model returned no answer text (only reasoning), even on the retry: the answer is the evidence summary."""
 
 
 def first_draft_output_cap() -> int:
@@ -27,6 +41,60 @@ def first_draft_output_cap() -> int:
         return max(256, int(os.getenv("TRIBOS_FIRST_DRAFT_MAX_OUTPUT_TOKENS", "") or 16_000))
     except ValueError:
         return 16_000
+
+
+# A draft the provider cut off at max_tokens (finish reason "length") is continued, at most this many times, so an
+# answer never ends mid-sentence.
+MAX_DRAFT_CONTINUATIONS = 2
+CONTINUE_PROMPT = (
+    "Your answer above was cut off by the output limit. Continue it from exactly where it stopped: do not repeat "
+    "anything already written, add no preamble or heading for the continuation, and start with the next characters "
+    "of the cut-off sentence. Finish every remaining section the answer format calls for."
+)
+
+
+def join_continuation(text: str, more: str, window: int = 300) -> str:
+    """text + more, without the overlap a model sometimes repeats at the start of a continuation."""
+    tail = text[-window:]
+    for n in range(min(len(tail), len(more)), 7, -1):
+        if tail.endswith(more[:n]):
+            return text + more[n:]
+    return text + more
+
+
+def fallback_reason(err: BaseException) -> str:
+    """Why the written answer is missing, for a reader: never an empty message."""
+    name = type(err).__name__
+    if "Timeout" in name:
+        return "the model provider did not respond in time (twice)"
+    text = str(err).strip()
+    return f"{name}: {text[:200]}" if text else name
+
+
+def verification_fallback_markdown(rep: dict[str, Any] | None) -> str:
+    """The computed parameters and numerical checks as a table, for an answer the model could not write."""
+    if not isinstance(rep, dict):
+        return ""
+    rows = ["| Quantity | Value | Unit |", "|---|---:|---|"]
+    for key, p in (rep.get("parameters") or {}).items():
+        if not isinstance(p, dict) or "value" not in p:
+            continue
+        value = p["value"]
+        shown = f"{value:.6g}" if isinstance(value, (int, float)) else str(value)
+        if isinstance(p.get("degrees"), (int, float)):
+            shown += f" ({p['degrees']:.4g}°)"
+        rows.append(f"| {key.replace('_', ' ').capitalize()} | {shown} | {p.get('unit') or ''} |")
+    conv = rep.get("convergence") or []
+    checks = [f"ODE residual: max |r| = {rep.get('residual_max', 0):.3g}"]
+    if conv:
+        last = conv[-1]
+        checks.append(f"RK4 at h = {last['h']} s: max error {last['max_error_x']:.3g}"
+                      + (f", observed order {last['observed_order']:.2f}" if "observed_order" in last else ""))
+    energy = rep.get("energy") or {}
+    if "balance_residual" in energy:
+        checks.append(f"Energy balance residual: {energy['balance_residual']:.3g} J")
+    table = "\n".join(rows) if len(rows) > 2 else ""
+    return (table + "\n\n" if table else "") + "\n".join(f"- {c}" for c in checks)
 
 
 def retrieval_date() -> str:
@@ -44,58 +112,71 @@ REVISION_INSTRUCTION = (
 )
 
 
+def _ok_data(tool_results: dict[str, Any], key: str) -> dict[str, Any] | None:
+    res = tool_results.get(key)
+    return res.data if res is not None and res.success and isinstance(res.data, dict) and res.data else None
+
+
+def computation_summary(tool_results: dict[str, Any]) -> str:
+    """Markdown lines with what the STEM computations returned (Dynamis, Axiom, Physis, Calcula), as computed.
+
+    Shown when the model could not write the answer, so every value is the tool's own; nothing is interpreted."""
+    from ..stem_evidence import num
+
+    lines: list[str] = []
+    sim = _ok_data(tool_results, DYNAMIS)
+    if sim is not None:
+        summary = sim.get("summary") or {}
+        final = {s: num(v.get("final")) for s, v in summary.items() if isinstance(v, dict) and "final" in v}
+        lines.append(
+            f"- **System**: {sim.get('model_name') or 'stated ODE system'} · method {sim.get('method') or 'unknown'} · "
+            f"t = {sim.get('t_span')}"
+        )
+        if final:
+            lines.append(f"- **Final state**: {json.dumps(final)}")
+    eq = _ok_data(tool_results, DYNAMIS_EQUILIBRIUM)
+    if eq is not None:
+        point = {k: num(v) for k, v in (eq.get("fixed_point") or {}).items()}
+        eig = [e.get("str") for e in (eq.get("eigenvalues") or []) if isinstance(e, dict)]
+        lines.append(f"- **Fixed point** ({eq.get('stability', 'unknown')}): {json.dumps(point)}; eigenvalues {', '.join(eig)}")
+    elif sim is not None:
+        lines.append("- **Equilibrium**: not computed; the final state is the end of the time course, not a steady state.")
+    scan = _ok_data(tool_results, DYNAMIS_SCAN)
+    if scan is not None:
+        rows = [r for r in (scan.get("scan_results") or []) if isinstance(r, dict)]
+        lines.append(f"- **Parameter scan** of {scan.get('parameter')} over {scan.get('scan_range')} ({len(rows)} points):")
+        lines.extend(
+            f"  - {scan.get('parameter')} = {num(r.get('parameter_value'))}: final state "
+            f"{json.dumps({k: num(v) for k, v in (r.get('final_state') or {}).items()})}"
+            for r in rows[:20]
+        )
+    ax = _ok_data(tool_results, AXIOM)
+    if ax is not None and isinstance(ax.get("answer"), dict) and ax["answer"].get("text"):
+        lines.append(f"- **Symbolic solution (Axiom, {str(ax.get('status') or '').replace('_', ' ')})**: {ax['answer']['text']}")
+    phys = _ok_data(tool_results, "physis")
+    for c in ((phys or {}).get("constants") or [])[:5]:
+        if isinstance(c, dict):
+            lines.append(f"- **{c.get('name')}**: {c.get('value')} {c.get('unit') or ''} (uncertainty {c.get('uncertainty')}; "
+                         f"{c.get('source') or 'source not stated'})")
+    calc = _ok_data(tool_results, CALCULA)
+    if calc is not None and (calc.get("result") is not None or calc.get("stdout")):
+        shown = calc.get("result") if calc.get("result") is not None else calc.get("stdout")
+        lines.append(f"- **Sandboxed computation (Calcula)**: {str(shown)[:400]}")
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
 def prepare_context(run: RunContext) -> None:
     """Plain-text tool summaries (used by the no-model fallback) and the scope notes passed to the model."""
     ao = orchestrator_module()
     orch = run.orch
-    ctx, tool_results, task_names, requested_plan = run.ctx, run.tool_results, run.task_names, run.requested_plan
+    ctx, tool_results, requested_plan = run.ctx, run.tool_results, run.requested_plan
     evaluated_sources = run.evaluated_sources
 
     # -------------------------------------------------------------
     # STAGE 4: EVIDENCE SYNTHESIS (PaperQA2 Grounded Context)
     # -------------------------------------------------------------
-    # Prepare structured context from empirical tool executions
-    vivarix_summary = ""
-    if tool_results.get("vivarix") and tool_results["vivarix"].success and isinstance(tool_results["vivarix"].data, dict):
-        v_data = tool_results["vivarix"].data
-        units = v_data.get("units", {}) or {}
-        convergence = (v_data.get("diagnostics", {}) or {}).get("convergence_status", "UNKNOWN")
-        vivarix_summary = (
-            f"- **Model**: {v_data.get('model_id')} ({v_data.get('model_name')})\n"
-            f"- **Solver**: {v_data.get('solver_method')} (Duration: {v_data.get('duration')}{units.get('time', 's')})\n"
-            f"- **Concentration Unit**: {v_data.get('concentration_unit') or units.get('quantity', 'unknown')}\n"
-            f"- **Final Time-Course Concentrations (t={v_data.get('duration')}, endpoint dynamics: {convergence})**: "
-            f"{json.dumps(v_data.get('final_concentrations', {}))}\n"
-        )
-        if v_data.get("applied_overrides"):
-            vivarix_summary += f"- **Applied Parameter Overrides**: {json.dumps(v_data['applied_overrides'])}\n"
-        ss_res = tool_results.get("vivarix_steady_state")
-        if ss_res and ss_res.success and isinstance(ss_res.data, dict):
-            vivarix_summary += (
-                f"- **COPASI Steady-State Solution ({ss_res.data.get('steady_state_status')}, "
-                f"stability: {ss_res.data.get('stability', 'unknown')})**: "
-                f"{json.dumps(ss_res.data.get('steady_state_concentrations', {}))}\n"
-            )
-        else:
-            vivarix_summary += (
-                "- **Steady State**: NOT computed. Describe values only as final time-course concentrations, never as steady states.\n"
-            )
-    scan_res = tool_results.get("vivarix_scan")
-    if scan_res is not None and isinstance(scan_res.data, dict):
-        sd = scan_res.data
-        rows = "\n".join(
-            f"  - {sd.get('resolved_parameter')} = {p.get('applied_value', p.get('parameter_value'))}: "
-            + (f"{sd.get('target_species')} = {p.get('target_response')}" if p.get("target_response") is not None
-               else json.dumps(p.get("endpoint_species", {})))
-            for p in sd.get("scan_results", [])
-        )
-        fails = "; ".join(f"{f.get('parameter_value')}: {f.get('error')}" for f in sd.get("failed_points", []))
-        vivarix_summary += (
-            f"- **Parameter Scan** of {sd.get('resolved_parameter')} in {sd.get('model_id')} "
-            f"({sd.get('successful_points')}/{sd.get('total_points')} points, {sd.get('duration_seconds')} s each, "
-            f"concentrations in {sd.get('concentration_unit')}):\n{rows}\n"
-            + (f"- **Failed Points**: {fails}\n" if fails else "")
-        )
+    # Prepare structured context from empirical tool executions: the computed values, for the no-model fallback.
+    vivarix_summary = computation_summary(tool_results)
 
     lumicell_summary = ""
     if tool_results.get("lumicell") and tool_results["lumicell"].success and isinstance(tool_results["lumicell"].data, dict):
@@ -128,9 +209,6 @@ def prepare_context(run: RunContext) -> None:
             synapta_summary += f"\n- **KEGG Pathway Memberships**: {pw_str}"
 
     scope_notes: list[str] = []
-    # Notes about Vivarix/Synapta not running only matter to questions they could have informed.
-    qtype = ctx.search_plan.question_type if ctx.search_plan is not None else "general"
-    molecular = qtype in ("mechanism", "target", "genetics", "biomarker", "general")
     # A simulation that was not requested is simply not part of this answer: no note, so it is never listed as a
     # limitation. An explicit "no simulation" constraint is passed on so the answer respects it silently.
     if ctx.suppress_simulation:
@@ -140,29 +218,8 @@ def prepare_context(run: RunContext) -> None:
         )
     if not ctx.enable_web_search:
         scope_notes.append("Live web search was disabled for this turn.")
-    disease_view = ctx.should_run("disease_targets")  # Synapta's disease view ran instead of a target lookup
-    if not ctx.primary_target and molecular and not disease_view:
-        scope_notes.append(
-            "No specific gene/protein target was identified in the question; Synapta target lookups were not run. "
-            "Mention this only if the question is about a molecular target."
-        )
-    elif ctx.primary_target and "synapta" not in task_names:
-        decision = ctx.decisions.get("synapta")
-        reason = (decision.reason if decision is not None and decision.reason else "it was not selected for this question")
-        scope_notes.append(
-            f"Synapta (OpenTargets/KEGG) was not run ({reason}); "
-            f"no target-disease association data exists for {ctx.primary_display or ctx.primary_target} in this answer."
-        )
-    syn_res = tool_results.get("synapta")
-    syn_data = syn_res.data if syn_res is not None and isinstance(syn_res.data, dict) else {}
-    syn_cov = syn_data.get("coverage") if isinstance(syn_data, dict) else None
-    syn_cov_d: dict[str, Any] = syn_cov if isinstance(syn_cov, dict) else {}
-    if syn_cov_d.get("status") in ("partial", "unavailable"):
-        failed = [k for k, v in (syn_cov_d.get("sources") or {}).items() if isinstance(v, dict) and v.get("status") == "error"]
-        scope_notes.append(
-            f"OpenTargets/KEGG coverage is {syn_cov_d['status']}: {', '.join(failed)} failed. A failed lookup is not "
-            "evidence that an association or pathway does not exist; say the data was unavailable."
-        )
+    # What the gather stages did not run (no Calcula code, no identifiable system, no symbolic solution).
+    scope_notes.extend(n for n in dict.fromkeys(run.gather_notes) if n)
     # Pre-synthesis check: the artifact must match the request, or the answer must say it does not.
     pre_outcome = orch._task_outcome(ctx, requested_plan, tool_results, None, True)
     if requested_plan is not None and pre_outcome.task_status in ("failed", "needs_input", "partial"):
@@ -184,6 +241,8 @@ def prepare_context(run: RunContext) -> None:
             scope_notes.extend(n for n in (provider(ctx, tool_results) or []) if n)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Scope note provider failed: %s", exc)
+    if is_closed_computation(ctx):
+        scope_notes.append(CLOSED_COMPUTATION_ANSWER_NOTE)
     run.vivarix_summary, run.lumicell_summary = vivarix_summary, lumicell_summary
     run.lithoscribe_summary, run.synapta_summary = lithoscribe_summary, synapta_summary
     run.scope_notes = scope_notes
@@ -224,9 +283,7 @@ async def write_first_draft(run: RunContext) -> None:
     orch = run.orch
     agent_state, tool_results, model_name, api_key = run.agent_state, run.tool_results, run.model_name, run.api_key
     emit, send, record, on_reasoning, on_text = run.emit, run.send, run.record, run.on_reasoning, run.on_text
-    successful_sources, clean_query, discovery_report, scope_notes = (
-        run.successful_sources, run.clean_query, run.discovery_report, run.scope_notes
-    )
+    successful_sources, clean_query, scope_notes = run.successful_sources, run.clean_query, run.scope_notes
     vivarix_summary, lumicell_summary = run.vivarix_summary, run.lumicell_summary
     lithoscribe_summary, synapta_summary = run.lithoscribe_summary, run.synapta_summary
 
@@ -241,19 +298,21 @@ async def write_first_draft(run: RunContext) -> None:
     from ...agentic.config import get_effort_profile
     effort_prof = get_effort_profile(effort_level)
 
+    # Keyed by the effort profile's deliberation_depth (tribos/agentic/config.py EFFORT_PROFILES).
     deliberation_prompts = {
-        "concise": "\n[EFFORT LEVEL: LOW / FAST]\nPrioritize direct, concise synthesis without lengthy internal deliberation. Focus on primary conclusive points.",
-        "standard": "\n[EFFORT LEVEL: MEDIUM / BALANCED]\nConduct standard scientific reasoning. Balance depth with clarity, highlighting core evidence, mechanisms, and caveats.",
-        "deep": "\n[EFFORT LEVEL: HIGH / DEEP THINKING]\nEngage in deep, multi-angle clinical deliberation. Explicitly analyze alternative hypotheses, mechanistic discrepancies, evidentiary tension, biomarker stratification, and clinical trial design subtleties before synthesizing conclusions.",
-        "exhaustive": "\n[EFFORT LEVEL: ULTRA / EXHAUSTIVE THINKING]\nEngage in exhaustive, maximal-rigor deliberation. Systematically interrogate every biological assumption, pharmacokinetic/pharmacodynamic pathway, edge-case safety signal, discordant publication readout, and statistical confidence limit. Stress-test contradictory evidence across in vitro, in vivo, and clinical phases with extreme depth.",
+        "minimal": "\n[EFFORT LEVEL: LOW / FAST]\nPrioritize a direct, concise answer without lengthy internal deliberation. Give the governing result, its value with units, and the one assumption it rests on.",
+        "standard": "\n[EFFORT LEVEL: MEDIUM / BALANCED]\nConduct standard scientific and engineering reasoning. Balance depth with clarity: state the governing equations and assumptions, show the key steps, and note the validity regime and main caveats.",
+        "deep": "\n[EFFORT LEVEL: HIGH / DEEP THINKING]\nEngage in deep, multi-angle deliberation. Check every derivation step and its assumptions, verify dimensional consistency and limiting cases, compare alternative models or regimes, and weigh numerical results (method, step size, convergence) against analytical ones before concluding.",
+        "exhaustive": "\n[EFFORT LEVEL: ULTRA / EXHAUSTIVE THINKING]\nEngage in exhaustive, maximal-rigor deliberation. Systematically interrogate every modelling assumption, boundary and initial condition, limiting and edge case, numerical error source (discretization, conditioning, convergence, tolerances), uncertainty propagation and significant figures, and any discordant literature or tool result; stress-test the conclusion against alternative models and regimes.",
     }
     depth = effort_prof.get("deliberation_depth", "standard")
     delib_text = deliberation_prompts.get(depth, "")
     if delib_text:
         system_prompt = f"{system_prompt}\n{delib_text}"
 
-    n_ok = sum(1 for r in tool_results.values() if r.success)
-    sources_text = f"{n_ok} of {len(tool_results)} sources returned evidence"
+    distinct = distinct_results(tool_results)  # an alias key ("lithoscribe", "vivarix") is not another source
+    n_ok = sum(1 for r in distinct.values() if r.success)
+    sources_text = f"{n_ok} of {len(distinct)} sources returned evidence"
     await emit(
         "synthesis",
         title="Reasoning over the evidence",
@@ -281,10 +340,15 @@ async def write_first_draft(run: RunContext) -> None:
         streamed_chars[0] += len(delta or "")
         await on_text(delta)
 
+    want = first_draft_output_cap()
+    finish = [""]  # the provider's finish reason of the latest draft call
+
+    def on_finish(reason: str) -> None:
+        finish[0] = reason
+
     try:
         llm_kwargs: dict[str, Any] = {}
         if budget is not None:
-            want = first_draft_output_cap()
             try:
                 alloc = budget.admit(
                     "first_draft", len(system_prompt) + len(synthesis_prompt), want, min_output=min(1024, want)
@@ -306,13 +370,91 @@ async def write_first_draft(run: RunContext) -> None:
         stream_kwargs: dict[str, Any] = {}
         if budget is not None and budget.time_limited:
             stream_kwargs["total_timeout"] = ao.stream_timeout(budget.remaining_seconds())
-        draft_text, draft_reasoning = await run.watched(
-            "synthesis",
-            ao.astream_with_reasoning(llm, messages, on_reasoning=on_reasoning, on_text=counted_text, **stream_kwargs),
-        )
+        for attempt in (1, 2):
+            try:
+                draft_text, draft_reasoning = await run.watched(
+                    "synthesis",
+                    ao.astream_with_reasoning(llm, messages, on_reasoning=on_reasoning, on_text=counted_text, on_finish=on_finish,
+                                             **stream_kwargs),
+                )
+                break
+            except Exception as exc:  # noqa: BLE001
+                # A transient provider failure (HTTP 500, dropped connection) gets one more attempt before the answer
+                # falls back to the raw evidence; anything already shown is cleared first, so nothing is duplicated.
+                if attempt == 2 or type(exc).__name__ not in ao._TRANSIENT_STREAM_ERRORS:
+                    raise
+                logger.warning("First draft failed (%s); retrying once without extended reasoning", type(exc).__name__)
+                if streamed_chars[0]:
+                    await send({"type": "content_reset", "reason": "retry"})
+                    streamed_chars[0] = 0
+                await emit("synthesis", title="Model error; writing the answer again", text=type(exc).__name__,
+                           status="running")
+                # A long silent reasoning pass is what times out (no bytes for minutes), so the retry answers directly.
+                llm = ao.get_llm(model_name=synthesis_model, api_key=api_key, streaming=True, reasoning_effort="low",
+                                 **llm_kwargs)
+                await asyncio.sleep(2.0)
         candidate_response = draft_text
         if alloc is not None:
             budget.settle(alloc, output_chars=len(draft_text or "") + len(draft_reasoning or ""))
+            alloc = None
+        if not (draft_text or "").strip():
+            # A reasoning model can spend its whole output allocation thinking and return no answer text. Ask once more
+            # with extended reasoning off (the answer text then gets the allocation); an empty draft is never kept.
+            logger.warning("First draft returned no text (%d reasoning chars); retrying without extended reasoning",
+                           len(draft_reasoning or ""))
+            await emit("synthesis", title="Writing the answer again: the first attempt returned no text",
+                       text=f"{len(draft_reasoning or '')} characters of reasoning, no answer text", status="running")
+            retry_kwargs: dict[str, Any] = {}
+            if budget is not None:
+                try:
+                    alloc = budget.admit(
+                        "first_draft", len(system_prompt) + len(synthesis_prompt), want, min_output=min(1024, want)
+                    )
+                except BudgetExhausted as exc:
+                    raise DraftBudgetStop(str(exc)) from exc
+                retry_kwargs["max_tokens"] = alloc.output_cap
+            llm = ao.get_llm(model_name=synthesis_model, api_key=api_key, streaming=True, reasoning_effort="low",
+                             **retry_kwargs)
+            draft_text, retry_reasoning = await run.watched(
+                "synthesis",
+                ao.astream_with_reasoning(llm, messages, on_reasoning=on_reasoning, on_text=counted_text, on_finish=on_finish,
+                                             **stream_kwargs),
+            )
+            if alloc is not None:
+                budget.settle(alloc, output_chars=len(draft_text or "") + len(retry_reasoning or ""))
+                alloc = None
+            candidate_response = draft_text
+            if not (draft_text or "").strip():
+                raise EmptyDraftError("the model returned reasoning but no answer text, twice")
+        for _ in range(MAX_DRAFT_CONTINUATIONS):
+            if finish[0] != "length" or not candidate_response.strip():
+                break
+            logger.warning("First draft hit the output limit after %d words; continuing it", len(candidate_response.split()))
+            await emit("synthesis", title="Continuing the answer: it reached the output limit",
+                       text=f"{len(candidate_response.split())} words so far", status="running")
+            finish[0] = ""
+            cont_kwargs: dict[str, Any] = {}
+            if budget is not None:
+                try:
+                    alloc = budget.admit("first_draft", len(system_prompt) + len(synthesis_prompt) + len(candidate_response),
+                                         want, min_output=min(1024, want))
+                except BudgetExhausted:
+                    break  # the cut-off draft stands; the budget cannot pay for more
+                cont_kwargs["max_tokens"] = alloc.output_cap
+            llm = ao.get_llm(model_name=synthesis_model, api_key=api_key, streaming=True, reasoning_effort="low",
+                             **cont_kwargs)
+            cont_messages = [*messages, AIMessage(content=candidate_response), HumanMessage(content=CONTINUE_PROMPT)]
+            more, more_reasoning = await run.watched(
+                "synthesis",
+                ao.astream_with_reasoning(llm, cont_messages, on_reasoning=on_reasoning, on_text=counted_text,
+                                          on_finish=on_finish, **stream_kwargs),
+            )
+            if alloc is not None:
+                budget.settle(alloc, output_chars=len(more or "") + len(more_reasoning or ""))
+                alloc = None
+            if not (more or "").strip():
+                break
+            candidate_response = join_continuation(candidate_response, more)
         await emit(
             "synthesis",
             title="Reasoned over the evidence and wrote the answer",
@@ -329,6 +471,8 @@ async def write_first_draft(run: RunContext) -> None:
         logger.warning("LLM synthesis error: %s. Generating deterministic evidence fallback.", err)
         if isinstance(err, DraftBudgetStop):
             title = "Agent budget used up before the answer could be written; showing the gathered evidence"
+        elif isinstance(err, EmptyDraftError):
+            title = "The model returned no answer text; showing the computed results and evidence"
         elif isinstance(err, RunDeadlineExceeded):
             title = "Run time budget ran out while writing; showing the gathered evidence"
         else:
@@ -349,17 +493,28 @@ async def write_first_draft(run: RunContext) -> None:
                 continue
             if md and md.strip():
                 plugin_sections.append(md.strip() + "\n\n")
-        # Deterministic, evidence-backed fallback without fake conclusions
+        # Deterministic, evidence-backed fallback without fake conclusions: only the sections that hold results.
+        math_art = (getattr(agent_state, "artifacts", None) or {}).get("math_agent") if agent_state is not None else None
+        math_answer = (math_art or {}).get("answer") or {}
+        ode_art = (getattr(agent_state, "artifacts", None) or {}).get("ode_verification") if agent_state is not None else None
+        sections = [
+            ("Computed result (Axiom)", f"$${math_answer['latex']}$$\n\nStatus: {(math_art or {}).get('status', '').replace('_', ' ')}"
+             if math_answer.get("latex") else ""),
+            ("Numerical verification", verification_fallback_markdown(ode_art)),
+            ("Computed results (Dynamis, Axiom, Physis, Calcula)", vivarix_summary),
+            ("Literature passages (Archivon)", lithoscribe_summary),
+            ("Target-disease associations", synapta_summary),
+            ("Single-cell analysis", lumicell_summary),
+        ]
+        body = "".join(f"#### {title_}\n{text_}\n\n" for title_, text_ in sections if (text_ or "").strip())
         candidate_response = (
-            f"### Evidence-Backed Clinical Evaluation: {clean_query}\n\n"
-            f"#### Target Biology & Topological Architecture (🧬 Synapta)\n{synapta_summary}\n\n"
-            f"#### Dynamic Kinetic Simulation (⚙️ Vivarix)\n{vivarix_summary}\n\n"
-            f"#### Single-Cell Transcriptomic Heterogeneity (🔬 Lumicell)\n{lumicell_summary}\n\n"
-            f"#### Verified Literature & Clinical Readouts (📚 Lithoscribe)\n{lithoscribe_summary}\n\n"
-            f"{''.join(plugin_sections)}"
-            f"{discovery_report.to_markdown_summary()}\n\n"
-            f"#### Evidence Limitations & Evaluation Status\n"
-            f"Synthesis generated from empirical tool outputs. Direct LLM completion encountered: {err}."
+            f"### Results gathered for: {clean_query}\n\n"
+            "The written answer could not be produced, so these are the tool results as computed, without "
+            "interpretation.\n\n"
+            f"{body}{''.join(plugin_sections)}"
+            "#### Evidence limitations\n"
+            f"No written answer: {fallback_reason(err)}. Check the results above against the question before relying "
+            "on them."
         )
 
     # What the client has on screen: the streamed draft (or, after a model error, nothing it must replace).

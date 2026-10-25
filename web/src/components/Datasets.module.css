@@ -114,13 +114,17 @@
   flex-shrink: 0;
 }
 
-.kind_h5ad,
-.kind_table {
+.kind_table,
+.kind_hdf5 {
   color: var(--domain-scp);
 }
 
-.kind_sbml {
+.kind_mat {
   color: var(--domain-t2b);
+}
+
+.kind_legacy {
+  color: var(--text-faint);
 }
 
 .chipName {
@@ -136,7 +140,6 @@
   white-space: nowrap;
 }
 
-.badgeVerified,
 .badgeDeclared {
   display: inline-flex;
   align-items: center;
@@ -145,11 +148,6 @@
   border-radius: 6px;
   font-size: 10.5px;
   white-space: nowrap;
-}
-
-.badgeVerified {
-  color: var(--nvidia-green);
-  background: color-mix(in srgb, var(--nvidia-green) 12%, transparent);
 }
 
 .badgeDeclared {
@@ -437,25 +435,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-heading);
-}
-
-.geoResult {
-  padding: 8px 10px;
-  border-radius: 9px;
-  font-size: var(--text-xs);
-  line-height: 1.5;
-  background: var(--code-inline-bg);
-  color: var(--text-body);
-}
-
-.geoResult[data-status="verified"] {
-  border: 1px solid var(--border-glow);
-  background: var(--nvidia-glow);
-}
-
-.geoResult[data-status="not_found"],
-.geoResult[data-status="lookup_failed"] {
-  border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
 }
 
 .error {

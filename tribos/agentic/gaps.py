@@ -34,17 +34,20 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from ..agents.evidence_need import is_computation_request
 from ..utils.text import sentence_spans
 from .guardrails import SPOTLIGHT_RULE, spotlight
 from .runtime import AgentPhase, PhaseOutcome, register_phase
 from .specialists import (
     LITERATURE_TOOL,
+    MODULE_SIMULATION,
     WEB_TOOL,
     ask_json,
     evidence_digest,
     evidence_text,
     fetch_new_literature,
     fetch_new_web,
+    is_pure_derivation,
     named_tool_allowed,
     not_requested_modules,
     seen_passages,
@@ -80,15 +83,27 @@ _GENERIC = frozenset(
 
 
 # A markdown heading that opens the answer's own limitations section: what it lists is already acknowledged, not a gap.
-_LIMITATIONS_HEADING_RE = re.compile(r"^\s*(?:#{1,6}\s*|\*\*)\s*(?:evidence\s+)?(?:limitations?|gaps?|caveats?)\b", re.I)
+_LIMITATIONS_HEADING_RE = re.compile(
+    r"^\s*(?:#{1,6}\s*|\*\*)\s*(?:\[[^\]]+\]\s*)?(?:evidence\s+)?(?:limitations?|gaps?|caveats?|what\s+remains|unchecked|untested|unverified)\b",
+    re.I,
+)
 _HEADING_RE = re.compile(r"^\s*(?:#{1,6}\s+\S|\*\*[^*]+\*\*\s*:?\s*$)")
+# Sentences about how this run computed or checked its answer, not about the topic: their gaps are in the run's own
+# record, and a literature or web query built from them ("tool-trace provenance agent computation record") finds noise.
+_PROCESS_RE = re.compile(
+    r"\b(?:tool[\s-]?(?:calls?|trace|outputs?|results?)|computation(?:al)? record|(?:mathematics|math|planning) agent|"
+    r"agent'?s (?:computation|record|tool)|verifier|provenance|this run|the run'?s)\b",
+    re.I,
+)
 # Words that tie a sentence to an analysis the researcher did not ask for (see specialists.not_requested_modules).
+# Keyed by the module names not_requested_modules returns. A numerical simulation is the run of a model (an ODE
+# integration, a parameter sweep, a steady-state solve), not an equation the answer merely names: "the closed form of
+# the ODE was not established" is still a gap for a derivation question.
 MODULE_PATTERNS: dict[str, re.Pattern[str]] = {
-    "kinetic simulation": re.compile(
-        r"\b(?:simulat\w*|kinetic\w*|ODE\b|COPASI|BioModels?|BIOMD\d+|Vivarix|pathway dynamics|time[- ]course|"
-        r"steady[- ]state)", re.I,
+    MODULE_SIMULATION: re.compile(
+        r"\b(?:simulat\w*|numerical(?:ly)?\s+integrat\w*|time[- ]courses?|trajector(?:y|ies)|steady[- ]states?"
+        r"|parameter\s+(?:scans?|sweeps?)|Dynamis|Vivarix|solve_ivp)", re.I,
     ),
-    "single-cell analysis": re.compile(r"\b(?:single[- ]cell|scRNA|snRNA|Lumicell|Leiden|cell clusters?)", re.I),
 }
 
 
@@ -108,7 +123,7 @@ class _GapReply(BaseModel):
 
 
 GAPS_SYSTEM = (
-    "[phase:gaps] You check a draft biomedical answer for evidence gaps, using the Self-RAG support rubric. For each "
+    "[phase:gaps] You check a draft science or engineering answer for evidence gaps, using the Self-RAG support rubric. For each "
     "sub-question decide whether the gathered evidence answers it: answered (fully supported), partial (partly "
     "supported) or missing (no support). Then propose at most 3 short literature search queries (key entities and "
     "terms only, no prose) for the partial or missing ones. Do not propose a query for something the evidence "
@@ -137,13 +152,15 @@ def hedged_sentences(draft: str, limit: int = MAX_HEDGED, skip_modules: list[str
     """Sentences of the draft that hedge or admit missing evidence (FLARE-style low-confidence spans).
 
     Sentences under the answer's limitations heading and sentences about analyses that were not requested
-    (skip_modules, e.g. "kinetic simulation") are not gaps: they are acknowledged scope, not missing evidence."""
+    (skip_modules, e.g. "numerical simulation") are not gaps: they are acknowledged scope, not missing evidence."""
     out: list[str] = []
     body = _without_limitations(draft)
     for raw in (body[s:e] for s, e in sentence_spans(body)):
         s = re.sub(r"^[\s#>*\-|0-9.)]+", "", raw).strip(" *_|")
         if len(s.split()) < 5 or not _HEDGE_RE.search(s):
             continue
+        if _PROCESS_RE.search(s):
+            continue  # a caveat about this run's own tools ("the tool call could not be matched"): no search fills it
         if skip_modules and mentions_modules(s, skip_modules):
             continue
         if s not in out:
@@ -337,6 +354,9 @@ class GapPhase(AgentPhase):
     def applies(self, state: Any) -> bool:
         if getattr(state.ctx, "scope", "research") != "research" or not (state.draft or "").strip():
             return False
+        # A pure mathematics or physics derivation is answered by computation, not by papers: no gap re-retrieval.
+        if is_pure_derivation(state):
+            return False
         if state.draft_round in (state.bag.get("gap_rounds_done") or []):
             return False
         return self._lit_ok(state) or self._web_ok(state)
@@ -363,6 +383,8 @@ class GapPhase(AgentPhase):
                     continue  # already searched for in an earlier round without a usable result
                 if mentions_modules(q.text, skip) and not mentions_modules(state.clean_query or state.query or "", skip):
                     continue  # a sub-question about an analysis nobody asked for
+                if is_computation_request(q.text):
+                    continue  # its result is computed, not retrieved: a literature or web search cannot fill it
                 q_stems = stems(q.text)
                 # Long sub-questions rarely share half their stems with the draft's "X was not retrieved" sentence, so
                 # three shared content stems ("silico", "binding", "predict") are enough to count it as hedged.

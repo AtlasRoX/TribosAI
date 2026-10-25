@@ -14,16 +14,17 @@ from .context import RunContext, logger, orchestrator_module
 
 
 def prefer_primary_reports(text: str, tool_results: dict[str, Any]) -> str:
-    """The answer with a named trial's retrieved primary report cited where only a review was cited for its figures."""
+    """The answer with a named result's retrieved primary paper cited where only a review was cited for its figures."""
     from ...verify import verifier as verifier_mod
 
     try:
-        out, changes = verifier_mod.prefer_primary_trial_reports(text, tool_results)
+        out, changes = verifier_mod.prefer_primary_reports(text, tool_results)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Primary-report citation step failed: %s", exc)
         return text
     for c in changes:
-        logger.info("Cited %s's primary report %s next to review %s", c["trial"], c["primary"], c["review"])
+        subject = c.get("subject") or c.get("trial")
+        logger.info("Cited %s's primary report %s next to review %s", subject, c["primary"], c["review"])
     return out
 
 
@@ -48,7 +49,12 @@ async def reconcile_confidence(run: RunContext) -> None:
     computed = computed_confidence_band(run)
     if computed is None or not run.candidate_response:
         return
-    reconciled = verifier_mod.reconcile_confidence_line(run.candidate_response, computed)
+    art = run.execution_artifacts.get("claim_confidence")
+    if not isinstance(art, dict) and run.agent_state is not None:
+        art = (getattr(run.agent_state, "artifacts", None) or {}).get("claim_confidence")
+    verified = isinstance(art, dict) and art.get("method") == "computational_verification"
+    note = "(verified by independent computation)" if verified else verifier_mod.COMPUTED_CONFIDENCE_NOTE
+    reconciled = verifier_mod.reconcile_confidence_line(run.candidate_response, computed, note)
     if reconciled == run.candidate_response:
         return
     run.candidate_response = reconciled
@@ -221,8 +227,12 @@ async def check_and_correct(run: RunContext) -> None:
                     query_context=ctx,
                     entailment_judge=entailment_judge,
                 )
+                # An empty draft has nothing to flag and so can outscore any real answer; it never wins over one.
+                draft_empty = len((candidate_response or "").split()) < 20
                 if revised.strip() and (
-                    revised_report.passed or revised_report.verification_score >= verification_report.verification_score
+                    draft_empty
+                    or revised_report.passed
+                    or revised_report.verification_score >= verification_report.verification_score
                 ):
                     candidate_response, verification_report = revised, revised_report
                     await send({"type": "content_reset", "reason": "revision"})
@@ -336,43 +346,67 @@ async def report_result(run: RunContext) -> None:
     result_step = (
         "verification_result" if ("revision" in thought_index or "claim_removal" in thought_index) else "verification"
     )
-    if verification_report.passed:
+    coverage = dict(getattr(verification_report, "coverage", None) or {})
+    if verification_report.passed and coverage.get("evaluated", 0) == 0:
+        # Nothing in the answer could be checked: say so; a defect-free score over zero claims is not a result.
+        await emit(
+            result_step,
+            title="No claims could be checked",
+            text=(
+                f"{coverage.get('extracted', 0)} statement(s) found, none decidable by the checks; cited identifiers "
+                "match the tool outputs."
+                if coverage.get("extracted")
+                else "The answer has no claims the checks can evaluate; cited identifiers match the tool outputs."
+            ),
+            agent="Verifier",
+            extra={"passed": True, "fully_verified": False, "status": "not_evaluated", "coverage": coverage},
+        )
+    elif verification_report.passed:
         # Say what was actually checked; "Verified" only when every material claim was checked and supported.
         fully = bool(verification_report.fully_verified and verification_report.claims)
         await emit(
             result_step,
             title=(
-                f"{'Verified' if fully else 'Checked'} against the evidence "
-                f"(score {verification_report.verification_score:.2f})"
+                f"{'Verified' if fully else 'Checked'}: {coverage.get('passed', 0)} of "
+                f"{coverage.get('extracted', len(verification_report.claims))} claim(s) checked and supported"
             ),
-            text=(
-                verifier_mod.claim_tally(verification_report)
-                if verification_report.claims
-                else "No checkable claims; cited identifiers match the tool outputs."
-            ),
+            text=verifier_mod.claim_tally(verification_report),
             agent="Verifier",
             extra={
                 "verification_score": verification_report.verification_score,
                 "passed": True,
                 "fully_verified": fully,
+                "status": verification_report.status,
+                "coverage": coverage,
             },
         )
     else:
+        failed_n = coverage.get("failed", 0)
         await emit(
             result_step,
             title=(
-                f"{len(verification_report.defects)} claim(s) remain unverified "
-                f"(score {verification_report.verification_score:.2f})"
-            ),
+                f"{failed_n} claim(s) contradicted by the checks" if failed_n
+                else f"{len(verification_report.defects)} problem(s) remain"
+            ) + (f" · {coverage.get('passed', 0)} of {coverage.get('extracted', 0)} supported" if coverage.get("extracted") else ""),
             text=defect_lines(verification_report),
             status="error",
             agent="Verifier",
-            extra={"verification_score": verification_report.verification_score, "passed": False},
+            extra={"verification_score": verification_report.verification_score, "passed": False,
+                   "status": verification_report.status, "coverage": coverage},
         )
         # Explicitly mark synthesis as unverified with honest scientific warning banner
-        warning_header = (
-            f"> ⚠️ **Scientific Verification Notice**: This synthesized assessment contains claims that could not be fully verified against empirical tool artifacts (Verification Score: {verification_report.verification_score:.2f} / 1.00).\n"
-            f"> **Unverified Findings**: {'; '.join(verifier_mod.defect_display(d, 200) for d in verification_report.defects[:3])}\n\n"
-        )
+        math_failed = [d for d in verification_report.defects if d.category == "MATH_CONSISTENCY"]
+        if math_failed:
+            warning_header = (
+                f"> ⚠️ **Verification found errors**: {len(math_failed)} mathematical statement(s) in this answer do not "
+                "hold when re-evaluated with the question's values and the computed results. Treat the flagged values "
+                "as wrong; the computed results in the cards below are the checked ones.\n"
+                f"> {'; '.join(verifier_mod.defect_display(d, 220) for d in math_failed[:3])}\n\n"
+            )
+        else:
+            warning_header = (
+                f"> ⚠️ **Scientific Verification Notice**: This synthesized assessment contains claims that could not be fully verified against empirical tool artifacts (Verification Score: {verification_report.verification_score:.2f} / 1.00).\n"
+                f"> **Unverified Findings**: {'; '.join(verifier_mod.defect_display(d, 200) for d in verification_report.defects[:3])}\n\n"
+            )
         candidate_response = warning_header + candidate_response
     run.candidate_response = candidate_response

@@ -7,7 +7,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 DATASET_ID_RE = re.compile(r"^ds_[0-9a-f]{12}$")
 
@@ -16,6 +16,14 @@ class DatasetKind(str, Enum):
     TABLE = "table"
     HDF5 = "hdf5"
     MAT = "mat"
+    # A manifest written by the biomedical release (kind "h5ad" or "sbml"): listed, counted and deletable, never
+    # analysed. Uploads can never create this kind (EXTENSION_KINDS has no extension for it).
+    LEGACY = "legacy"
+
+
+# Kinds of the biomedical release that are no longer accepted; their manifests are read as DatasetKind.LEGACY.
+LEGACY_KINDS = frozenset({"h5ad", "sbml"})
+UPLOAD_KINDS = (DatasetKind.TABLE, DatasetKind.HDF5, DatasetKind.MAT)
 
 
 class ConsentStatus(str, Enum):
@@ -140,6 +148,8 @@ class DatasetRecord(BaseModel):
     geo_verification: GeoVerification = Field(default_factory=GeoVerification)
     validation: ValidationSummary
     provenance_history: list[dict[str, Any]] = Field(default_factory=list)
+    # The kind the manifest was written with when it is one of LEGACY_KINDS (kind is then DatasetKind.LEGACY).
+    legacy_kind: str | None = None
 
     @field_validator("id")
     @classmethod
@@ -147,6 +157,18 @@ class DatasetRecord(BaseModel):
         if not DATASET_ID_RE.match(value):
             raise ValueError("invalid dataset id")
         return value
+
+    @model_validator(mode="before")
+    @classmethod
+    def _map_legacy_kind(cls, data: Any) -> Any:
+        """Read an h5ad/sbml manifest of the biomedical release as a legacy record instead of failing validation."""
+        if isinstance(data, dict) and str(data.get("kind") or "").lower() in LEGACY_KINDS:
+            data = {**data, "legacy_kind": str(data["kind"]).lower(), "kind": DatasetKind.LEGACY.value}
+        return data
+
+    @property
+    def analysable(self) -> bool:
+        return self.kind != DatasetKind.LEGACY
 
     @property
     def geo_verified(self) -> bool:
@@ -205,6 +227,12 @@ class DatasetRecord(BaseModel):
     def to_api(self) -> dict[str, Any]:
         data = self.model_dump(mode="json")
         data["dims"] = self.dims()
+        data["analysable"] = self.analysable
+        if not self.analysable:
+            data["unsupported_reason"] = (
+                f"Legacy {self.legacy_kind or 'biomedical'} upload: Tribos no longer analyses this format. "
+                "It still counts toward your storage quota; delete it to free the space."
+            )
         return data
 
 

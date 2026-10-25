@@ -92,21 +92,23 @@ def _preview(inp: Any) -> dict[str, Any]:
             head = df.head(5).to_string(max_cols=12, max_colwidth=24)
         return {"kind": "table", "n_columns": int(df.shape[1]), "columns": cols, "index_name": str(df.index.name or ""),
                 "head": head, "note": "first column is the row index (index_col=0)"}
-    import anndata as ad
+    arrays: list[dict[str, Any]] = []
+    if inp.kind == "mat":
+        import scipy.io
 
-    adata = ad.read_h5ad(inp.path, backed="r")
-    try:
-        obs = adata.obs
-        cols = [{"name": str(c), "dtype": str(t)} for c, t in list(obs.dtypes.items())[:60]]
-        with pd.option_context("display.max_columns", 12, "display.width", 160):
-            head = obs.head(5).to_string(max_cols=12, max_colwidth=24) if obs.shape[1] else ""
-        return {"kind": "h5ad", "n_obs": int(adata.n_obs), "n_vars": int(adata.n_vars), "obs_columns": cols,
-                "var_names_head": [str(v) for v in list(adata.var_names[:20])], "head": head}
-    finally:
-        try:
-            adata.file.close()
-        except Exception:  # noqa: BLE001
-            pass
+        for name, shape, dtype in scipy.io.whosmat(inp.path)[:50]:
+            arrays.append({"name": str(name), "shape": [int(s) for s in shape], "dtype": str(dtype)})
+        return {"kind": "mat", "n_arrays": len(arrays), "arrays": arrays}
+    import h5py  # hdf5 (and a legacy .h5ad, which is an HDF5 file): names, shapes and dtypes, no data loaded
+
+    with h5py.File(inp.path, "r") as fh:
+
+        def visit(name: str, obj: Any) -> None:
+            if isinstance(obj, h5py.Dataset) and len(arrays) < 50:
+                arrays.append({"name": name, "shape": [int(s) for s in obj.shape], "dtype": str(obj.dtype)})
+
+        fh.visititems(visit)
+    return {"kind": str(inp.kind or "hdf5"), "n_arrays": len(arrays), "arrays": arrays}
 
 
 def _preview_text(inp: Any, preview: dict[str, Any]) -> str:
@@ -172,48 +174,48 @@ def deterministic_script(inp: Any, query: str) -> str:
                 "    fig.tight_layout()",
             ]
         return "\n".join(lines) + "\n"
+    # HDF5 and MAT files: list every numeric array with its shape and summary statistics (h5py / scipy.io; the
+    # sandbox no longer imports AnnData, and the .h5ad single-cell branch was a biomedical leftover).
+    if inp.kind == "mat":
+        load = [
+            "import scipy.io",
+            f"raw = scipy.io.loadmat({inp.name!r})",
+            "arrays = {k: np.asarray(v) for k, v in raw.items() if not k.startswith('__')}",
+        ]
+    else:
+        load = [
+            "import h5py",
+            "arrays = {}",
+            f"with h5py.File({inp.name!r}, 'r') as fh:",
+            "    def visit(name, obj):",
+            "        if isinstance(obj, h5py.Dataset) and len(arrays) < 50:",
+            "            arrays[name] = obj[()] if obj.size <= 5_000_000 else obj[:1000]",
+            "    fh.visititems(visit)",
+        ]
     lines = [
         "import numpy as np",
         "import pandas as pd",
-        "import anndata as ad",
-        f"adata = ad.read_h5ad({inp.name!r})",
-        "X = adata.X",
-        "means = np.asarray(X.mean(axis=0)).ravel()",
-        "detected = np.asarray((X > 0).sum(axis=0)).ravel()",
-        'genes = pd.DataFrame({"mean": means, "cells_detected": detected}, index=[str(v) for v in adata.var_names])',
-        'top = genes.sort_values("mean", ascending=False).head(20)',
-        "result = {",
-        '    "n_obs": int(adata.n_obs),',
-        '    "n_vars": int(adata.n_vars),',
-        '    "obs_columns": [str(c) for c in adata.obs.columns][:30],',
-        '    "top_mean_genes": {str(k): round(float(v), 4) for k, v in top["mean"].items()},',
-        "}",
-        'tables = {"top_genes": top.round(4)}',
-        "group_col = None",
-        "for c in adata.obs.columns:",
-        "    n = adata.obs[c].nunique()",
-        "    if not pd.api.types.is_numeric_dtype(adata.obs[c]) and 2 <= n <= 20:",
-        "        group_col = c",
-        "        break",
-        "if group_col is not None:",
-        "    labels = adata.obs[group_col].astype(str).values",
-        '    result["group_column"] = str(group_col)',
-        '    result["group_sizes"] = {str(k): int(v) for k, v in adata.obs[group_col].value_counts().items()}',
-        "    chosen = list(top.index[:10])",
-        "    sub = adata[:, chosen].X",
-        '    dense = sub.toarray() if hasattr(sub, "toarray") else np.asarray(sub)',
-        "    frame = pd.DataFrame(dense, columns=chosen)",
-        "    frame['group'] = labels",
-        "    tables[\"group_means\"] = frame.groupby('group').mean().T.round(4)",
+        *load,
+        "rows = []",
+        "for name, arr in arrays.items():",
+        "    arr = np.asarray(arr)",
+        "    row = {'array': str(name), 'shape': 'x'.join(str(d) for d in arr.shape), 'dtype': str(arr.dtype)}",
+        "    if arr.size and np.issubdtype(arr.dtype, np.number):",
+        "        row.update(min=float(np.nanmin(arr)), max=float(np.nanmax(arr)), mean=float(np.nanmean(arr)))",
+        "    rows.append(row)",
+        "summary = pd.DataFrame(rows)",
+        "result = {'n_arrays': len(rows), 'arrays': [r['array'] for r in rows][:30]}",
+        "tables = {'arrays': summary.head(50).round(4) if len(summary) else summary}",
     ]
     if plot:
         lines += [
             "import matplotlib.pyplot as plt",
-            "fig, ax = plt.subplots(figsize=(6, 4))",
-            "ax.hist(np.log1p(means), bins=40)",
-            'ax.set_xlabel("log1p(mean expression per gene)")',
-            'ax.set_ylabel("genes")',
-            "fig.tight_layout()",
+            "numeric = [np.asarray(a).ravel() for a in arrays.values() if np.asarray(a).size and np.issubdtype(np.asarray(a).dtype, np.number)]",
+            "if numeric:",
+            "    fig, ax = plt.subplots(figsize=(6, 4))",
+            "    ax.hist(numeric[0][:100000], bins=40)",
+            "    ax.set_title(f'Values of {next(iter(arrays))}')",
+            "    fig.tight_layout()",
         ]
     return "\n".join(lines) + "\n"
 

@@ -76,7 +76,11 @@ class PlanNode(BaseModel):
     round: int = 0  # 0 = first plan, 1.. = replans
     resolved_args: dict[str, Any] | None = None  # args with references filled in, set when the node runs
     adjusted: list[str] = Field(default_factory=list)  # argument repairs (tools.arg_repair), e.g. "size 100→50"
-    fill_from_run: list[str] = Field(default_factory=list)  # drug arguments left blank: filled at run time
+    # Orchestration controls, kept out of the tool's arguments: the node's own deadline (seconds), enforced by the
+    # executor (and passed to the tool when its schema takes a timeout).
+    timeout_s: float | None = None
+    # A later node that did what this failed one was for (same tool and purpose): the failure is recovered history.
+    recovered_by: str | None = None
 
     def call_args(self) -> dict[str, Any]:
         return self.resolved_args if self.resolved_args is not None else self.args
@@ -97,6 +101,10 @@ class PlanNode(BaseModel):
             out["resolved_args"] = _json_safe(self.resolved_args)
         if self.adjusted:
             out["adjusted"] = list(self.adjusted)
+        if self.timeout_s is not None:
+            out["timeout_s"] = self.timeout_s
+        if self.recovered_by:
+            out["recovered_by"] = self.recovered_by
         return out
 
 
@@ -127,6 +135,20 @@ def _json_safe(value: Any) -> Any:
 def canonical(value: Any) -> str:
     """Canonical JSON of a call's arguments, for duplicate detection."""
     return json.dumps(_json_safe(value), sort_keys=True, separators=(",", ":"))
+
+
+# The literature search is registered under its current name and a legacy alias that runs the same search.
+LITERATURE_TOOLS = frozenset({"archivon_literature_search", "lithoscribe_literature_synthesis"})
+
+
+def call_signature(tool: str, inputs: Any) -> tuple[str, str]:
+    """The duplicate-detection key of a call. A literature search is one search whichever of its two names runs it,
+    and is keyed by its query and sources only: asking again for fewer or more results of the same query finds
+    the same papers."""
+    if tool in LITERATURE_TOOLS and isinstance(inputs, dict):
+        query = re.sub(r"\s+", " ", str(inputs.get("query") or "")).strip().lower()
+        return "literature_search", canonical({"query": query, "sources": inputs.get("sources")})
+    return tool, canonical(inputs)
 
 
 def normalise_id(raw: Any) -> str:
@@ -341,6 +363,11 @@ def parse_plan(value: Any, *, round_no: int = 0, taken_ids: set[str] | None = No
             deps = [deps]
         if not isinstance(deps, list):
             deps = []
+        nested = args.get("depends_on") if isinstance(args.get("depends_on"), (list, str)) else None
+        if nested is not None:
+            # A node-level field written inside args by mistake: it orders the plan, it is not a tool argument.
+            args = {k: v for k, v in args.items() if k != "depends_on"}
+            deps = [*deps, *([nested] if isinstance(nested, str) else nested)]
         nid = orig
         if nid in taken:
             nid = f"r{round_no}_{orig}"
@@ -356,6 +383,7 @@ def parse_plan(value: Any, *, round_no: int = 0, taken_ids: set[str] | None = No
             depends_on=[normalise_id(d) for d in deps if str(d).strip()],
             purpose=str(_first(raw, "purpose", "description", "why") or "")[:240],
             round=round_no,
+            timeout_s=_as_seconds(_first(raw, "timeout_s", "timeout", "timeout_seconds")),
         )
         staged.append((node, orig))
 
@@ -365,50 +393,80 @@ def parse_plan(value: Any, *, round_no: int = 0, taken_ids: set[str] | None = No
 
 
 # Policy -------------------------------------------------------------------------------------------------------
-# The pipeline source (ctx.decisions / ctx.source_allowlist key) each tool's evidence counts as.
+# The pipeline source (ctx.decisions / ctx.source_allowlist key) each tool's evidence counts as, where it differs
+# from the tool's registry domain.
 TOOL_SOURCES: dict[str, str] = {
     "lithoscribe_literature_synthesis": "lithoscribe",
-    "lithoscribe_clinical_trials_search": "clinical_trials",
     "websurfer_search": "websurfer",
-    "openfda_drug_safety": "openfda",
-    "chembl_resolve_drugs": "chembl",
-    "chembl_drug_profile": "chembl",
-    "opentargets_disease_targets": "disease_targets",
-    "primekg_investigate": "primekg",
-    "primekg_query": "primekg",
-    "lumicell_analyze_single_cell": "lumicell",
 }
+# Registry domains whose decision key has another name ("analysis" tools are gated by the "calcula" decision).
+_DOMAIN_SOURCES: dict[str, str] = {"analysis": "calcula"}
 
 
 def tool_source(entry: Any) -> str:
     name = str(getattr(entry, "name", entry) or "")
     if name in TOOL_SOURCES:
         return TOOL_SOURCES[name]
-    if "clinical_trial" in name:
-        return "clinical_trials"
-    if name.startswith("primekg"):
-        return "primekg"
     if name.startswith("vivarix") or "calibrat" in name:
         return "vivarix"
-    return str(getattr(entry, "domain", "") or name.split("_", 1)[0]).lower()
+    domain = str(getattr(entry, "domain", "") or name.split("_", 1)[0]).lower()
+    return _DOMAIN_SOURCES.get(domain, domain)
 
 
-def is_simulation_tool(name: str) -> bool:
-    return name.startswith("vivarix_") or "calibrat" in name or "simulat" in name
+# Tool capabilities (SUP-3) -----------------------------------------------------------------------------------
+# What a tool does, read from its registry entry (domain, name and tags) rather than from one regex per caller:
+# plan approval asks before EXPENSIVE work, the "no simulation" ban removes SIMULATION tools, and the "no code
+# execution" request removes EXECUTES_CODE tools. A registry tag with the capability's name always adds it.
+EXECUTES_CODE = "executes_code"
+SIMULATION = "simulation"
+EXPENSIVE = "expensive"
+CAPABILITIES = (EXECUTES_CODE, SIMULATION, EXPENSIVE)
+# Dynamis (numerical ODE simulation, equilibria, scans, fitting, optimisation, root finding) and its Vivarix aliases:
+# every one of them is a numerical model run, so a "no simulation" question runs none of them.
+SIMULATION_DOMAINS = frozenset({"dynamis", "vivarix"})
+_CODE_DOMAINS = frozenset({"analysis", "calcula", "sandbox"})
+# Simulation work long enough to need approval: integrations, sweeps, fits, calibrations and optimisations. A single
+# equilibrium or root solve is cheap.
+_HEAVY_SIMULATION_RE = re.compile(r"simulat|scan|sweep|fit|calibrat|optimi[sz]")
 
 
-def is_expensive_tool(name: str) -> bool:
-    """Tools that need the researcher's approval on an interactive run: simulations, scans, calibration, code
-    execution and structure docking or generation."""
-    n = name.lower()
-    return (
-        n.startswith("vivarix_")
-        or "calibrat" in n
-        or n.startswith("analysis_")
-        or ("structure" in n and ("dock" in n or "generat" in n))
-        or "diffdock" in n
-        or "molmim" in n
-    )
+def tool_capabilities(tool: Any, entry: Any = None) -> frozenset[str]:
+    """The capability set of a tool, given its registry entry or name (with the entry, when known, as `entry`)."""
+    entry = entry if entry is not None else (None if isinstance(tool, str) else tool)
+    name = str(getattr(entry, "name", None) or getattr(tool, "name", tool) or "").lower()
+    domain = str(getattr(entry, "domain", "") or name.split("_", 1)[0]).lower()
+    tags = {str(t).lower() for t in (getattr(entry, "tags", None) or [])}
+    caps = {c for c in CAPABILITIES if c in tags and c != SIMULATION}  # "simulation" is also a search tag
+    if (domain in _CODE_DOMAINS and "run_" in name) or name.endswith("run_python") or "sagemath" in name:
+        caps.add(EXECUTES_CODE)
+    if domain in SIMULATION_DOMAINS or name.startswith(("dynamis_", "vivarix_")) or "calibrat" in name or "simulat" in name:
+        caps.add(SIMULATION)
+    if EXECUTES_CODE in caps or name.startswith("vivarix_") or (SIMULATION in caps and _HEAVY_SIMULATION_RE.search(name)):
+        caps.add(EXPENSIVE)
+    return frozenset(caps)
+
+
+def is_simulation_tool(tool: Any, entry: Any = None) -> bool:
+    return SIMULATION in tool_capabilities(tool, entry)
+
+
+def executes_code(tool: Any, entry: Any = None) -> bool:
+    return EXECUTES_CODE in tool_capabilities(tool, entry)
+
+
+def is_expensive_tool(tool: Any, entry: Any = None) -> bool:
+    """Tools that need the researcher's approval on an interactive run: code execution (sandboxed Python, SageMath)
+    and long numerical runs (ODE integrations, parameter scans, fits, calibrations, optimisations)."""
+    return EXPENSIVE in tool_capabilities(tool, entry)
+
+
+def simulation_banned(ctx: Any) -> bool:
+    constraints = getattr(ctx, "simulation_constraints", None)
+    return bool(getattr(ctx, "suppress_simulation", False) or getattr(constraints, "simulation_forbidden", False))
+
+
+# Sources a "no outside evidence needed" decision (ctx.evidence_need.skip_retrieval) rules out.
+RETRIEVAL_SOURCES = frozenset({"archivon", "lithoscribe", "websurfer"})
 
 
 def single_cell_dataset_path(ctx: Any) -> str | None:
@@ -421,33 +479,28 @@ def single_cell_dataset_path(ctx: Any) -> str | None:
     return typed if isinstance(typed, str) and typed.strip() else None
 
 
-# Omics analyses a "no omics" question excludes: expression, association and dependency screens. Literature,
-# chemistry and pathway lookups share the extension domain but are not omics analyses.
-OMICS_TOOL_PREFIXES = ("gwas", "gtex", "depmap")
-
-
 def excluded_by_question(entry: Any, ctx: Any) -> str | None:
-    """Why the question's own exclusions ("No FDA sweep, omics ... is needed") rule this tool out, or None."""
+    """Why the question's own exclusions ("No simulation or hypothesis generation is needed") rule this tool out, or
+    None."""
     excluded = getattr(ctx, "excluded_modules", None) or set()
-    if not excluded:
-        return None
-    name = str(getattr(entry, "name", entry) or "")
-    if "omics" in excluded and name.startswith(OMICS_TOOL_PREFIXES):
-        return "omics analysis was excluded at your request"
+    if "simulation" in excluded and is_simulation_tool(entry, None if isinstance(entry, str) else entry):
+        return "simulation was excluded at your request"
     return None
 
 
 def policy_violation(entry: Any, ctx: Any) -> str | None:
     """Why the turn's hard policy forbids this tool, or None."""
-    name = str(getattr(entry, "name", entry) or "")
     if ctx is None:
         return None
-    constraints = getattr(ctx, "simulation_constraints", None)
-    if is_simulation_tool(name) and (
-        getattr(ctx, "suppress_simulation", False) or bool(getattr(constraints, "simulation_forbidden", False))
-    ):
+    tool_entry = None if isinstance(entry, str) else entry
+    if is_simulation_tool(entry, tool_entry) and simulation_banned(ctx):
         return "simulation was forbidden for this question"
+    if executes_code(entry, tool_entry) and (getattr(ctx, "extras", None) or {}).get("code_analysis_forbidden"):
+        return "the researcher asked for no code execution"
     source = tool_source(entry)
+    need = getattr(ctx, "evidence_need", None)
+    if source in RETRIEVAL_SOURCES and need is not None and getattr(need, "skip_retrieval", False):
+        return str(getattr(need, "reason", "") or "no outside evidence is needed for this question")
     allow = getattr(ctx, "source_allowlist", None)
     if allow is not None and source not in allow:
         reason = getattr(ctx, "source_restriction_reason", "") or "restricted sources"
@@ -555,16 +608,39 @@ def _cycle_members(nodes: Sequence[PlanNode], leftover: set[str]) -> set[str]:
 
 
 # Validation ---------------------------------------------------------------------------------------------------
-# Plan arguments that name drugs (shared with executor.run_known_drugs fallbacks).
-DRUG_ARG_KEYS = {"names", "name", "drug", "drugs", "drug_name", "drug_names", "ingredient", "ingredients", "intervention"}
+# Deadline fields a planner writes; they control how the step runs, so they are never dropped as unknown arguments.
+TIMEOUT_KEYS = ("timeout_s", "timeout", "timeout_seconds", "time_limit", "time_limit_s", "deadline_s", "max_seconds")
 
 
-def _blank(value: Any) -> bool:
-    if isinstance(value, str):
-        return len(value.strip()) < 2
-    if isinstance(value, (list, tuple)):
-        return not any(isinstance(v, str) and len(v.strip()) >= 2 for v in value)
-    return value is None
+def _as_seconds(value: Any) -> float | None:
+    try:
+        secs = float(value)
+    except (TypeError, ValueError):
+        return None
+    return secs if 0 < secs <= 3600 else None
+
+
+def move_orchestration_args(node: PlanNode, entry: Any) -> None:
+    """Move deadline fields the planner wrote into a tool's args out of them: they become the node's deadline, and are
+    passed to the tool's own timeout argument when its schema has one ("timeout_seconds" -> "timeout_s"). Every move
+    is recorded in `node.adjusted`, so nothing that affects execution is removed silently."""
+    schema = getattr(entry, "input_schema", None)
+    fields = getattr(schema, "model_fields", {}) or {}
+    tool_timeout = next((f for f in ("timeout_s", "timeout", "timeout_seconds") if f in fields), None)
+    for key in [k for k in node.args if k in TIMEOUT_KEYS and k not in fields]:
+        raw = node.args.pop(key)
+        secs = _as_seconds(raw)
+        if secs is None:
+            node.adjusted.append(f"ignored {key}={str(raw)[:20]!r} (not a number of seconds)")
+            continue
+        if node.timeout_s is None:
+            node.timeout_s = secs
+        if tool_timeout and tool_timeout not in node.args:
+            annotation = str(getattr(fields[tool_timeout], "annotation", ""))
+            node.args[tool_timeout] = int(round(secs)) if "int" in annotation else secs
+            node.adjusted.append(f"{key} → {tool_timeout}")
+        else:
+            node.adjusted.append(f"{key} applied as the step deadline ({secs:g} s)")
 
 
 def validate_plan(
@@ -582,7 +658,7 @@ def validate_plan(
     external_ids: ids of finished nodes from earlier rounds that this plan may depend on and reference.
     """
     external = set(external_ids or ())
-    seen_calls: set[tuple[str, str]] = {(t, canonical(a)) for t, a in (prior_calls or [])}
+    seen_calls: set[tuple[str, str]] = {call_signature(t, a) for t, a in (prior_calls or [])}
 
     def all_known() -> set[str]:
         return set(graph.ids()) | external
@@ -613,13 +689,8 @@ def validate_plan(
         if unknown:
             graph.reject(node, f"depends on unknown node(s) {', '.join(unknown)}")
             continue
+        move_orchestration_args(node, entry)
         ref_fields = {k for k, v in node.args.items() if refs_in(v, known)}
-        # A drug argument the planner left blank ("", "x", []) is filled at run time with the drugs the run has
-        # found (executor.run_known_drugs) rather than rejecting the step.
-        for k in [k for k, v in node.args.items() if k.lower() in DRUG_ARG_KEYS and k not in ref_fields and _blank(v)]:
-            node.args.pop(k)
-            node.fill_from_run.append(k)
-            ref_fields.add(k)
         problem = schema_problem(entry, node.args, ref_fields)
         if problem:
             # One conservative repair (limits clamped to their bounds, over-long lists cut, {"name": ..} objects
@@ -634,7 +705,7 @@ def validate_plan(
             continue
         if not ref_fields:
             inputs = validated_inputs(entry, node.args)
-            sig = (node.tool, canonical(inputs if inputs is not None else node.args))
+            sig = call_signature(node.tool, inputs if inputs is not None else node.args)
             if sig in seen_calls:
                 graph.reject(node, "an identical call was already made this turn")
                 continue
@@ -690,15 +761,24 @@ def drop_nodes(graph: PlanGraph, ids: Iterable[str], reason: str) -> list[str]:
 
 
 __all__ = [
+    "CAPABILITIES",
+    "EXECUTES_CODE",
+    "EXPENSIVE",
+    "LITERATURE_TOOLS",
     "NODE_STATUSES",
+    "SIMULATION",
     "drop_nodes",
     "PlanGraph",
     "PlanNode",
     "RefError",
     "TOOL_SOURCES",
+    "call_signature",
     "canonical",
+    "executes_code",
     "is_expensive_tool",
     "is_simulation_tool",
+    "simulation_banned",
+    "tool_capabilities",
     "lookup",
     "normalise_id",
     "parse_plan",

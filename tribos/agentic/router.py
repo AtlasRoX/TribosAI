@@ -30,8 +30,18 @@ from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
 
+from ..agents.evidence_need import is_closed_computation, is_computation_request
 from .budget import BudgetExhausted, RunBudget
-from .config import AGENTIC, AUTO, DEBATE, SUPERVISOR, SWARM, agent_model, env_flag, env_int
+from .config import (
+    AGENTIC,
+    AUTO,
+    DEBATE,
+    SUPERVISOR,
+    SWARM,
+    agent_model,
+    env_flag,
+    env_int,
+)
 from .decompose import complexity_signals, heuristic_split, strip_output_instructions
 from .llm import agent_model_kwargs, settle_reply
 from .router_store import adjustments, get_store, outcome_quality
@@ -40,6 +50,10 @@ from .runtime import AgentPhase, PhaseOutcome, register_phase
 logger = logging.getLogger(__name__)
 
 ARCHITECTURES = (AGENTIC, SUPERVISOR, SWARM, DEBATE)
+# The approaches Auto scores, cheapest first. DIRECT is not a framework of its own: it runs the plan-and-execute
+# runtime with the tool planner skipped (the fixed pipeline: evidence, the mathematics agent, simulation and checks).
+DIRECT = "direct"
+APPROACHES = (DIRECT, AGENTIC, SUPERVISOR, SWARM, DEBATE)
 ROUTER_LLM_TIMEOUT_S = 8.0
 ROUTER_MAX_OUTPUT_TOKENS = 1024  # the feature reply is a small JSON object
 SOFTMAX_TEMPERATURE = 0.4
@@ -63,6 +77,7 @@ DEBATE_COST_NOTE = (
 SCORES_NOTE = "Suitability scores from heuristic and model features; they are not calibrated probabilities of the best route."
 
 FRAMEWORK_LABELS: dict[str, str] = {
+    DIRECT: "Direct workflow",
     AGENTIC: "Plan & execute",
     SUPERVISOR: "Supervisor",
     SWARM: "Swarm",
@@ -142,19 +157,32 @@ _HYPOTHESIS = re.compile(
 _CONTESTED = re.compile(
     r"\b(controvers\w*|conflicting|contradict\w*|disputed|debated?|is it (?:true|really)|really (?:works?|effective|holds?|converges?)"
     r"|overstated|superior|inferior|non-?inferior|better than|worse than|head[- ]to[- ]head|which is (?:better|best|preferred|faster|more accurate|more stable)"
-    r"|should (?:we|i|engineers|researchers|clinicians|patients|one)|evidence (?:for and against|against)|counterexample\w*)\b",
+    r"|should (?:we|i|engineers|researchers|clinicians|patients|one)|evidence (?:for and against|against)|counterexample\w*"
+    r"|(?:is|was) (?:the|this|that) claim|claims? that|outperform\w*|myths?|supported by (?:the )?(?:evidence|data|literature)"
+    r"|does (?:it|this|that) (?:really|actually))\b",
     re.I,
 )
+# Safety-critical engineering: a wrong answer can hurt people or destroy equipment, so the draft gets critics. Only
+# engineering terms: ordinary STEM words that clinical text also uses ("fluid-structure interactions", "children of a
+# B-tree node", "electron-phonon interactions", "dose-response fit") are not stakes. Radiation dose is: a dose or dose
+# rate from a radioactive source sets shielding and exposure limits ("dose rate from Co-60 at 1 m"), so it counts
+# when it is named with radiation, a dose unit or a radionuclide.
 _STAKES = re.compile(
     r"\b(safety[- ]critical|pressure vessel\w*|boiler\w*|high[- ]voltage|arc[- ]flash|fault current|short[- ]circuit"
-    r"|structural (?:integrity|failure|safety|collapse)|buckling|fatigue (?:life|limit|failure)|critical (?:load|speed|pressure|temperature|heat flux)"
-    r"|safety factor|factor of safety|margin of safety|seismic|load[- ]bearing|life[- ]safety|relief valve|blowdown"
-    r"|nuclear|reactor|criticality|containment|thermal runaway|overpressure|explosi\w*|flammab\w*|cryogenic"
-    r"|aerospace|airworthiness|flight[- ]critical|code compliance|\b(?:ASME|IEEE|Eurocode|ACI|AISC|NFPA|NEC|NUREG|FAA)\b"
-    r"|my patient|\d{1,3}[- ]?(?:year|yr)s?[- ]?old|pregnan\w*|breast-?feeding|lactat\w*|p(?:a)?ediatric|children|infants?"
-    r"|neonat\w*|elderly|dos(?:e|es|ing|age)|mg/kg|renal (?:impairment|failure)|hepatic (?:impairment|failure)|dialysis"
-    r"|contraindicat\w*|drug[- ]drug|interactions?|overdose|black[- ]box|boxed warning"
-    r"|should (?:i|we) (?:start|stop|give|prescribe|switch))\b",
+    r"|electrocution|(?:structural|catastrophic) (?:integrity|failure|safety|collapse)"
+    r"|buckling|fatigue (?:life|limit|failure)|critical (?:load|speed|pressure|temperature|heat flux)"
+    r"|safety factor|factor of safety|margin of safety|seismic (?:design|loads?|loading|retrofit|safety|codes?)"
+    r"|load[- ]bearing|life[- ]safety|relief valve|blowdown"
+    # Not "nuclear norm", "nuclear spin" or "combinatorial explosion": the plant, the reactor, the blast.
+    r"|nuclear (?:reactors?|power|plants?|safety|fuel|waste|accidents?|criticality)|criticality (?:safety|accidents?)"
+    r"|reactor (?:core|safety|coolant|vessel|scram)|containment (?:building|vessel|structure|failure)|meltdown"
+    r"|thermal runaway|overpressure|(?:gas|dust|vapou?r|boiler|pressure[- ]vessel) explosions?|explosives?"
+    r"|blast (?:waves?|loads?|loading)|flammab\w*|cryogenic (?:storage|tanks?|handling|hazards?)|toxic gas"
+    r"|aerospace|airworthiness|flight[- ]critical|crashworthiness|medical devices?|implantable|pacemakers?"
+    r"|code compliance|\b(?:ASME|IEEE|Eurocode|ACI|AISC|NFPA|NEC|NUREG|FAA)\b"
+    r"|radiation (?:dose|exposure|shielding|safety|protection)|(?:absorbed|effective|equivalent) dose"
+    r"|dose rates?|(?:milli|micro)?sieverts?|\d+(?:\.\d+)?\s*(?:[mµu]?Sv|Gy|mGy|rem)(?:/h)?"
+    r"|(?:Co|Cs|Sr|Ir|Am|Pu|U)-\d{2,3})\b",
     re.I,
 )
 _RECOMMENDATION = re.compile(
@@ -297,6 +325,15 @@ def _multi_domain(n: int) -> float:
     return 0.0 if n <= 1 else 0.5 if n == 2 else 1.0
 
 
+# Planner intents that name the same activity ("simulate" and "simulation") count as one facet of the question.
+_INTENT_SYNONYMS = {"simulation": "simulate", "computation": "compute", "derivation": "derive", "comparison": "compare",
+                    "explanation": "explain", "calculation": "compute", "calculate": "compute"}
+
+
+def _distinct_intents(intents: Sequence[str]) -> set[str]:
+    return {_INTENT_SYNONYMS.get(i, i) for i in intents}
+
+
 def deterministic_features(s: RoutingSignals) -> dict[str, float]:
     structural = [c for c in s.complexity if c in _STRUCTURAL]
     return {
@@ -312,7 +349,7 @@ def deterministic_features(s: RoutingSignals) -> dict[str, float]:
         "explicit_parts": float(s.explicit_parts),
         "decomposable": float(s.explicit_parts or len(structural) >= 2),
         "sequential": float("multi-hop chain" in s.complexity or bool(s.computational)),
-        "breadth": float(len(s.domains) >= 2 or len(s.intents) >= 2 or s.target_evaluation),
+        "breadth": float(len(s.domains) >= 2 or len(_distinct_intents(s.intents)) >= 2 or s.target_evaluation),
         "multi_domain": _multi_domain(len(s.domains)),
         # Not a model feature (blend carries it over): a brief of three or more parts, where one hypothesis or
         # contested part does not make the whole answer a debate.
@@ -402,14 +439,19 @@ Reply with only JSON with exactly these keys."""
 
 
 def _first_json(text: str) -> dict[str, Any] | None:
-    m = re.search(r"\{.*\}", text or "", re.S)
-    if not m:
-        return None
-    try:
-        obj = json.loads(m.group(0))
-    except ValueError:
-        return None
-    return obj if isinstance(obj, dict) else None
+    """The first JSON object in a model reply. Each "{" is tried as the start of an object and decoded to its own
+    closing brace (a greedy "{.*}" would span from the first "{" to the last "}" and fail on any reply with text or a
+    second object after the first)."""
+    text = text or ""
+    decoder = json.JSONDecoder()
+    for m in re.finditer(r"\{", text):
+        try:
+            obj, _end = decoder.raw_decode(text, m.start())
+        except ValueError:
+            continue
+        if isinstance(obj, dict):
+            return obj
+    return None
 
 
 def router_samples() -> int:
@@ -512,28 +554,41 @@ def blend(det: dict[str, float], sem: dict[str, float] | None) -> dict[str, floa
 # -- scores ------------------------------------------------------------------------------------------------------------
 
 def score_terms(f: dict[str, float]) -> dict[str, list[tuple[str, float]]]:
-    """(factor, contribution) per architecture; a score is the sum of its terms.
+    """(factor, contribution) per approach; a score is the sum of its terms.
 
-    Plan & execute is the backbone: decomposable and computational work favour it, since parallel tool plans suit
-    independent parts and sequential pipelines degrade under multi-agent coordination. Debate is reserved for
-    hypotheses and contested conclusions with stakes, where critique and ranking pay off. The supervisor takes
-    open-ended, multi-facet questions without explicit parts. The swarm only takes low-stakes exploration, because
-    independent agents amplify errors.
+    Cheapest adequate approach first (Anthropic, "Building effective agents": add agentic complexity only when it
+    demonstrably helps; Kim et al. 2025, arXiv:2512.08296: coordination gains +81% on parallelizable tasks and costs
+    39-70% on sequential ones; Wang et al., ACL 2024: one strong agent matches multi-agent discussion on most tasks):
 
-    In a brief of three or more parts, a hypothesis or contested point is one part among several: Debate's terms
-    are damped (the "brief" term, -60% of them), so the brief goes to the plan-and-execute backbone and
-    Auto's escalation adds critics only when the draft's evidence conflicts. A whole-answer debate is not forced
-    by one keyword."""
+    - Direct workflow is the default: one pass through the fixed pipeline (retrieval when needed, the mathematics agent,
+      simulation, verification). It gives way as the question gains independent parts, breadth or open scope.
+    - Plan & execute needs structure worth planning: explicit or independent parts, several domains, or computations
+      that can run in parallel. A single computation is sequential work the direct pipeline already does.
+    - Supervisor takes open-ended, multi-facet questions without explicit parts.
+    - Debate is reserved for hypotheses and contested conclusions with stakes (debate gains over voting are small:
+      Choi et al., NeurIPS 2025), damped in a brief of three or more parts where one contested point is one part.
+    - Swarm only takes low-stakes exploration, because independent agents amplify errors (Cemri et al. 2025)."""
     contested_weight = max(f["high_stakes"], f["recommendation"], f["comparison"])
     hypothesis_term = 2.4 * f["hypothesis"]
     contested_term = 1.0 * f["contested"] + 1.4 * f["contested"] * contested_weight
+    parallel = max(f["decomposable"], f["explicit_parts"], f["multi_domain"])
     return {
-        AGENTIC: [
+        DIRECT: [
             ("bias", 1.0),
-            ("explicit_parts", 0.8 * f["explicit_parts"]),
-            ("decomposable", 0.6 * f["decomposable"]),
-            ("computational", 1.2 * f["computational"]),
-            ("sequential", 0.5 * f["sequential"]),
+            ("explicit_parts", -0.9 * f["explicit_parts"]),
+            ("decomposable", -0.7 * f["decomposable"]),
+            ("breadth", -0.2 * f["breadth"]),
+            ("multi_domain", -0.5 * f["multi_domain"]),
+            ("open_ended", -0.3 * f["open_ended"] - 0.4 * f["open_ended"] * f["breadth"]),
+            ("exploratory", -0.6 * f["exploratory"]),
+        ],
+        AGENTIC: [
+            ("bias", 0.5),
+            ("explicit_parts", 0.9 * f["explicit_parts"]),
+            ("decomposable", 0.8 * f["decomposable"]),
+            ("computational", 0.6 * f["computational"] * parallel),
+            ("multi_domain", 0.4 * f["multi_domain"]),
+            ("breadth", 0.3 * f["breadth"] * parallel),  # several facets matter only when they can run in parallel
         ],
         DEBATE: [
             ("bias", 0.2),
@@ -592,16 +647,23 @@ class RoutingDecision:
     semantic: dict[str, Any] = field(default_factory=dict)
     guardrail: str | None = None
     bucket: str = ""
+    label: str = ""  # shown instead of the framework's name when the route is a fixed workflow, not an architecture
+    approach: str = ""  # the scored approach (DIRECT runs the AGENTIC framework without its planner); "" = framework
+
+    @property
+    def display_label(self) -> str:
+        return self.label or FRAMEWORK_LABELS.get(self.framework, self.framework)
 
     @property
     def confidence(self) -> float:
-        return self.probabilities.get(self.framework, 1.0)
+        return self.probabilities.get(self.approach or self.framework, 1.0)
 
     def to_artifact(self) -> dict[str, Any]:
         return {
             "requested": AUTO,
             "chosen": self.framework,
-            "label": FRAMEWORK_LABELS.get(self.framework, self.framework),
+            "label": self.display_label,
+            "approach": self.approach or self.framework,
             "rule": self.rule,
             "reason": self.reason,
             "confidence": round(self.confidence, 3),
@@ -631,6 +693,12 @@ def _join(items: Sequence[str]) -> str:
 def _explain(framework: str, f: dict[str, float], s: RoutingSignals, factors: list[tuple[str, float]]) -> tuple[str, str]:
     """(rule, reason) from the factors that drove the chosen score."""
     lead = factors[0][0] if factors else "bias"
+    if framework == DIRECT:
+        if f["computational"] >= 0.5:
+            what = _join(s.computational).replace("_", "-") or "a computation"
+            return FOCUSED, (f"A focused question with one line of work ({what}); the direct workflow computes and checks it "
+                             "without a separate tool plan.")
+        return FOCUSED, "A focused, single-part question; the direct workflow answers it in one pass and checks the claims."
     if framework == DEBATE:
         if f["hypothesis"] >= f["contested"]:
             return "hypothesis_generation", (
@@ -645,9 +713,10 @@ def _explain(framework: str, f: dict[str, float], s: RoutingSignals, factors: li
         return "open_multi_domain", f"An open-ended question across {facets}; a supervisor delegates each part to a domain specialist."
     if framework == SWARM:
         return "exploratory_chain", "An exploratory multi-step question; specialists hand it along the chain, each adding its own source."
-    if f["computational"] >= 0.5 or lead == "computational":
+    if lead == "computational":
         what = _join(s.computational).replace("_", "-") or "an analysis"
-        return "computational", f"The question needs a computational analysis ({what}); one planned tool chain handles sequential steps best."
+        return "computational", (f"Several computations ({what}) across independent parts; a parallel tool plan runs "
+                                 "them together.")
     if f["explicit_parts"] >= 0.5 or f["decomposable"] >= 0.5:
         cues = _join([c for c in s.complexity if c in _STRUCTURAL][:3]) or "several parts"
         return "default_backbone", f"A multi-part question ({cues}); a parallel tool plan answers each part and checks claims against counter-evidence."
@@ -672,7 +741,7 @@ def decide(
             terms[fw].append(("history", float(adj["delta"])))
     scores = {fw: sum(w for _, w in t) for fw, t in terms.items()}
     probs = softmax(scores)
-    ranked = sorted(ARCHITECTURES, key=lambda fw: (-probs[fw], ARCHITECTURES.index(fw)))
+    ranked = sorted(APPROACHES, key=lambda fw: (-probs[fw], APPROACHES.index(fw)))
     framework, guardrail = ranked[0], None
     if framework == SWARM and features["high_stakes"] >= 0.5:
         framework = next(fw for fw in ranked if fw != SWARM)
@@ -686,10 +755,17 @@ def decide(
     candidates = [framework]
     if probs[framework] < ADJUDICATE_BELOW and probs[framework] - probs[runner_up] < ADJUDICATE_MARGIN:
         candidates.append(runner_up)
-    return RoutingDecision(
+    decision = RoutingDecision(
         framework, rule, reason, s, candidates=candidates, features=features, probabilities=probs,
         factors=factors[:5], learned=learned, semantic=semantic or {"used": False}, guardrail=guardrail, bucket=bucket,
     )
+    return _as_direct(decision) if framework == DIRECT else decision
+
+
+def _as_direct(decision: RoutingDecision) -> RoutingDecision:
+    """The direct approach runs on the plan-and-execute runtime with its planner skipped (config.DIRECT_ROUTES)."""
+    decision.framework, decision.approach, decision.label = AGENTIC, DIRECT, DIRECT_WORKFLOW_LABEL
+    return decision
 
 
 def rule_decision(query: str, ctx: Any) -> RoutingDecision:
@@ -706,16 +782,17 @@ def rule_decision(query: str, ctx: Any) -> RoutingDecision:
 ROUTER_ADJUDICATE_SYSTEM = """[phase:router_adjudicate]
 You choose how a mathematics, physics, and engineering research assistant answers one question. Options:
 {options}
-Pick the single best option for this question. Prefer plan_execute unless another option clearly fits better.
+Pick the cheapest option that fully answers the question: direct for focused questions, plan_execute only when independent parts or parallel computations need a tool plan, supervisor for open-ended multi-domain scope, debate only for hypotheses or contested high-stakes conclusions.
 Reply with only JSON: {{"route": "<option id>", "reason": "<one sentence for the user>"}}"""
 
 _OPTION_TEXT: dict[str, str] = {
+    DIRECT: "direct: one pass through the standard pipeline (evidence retrieval when needed, the verified mathematics agent, simulation, claim checks) without a separate tool plan",
     AGENTIC: "plan_execute: decompose into sub-questions, run symbolic, numerical, reference, and literature tools in parallel, check claims against counter-evidence",
     SUPERVISOR: "supervisor: a manager delegates open-ended parts to domain specialists (literature, symbolic math, numerical simulation, computation, reference data)",
     SWARM: "swarm: specialists hand the question along a chain of steps (exploratory, low-stakes multi-hop questions)",
     DEBATE: "debate: plan_execute plus independent critics (mathematician, physicist, engineer) who cross-examine the draft (conjectures, contested conclusions)",
 }
-_OPTION_IDS: dict[str, str] = {AGENTIC: "plan_execute", SUPERVISOR: "supervisor", SWARM: "swarm", DEBATE: "debate"}
+_OPTION_IDS: dict[str, str] = {DIRECT: "direct", AGENTIC: "plan_execute", SUPERVISOR: "supervisor", SWARM: "swarm", DEBATE: "debate"}
 
 
 async def _adjudicate(query: str, decision: RoutingDecision, llm_factory: Callable[..., Any], model_name: str,
@@ -729,6 +806,32 @@ async def _adjudicate(query: str, decision: RoutingDecision, llm_factory: Callab
     if chosen not in decision.candidates:
         return None
     return chosen, str((obj or {}).get("reason") or "").strip()[:300]
+
+
+# Routes that run the fixed workflow (mathematics agent, stated-system simulation, numerical verification, evidence
+# where asked) and skip the tool planner. Multi-agent and planner architectures pay off on parallelizable, open work
+# and lose on sequential, fully specified work (Kim et al. 2025, arXiv:2512.08296: +81% on parallelizable tasks,
+# -39 to -70% on sequential ones; Anthropic, "Building effective agents": the simplest workflow that solves the task).
+FULLY_SPECIFIED = "fully_specified"  # one of config.DIRECT_ROUTES
+FOCUSED = "focused"  # one of config.DIRECT_ROUTES: the scored direct approach won
+DIRECT_WORKFLOW_LABEL = "Direct workflow"
+FULLY_SPECIFIED_REASON = ("A fully specified problem: every quantity is stated, so the fixed workflow solves, simulates "
+                          "and verifies it directly; a tool planner would only repeat those steps.")
+
+
+def is_fully_specified(query: str, signals: RoutingSignals) -> bool:
+    """The math parser captures the whole problem (every number is part of it) and nothing asks for judgement between
+    positions: no hypothesis, contested claim, recommendation or target evaluation. "Investigate" or "evaluate" in a
+    problem the parser fully captures is a verb for working it, not an open-ended survey."""
+    if signals.hypothesis or signals.contested or signals.recommendation or signals.target_evaluation:
+        return False
+    from ..axiom.problem import parse_problem  # local: sympy is heavy
+
+    try:
+        spec = parse_problem(str(query or ""))
+    except Exception:  # noqa: BLE001 - an unparseable question is routed by the scores
+        return False
+    return bool(spec.parsed and not spec.unaccounted)
 
 
 async def choose_framework(
@@ -747,6 +850,14 @@ async def choose_framework(
     if getattr(ctx, "scope", "research") != "research":
         return rule_decision(query, ctx)
     signals = routing_signals(query, ctx)
+    if is_closed_computation(ctx):
+        # A self-contained calculation needs no architecture choice: the verified mathematics agent answers it.
+        return RoutingDecision(AGENTIC, "closed_computation", "A self-contained calculation: solved and checked by "
+                               "computation, with no evidence search.", signals, candidates=[AGENTIC],
+                               probabilities={AGENTIC: 1.0}, label=DIRECT_WORKFLOW_LABEL)
+    if is_fully_specified(query, signals):
+        return RoutingDecision(AGENTIC, FULLY_SPECIFIED, FULLY_SPECIFIED_REASON, signals, candidates=[AGENTIC],
+                               probabilities={AGENTIC: 1.0}, label=DIRECT_WORKFLOW_LABEL)
     det = deterministic_features(signals)
     sem: dict[str, float] | None = None
     kind: str | None = None
@@ -775,10 +886,13 @@ async def choose_framework(
         return decision
     framework, reason = picked
     decision.tie_break = "llm"
-    if framework != decision.framework:
-        decision.framework, decision.rule = framework, "llm_tie_break"
+    if framework != (decision.approach or decision.framework):
+        decision.framework, decision.approach, decision.label, decision.rule = framework, "", "", "llm_tie_break"
         decision.reason = reason or f"Among {_join([FRAMEWORK_LABELS[c] for c in decision.candidates])}, the model judged this the best fit."
         decision.factors = []
+        if framework == DIRECT:
+            _as_direct(decision)
+            decision.rule = "llm_tie_break_direct"
     return decision
 
 
@@ -814,7 +928,8 @@ def record_outcome(
     quality = outcome_quality(verification_score, answer_confidence, task_status, core_status)
     cost = llm_calls / llm_limit if llm_limit else 0.0
     try:
-        store.record(bucket, framework, bool(routing), quality, round(cost, 3), features,
+        approach = str((routing or {}).get("approach") or framework)  # the direct workflow learns as its own approach
+        store.record(bucket, approach, bool(routing), quality, round(cost, 3), features,
                      self_verification=verification_score, self_confidence=answer_confidence)
     except Exception as exc:  # noqa: BLE001
         logger.info("Router outcome not recorded: %s", exc)
@@ -843,7 +958,9 @@ def escalation_triggers(state: Any) -> list[str]:
     core = state.core_phase_status() if hasattr(state, "core_phase_status") else None
     if isinstance(core, dict) and core.get("status") == "fallback":
         triggers.append(f"the {core.get('label') or 'core'} step fell back to a fixed plan")
-    subs = list(getattr(state, "sub_questions", None) or [])
+    # Sub-questions answered by computing are not "lacking evidence" a debate could supply; only the ones that need
+    # sources count.
+    subs = [q for q in (getattr(state, "sub_questions", None) or []) if not is_computation_request(getattr(q, "text", ""))]
     open_subs = [q for q in subs if getattr(q, "status", "open") != "answered"]
     if len(open_subs) >= 2 and len(open_subs) * 2 > len(subs):
         triggers.append(f"{len(open_subs)} of {len(subs)} sub-questions still lack evidence")

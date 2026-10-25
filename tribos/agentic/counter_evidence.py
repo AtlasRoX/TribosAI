@@ -12,17 +12,17 @@ answer discusses conflicts instead of presenting one side:
 - Chain-of-Verification (Dhuliawala et al., Findings ACL 2024, arXiv:2309.11495): the "find evidence against X"
   verification questions are answered independently of the draft (this phase runs before any draft exists).
 
-Claims come from the evidence (the top target-disease association, and passage sentences that state an
-association, mechanism or clinical outcome) or, failing that, from the question. Queries are deterministic
-negations ("<entity> resistance", "<entity> no significant effect", "<entity> failed trial", "<entity>
-contradicting evidence", "<drug> adverse events"); at most 3 literature calls run and only passages not already in
-the evidence are kept. Each pair is classified by, in order: the NLI judge another phase installed
+Claims come from the evidence (passage sentences that state a result: a prediction, a scaling, a bound, an
+agreement with measurement) or, failing that, from the question. Queries are deterministic negations of the
+question's main concept, equation, system or material ("<x> limitations", "<x> counterexample", "<x> breakdown
+regime", "<x> experimental discrepancy", "<material> failure mode"); at most 3 literature calls run and only passages
+not already in the evidence are kept. Each pair is classified by, in order: the NLI judge another phase installed
 (state.bag["nli_judge_async"], then state.bag["nli_judge_fn"]), the agent model with the Likert rubric
 ([phase:counter_evidence]), or a cue-word heuristic that is always labelled "heuristic" and never reported as a
 certain contradiction.
 
 After the answer is written and verified, a second, model-free pass (CounterEvidenceRecheckPhase, stage finalize)
-re-checks the answer's own top claims (numeric and clinical ones from the verifier report, recheck_claims) against
+re-checks the answer's own top claims (mathematical and numeric ones from the verifier report, recheck_claims) against
 the counter-evidence passages already fetched, with the NLI judge or the cue-word heuristic; rows are added to the
 same artifact under "answer_rechecks". No new literature calls are made.
 
@@ -40,6 +40,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from ..sources.keys import passage_keys, same_document
 from ..utils.text import sentence_spans
 from ..verify.verifier import truncate_words
 from .config import env_flag
@@ -48,6 +49,7 @@ from .runtime import AgentPhase, PhaseOutcome, register_phase
 from .specialists import (
     ask_json,
     fetch_new_literature,
+    is_pure_derivation,
     iter_passages,
     named_tool_allowed,
     passage_source_key,
@@ -64,46 +66,47 @@ MAX_CLAIMS = 3
 MAX_PAIRS = 10
 FLAG_AT = 8  # ContraCrow: a claim is contradicted at a Likert score of 8 or more
 
+# Sentences that state a checkable result: a prediction, a scaling or bound, a dependence, an agreement with data.
 _CLAIM_CUE_RE = re.compile(
-    r"\b(associat\w*|inhibit\w*|activat\w*|improv\w*|increas\w*|reduc\w*|decreas\w*|surviv\w*|respon\w*|efficac\w*|"
-    r"effective|promot\w*|suppress\w*|driv\w*|mediat\w*|correlat\w*|benefit\w*|sensitiv\w*|prolong\w*)\b",
+    r"\b(predict\w*|scal(?:es|ing)|proportional|bound(?:ed|s)?|converg\w*|diverg\w*|stab(?:le|ility)|unstable|"
+    r"increas\w*|decreas\w*|reduc\w*|improv\w*|exceed\w*|depend\w*|correlat\w*|associat\w*|agree\w*|consistent|"
+    r"valid|holds?|satisf\w*|implies|yield\w*|exhibit\w*|enhanc\w*|suppress\w*|dominat\w*|governed by|follows?)\b",
     re.I,
 )
-# Cue words for the heuristic classifier: (pattern, weight). Strong cues state a negative finding outright.
+# Cue words for the heuristic classifier: (pattern, weight). Strong cues state a negative finding outright: a
+# counterexample, a result that does not hold, a model that breaks down or disagrees with measurement.
 _CONTRA_CUES: tuple[tuple[re.Pattern, int], ...] = (
-    (re.compile(r"\bno (?:statistically )?significant\b", re.I), 3),
-    (re.compile(r"\b(?:did|does|do) not (?:improve|reduce|increase|prolong|show|respond|benefit|differ|predict)\b", re.I), 3),
-    (re.compile(r"\b(?:not|no longer) associated\b|\bno association\b", re.I), 3),
-    (re.compile(r"\bno (?:clinical )?(?:benefit|effect|improvement|difference|activity)\b", re.I), 3),
-    (re.compile(r"\b(?:failed|failure) to\b|\bfailed (?:trial|to meet)\b|\bterminated for futility\b", re.I), 3),
-    (re.compile(r"\black of (?:efficacy|benefit|response)\b|\bcontrary to\b|\brefut\w*\b", re.I), 3),
-    (re.compile(r"\bresistan(?:ce|t)\b", re.I), 2),
-    (re.compile(r"\b(?:adverse events?|toxicit(?:y|ies)|discontinu\w*)\b", re.I), 2),
+    (re.compile(r"\bcounter-?examples?\b|\bdisprov\w*|\brefut\w*|\bfalsif\w*", re.I), 3),
+    (re.compile(r"\b(?:does|do|did) not (?:hold|apply|agree|match|converge|reproduce|predict|scale|generali[sz]e|"
+                r"satisfy|capture|improve|reduce|increase|show)\b", re.I), 3),
+    (re.compile(r"\bbreaks? down\b|\bbreakdown of\b|\bfails? (?:to|for|when|at|beyond|in)\b|\bfailure of\b"
+                r"|\binvalid(?:ates?|ated)?\b|\bviolat\w*", re.I), 3),
+    (re.compile(r"\bcontrary to\b|\bno longer (?:valid|holds?|applies)\b", re.I), 3),
+    (re.compile(r"\bno (?:statistically )?significant (?:effect|improvement|change|correlation|dependence)\b", re.I), 2),
+    (re.compile(r"\bdiscrepanc(?:y|ies)\b|\bdeviat\w* (?:from|significantly)\b|\bdisagree\w*|\b(?:over|under)estimat\w*",
+                re.I), 2),
     (re.compile(r"\b(?:inconsistent|conflicting|controvers\w*|contradict\w*)\b", re.I), 2),
 )
-# A negated safety finding ("no significant adverse events", "without serious toxicity", "was not associated with
-# increased toxicity") reports the absence of harm: it is not a negative finding about the claim, so these spans are
-# removed before the contradiction cues are counted (AGT-008: a single "no significant" used to read as a contradiction).
-_SAFETY_TERMS = (
-    r"(?:adverse (?:events?|effects?|reactions?|drug reactions?)|aes?|saes?|toxicit(?:y|ies)|side[- ]effects?"
-    r"|safety (?:signals?|concerns?|issues?)|hepatotoxicity|cardiotoxicity|nephrotoxicity|neurotoxicity"
-    r"|discontinuations?(?: due to (?:adverse events?|toxicity))?|dose[- ](?:limiting toxicit(?:y|ies)|reductions?)"
-    r"|deaths?|mortality|complications?|(?:risk of )?(?:bleeding|infections?|hospitali[sz]ations?))"
+# A negated discrepancy ("no significant deviation from the prediction", "without measurable error") reports
+# agreement: it is not a negative finding about the claim, so these spans are removed before the contradiction cues
+# are counted (AGT-008: a single negation word must not read as a contradiction).
+_DISCREPANCY_TERMS = (
+    r"(?:deviations?|discrepanc(?:y|ies)|disagreements?|errors?|differences?|violations?|breakdowns?|instabilit(?:y|ies)"
+    r"|failures?|anomal(?:y|ies)|inconsistenc(?:y|ies))"
 )
-_SAFETY_QUALIFIERS = (
-    r"(?:(?:statistically |clinically )?significant(?:ly)?|serious|severe|major|new|unexpected|additional|increased|excess"
-    r"|treatment[- ](?:related|emergent)|drug[- ]related|grade\s*(?:[3-5]|≥\s*3|>=\s*3)(?:\s*(?:or|to|-)\s*(?:[3-5]))?"
-    r"|unacceptable|clinically relevant|dose[- ]limiting|increase in|difference in|rise in)\s+"
+_DISCREPANCY_QUALIFIERS = (
+    r"(?:(?:statistically )?significant(?:ly)?|appreciable|measurable|noticeable|systematic|large|major|notable"
+    r"|observable|detectable|substantial)\s+"
 )
-_NEGATED_SAFETY_RE = re.compile(
-    rf"\b(?:no|without|absence of|free of|lack of|nor|not any)\s+(?:{_SAFETY_QUALIFIERS}){{0,3}}{_SAFETY_TERMS}\b"
-    rf"|\b(?:was|were|is|are)\s+not\s+associated\s+with\s+(?:an?\s+)?(?:{_SAFETY_QUALIFIERS}){{0,3}}{_SAFETY_TERMS}\b"
-    rf"|\b(?:did|does|do)\s+not\s+(?:cause|increase|raise|lead to|result in|show|demonstrate|exhibit|observe|produce|induce|reveal|display|report|experience|encounter|have)\s+(?:{_SAFETY_QUALIFIERS}){{0,3}}{_SAFETY_TERMS}\b",
+_NEGATED_DISCREPANCY_RE = re.compile(
+    rf"\b(?:no|without|absence of|free of|nor|not any|negligible)\s+(?:{_DISCREPANCY_QUALIFIERS}){{0,3}}{_DISCREPANCY_TERMS}\b"
+    rf"|\b(?:did|does|do)\s+not\s+(?:show|exhibit|reveal|display|produce|find|observe)\s+(?:an?\s+)?"
+    rf"(?:{_DISCREPANCY_QUALIFIERS}){{0,3}}{_DISCREPANCY_TERMS}\b",
     re.I,
 )
 _SUPPORT_CUE_RE = re.compile(
-    r"\b(significantly (?:improved|increased|reduced|prolonged|associated)|was associated with|were associated with|"
-    r"is associated with|improved|effective|efficacy|durable (?:clinical )?benefit|response rate)\b",
+    r"\b((?:good|excellent|close|reasonable) agreement|agrees? (?:well )?with|in agreement with|consistent with|"
+    r"confirm\w*|validat\w*|verif(?:y|ies|ied)|reproduc(?:es|ed)|matche[sd]|accurately predict\w*)\b",
     re.I,
 )
 
@@ -119,11 +122,12 @@ class _RatingReply(BaseModel):
 
 
 COUNTER_SYSTEM = (
-    "[phase:counter_evidence] You rate whether a retrieved passage contradicts a biomedical claim, using the "
+    "[phase:counter_evidence] You rate whether a retrieved passage contradicts a scientific or engineering claim, using the "
     "PaperQA2/ContraCrow 11-point scale: 0 = strongly supports, 2 = supports, 5 = lack of evidence or unrelated, "
     "8 = contradicts, 10 = strongly contradicts. A passage contradicts a claim only if it reports a finding that "
-    "is incompatible with it in the same setting (a negative trial, resistance, no effect, an opposite direction); a "
-    "different setting or population is at most a partial conflict (6-7). Reply with only JSON: "
+    "is incompatible with it in the same regime (a counterexample, a measurement that disagrees with the prediction, "
+    "a model that breaks down, an opposite trend); a different regime, geometry, material or parameter range is at "
+    "most a partial conflict (6-7). Reply with only JSON: "
     '{"ratings":[{"pair":<number>,"likert":<0-10>,"reason":"<one sentence>"}]}\n' + SPOTLIGHT_RULE
 )
 
@@ -133,21 +137,19 @@ def _sentences(text: str) -> list[str]:
     return [text[s:e].strip() for s, e in sentence_spans(text) if len(text[s:e].split()) >= 5]
 
 
+def subject_names(entities: dict[str, list[str]]) -> list[str]:
+    """The question's subjects a claim or a negation query is about: concepts, equations, systems, then materials."""
+    names: list[str] = []
+    for kind in ("concepts", "equations", "systems", "materials"):
+        names.extend(n for n in entities.get(kind) or [] if n and n not in names)
+    return names
+
+
 def extract_claims(state: Any, entities: dict[str, list[str]]) -> list[dict[str, Any]]:
     """Up to 3 checkable claims from the gathered evidence, else one from the question."""
-    names = [*entities["genes"], *entities["drugs"]]
+    names = subject_names(entities)
     name_stems = stems(" ".join(names))
     claims: list[dict[str, Any]] = []
-    gene = entities["genes"][0] if entities["genes"] else ""
-    for key, res in list(state.tool_results.items()):  # the top target-disease association
-        data = getattr(res, "data", None)
-        if not gene or not getattr(res, "success", False) or not isinstance(data, dict):
-            continue
-        assoc = [a for a in data.get("associations") or [] if isinstance(a, dict) and a.get("disease_name")]
-        if assoc:
-            top = max(assoc, key=lambda a: float(a.get("overall_association_score") or 0.0))
-            claims.append({"text": f"{gene} is associated with {top['disease_name']}", "source_key": key, "entity": gene})
-            break
     scored: list[tuple[float, str, str]] = []
     for rkey, p in iter_passages(state.tool_results):
         for s in _sentences(str(p.get("passage_text") or "")):
@@ -170,16 +172,36 @@ def extract_claims(state: Any, entities: dict[str, list[str]]) -> list[dict[str,
     return claims
 
 
+# A bare number, a unit or a generic mechanical component is not a subject a contradicting paper is written about.
+_NOT_A_SUBJECT_RE = re.compile(
+    r"^\d|^(?:kg|g|mg|mm|cm|m|s|ms|N|kN|Pa|kPa|MPa|GPa|Hz|kHz|MHz|rad/s|J|kJ|W|kW|ball|oscillator|spring|damper)$", re.I
+)
+# Negation templates per subject kind. A theory, method or equation is challenged by counterexamples, limits of
+# validity and disagreement with measurement; a material or engineered system by its failure modes.
+_THEORY_NEGATIONS = ("{} limitations", "{} counterexample", "{} breakdown regime", "{} experimental discrepancy")
+_MATERIAL_NEGATIONS = ("{} failure mode", "{} limitations", "{} experimental discrepancy")
+
+
 def negation_queries(entities: dict[str, list[str]]) -> list[str]:
-    """Deterministic contradiction queries for the question's main entity (and drug)."""
-    entity = (entities["genes"] or entities["drugs"] or [""])[0]
-    drug = entities["drugs"][0] if entities["drugs"] else ""
-    if not entity:
-        return []
-    queries = [f"{entity} resistance"]
-    if drug:
-        queries.append(f"{drug} adverse events")
-    queries += [f"{entity} no significant effect", f"{entity} failed trial", f"{entity} contradicting evidence"]
+    """Deterministic contradiction queries for the question's main subject (a concept, equation or system), plus a
+    failure-mode query for the first material when the question names one. No subject, no queries."""
+    def first(kinds: tuple[str, ...]) -> str:
+        for kind in kinds:
+            for name in entities.get(kind) or []:
+                if name and not _NOT_A_SUBJECT_RE.search(name.strip()):
+                    return name.strip()
+        return ""
+
+    subject = first(("concepts", "equations", "systems"))
+    material = first(("materials",))
+    queries: list[str] = []
+    if subject:
+        queries.append(_THEORY_NEGATIONS[0].format(subject))
+        if material and material != subject:
+            queries.append(_MATERIAL_NEGATIONS[0].format(material))
+        queries += [t.format(subject) for t in _THEORY_NEGATIONS[1:]]
+    elif material:
+        queries += [t.format(material) for t in _MATERIAL_NEGATIONS]
     return list(dict.fromkeys(queries))[:MAX_QUERIES]
 
 
@@ -189,22 +211,22 @@ def label_for(likert: float) -> str:
 
 def heuristic_rating(claim: str, passage: str) -> tuple[int, str]:
     """Cue-word estimate of the Likert score: at most FLAG_AT - 1, so cue words alone never reach "contradicts"
-    (they can still be flagged as a possible conflict to check at 7). Negated safety findings are not counted as
-    negative findings."""
+    (they can still be flagged as a possible conflict to check at 7). A negated discrepancy ("no significant
+    deviation") is not counted as a negative finding."""
     claim_stems = stems(claim)
     overlap = len(claim_stems & stems(passage))
     if not claim_stems or overlap == 0:
         return 5, "passage does not mention the claim's terms"
-    negated_safety = bool(_NEGATED_SAFETY_RE.search(passage))
-    scan = _NEGATED_SAFETY_RE.sub(" ", passage)
+    negated = bool(_NEGATED_DISCREPANCY_RE.search(passage))
+    scan = _NEGATED_DISCREPANCY_RE.sub(" ", passage)
     hits = [(pat.pattern, w) for pat, w in _CONTRA_CUES if pat.search(scan)]
     contra = sum(w for _p, w in hits)
     if contra:
         return min(FLAG_AT - 1, 5 + contra), "negative-finding cue words in the passage (heuristic, unverified)"
     if _SUPPORT_CUE_RE.search(scan):
         return 3, "supporting cue words in the passage (heuristic, unverified)"
-    if negated_safety:
-        return 5, "the passage reports an absence of harm (e.g. no significant adverse events), not a negative finding (heuristic)"
+    if negated:
+        return 5, "the passage reports an absence of discrepancy (e.g. no significant deviation), not a negative finding (heuristic)"
     return 5, "no cue words either way (heuristic)"
 
 
@@ -233,6 +255,10 @@ class CounterEvidencePhase(AgentPhase):
             return False
         if getattr(state.ctx, "scope", "research") != "research":
             return False
+        # A pure mathematics or physics derivation, proof or calculation (by sub-question focus or planner intent) is
+        # checked by computation, not argued against with papers.
+        if is_pure_derivation(state):
+            return False
         lit_tool = resolve_literature_tool(state.registry, state)
         return named_tool_allowed(state, lit_tool)
 
@@ -249,7 +275,7 @@ class CounterEvidencePhase(AgentPhase):
         for q in queries:
             if state.budget.exhausted():
                 break
-            keywords = [w for w in q.split() if w.lower() not in ("evidence", "effect", "events")] + entities["diseases"][:1]
+            keywords = [w for w in q.split() if w.lower() not in ("evidence", "regime", "mode")] + entities["systems"][:1]
             key, passages = await fetch_new_literature(
                 state, phase=self.key, query=q, purpose=f"counter-evidence search: {q}", seen=seen,
                 keywords=keywords, max_articles=4, render=False,
@@ -264,7 +290,7 @@ class CounterEvidencePhase(AgentPhase):
             pairs.append({
                 "claim_id": claim["id"], "claim": claim["text"], "passage": text[:1200],
                 "source_key": passage_source_key(p, rkey), "result_key": rkey,
-                "pmid": str(p.get("pmid") or ""), "doi": str(p.get("doi") or ""),
+                "pmid": str(p.get("pmid") or ""), "doi": str(p.get("doi") or ""), "keys": passage_keys(p),
                 "citation": str(p.get("citation") or p.get("citation_label") or ""),
                 "setting": str(p.get("grade_label") or p.get("experimental_setting") or ""),
             })
@@ -281,7 +307,7 @@ class CounterEvidencePhase(AgentPhase):
             "conflicts": [
                 {
                     "claim": r["claim"], "passage": r["passage"][:600], "source_key": r["source_key"], "pmid": r["pmid"],
-                    "doi": r["doi"], "label": r["label"], "likert": r["likert"], "score": r["score"],
+                    "doi": r["doi"], "keys": r["keys"], "label": r["label"], "likert": r["likert"], "score": r["score"],
                     "classifier": r["classifier"], "reason": r["reason"][:240],
                 }
                 for r in pairs
@@ -392,9 +418,16 @@ def _attr(obj: Any, name: str, default: Any = None) -> Any:
     return obj.get(name, default) if isinstance(obj, dict) else getattr(obj, name, default)
 
 
+# Verifier claim types re-checked even without a figure: results stated about the subject ("clinical" is the
+# verifier's label for an outcome claim about a study, kept while the verifier still emits it).
+_RESULT_CLAIM_TYPES = frozenset({"mathematical", "quantitative", "empirical", "clinical"})
+_ID_TOKEN_RE = re.compile(r"\b(?:PMID|arXiv|DOI|Zbl|MR):?\s*[\w./-]+|\b10\.\d{4,9}/\S+", re.IGNORECASE)
+
+
 def recheck_claims(report: Any, limit: int = MAX_RECHECK_CLAIMS) -> list[dict[str, Any]]:
-    """The answer's top claims for a counter-evidence re-check: clinical claims and claims with a figure from the
-    verifier report (contradicted ones are already flagged and skipped), clinical first."""
+    """The answer's top claims for a counter-evidence re-check: result claims (mathematical, quantitative) and
+    claims with a figure from the verifier report (contradicted ones are already flagged and skipped), result
+    claims first."""
     picked: list[tuple[int, dict[str, Any]]] = []
     for c in list(_attr(report, "claims", None) or []):
         text = str(_attr(c, "claim_text", "") or "").strip()
@@ -402,26 +435,39 @@ def recheck_claims(report: Any, limit: int = MAX_RECHECK_CLAIMS) -> list[dict[st
         status = str(_attr(c, "status", "") or "")
         if not text or status == "contradicted" or kind == "absence":
             continue
-        numeric = bool(_FIGURE_RE.search(re.sub(r"\bPMID:?\s*\d+|\bNCT\d{8}\b", " ", text, flags=re.IGNORECASE)))
-        if kind != "clinical" and not numeric:
+        numeric = bool(_FIGURE_RE.search(_ID_TOKEN_RE.sub(" ", text)))  # an identifier's digits are not a figure
+        result = kind in _RESULT_CLAIM_TYPES
+        if not result and not numeric:
             continue
         evidence = list(_attr(c, "evidence", None) or [])
         source = str(_attr(evidence[0], "source_key", "") or "") if evidence else ""
-        rank = (0 if kind == "clinical" else 1) * 2 + (0 if numeric else 1)
+        rank = (0 if result else 1) * 2 + (0 if numeric else 1)
         picked.append((rank, {"id": f"a{len(picked) + 1}", "text": text, "source_key": source or "answer"}))
     picked.sort(key=lambda t: t[0])
     return [c for _r, c in picked[:limit]]
 
 
+def _own_source(claim: dict[str, Any], row: dict[str, Any]) -> bool:
+    """Whether a counter-evidence row is the claim's own supporting source, under any of the row's identifiers."""
+    own = str(claim.get("source_key") or "")
+    if not own:
+        return False
+    keys = [str(row.get("source_key") or ""), *(str(k) for k in row.get("keys") or [])]
+    keys += [f"DOI:{row['doi']}"] if row.get("doi") else []
+    keys += [f"PMID:{row['pmid']}"] if row.get("pmid") else []
+    return any(k and (k == own or same_document(k, own)) for k in keys)
+
+
 def recheck_pairs(claims: list[dict[str, Any]], passages: list[dict[str, Any]], max_pairs: int = MAX_PAIRS) -> list[dict[str, Any]]:
     """(answer claim, counter-evidence passage) pairs: each claim with the passages sharing at least two stems,
-    never the claim's own supporting source."""
+    never the claim's own supporting source (compared as documents, so "arXiv:2312.04511v2" and "ARXIV:2312.04511",
+    or a passage's DOI and its arXiv id, are the same source)."""
     pairs: list[dict[str, Any]] = []
     for c in claims:
         c_stems = stems(c["text"])
         for p in passages:
             text = str(p.get("passage") or "")
-            if not text or p.get("source_key") == c["source_key"] or len(c_stems & stems(text)) < 2:
+            if not text or len(c_stems & stems(text)) < 2 or _own_source(c, p):
                 continue
             pairs.append({
                 "claim_id": c["id"], "claim": c["text"], "passage": text, "source_key": str(p.get("source_key") or ""),

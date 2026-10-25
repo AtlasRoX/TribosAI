@@ -28,10 +28,11 @@ from .report_model import (
     ReportCitation,
     ReportModel,
     citation_parts,
-    fmt_number,
     question_is_title,
     report_headline,
     report_kind,
+    simulation_line,
+    simulation_table,
     task_lines,
     verification_lines,
 )
@@ -158,22 +159,13 @@ def _parts(report: ReportModel, *, question_in_title: bool) -> list[Part]:
     sim = report.simulation
     if sim and (sim.rows or report.plot_png):
         parts.append(("heading", "Simulation"))
-        label = " ".join(x for x in (sim.model_id, f"({sim.model_name})" if sim.model_name else "") if x)
-        line = f"Model: {label}" if label else ""
-        if sim.duration is not None:
-            line += f", duration {fmt_number(sim.duration)} {sim.time_unit}".rstrip()
+        line = simulation_line(sim)
         if line:
             parts.append(("html", _spaced(f"<p>{_esc(line)}</p>")))
         if report.plot_png:
             parts.append(("plot", None))
         if sim.rows:
-            unit = f" ({sim.quantity_unit})" if sim.quantity_unit else ""
-            has_ss = any(r.steady_state is not None for r in sim.rows)
-            header = ["Species", f"Initial{unit}", f"Final{unit}"] + ([f"Steady state{unit}"] if has_ss else [])
-            rows = [
-                [r.species, fmt_number(r.initial), fmt_number(r.final)] + ([fmt_number(r.steady_state)] if has_ss else [])
-                for r in sim.rows
-            ]
+            header, rows = simulation_table(sim)
             parts.append(("table", _table_html(header, rows)))
 
     for table in report.data_tables:

@@ -1,5 +1,5 @@
 # Top-level regression suite: everything under tests/ (auth and tenant isolation, datasets, exports,
-# streaming, clinical modules, scientific validation and the audit regression cases), with a coverage gate,
+# streaming, the specialist agents, scientific validation and the audit regression cases), with a coverage gate,
 # plus ruff on the core packages.
 name: TESTS Core
 
@@ -124,5 +124,5 @@ jobs:
       - name: Run mypy
         run: >-
           uv run mypy --ignore-missing-imports
-          tribos/agents tribos/trials tribos/drugintel tribos/variants
+          tribos/agents tribos/axiom tribos/dynamis tribos/physis tribos/archivon
           tribos/provenance tribos/export tribos/datasets

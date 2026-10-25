@@ -23,8 +23,18 @@ def _reproduce_md(report: ReportModel, manifest: dict[str, Any] | None, notes: l
         "# Reproducing this run",
         "",
         "`manifest.json` lists every tool call Tribos made for this answer: the validated inputs, the output",
-        "sha256 (volatile fields such as plots and timings removed), and key output fields, plus the BioModels",
-        "revision, dataset hashes and upstream data-source versions that were current at the time.",
+        "sha256 (volatile fields such as plots and timings removed), and key output fields, plus dataset hashes",
+        "and upstream data-source versions that were current at the time. What a re-run repeats:",
+        "",
+        "- Simulations (Dynamis): the same system (preset or right-hand sides), parameters, initial state, time span",
+        "  and integrator with its tolerances (rtol, atol), listed per call under Reproducibility in the report.",
+        "- Symbolic results (Axiom): the same expressions and assumptions; they are exact and replay identically.",
+        "- Sandboxed code (Calcula): the same program, identified by the sha256 of its source in the report; it",
+        "  runs again in the sandbox with the same inputs and any attached dataset (by hash).",
+        "- Reference data (Physis): physical constants come from the CODATA release the run used (shown in the",
+        "  report); a newer release can move a constant within its stated uncertainty.",
+        "- Literature (Archivon): the retrieved arXiv, DOI, zbMATH and MR identifiers are replayed as exact lookups;",
+        "  a new preprint version or a withdrawn paper shows up as drift, never silently.",
         "",
         "## Re-run against the stored run",
         "",
@@ -54,8 +64,8 @@ def _reproduce_md(report: ReportModel, manifest: dict[str, Any] | None, notes: l
         "## Reading the result",
         "",
         "- `identical`: every tool output hash matches.",
-        "- `drifted`: only upstream evidence changed (new literature, a new data release) or numbers moved within",
-        "  the verifier's 5% tolerance.",
+        "- `drifted`: only upstream evidence changed (new literature, a new preprint version, a new CODATA or data",
+        "  release) or numbers moved within the verifier's 5% tolerance (for example a different BLAS or solver build).",
         "- `changed`: a tool's status changed or a computed value moved by more than 5%.",
         "",
         "LLM output is not deterministic, so a full re-run can word the answer differently even when every tool",
@@ -90,6 +100,9 @@ def render_bundle(report: ReportModel) -> bytes:
 
         files["manifest.json"] = json.dumps(client_view(manifest), indent=2, ensure_ascii=False).encode("utf-8")
     files["sources.json"] = json.dumps([c.model_dump() for c in report.citations], indent=2, ensure_ascii=False).encode("utf-8")
+    if report.result_record:
+        # The computed results the answer was checked against, with the verification stamp (same revision as the cards).
+        files["result_record.json"] = json.dumps(report.result_record, indent=2, ensure_ascii=False).encode("utf-8")
     if report.plot_png:
         files["simulation.png"] = report.plot_png
     files["REPRODUCE.md"] = _reproduce_md(report, manifest, notes).encode("utf-8")

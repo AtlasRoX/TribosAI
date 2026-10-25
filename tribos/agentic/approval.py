@@ -3,8 +3,8 @@ Plan approval (feature 15, human in the loop; stage approve, order 10).
 
 Magentic-UI (Mozannar et al. 2025, arXiv:2507.22358): co-planning (the researcher sees and edits the plan
 before anything runs) and action guards (approval before expensive or irreversible work). Here the plan is
-the source routing in `ctx.decisions`; expensive work is a kinetic simulation or parameter scan (Vivarix),
-single-cell analysis (Lumicell), model calibration, docking or a sandboxed code run.
+the source routing in `ctx.decisions`; expensive work is a numerical simulation or parameter scan (Dynamis, and its
+Vivarix aliases), single-cell analysis (Lumicell), model calibration or a sandboxed code run.
 
 When it runs:
 - interactive runs, and runs a human was attached to (a background job whose watcher left): when
@@ -18,7 +18,7 @@ reason}],"expensive":[...],"question"}}` goes out through `state.send`, and the 
 
 Fail closed (AGT-005). No answer within `TRIBOS_APPROVAL_TIMEOUT_S` (default 300 s), the last watcher leaving,
 or an error while asking is not an approval: the expensive work (simulation, parameter scan, calibration,
-single-cell analysis, sandboxed code, docking) is withheld (`withhold_expensive`) and the run continues with the
+single-cell analysis, sandboxed code) is withheld (`withhold_expensive`) and the run continues with the
 cheap, read-only source searches. `TRIBOS_APPROVAL_ON_TIMEOUT=reject` treats it as a full rejection instead
 (literature search only). Nothing is ever approved on the researcher's behalf once a researcher could answer.
 
@@ -44,15 +44,26 @@ from .config import env_float
 from .control import ApprovalDecision
 from .guardrails import neutralise
 from .runtime import AgentPhase, PhaseOutcome, register_phase
+from .sandbox import ANALYSABLE_KINDS
 from .state import AgentState
 
 logger = logging.getLogger(__name__)
 
-ALWAYS_ON = ("lithoscribe",)
+ALWAYS_ON = ("archivon", "lithoscribe")
+# Legacy decision keys that mirror a current agent (kept in ctx.decisions for older call sites). A switch applies to
+# both names, and the card shows only the current one, so a source never appears twice under different labels.
+ALIASES: dict[str, str] = {"lithoscribe": "archivon", "vivarix": "dynamis"}
+UNAVAILABLE_REASON = "tool not available"
 SWITCHED_OFF_REASON = "switched off by the researcher"
 WITHHELD_REASON = "withheld: the expensive work was not approved"
-# Sources whose routed work is itself expensive (kinetic simulation / parameter scan, single-cell analysis).
-EXPENSIVE_SOURCES = ("vivarix", "lumicell")
+# Sources whose routed work is itself expensive (numerical simulation / parameter scan, single-cell analysis).
+EXPENSIVE_SOURCES = ("dynamis", "vivarix", "lumicell")
+# Labels of the expensive work, shown on the approval card and in the withheld-work notes.
+SIMULATION_WORK = "numerical simulation"
+SCAN_WORK = "parameter scan"
+CALIBRATION_WORK = "model calibration"
+CODE_WORK = "sandboxed code analysis"
+SIMULATION_WORKS = (SIMULATION_WORK, SCAN_WORK, CALIBRATION_WORK)
 # Decision sources that are a refusal by default rather than an answer from the researcher.
 FAIL_CLOSED_SOURCES = ("timeout", "unattended", "error")
 
@@ -61,7 +72,6 @@ SOURCE_LABELS: dict[str, str] = source_labels("description")
 
 _CALIBRATION_RE = re.compile(r"\b(calibrat\w*|fit(?:ting)?\s+(?:the\s+)?(?:model|parameters?)|estimat\w*\s+(?:the\s+)?(?:kinetic\s+)?parameters?|parameter\s+estimation)\b", re.I)
 _ANALYSIS_RE = re.compile(r"\b(analy[sz]e|analysis|regression|statistic\w*|differential\s+expression|cluster\w*|correlat\w*|plot)\b", re.I)
-_DOCKING_RE = re.compile(r"\b(dock(?:ing)?|generate\s+(?:analogs?|analogues|molecules))\b", re.I)
 
 
 def approval_timeout() -> float:
@@ -79,27 +89,30 @@ def expensive_work(state: AgentState) -> list[str]:
     ctx = state.ctx
     out: list[str] = []
     should = getattr(ctx, "should_run", None)
-    if callable(should) and should("vivarix"):
+    if callable(should) and (should("dynamis") or should("vivarix")):
         plan = getattr(ctx, "simulation_plan", None)
-        out.append("parameter scan" if plan is not None and getattr(plan, "action", "") == "parameter_scan" else "kinetic simulation")
+        out.append(SCAN_WORK if plan is not None and getattr(plan, "action", "") == "parameter_scan" else SIMULATION_WORK)
     if callable(should) and should("lumicell"):
         out.append("single-cell analysis")
     query = state.clean_query or ""
     attachments = list(getattr(ctx, "attachments", None) or [])
-    has_table = any(getattr(a, "kind", "") in ("h5ad", "table") for a in attachments)
+    # A dataset the sandbox can read: a table, an HDF5 or a MAT file (sandbox.ANALYSABLE_KINDS).
+    has_table = any(getattr(a, "kind", "") in ANALYSABLE_KINDS for a in attachments)
     has_model = bool(getattr(ctx, "biomodel_id", None) or getattr(ctx, "model_attachment", None))
     if _CALIBRATION_RE.search(query) and has_table and has_model:
-        out.append("model calibration")
+        out.append(CALIBRATION_WORK)
     elif has_table and _ANALYSIS_RE.search(query) and state.options.get("enable_code_analysis", True):
-        out.append("sandboxed code analysis")
-    if _DOCKING_RE.search(query):
-        out.append("docking or molecule generation")
+        out.append(CODE_WORK)
     return list(dict.fromkeys(out))
 
 
 def source_rows(ctx: Any) -> list[dict[str, Any]]:
+    """The approval card's source switches: current agents and registered sources, never a legacy alias or a tool
+    this installation does not have."""
     rows: list[dict[str, Any]] = []
     for key, decision in (getattr(ctx, "decisions", None) or {}).items():
+        if key in ALIASES or str(getattr(decision, "reason", "") or "") == UNAVAILABLE_REASON:
+            continue
         rows.append(
             {
                 "key": key,
@@ -151,7 +164,10 @@ def _switch_off(ctx: Any, keys: list[str], reason: str = SWITCHED_OFF_REASON) ->
     from ..agents.query_context import SourceDecision
 
     done: list[str] = []
-    for key in keys:
+    # A switch covers the current key and its legacy alias ("archivon" and "lithoscribe" gate the same search).
+    partners = {**ALIASES, **{canon: alias for alias, canon in ALIASES.items()}}
+    expanded = list(dict.fromkeys(k for key in keys for k in (key, partners.get(key)) if k))
+    for key in expanded:
         current = ctx.decisions.get(key)
         if current is not None and current.run:
             ctx.decisions[key] = SourceDecision(run=False, reason=reason)
@@ -160,11 +176,12 @@ def _switch_off(ctx: Any, keys: list[str], reason: str = SWITCHED_OFF_REASON) ->
         if reason == SWITCHED_OFF_REASON:
             prior = list(ctx.extras.get("switched_off_by_researcher") or [])
             ctx.extras["switched_off_by_researcher"] = sorted(set(prior) | set(done))
-        if "vivarix" in done:
+        if "vivarix" in done or "dynamis" in done:
             ctx.suppress_simulation = True  # agentic phases must not simulate behind the researcher's back either
         if "lumicell" in done:
             ctx.extras["single_cell_forbidden"] = True
-    return done
+    # Report what the caller switched, not the legacy aliases switched along with it.
+    return [k for k in done if k in keys or k not in ALIASES]
 
 
 def withhold_expensive(state: AgentState, expensive: list[str]) -> list[str]:
@@ -175,7 +192,7 @@ def withhold_expensive(state: AgentState, expensive: list[str]) -> list[str]:
         return []
     decisions = getattr(ctx, "decisions", None) or {}
     switched = _switch_off(ctx, [k for k in EXPENSIVE_SOURCES if k in decisions], reason=WITHHELD_REASON) if decisions else []
-    if any(w in expensive for w in ("kinetic simulation", "parameter scan", "model calibration")):
+    if any(w in expensive for w in SIMULATION_WORKS):
         try:
             ctx.suppress_simulation = True  # simulation_block_reason(): no simulation or calibration this turn
         except Exception:  # noqa: BLE001
@@ -185,7 +202,7 @@ def withhold_expensive(state: AgentState, expensive: list[str]) -> list[str]:
         if "single-cell analysis" in expensive:
             extras["single_cell_forbidden"] = True
         extras["expensive_work_withheld"] = sorted(set(extras.get("expensive_work_withheld") or []) | set(expensive))
-    if "sandboxed code analysis" in expensive:
+    if CODE_WORK in expensive:
         state.options["enable_code_analysis"] = False
     state.scope_notes.append(f"Not run because it was not approved: {', '.join(expensive)}.")
     state.brief_notes.append(

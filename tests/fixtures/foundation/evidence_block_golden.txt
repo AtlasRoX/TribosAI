@@ -14,9 +14,9 @@
 <cluster id="0" cells="60">CD3E (log2FC=2.0, p_adj=0.001)</cluster>
 <target_expression>{"0": {"percent_expressing_cells": 12.5}}</target_expression>
 </lumicell>
-<literature source="EuropePMC / PubMed">
-<document index="1" pmid="123456" doi="10.1056/x" citation="Doe et al. (2021)" setting="in-vitro">KRAS signaling in pancreatic cancer &lt;b&gt;&amp;amp;&lt;/b&gt; &quot;quoted&quot; text.</document>
-<document index="2" pmid="" doi="" citation="" setting="unspecified">Second passage without identifiers.</document>
+<literature source="Archivon scholarly literature search">
+<document index="1" doi="10.1056/x" pmid="123456" citation="Doe et al. (2021)" setting="in-vitro">KRAS signaling in pancreatic cancer &lt;b&gt;&amp;amp;&lt;/b&gt; &quot;quoted&quot; text.</document>
+<document index="2" doi="" citation="" setting="unspecified">Second passage without identifiers.</document>
 </literature>
 <web_search note="unreviewed web sources; lower weight than peer-reviewed passages">
 <result url="https://example.org/a?x=1&amp;y=2" title="A &lt;title&gt;" authority="web">Snippet &amp; more</result>

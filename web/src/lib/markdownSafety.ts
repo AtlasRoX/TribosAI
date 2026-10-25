@@ -110,16 +110,18 @@ export function safeUrl(value: unknown): string {
 }
 
 /**
- * Splits streaming Markdown at blank lines outside code fences. Every block but the last is complete, so the
- * renderer memoizes them; the final answer is rendered whole (with citations) once the stream ends.
+ * Splits streaming Markdown at blank lines outside code fences and `$$` math blocks. Every block but the last is
+ * complete, so the renderer memoizes them; the final answer is rendered whole (with citations) once the stream ends.
  */
 export function splitStreamingBlocks(text: string): string[] {
   const blocks: string[] = [];
   let current: string[] = [];
   let inFence = false;
+  let inMath = false;
   for (const line of text.split("\n")) {
-    if (/^\s*(```|~~~)/.test(line)) inFence = !inFence;
-    if (!inFence && line.trim() === "" && current.length) {
+    if (!inMath && /^\s*(```|~~~)/.test(line)) inFence = !inFence;
+    if (!inFence && line.trim() === "$$") inMath = !inMath;
+    if (!inFence && !inMath && line.trim() === "" && current.length) {
       blocks.push(current.join("\n"));
       current = [];
       continue;
@@ -281,4 +283,21 @@ export function rehypeStripUnsafe() {
     node.children = next;
   };
   return (tree: HastNode) => clean(tree, false);
+}
+
+/** A Markdown link with the title's brackets and backslashes escaped and the URL's parentheses and spaces encoded. */
+export function markdownLink(title: string, url: string): string {
+  const text = title.replace(/[\\[\]]/g, (c) => `\\${c}`);
+  // encodeURIComponent leaves "(" and ")" alone, so they are percent-encoded by hand.
+  const href = url.replace(/[()\s<>]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`);
+  return `[${text}](${href})`;
+}
+
+/**
+ * Replaces "[web]" / "[web search]" markers with a link to the first web source. A replacer function is used, so
+ * "$&" or "$1" in a title or URL is inserted literally instead of being expanded by String.replace.
+ */
+export function linkWebMarkers(text: string, title: string, url: string): string {
+  const link = markdownLink(title, url);
+  return text.replace(/\[(?:web\s*search|web)\]/gi, () => link);
 }

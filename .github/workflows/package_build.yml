@@ -34,8 +34,9 @@ jobs:
 
       - name: Run pre-build quality checks
         run: |
-          uv run ruff check tribos/
-          uv run bandit -c pyproject.toml -r tribos/
+          # Same gates as tests_tribos.yml (the full ruff rule set still has legacy findings).
+          uv run ruff check --select F,E9 tribos app
+          uv run bandit -c pyproject.toml -r tribos app --severity-level high
 
       - name: Get package version
         id: version

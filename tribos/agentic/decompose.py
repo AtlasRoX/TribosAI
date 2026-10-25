@@ -340,6 +340,45 @@ def parse_decomposition(value: Any, query: str | None = None, max_sub_questions:
     return complex_flag, subs
 
 
+SUMMARY_LINE_CHARS = 160
+
+
+def _shared_span(texts: list[str]) -> str:
+    """The longest stretch of text every sub-question repeats (the restated problem), or "" when there is none."""
+    from difflib import SequenceMatcher
+
+    shared = texts[0]
+    for other in texts[1:]:
+        m = SequenceMatcher(None, shared, other, autojunk=False).find_longest_match(0, len(shared), 0, len(other))
+        shared = shared[m.a:m.a + m.size]
+        if not shared:
+            break
+    return shared.strip(" ,.;:")
+
+
+def subquestion_summary(subs: list[SubQuestion]) -> str:
+    """The sub-questions for the activity step, one per line. Decomposition restates the problem inside every
+    sub-question so each is answerable alone; that restatement is shown once and left out of the lines."""
+    texts = [q.text for q in subs]
+    shared = _shared_span(texts) if len(texts) > 1 else ""
+    lines: list[str] = []
+    if len(shared) >= 40:
+        lines.append(f"Common to all: {shared}")
+    # The restatement becomes a short reference, so each line still reads as a sentence ("Simulate the system ...").
+    referent = "the system" if re.search(r"\bsystem\b", shared, re.I) else "the problem"
+    for q in subs:
+        text = q.text
+        at = text.find(shared) if len(shared) >= 40 else -1
+        if at >= 0:
+            before = re.sub(r"\b(?:the|a|an)\s+$", "", text[:at])  # "Simulate the <shared>" -> "Simulate the system"
+            text = before + referent + text[at + len(shared):]
+        text = re.sub(r"\s+([,.;:)])", r"\1", re.sub(r"\s{2,}", " ", text)).strip(" ,;:")
+        if len(text) > SUMMARY_LINE_CHARS:
+            text = text[:SUMMARY_LINE_CHARS].rsplit(" ", 1)[0] + "…"
+        lines.append(f"{q.id}. {text}" + (f" (after {', '.join(q.depends_on)})" if q.depends_on else ""))
+    return "\n".join(lines)
+
+
 class DecomposePhase(AgentPhase):
     key = "decompose"
     stage = "before_evidence"
@@ -407,7 +446,7 @@ class DecomposePhase(AgentPhase):
             await state.step(
                 "agent_decompose",
                 f"Split the question into {len(subs)} sub-questions",
-                "\n".join(f"{q.id}. {q.text}" + (f" (after {', '.join(q.depends_on)})" if q.depends_on else "") for q in subs),
+                subquestion_summary(subs),
                 status="done",
                 agent="Planner",
                 method=info["method"],

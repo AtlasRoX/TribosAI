@@ -82,7 +82,8 @@ export function makeKey(prefix: string, rawId: string): string | null {
       .replace(/[.,;)]+$/, "")
       .toLowerCase();
   } else if (upperPrefix === "ARXIV") {
-    value = value.replace(/^arxiv:\s*/i, "").replace(/[.,;)]+$/, "");
+    // Version suffix dropped, as tribos/sources/keys.py does: arXiv:2309.17452v2 and arXiv:2309.17452 are one paper.
+    value = value.replace(/^arxiv:\s*/i, "").replace(/[.,;)]+$/, "").replace(/v\d+$/i, "");
   } else if (upperPrefix === "ZBL") {
     value = value.replace(/^zbl\s*:?\s*/i, "");
   } else if (upperPrefix === "MR") {

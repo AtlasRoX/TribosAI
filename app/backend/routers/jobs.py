@@ -28,6 +28,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
 from app.backend.auth import get_current_user
+from app.backend.limits import RecentRequestIds
 from tribos.agentic.jobs import JOB_ID_RE, STATUSES, JobError, get_job_manager, public_job
 
 logger = logging.getLogger("tribos.backend.jobs")
@@ -35,6 +36,11 @@ logger = logging.getLogger("tribos.backend.jobs")
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
 JobIdPath = Path(..., min_length=4, max_length=64)
+
+# client_request_id -> the job it created, per user: a retried POST /api/jobs (the client lost the first response)
+# gets the same job back instead of queueing the question twice. Kept for 10 minutes.
+_submitted = RecentRequestIds(ttl_s=600.0)
+_SUBMITTING = "submitting"
 
 
 def _heartbeat_s() -> float:
@@ -62,7 +68,10 @@ def request_from_body(body: dict[str, Any]) -> tuple[dict[str, Any], str | None]
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=json.loads(exc.json(include_url=False, include_input=False))) from exc
     request = {
-        "message": req.message,
+        "message": req.full_message,  # with the attached images' transcriptions
+        # What the user typed, without the transcriptions: the client matches it against the thread's last user
+        # message when it reopens the job, so the question is not shown twice (LOG-37).
+        "display_message": req.message,
         "thread_id": req.thread_id,
         "model": req.model,
         "enable_web_search": req.enable_web_search if req.enable_web_search is not None else True,
@@ -77,11 +86,26 @@ def request_from_body(body: dict[str, Any]) -> tuple[dict[str, Any], str | None]
 @router.post("", status_code=201)
 async def create_job(body: dict[str, Any] = Body(...), user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     request, api_key = request_from_body(body)
+    client_request_id = body.get("client_request_id") if isinstance(body.get("client_request_id"), str) else None
+    if client_request_id:
+        previous = _submitted.get(user_id, client_request_id)
+        if previous == _SUBMITTING:
+            raise HTTPException(status_code=409, detail="This question is already being submitted (same client_request_id).")
+        if previous is not None:
+            return {**previous, "duplicate": True}
+        _submitted.put(user_id, client_request_id, _SUBMITTING)
     try:
         job = await get_job_manager().submit(user_id, request, api_key=api_key)
-    except JobError as exc:
-        raise _job_error(exc) from exc
-    return {"job_id": job["job_id"], "run_id": job["run_id"], "status": job["status"], "thread_id": job["thread_id"]}
+    except BaseException as exc:
+        if client_request_id:
+            _submitted.pop(user_id, client_request_id)
+        if isinstance(exc, JobError):
+            raise _job_error(exc) from exc
+        raise
+    out = {"job_id": job["job_id"], "run_id": job["run_id"], "status": job["status"], "thread_id": job["thread_id"]}
+    if client_request_id:
+        _submitted.put(user_id, client_request_id, out)
+    return out
 
 
 @router.get("")

@@ -105,6 +105,7 @@ def upload_root(monkeypatch, tmp_path):
         "TRIBOS_UPLOAD_MAX_MB_HDF5",
         "TRIBOS_UPLOAD_MAX_MB_H5AD",
         "TRIBOS_UPLOAD_MAX_MB_CSV",
+        "TRIBOS_UPLOAD_MAX_MB_MAT",
         "TRIBOS_UPLOAD_MAX_MB_SBML",
         "TRIBOS_UPLOAD_MAX_TOTAL_MB",
         "TRIBOS_UPLOAD_MAX_DATASETS",

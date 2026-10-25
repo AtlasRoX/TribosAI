@@ -16,7 +16,15 @@ type StudyTypeKey = StudyType;
 const GROUP: Record<string, string> = {
   formal_proof: "Formal & symbolic proofs",
   established_theory: "Established theory & standards",
-  peer_reviewed: "Peer-reviewed articles",
+  theorem_proof: "Theorem & proof papers",
+  experimental_measurement: "Experimental studies",
+  numerical_simulation: "Simulation studies",
+  monograph_standard: "Books, monographs & standards",
+  // Journal venue from the record; peer review itself is not verified.
+  peer_reviewed: "Journal articles",
+  book_chapter: "Book chapters",
+  conference: "Conference papers",
+  technical_report: "Reports & theses",
   meta_analysis: "Meta-analyses",
   network_meta_analysis: "Network meta-analyses",
   systematic_review: "Systematic reviews",
@@ -35,7 +43,14 @@ const GROUP: Record<string, string> = {
 const COUNT_WORD: Record<string, [string, string]> = {
   formal_proof: ["formal proof", "formal proofs"],
   established_theory: ["reference", "references"],
-  peer_reviewed: ["peer-reviewed", "peer-reviewed"],
+  theorem_proof: ["theorem paper", "theorem papers"],
+  experimental_measurement: ["experimental study", "experimental studies"],
+  numerical_simulation: ["simulation study", "simulation studies"],
+  monograph_standard: ["book", "books"],
+  peer_reviewed: ["journal article", "journal articles"],
+  book_chapter: ["book chapter", "book chapters"],
+  conference: ["conference paper", "conference papers"],
+  technical_report: ["report", "reports"],
   meta_analysis: ["meta-analysis", "meta-analyses"],
   network_meta_analysis: ["network meta-analysis", "network meta-analyses"],
   systematic_review: ["systematic review", "systematic reviews"],
@@ -56,7 +71,14 @@ const TIER: Record<string, number> = {
   established_theory: 2,
   meta_analysis: 2,
   systematic_review: 2,
+  theorem_proof: 1,
+  monograph_standard: 2,
+  experimental_measurement: 2,
+  numerical_simulation: 3,
   peer_reviewed: 3,
+  book_chapter: 3,
+  conference: 4,
+  technical_report: 5,
   network_meta_analysis: 3,
   review: 3,
   monograph: 3,
@@ -127,7 +149,8 @@ function journalName(value: string | null | undefined): string {
 
 /** Short names for the design a record was indexed as, when its reported analysis differs. */
 const INDEXED_AS: Record<string, string> = {
-  peer_reviewed: "peer-reviewed article",
+  peer_reviewed: "journal article",
+  book_chapter: "book chapter",
   meta_analysis: "meta-analysis",
   systematic_review: "systematic review",
   review: "review",
@@ -357,22 +380,36 @@ function ExcludedSection({ articles }: { articles: GradedArticle[] }) {
 }
 
 /** Graded literature evidence (study design and integrity per article) and the works excluded from the answer. */
+// Works shown before "Show all": a long bibliography is available, but the answer's evidence comes first.
+const VISIBLE_WORKS = 12;
+
 export function EvidenceSources({ data }: EvidenceSourcesProps) {
+  const [showAll, setShowAll] = useState(false);
   const graded = [...(data?.graded_articles ?? [])].sort((a, b) => tierOf(a.grade) - tierOf(b.grade));
   const excluded = data?.excluded_articles ?? [];
   if (!graded.length && !excluded.length) return null;
 
   const check = checkLine(data?.integrity_check ?? {});
+  const shown = showAll ? graded : graded.slice(0, VISIBLE_WORKS);
+  const hidden = graded.length - shown.length;
 
   // Articles grouped by design, strongest tier first, so the design is named once per group instead of per row.
   const groups: { type: StudyTypeKey; tier: number; items: GradedArticle[] }[] = [];
-  for (const a of graded) {
+  for (const a of shown) {
     const type = ((a.grade?.study_type as StudyTypeKey) in GROUP ? a.grade?.study_type : "unclassified") as StudyTypeKey;
     const g = groups.find((x) => x.type === type);
     if (g) g.items.push(a);
     else groups.push({ type, tier: tierOf(a.grade), items: [a] });
   }
-  const designs = groups.map((g) => `${g.items.length} ${COUNT_WORD[g.type][g.items.length === 1 ? 0 : 1]}`).join(", ");
+  // The header counts every work, shown or not.
+  const allCounts = new Map<StudyTypeKey, number>();
+  for (const a of graded) {
+    const type = ((a.grade?.study_type as StudyTypeKey) in GROUP ? a.grade?.study_type : "unclassified") as StudyTypeKey;
+    allCounts.set(type, (allCounts.get(type) || 0) + 1);
+  }
+  const designs = [...allCounts.entries()]
+    .map(([type, n]) => `${n} ${(COUNT_WORD[type] || [type, type])[n === 1 ? 0 : 1]}`)
+    .join(", ");
 
   return (
     <Card
@@ -405,6 +442,11 @@ export function EvidenceSources({ data }: EvidenceSourcesProps) {
           </ul>
         </section>
       ))}
+      {(hidden > 0 || showAll) && graded.length > VISIBLE_WORKS && (
+        <button type="button" className={styles.showMore} onClick={() => setShowAll(!showAll)} aria-expanded={showAll}>
+          {showAll ? `Show the first ${VISIBLE_WORKS}` : `Show all ${graded.length} works (${hidden} more)`}
+        </button>
+      )}
 
       {excluded.length > 0 && <ExcludedSection articles={excluded} />}
     </Card>

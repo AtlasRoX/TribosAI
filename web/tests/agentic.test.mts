@@ -37,9 +37,10 @@ test("toAgentOptions sends budget only when enabled, with ChatRequest.agent_opti
     "effort_level",
     "enable_code_analysis",
     "enable_counter_evidence",
-    "enable_hypotheses",
     "require_plan_approval",
   ]);
+  // Hypotheses on = server decides from the question (not sent); off is sent explicitly.
+  assert.equal(toAgentOptions({ ...DEFAULT_AGENT_OPTIONS, enable_hypotheses: false }).enable_hypotheses, false);
   const on = toAgentOptions({ ...DEFAULT_AGENT_OPTIONS, budgetEnabled: true });
   assert.deepEqual(Object.keys(on.budget ?? {}).sort(), ["max_draft_rounds", "max_llm_calls", "max_seconds", "max_tool_calls"]);
 });

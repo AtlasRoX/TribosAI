@@ -15,8 +15,9 @@ never interrupted.
 Deterministic ambiguity signals, from the parsed QueryContext:
 - the scope is "unclear" (no biomedical topic found);
 - an ambiguous gene family (`ctx.genes` with `ambiguous_with`) and no resolved primary target;
-- simulation intent with no model (no BIOMD id, no uploaded SBML) and no searchable term;
-- several attached tabular datasets and nothing in the question that says which one to use.
+- simulation intent with nothing to simulate: no equations, no named system, no ODE or initial condition written
+  in the question, no uploaded model (the question then asks for the equations, parameters and initial conditions);
+- several attached datasets (tables, HDF5, MAT) and nothing in the question that says which one to use.
 
 Rules: never when `agent_options.allow_clarification` is false; never twice in a row in one thread (a
 per-thread marker is kept when a question is asked, and the next turn is treated as the answer: its text and
@@ -36,6 +37,7 @@ from pydantic import BaseModel, Field
 
 from .guardrails import neutralise, spotlight
 from .runtime import AgentPhase, PhaseOutcome, register_phase
+from .sandbox import ANALYSABLE_KINDS
 from .state import AgentState
 
 logger = logging.getLogger(__name__)
@@ -103,6 +105,30 @@ def _mentions_attachment(query: str, att: Any) -> bool:
     return any(tok and tok in q for tok in (name, stem, ident) if len(tok) >= 3)
 
 
+# An ODE or dynamical system written out in the question: a derivative (dx/dt, d^2y/dt^2, y', y'', \dot{x}) or an
+# initial condition (x(0) = 1, y'(0)=0).
+_ODE_TEXT_RE = re.compile(
+    r"\bd\s*\^?\s*\d?\s*[A-Za-z]\w*\s*/\s*d\s*[A-Za-z]\w*(?:\s*\^\s*\d)?"
+    r"|\b[A-Za-z]\w*'{1,3}(?=\s*(?:\(|[-+=*/]|$))"
+    r"|\\d?dot\s*\{?\s*[A-Za-z]"
+    r"|\b[A-Za-z]\w*'{0,3}\s*\(\s*0\s*\)\s*="
+)
+
+
+def names_dynamical_system(ctx: Any, query: str) -> bool:
+    """The question gives Dynamis something to simulate: equations or a system the parser resolved, a simulation plan
+    naming a system or parameters, or an ODE or initial condition written out in the text."""
+    if getattr(ctx, "equations", None) or getattr(ctx, "systems", None) or getattr(ctx, "system_name", None):
+        return True
+    plan = getattr(ctx, "simulation_plan", None)
+    if plan is not None and (getattr(plan, "system_name", None) or getattr(plan, "parameter_overrides", None)):
+        return True
+    signal = str(getattr(getattr(ctx, "evidence_need", None), "signal", "") or "")
+    if signal.startswith(("ode:", "ode_system:", "system:")):
+        return True
+    return bool(_ODE_TEXT_RE.search(query or ""))
+
+
 def detect_signals(ctx: Any, query: str) -> list[dict[str, Any]]:
     """Ambiguity signals for one question: [{"signal", "strength": high|borderline, "question", "options", "reason"}]."""
     out: list[dict[str, Any]] = []
@@ -112,14 +138,14 @@ def detect_signals(ctx: Any, query: str) -> list[dict[str, Any]]:
             {
                 "signal": "scope_unclear",
                 "strength": "high",
-                "question": "I could not find a biomedical topic in your message. What would you like me to investigate?",
+                "question": "I could not find a scientific, engineering, or mathematical topic in your message. What would you like me to investigate?",
                 "options": [
-                    "A gene or protein target (for example KRAS)",
-                    "A drug or compound and its mechanism",
-                    "A disease and its targets or trials",
-                    "A kinetic model simulation (a BioModels id or an uploaded SBML file)",
+                    "A physics or engineering problem (for example terminal velocity, fluid dynamics, stress analysis)",
+                    "A mathematical derivation, proof, or differential equation",
+                    "An ODE dynamical simulation or parameter scan",
+                    "A computational Python analysis on a scientific dataset",
                 ],
-                "reason": "No biomedical topic was found in the question.",
+                "reason": "No STEM or scientific topic was found in the question.",
             }
         )
         return out
@@ -145,23 +171,23 @@ def detect_signals(ctx: Any, query: str) -> list[dict[str, Any]]:
             }
         )
 
-    searchable = bool(getattr(ctx, "primary_target", None) or genes or getattr(ctx, "drugs", None) or getattr(ctx, "diseases", None))
-    if getattr(ctx, "is_simulation_intent", False) and not has_model and not searchable:
+    if getattr(ctx, "is_simulation_intent", False) and not has_model and not names_dynamical_system(ctx, query):
         out.append(
             {
                 "signal": "simulation_without_model",
                 "strength": "high",
-                "question": "Which model should I simulate?",
+                "question": "Which dynamical system should I simulate?",
                 "options": [
-                    "Give a BioModels id (for example BIOMD0000000010)",
-                    "Attach an SBML model file",
-                    "Name the pathway or protein to search BioModels for",
+                    "Write the equations (for example dx/dt = -2*x + sin(t), or y'' + 3y' + 2y = 0)",
+                    "Give the parameter values and the initial conditions (for example x(0) = 1)",
+                    "Name a standard system (for example the Lorenz system or a damped harmonic oscillator)",
+                    "Give the time span to integrate over (for example 0 to 10 s)",
                 ],
-                "reason": "A simulation was requested but no model or searchable topic was named.",
+                "reason": "A simulation was requested but no equations or named system were given.",
             }
         )
 
-    tables = [a for a in (getattr(ctx, "attachments", None) or []) if getattr(a, "kind", "") in ("h5ad", "table")]
+    tables = [a for a in (getattr(ctx, "attachments", None) or []) if getattr(a, "kind", "") in ANALYSABLE_KINDS]
     if len(tables) >= 2 and not any(_mentions_attachment(query, a) for a in tables):
         names = [str(a.display_name) for a in tables][:MAX_OPTIONS]
         out.append(
@@ -187,7 +213,7 @@ async def _model_check(state: AgentState, signal: dict[str, Any]) -> ClarifyVerd
     if not state.llm.available:
         return None
     system = (
-        "[phase:clarify] You decide whether a biomedical research question is too ambiguous to answer without "
+        "[phase:clarify] You decide whether a mathematics, physics or engineering research question is too ambiguous to answer without "
         "asking the researcher first. Ask only when plausible readings lead to clearly different answers. "
         'Reply with JSON only: {"ambiguous": true|false, "question": "...", "options": ["...", "..."]} '
         f"with at most {MAX_OPTIONS} short options."

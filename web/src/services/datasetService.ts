@@ -1,17 +1,71 @@
 // Client for /api/datasets (UPLOADS, feature 8). Uploads use XMLHttpRequest for progress events;
 // the browser sets the multipart boundary, so Content-Type is never set by hand.
 
-import type { DatasetKind, DatasetProvenance, DatasetRecord, GeoVerification, MessageAttachment } from "@/types/datasets";
+import type { DatasetLimits, DatasetProvenance, DatasetRecord, DatasetSource, MessageAttachment, UploadKind } from "@/types/datasets";
 import { ApiError, requestJson, type AuthHeaders } from "./apiClient.ts";
 
 export type { AuthHeaders };
 
-export const ACCEPTED_EXTENSIONS = [".h5ad", ".csv", ".tsv", ".xml", ".sbml"] as const;
-export const ACCEPT_ATTR = ACCEPTED_EXTENSIONS.join(",");
-
 const MB = 1024 * 1024;
-// Server defaults (TRIBOS_UPLOAD_MAX_MB_*); the server re-checks every upload.
-export const CLIENT_SIZE_LIMITS: Record<DatasetKind, number> = { h5ad: 500 * MB, table: 100 * MB, sbml: 10 * MB };
+
+/**
+ * The server's defaults (EXTENSION_KINDS and TRIBOS_UPLOAD_MAX_MB_* in tribos/datasets/store.py), used until
+ * GET /api/datasets/limits answers, or when it fails. The server re-checks every upload.
+ */
+export const DEFAULT_DATASET_LIMITS: DatasetLimits = {
+  extensions: {
+    ".csv": "table",
+    ".tsv": "table",
+    ".xlsx": "table",
+    ".parquet": "table",
+    ".json": "table",
+    ".h5": "hdf5",
+    ".hdf5": "hdf5",
+    ".mat": "mat",
+  },
+  max_bytes: { table: 100 * MB, hdf5: 500 * MB, mat: 100 * MB },
+};
+
+const UPLOAD_KINDS: readonly UploadKind[] = ["table", "hdf5", "mat"];
+
+/** A limits body as the server sent it, with anything malformed replaced by the defaults. */
+export function normalizeDatasetLimits(body: unknown): DatasetLimits {
+  const b = (body && typeof body === "object" ? body : {}) as { extensions?: unknown; max_bytes?: unknown };
+  const extensions: Record<string, UploadKind> = {};
+  if (b.extensions && typeof b.extensions === "object") {
+    for (const [ext, kind] of Object.entries(b.extensions as Record<string, unknown>)) {
+      if (/^\.[a-z0-9]{1,10}$/i.test(ext) && UPLOAD_KINDS.includes(kind as UploadKind)) extensions[ext.toLowerCase()] = kind as UploadKind;
+    }
+  }
+  const caps = (b.max_bytes && typeof b.max_bytes === "object" ? b.max_bytes : {}) as Record<string, unknown>;
+  const max_bytes = { ...DEFAULT_DATASET_LIMITS.max_bytes };
+  for (const kind of UPLOAD_KINDS) {
+    const v = caps[kind];
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) max_bytes[kind] = v;
+  }
+  return { extensions: Object.keys(extensions).length ? extensions : { ...DEFAULT_DATASET_LIMITS.extensions }, max_bytes };
+}
+
+/** The upload limits the server enforces; the static defaults when the call fails (older server, offline). */
+export async function fetchDatasetLimits(backendUrl: string, authHeaders: AuthHeaders, signal?: AbortSignal): Promise<DatasetLimits> {
+  try {
+    return normalizeDatasetLimits(await requestJson<unknown>(`${backendUrl}/api/datasets/limits`, { headers: authHeaders(), signal }));
+  } catch {
+    return DEFAULT_DATASET_LIMITS;
+  }
+}
+
+/** The `accept` attribute of the file picker. */
+export function acceptAttr(limits: DatasetLimits = DEFAULT_DATASET_LIMITS): string {
+  return Object.keys(limits.extensions).join(",");
+}
+
+/** ".csv, .tsv, .xlsx, …" for hints and errors. */
+export function extensionList(limits: DatasetLimits = DEFAULT_DATASET_LIMITS): string {
+  return Object.keys(limits.extensions).join(", ");
+}
+
+export const KIND_NAMES: Record<UploadKind, string> = { table: "Table", hdf5: "HDF5", mat: "MATLAB .mat" };
 
 export class DatasetApiError extends ApiError {
   reasonCode?: string;
@@ -23,22 +77,19 @@ export class DatasetApiError extends ApiError {
 }
 
 const REASON_MESSAGES: Record<string, string> = {
-  not_hdf5: "Not an AnnData (.h5ad) file.",
-  not_anndata: "Not an AnnData file.",
+  not_hdf5: "Not an HDF5 file.",
   hdf5_unreadable: "The file is truncated or corrupt.",
-  hdf5_external_link: "The file contains external HDF5 links, which are not allowed.",
-  too_few_cells: "The matrix has too few cells (at least 5 are needed).",
-  too_few_genes: "The matrix has too few genes (at least 2 are needed).",
-  matrix_too_large: "The matrix is too large to analyze.",
+  hdf5_empty: "The HDF5 file contains no datasets.",
+  hdf5_too_complex: "The HDF5 file has too many objects to check.",
+  hdf5_external_link: "The file contains external or virtual HDF5 links, which are not allowed.",
+  mat_unreadable: "The MATLAB .mat file could not be parsed.",
+  mat_empty: "The MATLAB .mat file contains no variables.",
+  matrix_too_large: "The table is too large to analyze.",
   table_unreadable: "The table could not be parsed.",
   non_numeric_values: "Every value in the table must be numeric.",
   non_finite_values: "The table contains empty, NaN or infinite values.",
-  xml_unparseable: "The file is not well-formed XML.",
-  not_sbml: "The XML file is not an SBML model.",
-  sbml_dtd_forbidden: "SBML DTD/entities are not allowed.",
-  sbml_external_reference: "External SBML model references are not supported.",
-  sbml_unloadable: "COPASI could not load the model.",
-  sbml_empty_model: "The SBML model defines no species.",
+  unsupported_format: "This file format is not supported.",
+  unsupported_type: "This file type is not supported.",
   empty_file: "The file is empty.",
 };
 
@@ -48,9 +99,13 @@ const STATUS_MESSAGES: Record<number, string> = {
   409: "The dataset is in use by a running analysis; try again shortly.",
   411: "The upload was sent without a length; try again.",
   413: "The file is larger than the upload limit.",
-  415: "Unsupported file type. Upload .h5ad, .csv, .tsv, .xml or .sbml.",
   507: "Your upload storage is full; delete a dataset first.",
 };
+
+/** The 415 text, naming the accepted extensions. */
+export function unsupportedTypeMessage(limits: DatasetLimits = DEFAULT_DATASET_LIMITS): string {
+  return `Unsupported file type. Upload ${extensionList(limits)}.`;
+}
 
 function errorFrom(status: number, body: unknown): DatasetApiError {
   const b = (body && typeof body === "object" ? body : {}) as { detail?: unknown; reason_code?: string };
@@ -63,6 +118,8 @@ function errorFrom(status: number, body: unknown): DatasetApiError {
     message = canned ? (detail && detail !== canned ? `${canned} ${detail}` : canned) : detail || "The file did not pass validation.";
   } else if (status === 413 || status === 507) {
     message = detail || STATUS_MESSAGES[status];
+  } else if (status === 415) {
+    message = unsupportedTypeMessage();
   } else {
     message = STATUS_MESSAGES[status] || detail || `Request failed (${status}).`;
   }
@@ -73,22 +130,19 @@ function request<T>(url: string, init: RequestInit): Promise<T> {
   return requestJson<T>(url, init, { toError: errorFrom });
 }
 
-export function kindForFile(name: string): DatasetKind | null {
-  const ext = name.slice(name.lastIndexOf(".")).toLowerCase();
-  if (ext === ".h5ad") return "h5ad";
-  if (ext === ".csv" || ext === ".tsv") return "table";
-  if (ext === ".xml" || ext === ".sbml") return "sbml";
-  return null;
+export function kindForFile(name: string, limits: DatasetLimits = DEFAULT_DATASET_LIMITS): UploadKind | null {
+  const dot = name.lastIndexOf(".");
+  if (dot < 0) return null;
+  return limits.extensions[name.slice(dot).toLowerCase()] ?? null;
 }
 
 /** Client-side pre-check before any network call; returns an error message or null. */
-export function precheckFile(file: File): string | null {
-  const kind = kindForFile(file.name);
-  if (!kind) return STATUS_MESSAGES[415];
+export function precheckFile(file: File, limits: DatasetLimits = DEFAULT_DATASET_LIMITS): string | null {
+  const kind = kindForFile(file.name, limits);
+  if (!kind) return unsupportedTypeMessage(limits);
   if (file.size === 0) return REASON_MESSAGES.empty_file;
-  if (file.size > CLIENT_SIZE_LIMITS[kind]) {
-    return `${kind === "table" ? "CSV/TSV" : kind === "sbml" ? "SBML" : ".h5ad"} files are limited to ${CLIENT_SIZE_LIMITS[kind] / MB} MB.`;
-  }
+  const cap = limits.max_bytes[kind];
+  if (file.size > cap) return `${KIND_NAMES[kind]} files are limited to ${Math.round(cap / MB)} MB.`;
   return null;
 }
 
@@ -102,20 +156,22 @@ export function formatBytes(n: number): string {
 
 export function dimsOf(record: DatasetRecord): string | undefined {
   if (record.dims) return record.dims;
-  const v = record.validation;
-  if (record.kind === "sbml") return v.n_species != null ? `${v.n_species} species` : undefined;
-  if (v.n_obs != null && v.n_vars != null) return `${v.n_obs.toLocaleString()} cells × ${v.n_vars.toLocaleString()} genes`;
+  const v: Partial<DatasetRecord["validation"]> = record.validation || {};
+  const rows = v.n_rows ?? v.n_obs;
+  const cols = v.n_columns ?? v.n_vars;
+  if (rows != null && cols != null) return `${rows.toLocaleString()} rows × ${cols.toLocaleString()} columns`;
+  const n = v.datasets?.length ?? 0;
+  if (n) return `${n} ${record.kind === "mat" ? "variable" : "dataset"}${n === 1 ? "" : "s"}`;
   return undefined;
 }
 
+/** False for a legacy (biomedical-release) upload the server lists but no longer analyses. */
+export function isAnalysable(record: Pick<DatasetRecord, "kind" | "analysable">): boolean {
+  return record.analysable !== false && record.kind !== "legacy";
+}
+
 export function toAttachment(record: DatasetRecord): MessageAttachment {
-  return {
-    id: record.id,
-    kind: record.kind,
-    display_name: record.display_name,
-    dims: dimsOf(record),
-    geo_verified: record.geo_verification?.status === "verified",
-  };
+  return { id: record.id, kind: record.kind, display_name: record.display_name, dims: dimsOf(record) };
 }
 
 export function listDatasets(backendUrl: string, authHeaders: AuthHeaders): Promise<DatasetRecord[]> {
@@ -145,14 +201,6 @@ export function deleteDataset(backendUrl: string, authHeaders: AuthHeaders, id: 
   return request<{ status: string }>(`${backendUrl}/api/datasets/${encodeURIComponent(id)}`, {
     method: "DELETE",
     headers: authHeaders(),
-  });
-}
-
-export function lookupGeo(backendUrl: string, authHeaders: AuthHeaders, accession: string): Promise<GeoVerification> {
-  return request<GeoVerification>(`${backendUrl}/api/datasets/geo-lookup`, {
-    method: "POST",
-    headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ accession }),
   });
 }
 
@@ -193,19 +241,28 @@ export function uploadDataset(
   return { promise, abort: () => xhr.abort() };
 }
 
-export const CONSENT_LABELS: Record<DatasetProvenance["consent_status"], string> = {
-  public_deidentified: "Public, de-identified",
-  irb_approved: "IRB-approved",
-  consent_obtained_no_irb: "Consent obtained, no IRB",
-  not_human_subjects: "Not human subjects",
-  unknown: "Unknown",
-};
-
-export const SOURCE_LABELS: Record<DatasetProvenance["source"], string> = {
-  geo: "GEO",
-  cellxgene: "CELLxGENE",
-  biomodels: "BioModels",
+/** Sources offered for an upload, in display order. */
+export const SOURCE_LABELS: Record<DatasetSource, string> = {
+  experiment: "Experiment",
+  simulation: "Simulation",
+  benchmark: "Benchmark",
+  public_repository: "Public repository",
+  literature: "Literature",
   in_house: "In-house",
   collaborator: "Collaborator",
   other: "Other",
 };
+
+/** Sources of the biomedical release, shown on old records only. */
+const LEGACY_SOURCE_LABELS: Record<string, string> = { geo: "GEO", cellxgene: "CELLxGENE", biomodels: "BioModels" };
+
+/** The label of any stored source, including legacy and unknown values. */
+export function sourceLabel(source: string | null | undefined): string {
+  if (!source) return "–";
+  return SOURCE_LABELS[source as DatasetSource] ?? LEGACY_SOURCE_LABELS[source] ?? source;
+}
+
+/** True for a source the form offers (anything else is a legacy value). */
+export function isOfferedSource(source: unknown): source is DatasetSource {
+  return typeof source === "string" && source in SOURCE_LABELS;
+}

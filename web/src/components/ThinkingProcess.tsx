@@ -22,6 +22,8 @@ interface ThinkingProcessProps {
   durationSeconds?: number;
   /** True once answer text has started arriving; the panel then folds away like Claude/ChatGPT. */
   answerStarted?: boolean;
+  /** Live estimate of the time left ("about 2 min left"), from this browser's past runs of the same approach. */
+  remaining?: string | null;
 }
 
 function StepIcon({ status }: { status: ThoughtStep["status"] }) {
@@ -53,6 +55,7 @@ export function ThinkingProcess({
   reasoning = "",
   isStreaming = false,
   elapsedSeconds = 0,
+  remaining = null,
   durationSeconds,
   answerStarted = false,
 }: ThinkingProcessProps) {
@@ -114,6 +117,7 @@ export function ThinkingProcess({
         {isStreaming ? (
           <span className="thinking-meta">
             {formatSeconds(elapsedSeconds)}
+            {remaining && <> &middot; {remaining}</>}
             {expanded && steps.length > 1 && <> &middot; {steps.length} steps</>}
           </span>
         ) : (

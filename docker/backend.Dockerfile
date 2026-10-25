@@ -57,7 +57,7 @@ COPY --chown=tribos:tribos tribos/ ./tribos/
 COPY --chown=tribos:tribos app/ ./app/
 
 # All mutable state lives on the /data volume. TRIBOS_DATA_DIR is the umbrella; the stores below are the
-# variables the code actually reads (run provenance, jobs, memory, projects, tool cache, PrimeKG).
+# variables the code actually reads (run provenance, jobs, memory, projects, tool cache).
 ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONPATH=/app \
     PYTHONUNBUFFERED=1 \
@@ -68,7 +68,6 @@ ENV PATH="/app/.venv/bin:${PATH}" \
     TRIBOS_MEMORY_DIR=/data/memory \
     TRIBOS_PROJECTS_DIR=/data/projects \
     TRIBOS_TOOL_CACHE_DIR=/data/tool_cache \
-    TRIBOS_PRIMEKG_DIR=/data/primekg \
     HOME=/home/tribos
 
 VOLUME ["/data"]

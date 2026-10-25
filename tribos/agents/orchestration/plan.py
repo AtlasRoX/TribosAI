@@ -161,8 +161,7 @@ async def _choose_framework(run: RunContext) -> None:
     run.framework = decision.framework
     run.routing = decision.to_artifact()
     if research:
-        label = router.FRAMEWORK_LABELS.get(decision.framework, decision.framework)
-        await run.emit("route", f"Chose {label}", decision.reason, agent="Router",
+        await run.emit("route", f"Chose {decision.display_label}", decision.reason, agent="Router",
                        extra={"framework": decision.framework, "rule": decision.rule})
 
 
@@ -240,7 +239,7 @@ async def _answer_non_research(run: RunContext) -> Any:
         title="Read the question",
         text="Not a research question · no sources searched"
         if ctx.scope == "conversational"
-        else "No biomedical topic found · no sources searched",
+        else "No scientific or engineering topic found · no sources searched",
         extra={"thread_id": thread_id, **ctx.to_step_extra()},
     )
     duration = round(time.perf_counter() - run.start_time, 2)
@@ -263,7 +262,7 @@ async def _answer_non_research(run: RunContext) -> Any:
             request_match=ctx.scope == "conversational",
             reason="Not a research question; no sources were searched."
             if ctx.scope == "conversational"
-            else "No biomedical topic was found in the question.",
+            else "No scientific or engineering topic was found in the question.",
         ).model_dump(),
     )
 

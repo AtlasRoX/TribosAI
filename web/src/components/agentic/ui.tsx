@@ -1,6 +1,7 @@
 "use client";
 
-import React, { createContext, useContext, useId, useState } from "react";
+import React, { createContext, useContext, useEffect, useId, useState } from "react";
+import { onUi } from "@/lib/uiEvents";
 import { Check, ChevronRight, Copy } from "lucide-react";
 import styles from "./Agentic.module.css";
 import { type CellKind, columnKind, isEmptyCell, isScalarList, listText, tableLayout } from "./tableColumns";
@@ -109,6 +110,11 @@ export function Card({
   // untouched card follows the policy as new data arrives, and a reader's choice survives later updates.
   const policy = useContext(CardDisclosureContext);
   const [manual, setManual] = useState<boolean | null>(null);
+  // "[" / "]" (or a value link pointing into a closed card) open or close every collapsible card at once.
+  useEffect(() => {
+    if (!collapsible) return;
+    return onUi("tribos:cards", ({ open: next }) => setManual(next));
+  }, [collapsible]);
   const open = manual ?? policy ?? defaultOpen;
   const setOpen = (next: (prev: boolean) => boolean) => setManual(next(open));
   const bodyId = useId();

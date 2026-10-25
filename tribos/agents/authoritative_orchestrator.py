@@ -94,6 +94,15 @@ from .query_context import (
     TaskStatus,
 )
 from .query_planner import build_query_context  # noqa: F401
+from .result_keys import (
+    AXIOM,
+    CALCULA,
+    DYNAMIS,
+    DYNAMIS_EQUILIBRIUM,
+    DYNAMIS_SCAN,
+    PHYSIS,
+    distinct_results,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -213,50 +222,6 @@ def _non_research_reply(query: str, scope: str) -> str:
     )
 
 
-_BIOMODEL_LITERATURE = {
-    "BIOMD0000000010": "Kholodenko MAPK cascade ultrasensitivity negative feedback oscillations 10712587",
-    "BIOMD0000000019": "Hatakeyama ErbB receptor MAP kinase 12683957",
-    "BIOMD0000000372": "Sedaghat insulin receptor signaling 12376338",
-}
-
-
-# Trial acronyms written in a question ("AURA3", "KEYNOTE-716", "CheckMate 76K", "SOLO-1"): a mixed/upper-case word
-# with at least two capitals followed by a number. Genes and drug codes the resolver recognised are excluded below.
-_QUESTION_TRIAL_NAME_RE = re.compile(r"\b([A-Z][A-Za-z]{2,}(?:[\s-]?\d{1,4}[A-Z]{0,2}))\b")
-_NOT_TRIAL_WORDS = {"COVID", "SARS", "ICD", "ECOG", "RECIST", "CTCAE", "TNM", "AJCC", "WHO"}
-
-
-def question_trial_names(ctx: Any, text: str) -> list[str]:
-    """Named trials mentioned in the question, so literature search can look up their publications directly."""
-    known = set()
-    for group in ("genes", "drugs", "variants"):
-        for ent in getattr(ctx, group, None) or []:
-            for attr in ("mention", "label", "symbol", "name"):
-                val = getattr(ent, attr, None)
-                if isinstance(val, str) and val:
-                    known.add(re.sub(r"[\s-]", "", val).upper())
-    out: list[str] = []
-    for m in _QUESTION_TRIAL_NAME_RE.finditer(text or ""):
-        name = m.group(1)
-        word = re.match(r"[A-Za-z]+", name).group(0)  # type: ignore[union-attr]
-        if sum(c.isupper() for c in word) < 2 or word.upper() in _NOT_TRIAL_WORDS:
-            continue
-        if re.sub(r"[\s-]", "", name).upper() in known or word.upper() in known:
-            continue
-        if name not in out:
-            out.append(name)
-    return out
-
-
-_GENERIC_DISEASE_WORDS = {
-    "cancer", "cancers", "carcinoma", "carcinomas", "tumor", "tumors", "tumour", "tumours", "neoplasm", "neoplasms",
-    "disease", "diseases", "syndrome", "disorder", "malignant", "primary", "adenocarcinoma", "of", "the", "and", "cell",
-}
-
-
-_INHERITED_WORDS = {"familial", "hereditary", "inherited", "germline", "syndrome"}
-
-
 _TRANSIENT_STREAM_ERRORS = ("ReadError", "RemoteProtocolError", "APIConnectionError", "ConnectError", "ReadTimeout",
                             "APITimeoutError", "InternalServerError")
 
@@ -303,38 +268,29 @@ def _edit_llm_kwargs(model_name: str) -> dict[str, Any]:
     return agent_model_kwargs(model_name)
 
 
-def question_disease_words(ctx: Any) -> list[set]:
-    """Distinctive words of each disease the question names ({"pancreatic"}, {"cutaneous", "melanoma"}). A class term
-    ("cancer", "solid tumors", "malignancy") has none, so it never ranks associations next to a specific disease."""
-    generic = _GENERIC_DISEASE_WORDS | {"malignancy", "malignancies", "solid", "neoplastic", "human", "illness", "disorders"}
-    out: list[set] = []
-    for ent in getattr(ctx, "diseases", None) or []:
-        for attr in ("mention", "label"):
-            text = getattr(ent, attr, None)
-            words = {w for w in re.findall(r"[a-z]{3,}", str(text or "").lower()) if w not in generic}
-            if words and words not in out:
-                out.append(words)
-    return out
+LONG_QUERY_CHARS = 240
+# What each kind of question is looking for in the literature, added to the subject terms.
+_QUERY_TYPE_TERMS = {
+    "derivation": "analytical solution", "proof": "proof", "numerical": "numerical method",
+    "modelling": "model", "design_sizing": "design", "conceptual": "theory", "literature_review": "review",
+}
 
 
-def prioritise_question_diseases(assocs: list[dict[str, Any]], q_diseases: list[set], keep: int = 5) -> list[dict[str, Any]]:
-    """Associations with the question's disease first (stable), then the strongest others, `keep` in all."""
-    if not q_diseases:
-        return list(assocs)[:keep]
-
-    def matches(a: dict[str, Any]) -> bool:
-        name = set(re.findall(r"[a-z]{3,}", str(a.get("disease_name") or "").lower()))
-        # "pancreatic" matches "pancreatic adenocarcinoma"; a stem match catches "pancreas" vs "pancreatic".
-        return any(words <= name or any(n[:6] == w[:6] for w in words for n in name if len(w) >= 6) for words in q_diseases)
-
-    hit = [a for a in assocs if matches(a)]
-    rest = [a for a in assocs if not matches(a)]
-    # "familial pancreatic carcinoma" matches "pancreatic" too, but a germline form is not the somatic disease a
-    # "KRAS-mutant pancreatic cancer" question means: inherited forms go after the plain disease unless asked for.
-    asked_inherited = any(w in _INHERITED_WORDS for words in q_diseases for w in words)
-    if not asked_inherited:
-        hit.sort(key=lambda a: bool(_INHERITED_WORDS & set(re.findall(r"[a-z]+", str(a.get("disease_name") or "").lower()))))
-    return (hit + rest)[: max(keep, min(len(hit), keep + 3))]
+def literature_query(ctx: Any, clean_query: str, plan: Any = None) -> str:
+    """The literature search text. A short question is searched as written; a long one (a whole worked problem with
+    its given values and instructions) is searched by its subject terms, since keyword search over a paragraph of
+    instructions returns off-topic papers."""
+    if len(clean_query) <= LONG_QUERY_CHARS:
+        return clean_query
+    terms = list(ctx.focus_terms()[:3]) if hasattr(ctx, "focus_terms") else []
+    kind = str(getattr(plan, "question_type", None) or getattr(getattr(ctx, "search_plan", None), "question_type", "") or "")
+    hint = _QUERY_TYPE_TERMS.get(kind)
+    if terms and hint:
+        terms.append(hint)
+    if terms:
+        return " ".join(dict.fromkeys(terms))
+    first_sentence = re.split(r"(?<=[.?!])\s+", clean_query, maxsplit=1)[0]
+    return first_sentence[:LONG_QUERY_CHARS]
 
 
 def literature_request(ctx: Any, clean_query: str, plan: Any = None) -> dict[str, Any]:
@@ -345,11 +301,43 @@ def literature_request(ctx: Any, clean_query: str, plan: Any = None) -> dict[str
     profile = get_effort_profile(effort_level)
     max_articles = profile.get("max_passages", 8)
 
-    return {
-        "query": clean_query,
+    req: dict[str, Any] = {
+        "query": literature_query(ctx, clean_query, plan),
         "max_results": max_articles,
         "max_articles": max_articles,
     }
+    # The planned scholarly searches and ranking words (Archivon runs up to two of the queries besides `query`).
+    search_plan = plan if plan is not None else getattr(ctx, "search_plan", None)
+    if search_plan is not None:
+        try:
+            queries = search_plan.scholarly_queries()
+            keywords = search_plan.keywords()
+        except Exception as exc:  # noqa: BLE001 - a malformed plan never blocks the search itself
+            logger.debug("Search plan unusable for the literature request: %s", exc)
+            queries, keywords = [], []
+        if queries:
+            req["search_queries"] = queries[:10]
+        if keywords:
+            req["keywords"] = keywords[:30]
+    # Identifiers the question names (arXiv, DOI, zbMATH, ...) are fetched first, whatever the ranking.
+    pinned = _question_identifiers(ctx)
+    if pinned:
+        req["pinned_ids"] = pinned[:20]
+    return req
+
+
+def _question_identifiers(ctx: Any) -> list[str]:
+    """"arXiv:2312.04511", "DOI:10.1103/physrevlett.1", "Zbl 1234.56789": literature identifiers written in the question."""
+    text = str(getattr(ctx, "clean_query", "") or "")
+    out = [f"arXiv:{m.group(1)}" for m in _ARXIV_ID_RE.finditer(text)]
+    out += [f"DOI:{m.group(0).rstrip('.,;)')}" for m in _DOI_RE.finditer(text)]
+    out += [f"Zbl {m.group(1)}" for m in _ZBL_RE.finditer(text)]
+    return list(dict.fromkeys(out))
+
+
+_ARXIV_ID_RE = re.compile(r"\barxiv\s*:?\s*(\d{4}\.\d{4,5}(?:v\d+)?)", re.IGNORECASE)
+_DOI_RE = re.compile(r"\b10\.\d{4,9}/[^\s\"<>]+")
+_ZBL_RE = re.compile(r"\bZbl\s*:?\s*(\d{4}\.\d{5})", re.IGNORECASE)
 
 
 def _show_reasoning() -> bool:
@@ -373,8 +361,8 @@ def _cite_marker(m: re.Match[str]) -> str:
 # names (from the shared SOURCE_REGISTRY), or None to drop the parenthetical (it names a pipeline step, not a source
 # the reader can check). Only these keys are rewritten; other source keys in parentheses are left as written.
 _INTERNAL_SOURCE_KEYS = (
-    "structure_intel", "structintel", "clinical_trials", "clinicaltrials", "synapta", "lithoscribe", "vivarix",
-    "lumicell", "websurfer", "disease_targets",
+    "archivon", "dynamis", "physis", "axiom", "calcula", "websurfer", "lithoscribe", "vivarix",
+    "structure_intel", "structintel", "clinical_trials", "clinicaltrials", "synapta", "lumicell", "disease_targets",
 )
 _INTERNAL_SOURCE_NAMES: dict[str, str | None] = {
     **{k: source_public_name(k) for k in _INTERNAL_SOURCE_KEYS},
@@ -397,7 +385,8 @@ _PAREN_RE = re.compile(r"[ \t]*\(([^()\n]{1,80})\)")
 # their parentheses or brackets, a lead-in like "evidence:", and list separators, they are removed from the answer.
 _STEP_KEY = (
     r"agent\.[a-z_]+(?:\.[\w-]+)+"
-    r"(?:\s+(?:lithoscribe|synapta|vivarix|lumicell|chembl|openfda|primekg|structure|websurfer|dgidb|pharos|"
+    r"(?:\s+(?:archivon|dynamis|physis|axiom|calcula|lithoscribe|synapta|vivarix|lumicell|chembl|openfda|primekg|"
+    r"structure|websurfer|dgidb|pharos|"
     r"bindingdb|pubtator|synlethdb|clinical_trials|trials|variants|gwas|gtex|string_ppi|reactome|pubchem))?"
 )
 _STEP_KEY_RE = re.compile(
@@ -502,9 +491,12 @@ def _clean_data_fields(segment: str) -> str:
 
 
 # The tags the evidence block wraps documents in (agentic/evidence.py, agentic/guardrails.py spotlight,
-# agentic/analyst.py, agents/prompts.py). A model sometimes copies them into the answer, raw, entity-escaped
+# agentic/analyst.py, agentic/math_agent.py, agents/prompts.py). A model sometimes copies them into the answer, raw, entity-escaped
 # ("&lt;untrusted_data source=...&gt;") or in a code span; they are markup for the model, never prose.
-_EVIDENCE_TAGS = ("agent_evidence", "untrusted_data", "tool_output", "document", "sandbox_analysis")
+_EVIDENCE_TAGS = (
+    "agent_evidence", "untrusted_data", "tool_output", "document", "sandbox_analysis",
+    "math_agent", "math_problem", "math_answer", "math_answer_latex", "math_checks", "math_check", "math_uncertainty", "math_steps",
+)
 _EVIDENCE_TAG_RE = re.compile(
     r"`?(?:<|&lt;|&#60;|&#x3c;)\s*/?\s*(?:" + "|".join(_EVIDENCE_TAGS) + r")\b"
     r"(?:\s+[a-z_][\w\-]*\s*=\s*(?:\"[^\"<>\n]*\"|'[^'<>\n]*'|&quot;.*?&quot;|[^\s<>&`]+))*"
@@ -568,8 +560,8 @@ def clean_internal_keys(text: str) -> str:
 
 class AuthoritativeOrchestrator:
     """
-    Authoritative Orchestrator coordinating Synapta, Vivarix, Lumicell,
-    Lithoscribe, and WebSurfer with genuine tool execution and verification.
+    Authoritative Orchestrator coordinating Archivon, WebSurfer, Physis, Axiom, Calcula and Dynamis with genuine
+    tool execution and verification.
     """
 
     def __init__(self) -> None:
@@ -578,7 +570,6 @@ class AuthoritativeOrchestrator:
             self.dynamis = DynamisEngine()
         except ImportError:
             self.dynamis = None
-        self.vivarix = getattr(self, "vivarix", None) or type("VivarixDummy", (), {"search_models": staticmethod(lambda *_a, **_k: [])})()
         self.verifier = TribosVerifier()
         self.memory = get_research_memory_engine()
 
@@ -649,6 +640,7 @@ class AuthoritativeOrchestrator:
         "dynamis_simulate_ode": "Simulating ODE model in Dynamis",
         "dynamis_parameter_scan": "Scanning parameter in Dynamis",
         "dynamis_equilibrium": "Finding equilibrium points in Dynamis",
+        "dynamis_scan": "Scanning parameter in Dynamis",
         "vivarix": "Simulating {model}",
         "vivarix_steady_state": "Solving for steady state",
         "vivarix_scan": "Scanning parameter",
@@ -672,6 +664,8 @@ class AuthoritativeOrchestrator:
                 "dynamis": f"Simulation of {ctx.get('model')} failed",
                 "dynamis_simulate_ode": "ODE simulation failed",
                 "dynamis_parameter_scan": "Parameter scan failed",
+                "dynamis_scan": f"Parameter scan of {ctx.get('model')} failed",
+                "dynamis_equilibrium": "Equilibrium solve failed",
                 "vivarix": f"Simulation of {ctx.get('model')} failed",
                 "vivarix_steady_state": "Steady-state solve failed",
                 "vivarix_scan": f"Parameter scan of {ctx.get('model')} failed",
@@ -733,14 +727,17 @@ class AuthoritativeOrchestrator:
                 parts.append(f"t = {data.get('t_span')}")
             if data.get("verified"):
                 parts.append("verified numerical solution")
-        elif name in ("dynamis_equilibrium", "vivarix_steady_state"):
-            title = f"Steady state: {data.get('steady_state_status', data.get('stability', 'computed'))}"
-            if data.get("stability"):
-                parts.append(f"stability: {data['stability']}")
-        elif name in ("dynamis_parameter_scan", "vivarix_scan"):
+        elif name in (DYNAMIS_EQUILIBRIUM, "vivarix_steady_state"):
+            title = f"Equilibrium: {str(data.get('stability') or data.get('steady_state_status') or 'computed').replace('_', ' ')}"
+            if data.get("fixed_point"):
+                parts.append(", ".join(f"{k} = {v:.4g}" if isinstance(v, (int, float)) else f"{k} = {v}"
+                                       for k, v in list(data["fixed_point"].items())[:4]))
+            if data.get("converged") is False:
+                parts.append("did not converge")
+        elif name in (DYNAMIS_SCAN, "dynamis_parameter_scan", "vivarix_scan"):
             n_ok = int(data.get("successful_points") or len(data.get("scan_results") or []) or 0)
             n_all = int(data.get("total_points") or len(data.get("scan_results") or []) or 0)
-            title = f"Scanned {data.get('resolved_parameter') or data.get('parameter_name') or 'parameter'} over {n_all} point{'s' if n_all != 1 else ''}"
+            title = f"Scanned {data.get('resolved_parameter') or data.get('parameter') or data.get('parameter_name') or 'parameter'} over {n_all} point{'s' if n_all != 1 else ''}"
             req = data.get("requested")
             req_d = req if isinstance(req, dict) else {}
             if req_d.get("start") is not None and req_d.get("end") is not None:
@@ -748,14 +745,26 @@ class AuthoritativeOrchestrator:
             if data.get("duration_seconds"):
                 parts.append(f"t = {data.get('duration_seconds')} s per point")
             parts.append(f"{n_ok} succeeded" + (f", {n_all - n_ok} failed" if n_all - n_ok else ""))
-        elif name in ("calcula", "calcula_run_python"):
-            title = "Executed sandboxed scientific computation"
-            if data.get("output"):
-                parts.append(str(data["output"])[:100].strip())
-        elif name in ("physis", "physis_constants"):
+        elif name in (CALCULA, "calcula_run_python"):
+            if "n_rows" in data or "datasets" in data or "variables" in data:
+                title = f"Inspected dataset {data.get('name') or data.get('dataset_id') or ''}".strip()
+            else:
+                title = "Executed sandboxed scientific computation"
+            shown = data.get("result") if data.get("result") is not None else (data.get("stdout") or data.get("output"))
+            if shown is not None and str(shown).strip():
+                parts.append(str(shown)[:100].strip())
+        elif name in (PHYSIS, "physis_constants"):
             title = "Looked up physical reference data"
             if data.get("constants"):
                 parts.append(f"{len(data['constants'])} constants retrieved")
+            elif data.get("materials"):
+                parts.append(f"{len(data['materials'])} materials retrieved")
+        elif name == AXIOM:
+            status = str(data.get("status") or "computed").replace("_", " ")
+            title = f"Solved symbolically ({status})"
+            answer = data.get("answer") if isinstance(data.get("answer"), dict) else {}
+            if answer.get("text"):
+                parts.append(str(answer["text"])[:120])
         elif name == "lumicell":
             title = f"Analyzed {data.get('dataset_name') or ctx.get('dataset')}"
             parts.append(f"{data.get('n_cells_post_qc')} cells after QC")
@@ -825,7 +834,10 @@ class AuthoritativeOrchestrator:
         core_phase_note (agentic frameworks): why the framework's own phase (debate, supervisor, swarm,
         plan-and-execute) did not run as asked; a run that would otherwise be "completed" is then "partial"."""
         grounding = "not_checked"
-        if verification is not None:
+        coverage = (getattr(verification, "coverage", None) or {}) if verification is not None else {}
+        if verification is not None and coverage and not coverage.get("evaluated"):
+            grounding = "not_checked"  # nothing was evaluated: no grounding claim either way
+        elif verification is not None:
             claims = getattr(verification, "claims", None) or []
             statuses = {str(c.get("status") if isinstance(c, dict) else getattr(c, "status", "")) for c in claims}
             if "contradicted" in statuses:
@@ -835,19 +847,48 @@ class AuthoritativeOrchestrator:
             else:
                 grounding = "unsupported" if float(getattr(verification, "verification_score", 0.0) or 0.0) < 0.5 else "partial"
 
+        from ..agentic.state import (
+            evidence_key_label,  # local: the agentic package imports this module
+        )
+
+        # A failed attempt that a later call with the same purpose replaced (plan_execute.link_recoveries) is history,
+        # not a gap in the answer; a failure nothing replaced is reported with what it means for the answer.
+        recovered = [
+            {"step": evidence_key_label(k), "recovered_by": evidence_key_label(str((r.metadata or {}).get("recovered_by")))}
+            for k, r in tool_results.items()
+            if r is not None and not r.success and (r.metadata or {}).get("recovered_by")
+        ]
+
+        def live(results: dict[str, ToolResult]) -> dict[str, ToolResult]:
+            return {k: r for k, r in distinct_results(results).items()
+                    if r is not None and not (not r.success and (r.metadata or {}).get("recovered_by"))}
+
+        def unresolved_failures(results: dict[str, ToolResult]) -> list[dict[str, str]]:
+            return [
+                {"step": evidence_key_label(k), "error": str(r.error or "failed")[:200],
+                 "effect": "its result is missing from the answer; statements that would rest on it are not supported by it"}
+                for k, r in distinct_results(results).items()
+                if r is not None and not r.success and not (r.metadata or {}).get("recovered_by")
+                and not (r.metadata or {}).get("skipped_by_user")
+            ]
+
         def out(status: TaskStatus, requested: str | None, executed: str | None, reason: str, match: bool = True) -> TaskOutcome:
             if core_phase_note and status in ("completed", "partial"):
                 status = "partial"
                 reason = core_phase_note if reason in ("", "Evidence gathered and synthesized.") else f"{core_phase_note} {reason}"
+            if recovered and status in ("completed", "partial"):
+                note = f"{len(recovered)} failed attempt(s) were recovered by a retry."
+                reason = f"{reason} {note}".strip() if note not in reason else reason
             return TaskOutcome(task_status=status, requested_operation=requested, executed_operation=executed,
-                               request_match=match, reason=reason, grounding_status=grounding)
+                               request_match=match, reason=reason, grounding_status=grounding,
+                               recovered_failures=recovered, unresolved_failures=unresolved_failures(tool_results))
 
         def _simulation_outcome(plan: SimulationPlan) -> TaskOutcome:
             """The simulation part of the request: the requested action against what ran."""
             requested = plan.action
-            dyn = tool_results.get("dynamis") or tool_results.get("dynamis_simulate_ode") or tool_results.get("vivarix")
-            ss = tool_results.get("dynamis_equilibrium") or tool_results.get("vivarix_steady_state")
-            scan = tool_results.get("dynamis_scan") or tool_results.get("dynamis_parameter_scan") or tool_results.get("vivarix_scan")
+            dyn = tool_results.get(DYNAMIS) or tool_results.get("dynamis_simulate_ode") or tool_results.get("vivarix")
+            ss = tool_results.get(DYNAMIS_EQUILIBRIUM)
+            scan = tool_results.get(DYNAMIS_SCAN) or tool_results.get("dynamis_parameter_scan") or tool_results.get("vivarix_scan")
             first_fail = next((r for r in (scan, ss, dyn) if r is not None and not r.success), None)
             meta = (first_fail.metadata or {}) if first_fail is not None else {}
             if first_fail is not None and meta.get("reason_code") == "MODEL_REQUIRED":
@@ -865,24 +906,38 @@ class AuthoritativeOrchestrator:
             if requested == "steady_state":
                 if ss is not None and ss.success:
                     return out("completed", requested, "steady_state", "Steady state computed.")
+                # In mechanical and physical systems, steady-state response is derived analytically or obtained from the time-course
+                ax = (
+                    tool_results.get("axiom")
+                    or tool_results.get("axiom_sagemath")
+                    or tool_results.get("calcula")
+                    or tool_results.get("calcula_run_sagemath")
+                    or tool_results.get("derivation")
+                )
+                if (dyn is not None and dyn.success) or (ax is not None and ax.success):
+                    return out("completed", requested, "steady_state_response", "Steady-state amplitude and response computed.")
                 return out("failed", requested, "time_course" if dyn is not None and dyn.success else None,
                            ((first_fail.error if first_fail else "") or "The steady state was not computed.")[:300], match=False)
             if dyn is not None and dyn.success:
                 return out("completed", requested, "time_course", "Time course computed.")
             return out("failed", requested, None, ((first_fail.error if first_fail else "") or "The simulation did not run.")[:300], match=False)
 
-        _sim_keys = ("dynamis", "dynamis_simulate_ode", "dynamis_parameter_scan", "dynamis_scan", "dynamis_equilibrium", "vivarix", "vivarix_steady_state", "vivarix_scan")
-        others = {k: r for k, r in tool_results.items() if r is not None and k not in _sim_keys and k != "lumicell"}
+        _sim_keys = (DYNAMIS, "dynamis_simulate_ode", "dynamis_parameter_scan", DYNAMIS_SCAN, DYNAMIS_EQUILIBRIUM, "vivarix", "vivarix_scan")
+        others = {k: r for k, r in live(tool_results).items() if k not in _sim_keys and k != "lumicell"}
 
         def combined(primary: TaskOutcome) -> TaskOutcome:
             """A computational request is one part of the question: failures of the other routed sources (literature,
             targets, trials) and an unavailable model also decide the status (ORC-009)."""
             if primary.task_status != "completed":
                 return primary
-            failed = sorted(k for k, r in others.items() if not r.success)
+            skipped = [k for k, r in others.items() if (r.metadata or {}).get("skipped_by_user")]
+            failed = sorted(k for k, r in others.items() if not r.success and k not in skipped)
             notes: list[str] = []
+            if skipped:
+                notes.append("The literature and web search was skipped at your request.")
             if failed:
-                notes.append(f"{len(failed)} of {len(others)} other evidence sources failed ({', '.join(failed[:5])}).")
+                names = list(dict.fromkeys(evidence_key_label(k) for k in failed))
+                notes.append(f"{len(failed)} of {len(others)} supporting steps failed: {'; '.join(names[:5])}.")
             if not llm_ok:
                 notes.append("The model was unavailable; the raw evidence is shown instead.")
             if not notes:
@@ -901,7 +956,7 @@ class AuthoritativeOrchestrator:
                 return out("needs_input", "single_cell_analysis", None, lum.error or "A dataset is required.", match=False)
             return out("failed", "single_cell_analysis", None, (lum.error or "Analysis failed.")[:300], match=False)
 
-        ran = [r for r in tool_results.values() if r is not None]
+        ran = list(live(tool_results).values())
         n_ok = sum(1 for r in ran if r.success)
         # ORC-007: nothing retrieved is "failed" whether or not the model was available (no raw evidence to show).
         if ran and n_ok == 0:
@@ -933,8 +988,8 @@ class AuthoritativeOrchestrator:
     ) -> AuthoritativeOrchestrationResult:
         """
         Execute full LLMCompiler dependency-aware workflow:
-        Stage 1 (Parallel Evidence): Synapta, Lithoscribe, WebSurfer, plus registered EvidenceSources
-        Stage 2 (Computational Systems): Vivarix, Lumicell
+        Stage 1 (Parallel Evidence): Archivon, WebSurfer, Physis, plus registered EvidenceSources
+        Stage 2 (Computational Systems): Axiom, Calcula, Dynamis
         Stage 3 (Hypothesis Prioritization): DiscoveryAgent
         Stage 4 (Synthesis & Grounding): Model invocation with streaming
         Stage 5 (Reflexion Verification): Deterministic defect audit & bounded correction

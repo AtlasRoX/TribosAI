@@ -40,8 +40,9 @@ jobs:
 
       - name: Run quality checks
         run: |
-          uv run ruff check tribos/
-          uv run bandit -c pyproject.toml -r tribos/
+          # Same gates as tests_tribos.yml: pyflakes errors and syntax errors block, the rest is reported there.
+          uv run ruff check --select F,E9 tribos app
+          uv run bandit -c pyproject.toml -r tribos app --severity-level high
 
       - name: Semantic release
         id: release
@@ -55,8 +56,7 @@ jobs:
       - name: Build package
         if: steps.release.outputs.released == 'true'
         run: |
-          rm -rf dist build release *.egg-info
-          rm -f tribos-compose-*.tar.gz tribos-compose-*.zip
+          rm -rf dist build *.egg-info
           uv build
 
       - name: Verify package integrity
@@ -68,93 +68,6 @@ jobs:
         run: |
           uv venv test-env
           uv pip install --python test-env dist/*.whl --dry-run
-
-      - name: Prepare compose release bundle
-        if: steps.release.outputs.released == 'true'
-        run: |
-          VERSION="${{ steps.release.outputs.tag }}"
-
-          rm -rf release
-          mkdir -p release
-
-          for app in tribos lithoscribe synapta; do
-            app_path="tribos/$app/docker-compose"
-
-            if [ -d "$app_path" ]; then
-              mkdir -p "release/$app/cpu"
-              mkdir -p "release/$app/gpu"
-
-              if [ -f "$app_path/cpu/docker-compose.yml" ]; then
-                cp "$app_path/cpu/docker-compose.yml" "release/$app/cpu/docker-compose.yml"
-              fi
-
-              if [ -f "$app_path/gpu/docker-compose.yml" ]; then
-                cp "$app_path/gpu/docker-compose.yml" "release/$app/gpu/docker-compose.yml"
-              fi
-            fi
-          done
-
-          cat > release/README.md <<EOF
-          # Tribos Compose Bundle ${VERSION}
-
-          This archive contains Docker Compose configurations for the published release tag.
-
-          Included applications:
-          - tribos
-          - lithoscribe
-          - synapta
-
-          Use the CPU or GPU subdirectory for the target app, provide the required environment variables, and then run:
-
-          \`\`\`bash
-          docker compose up -d
-          \`\`\`
-          EOF
-
-          cat > "release/tribos/cpu/.env.example" <<'EOF'
-          OPENAI_API_KEY=your_openai_api_key_here
-          LANGCHAIN_TRACING_V2=true
-          LANGCHAIN_API_KEY=your_langchain_api_key_here
-          NVIDIA_API_KEY=your_nvidia_api_key_here
-          MILVUS_HOST=milvus-standalone
-          MILVUS_PORT=19530
-          MILVUS_USER=root
-          MILVUS_PASSWORD=Milvus
-          MILVUS_DATABASE=synapta_primekg
-          BATCH_SIZE=500
-          EOF
-          cp "release/tribos/cpu/.env.example" "release/tribos/gpu/.env.example"
-
-          cat > "release/synapta/cpu/.env.example" <<'EOF'
-          OPENAI_API_KEY=your_openai_api_key_here
-          LANGCHAIN_TRACING_V2=true
-          LANGCHAIN_API_KEY=your_langchain_api_key_here
-          NVIDIA_API_KEY=your_nvidia_api_key_here
-          MILVUS_HOST=milvus-standalone
-          MILVUS_PORT=19530
-          MILVUS_USER=root
-          MILVUS_PASSWORD=Milvus
-          MILVUS_DATABASE=synapta_primekg
-          BATCH_SIZE=500
-          EOF
-          cp "release/synapta/cpu/.env.example" "release/synapta/gpu/.env.example"
-
-          cat > "release/lithoscribe/cpu/.env.example" <<'EOF'
-          OPENAI_API_KEY=your_openai_api_key_here
-          LANGCHAIN_TRACING_V2=true
-          LANGCHAIN_API_KEY=your_langchain_api_key_here
-          NVIDIA_API_KEY=your_nvidia_api_key_here
-          ZOTERO_API_KEY=your_zotero_api_key_here
-          ZOTERO_USER_ID=your_zotero_user_id_here
-          MILVUS_HOST=milvus-standalone
-          MILVUS_PORT=19530
-          MILVUS_DB_NAME=pdf_rag_db
-          MILVUS_COLLECTION_NAME=pdf_rag_documents
-          EOF
-          cp "release/lithoscribe/cpu/.env.example" "release/lithoscribe/gpu/.env.example"
-
-          tar -czf "tribos-compose-${VERSION}.tar.gz" -C release .
-          zip -rq "tribos-compose-${VERSION}.zip" release
 
       - name: Publish to PyPI
         if: steps.release.outputs.released == 'true'
@@ -186,36 +99,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - image: tribos
-            dockerfile: tribos/tribos/Dockerfile
-            suffix: ""
-            latest_tag: latest
-            install_cuda: "true"
-          - image: tribos
-            dockerfile: tribos/tribos/Dockerfile
-            suffix: "-cpu"
-            latest_tag: latest-cpu
-            install_cuda: "false"
-          - image: vivarix
-            dockerfile: tribos/vivarix/Dockerfile
-            suffix: ""
-            latest_tag: latest
-            install_cuda: "false"
-          - image: lithoscribe
-            dockerfile: tribos/lithoscribe/Dockerfile
-            suffix: ""
-            latest_tag: latest
-            install_cuda: "false"
-          - image: synapta
-            dockerfile: tribos/synapta/Dockerfile
-            suffix: ""
-            latest_tag: latest
-            install_cuda: "true"
-          - image: synapta
-            dockerfile: tribos/synapta/Dockerfile
-            suffix: "-cpu"
-            latest_tag: latest-cpu
-            install_cuda: "false"
+          - image: tribos-backend
+            dockerfile: docker/backend.Dockerfile
+            context: .
+          - image: tribos-web
+            dockerfile: docker/web.Dockerfile
+            context: web
 
     steps:
       - name: Checkout repository
@@ -240,11 +129,10 @@ jobs:
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
+          context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           push: true
           platforms: linux/amd64
           tags: |
-            vpatientengine/${{ matrix.image }}:${{ needs.release.outputs.tag }}${{ matrix.suffix }}
-            vpatientengine/${{ matrix.image }}:${{ matrix.latest_tag }}
-          build-args: |
-            INSTALL_CUDA=${{ matrix.install_cuda }}
+            ${{ vars.DOCKERHUB_NAMESPACE || 'vpatientengine' }}/${{ matrix.image }}:${{ needs.release.outputs.tag }}
+            ${{ vars.DOCKERHUB_NAMESPACE || 'vpatientengine' }}/${{ matrix.image }}:latest

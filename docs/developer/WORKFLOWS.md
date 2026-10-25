@@ -36,13 +36,32 @@ Our CI/CD pipeline uses **uv** for fast, deterministic dependency management acr
 
 **File:** `tests_tribos.yml`
 
-**Purpose:** Comprehensive test suite execution and quality checks for the core Tribos package.
+**Purpose:** Quality gates and the offline test suite (`tests/`) with coverage over `tribos/` and `app/`.
+
+**Triggers:** pushes and pull requests to `main`/`master` that change `tribos/**`, `app/**`, `tests/**`,
+`scripts/gen_env_reference.py`, `pyproject.toml`, `uv.lock` or the workflow itself; manual dispatch.
+
+**Jobs:**
+
+#### 1. Code Quality Checks (Ubuntu)
+- **Blocking:** `ruff check --select F,E9 tribos app tests` (pyflakes and syntax errors), `bandit -c pyproject.toml
+  -r tribos app --severity-level high`, and `python scripts/gen_env_reference.py --check` (every `TRIBOS_*` the code
+  reads is a registered setting, and `docs/configuration.md` / `.env.example` match the registry).
+- **Report only:** the full ruff rule set, pylint, and bandit at every severity (legacy findings remain).
+
+#### 2. Cross-Platform Testing Matrix
+- **Matrix:** Ubuntu Latest, macOS 15, Windows Latest; Python 3.12.
+- **Steps:** `coverage run --source=tribos,app --omit="*/tests/*" -m pytest tests/`, the coverage report and XML,
+  a coverage gate (75%; measured 79% on 2026-10-25) and the Codecov upload (Ubuntu only).
+- **No keys:** `tests/conftest.py` removes every key-like variable and blocks non-loopback network access; cases
+  marked `@pytest.mark.network` run only with `TRIBOS_LIVE_TESTS=1`.
 
 ### Tests Scientific Validation
 
 **File:** `tests_scientific_validation.yml`
 
-**Purpose:** Executes the scientific validation and regression test matrix across Python 3.12.
+**Purpose:** The same `tests/` suite with its own coverage gate, ruff on the core packages and a report-only mypy
+job.
 
 ### Tests Web
 
@@ -54,43 +73,10 @@ Our CI/CD pipeline uses **uv** for fast, deterministic dependency management acr
 
 **File:** `evals.yml`
 
-**Purpose:** Offline and online evaluation harness benchmarks for query routing and full answer rubric scoring.
-
-**Triggers:**
-- Pull requests to `main` with changes to:
-  - `tribos/lithoscribe/**`
-  - `pyproject.toml`
-  - `uv.lock`
-- Manual workflow dispatch
-
-**Jobs:**
-
-#### 1. Code Quality Checks
-- **Runner:** Ubuntu Latest
-- **Dependencies:** UV sync with frozen lockfile
-- **Checks:**
-  - Pylint analysis with specific disabled rules
-  - Ruff linting for code style
-  - Bandit security scanning
-
-#### 2. Cross-Platform Testing Matrix
-- **Strategy:** Fail-fast disabled for comprehensive testing
-- **Matrix:**
-  - OS: Ubuntu Latest, macOS 15, Windows Latest
-  - Python: 3.12
-- **Steps:**
-  - UV dependency installation
-  - Test execution with coverage
-  - Coverage reporting and XML generation
-  - **100% coverage requirement** (builds fail if not met)
-  - Codecov upload (Ubuntu only)
-
-**Environment Variables:**
-```yaml
-OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
-ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
-```
+**Purpose:** The evaluation harness (`python -m tribos.evals`, see `docs/evals.md`). On pushes and pull requests
+that touch the agents, tools, specialist packages or `app/`: the harness tests, the offline plan gate over the
+`math`, `physics`, `engineering` and `behavior` suites (every offline expectation must hold) and the replay of
+committed answer cassettes. Weekly and on manual dispatch: live retrieval and answer levels with the rubric judge.
 
 ---
 
@@ -156,8 +142,6 @@ ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
 ```yaml
 OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
-ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
-ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
 ```
 
 **Process:**
@@ -180,14 +164,10 @@ ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
 
 **File:** `docker_build.yml`
 
-**Purpose:** Build and push Docker images for manual rebuilds or direct tag-triggered runs
-
-**Features:**
-- Multi-stage builds for optimized image sizes
-- Pinned base images (no `latest` tags)
-- Separate CPU and GPU variants
-- Health check implementations
-- Push to Docker Hub registry
+**Purpose:** Build and push the two images on a `v*` tag or a manual dispatch: `tribos-backend`
+(`docker/backend.Dockerfile`, context: the repository root) and `tribos-web` (`docker/web.Dockerfile`, context:
+`web/`). Images are pushed to the Docker Hub namespace in the `DOCKERHUB_NAMESPACE` repository variable (default
+`vpatientengine`) as `<version>` and `latest`.
 
 ### Package Build
 
@@ -203,7 +183,7 @@ ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
 - Manual workflow dispatch
 
 **Features:**
-- **Quality Checks:** Ruff linting and Bandit security scanning
+- **Quality Checks:** the same blocking ruff (F, E9) and bandit (high severity) gates as `tests_tribos.yml`
 - **Cross-Platform Testing:** Ubuntu, macOS 15, Windows Latest
 - **Package Validation:** Builds wheel/sdist and tests installation
 - **Dependency Resolution:** Fixed PyArrow compatibility issues with uv
@@ -226,10 +206,9 @@ ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
 **Features:**
 - **Python Semantic Release:** `python-semantic-release` controls version bumps
 - **Single version source:** `pyproject.toml`
-- **Quality Gates:** Ruff linting and Bandit security before release
+- **Quality Gates:** the same blocking ruff (F, E9) and bandit (high severity) gates as `tests_tribos.yml`
 - **PyPI Publishing:** Automated package distribution
 - **GitHub Releases:** Generated from semantic-release notes
-- **Compose bundles:** Attached as release assets without mutating release notes
 - **Docker publishing:** Builds and pushes release-tagged images in the same workflow after a successful release
 
 **Semantic Release Convention:**
@@ -243,22 +222,7 @@ BREAKING CHANGE:     → Major version bump (1.0.0 → 2.0.0)
 - ✅ Python semantic-release automation with conventional commits
 - ✅ Modern uv dependency management for fast builds
 - ✅ Releases are cut from `main`
-- ✅ Auto-creates tags, publishes to PyPI, uploads release assets, and publishes Docker images
-
-### Docker Build
-
-**File:** `docker_build.yml`
-
-**Purpose:** Fallback/manual Docker image publishing workflow
-
-**Triggers:**
-- Push tags matching `v*`
-- Manual workflow dispatch
-
-**Features:**
-- Manual or externally triggered image builds
-- Separate CPU and GPU variants where configured
-- Docker Hub publishing for release versions and `latest` aliases
+- ✅ Auto-creates tags, publishes to PyPI, uploads the wheel and sdist, and publishes the backend and web images
 
 ---
 
@@ -316,7 +280,7 @@ All workflows use UV for fast, reliable dependency management:
 
 ### 3. **Quality Assurance**
 - Multi-platform testing matrices (Ubuntu, macOS, Windows)
-- 100% code coverage requirements with flexible LLM test handling
+- Coverage gates set a few points below the measured total (raised as tests land, never lowered to pass a PR)
 - Multiple linting tools (ruff, pylint) with consistent disable flags
 - Cross-platform compatibility (Windows PowerShell vs Unix bash)
 
@@ -343,9 +307,9 @@ All workflows use UV for fast, reliable dependency management:
 
 ### Required Secrets
 ```yaml
-OPENAI_API_KEY          # OpenAI API access (test execution)
-ZOTERO_API_KEY          # Zotero integration (Lithoscribe)
-ZOTERO_USER_ID          # Zotero user identification
+OPENAI_API_KEY          # Live evaluations (evals.yml, scheduled and manual runs only)
+NVIDIA_API_KEY          # Live evaluations (evals.yml, scheduled and manual runs only)
+DOCKERHUB_TOKEN         # Docker image publishing (with the DOCKERHUB_USERNAME variable)
 CODECOV_TOKEN           # Coverage reporting
 SONAR_TOKEN             # SonarCloud analysis
 PYPI_API_TOKEN          # PyPI publishing
@@ -385,7 +349,7 @@ Some tests may fail in CI due to non-deterministic LLM responses:
 - Reports "unable to access" as valid responses
 
 #### Coverage Threshold Failures
-The workflows enforce 100% coverage. To handle this:
+The coverage gates (`tests_tribos.yml`, `tests_scientific_validation.yml`) sit a few points below the measured total. When one fails:
 1. Add proper tests for uncovered code
 2. Use coverage exclusions in `pyproject.toml` for legitimate cases
 3. Check for import-time code paths not triggered in CI

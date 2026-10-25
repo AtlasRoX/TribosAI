@@ -23,6 +23,19 @@ EntityType = Literal[
     "constant",
     "material",
     "system",
+    "mass",
+    "damping",
+    "stiffness",
+    "force",
+    "frequency",
+    "displacement",
+    "velocity",
+    "acceleration",
+    "pressure",
+    "energy",
+    "power",
+    "time",
+    "length",
     # Legacy types retained for backward compatibility
     "gene",
     "drug",
@@ -114,6 +127,12 @@ class TaskOutcome(BaseModel):
     grounding_status: Literal["supported", "partial", "unsupported", "contradicted", "not_checked"] = "not_checked"
     incomplete_reasons: list[str] = Field(default_factory=list)
     unresolved: list[str] = Field(default_factory=list)
+    # Failed tool attempts a later call with the same purpose replaced ({"step", "recovered_by"}): history, not a gap.
+    recovered_failures: list[dict[str, str]] = Field(default_factory=list)
+    # Failed steps nothing replaced, with what their failure means for the answer ({"step", "error", "effect"}).
+    unresolved_failures: list[dict[str, str]] = Field(default_factory=list)
+    # Requested deliverables and whether the answer provides them (tribos.agents.deliverables).
+    deliverables: list[dict[str, Any]] = Field(default_factory=list)
 
 
 @dataclass
@@ -205,6 +224,8 @@ class QueryContext:
     attachment_errors: list[str] = field(default_factory=list)
     enable_web_search: bool = True
     decisions: dict[str, SourceDecision] = field(default_factory=dict)
+    # Whether the answer needs outside evidence (agents.evidence_need.EvidenceNeed); gates literature and web search.
+    evidence_need: Any | None = None
     planner: str = "deterministic"
     scope: str = "research"
     normalization: str = "skipped"
@@ -387,8 +408,9 @@ class QueryContext:
             *self.drugs[:2],
             *self.diseases[:1],
         ):
-            if ent.label and ent.label not in terms:
-                terms.append(ent.label)
+            name = (ent.metadata or {}).get("display_name") or ent.label  # "Damped Harmonic Oscillator", not its id
+            if name and name not in terms:
+                terms.append(name)
             if ent.mention and ent.mention not in terms:
                 terms.append(ent.mention)
         return list(dict.fromkeys(terms))
@@ -418,8 +440,9 @@ class QueryContext:
             facts.append(f"Subject: {self.primary_display}")
         facts.extend(self._entity_facts())
         if not facts:
-            facts.append("General STEM / analytical inquiry")
-        if self.system_name:
+            closed = self.evidence_need is not None and self.evidence_need.kind == "closed_computation"
+            facts.append("Self-contained calculation" if closed else "General STEM / analytical inquiry")
+        if self.system_name and not self.systems:  # a recognized system is already listed by name above
             facts.append(f"Dynamical system: {self.system_name}")
         if self.biomodel_id:
             facts.append(f"Model: {self.biomodel_id}")
@@ -466,12 +489,16 @@ class QueryContext:
             )
         elif self.dataset_path:
             facts.append(f"Dataset: {self.dataset_path}")
-        facts.append("Web search: on" if self.enable_web_search else "Web search: off")
+        if self.enable_web_search and self.evidence_need is not None and self.evidence_need.skip_retrieval:
+            facts.append("Web search: not needed")
+        else:
+            facts.append("Web search: on" if self.enable_web_search else "Web search: off")
         return facts
 
     def _entity_facts(self) -> list[str]:
         def show(e: ResolvedEntity) -> str:
-            return e.label if not e.mention or e.mention.lower() == e.label.lower() else f"{e.label} ({e.mention})"
+            name = (e.metadata or {}).get("display_name") or e.label  # "Damped Harmonic Oscillator", not its id
+            return name if not e.mention or e.mention.lower() == name.lower() else f"{name} ({e.mention})"
 
         facts: list[str] = []
         if self.concepts:

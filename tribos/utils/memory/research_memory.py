@@ -1,5 +1,5 @@
 """
-Clinical Memory Engine for Tribos, inspired by Mem0 (2025).
+Research Memory Engine for Tribos, inspired by Mem0 (2025).
 Provides durable, isolated, and evidence-backed persistent memory:
 - Explicit separation of memory types: User Instructions, Query History, Hypotheses, Retrieved Evidence,
   Computed Simulation Results, and Reflexion Failure Lessons
@@ -38,7 +38,19 @@ _LEGACY_ID_KEYS = ("biomodels", "pmids", "dois", "ensembl", "uniprot")
 
 DEFAULT_USER_ID = "default_user"
 INSTRUCTION_SCOPES = ("current_turn", "investigation", "profile")
-SUBJECT_KEYS = ("gene", "drug", "disease", "biomodel_id")
+# Subject of a turn, for resolving follow-ups ("now for 50 s"): the STEM keys first (the first one present is the
+# resolved subject), then the legacy biomedical keys still found in stored rows.
+SUBJECT_KEYS = (
+    "concept", "equation", "system", "material", "quantity", "constant",
+    "gene", "drug", "disease", "biomodel_id",
+)
+# The origin of an assistant-answer node; older databases hold the legacy value, which still reads as the same origin.
+SYNTHESIS_ORIGIN = "supervisor_synthesis"
+SYNTHESIS_ORIGINS = (SYNTHESIS_ORIGIN, "clinical_supervisor_synthesis")
+# Rows scanned per recall: newest first, so a long thread's recall stays bounded.
+MAX_RECALL_ROWS = 400
+MAX_RANKED_EVIDENCE = 200
+_STEM_SCAN_CHARS = 20000  # tool text scanned for STEM entities
 
 # Recall caps: the injected memory block stays bounded however long a thread grows.
 MAX_INSTRUCTIONS = 10
@@ -114,14 +126,14 @@ class MemoryType(str, Enum):
     USER_INSTRUCTION = "USER_INSTRUCTION"        # Explicit user directives, stored with a scope
     QUERY_HISTORY = "QUERY_HISTORY"              # Questions asked earlier; history, never directives
     WORKING_HYPOTHESIS = "WORKING_HYPOTHESIS"    # Investigative hypotheses undergoing testing
-    RETRIEVED_EVIDENCE = "RETRIEVED_EVIDENCE"    # Verified external literature, OpenTargets scores
-    COMPUTED_RESULT = "COMPUTED_RESULT"          # COPASI ODE flux, Scanpy cluster marker outputs
+    RETRIEVED_EVIDENCE = "RETRIEVED_EVIDENCE"    # Retrieved external literature and database records
+    COMPUTED_RESULT = "COMPUTED_RESULT"          # Simulations, symbolic results, sandbox runs, CODATA reference values
     FAILURE_LESSON = "FAILURE_LESSON"            # Reflexion defect audits and self-correction lessons
     DIALOGUE_TURN = "DIALOGUE_TURN"              # Conversational context turn
 
 
 class VerificationStatus(str, Enum):
-    VERIFIED_EMPIRICAL = "VERIFIED_EMPIRICAL"    # Grounded in real tool outputs or peer-reviewed PMIDs
+    VERIFIED_EMPIRICAL = "VERIFIED_EMPIRICAL"    # Grounded in real tool outputs or retrieved scholarly sources
     PROVISIONAL = "PROVISIONAL"                  # Active working hypothesis
     REFUTED = "REFUTED"                          # Disproven by subsequent tool execution
     UNVERIFIED_GENERATED = "UNVERIFIED_GENERATED"# Model-synthesized prose (never promoted to empirical)
@@ -180,7 +192,7 @@ class MemoryContextPackage(BaseModel):
         if self.verified_evidence:
             sections.append("### Verified Evidence Grounding:\n" + "\n".join(f"- {e}" for e in self.verified_evidence[:MAX_EVIDENCE]))
         if self.computed_artifacts:
-            sections.append("### Prior Computational Artifacts (Vivarix/Lumicell):\n" + "\n".join(f"- {a}" for a in self.computed_artifacts[:MAX_COMPUTED]))
+            sections.append("### Prior Computational Artifacts (Dynamis, Physis, Axiom, Calcula):\n" + "\n".join(f"- {a}" for a in self.computed_artifacts[:MAX_COMPUTED]))
         if self.failure_lessons:
             sections.append("### Audit Warnings (Avoid Prior Defects):\n" + "\n".join(f"- ⚠️ {lesson}" for lesson in self.failure_lessons[:MAX_LESSONS]))
 
@@ -313,6 +325,44 @@ def _strip_label(content: str) -> str:
     return body if sep else content or ""
 
 
+def computed_result_class(
+    tool_key: str, data: Any, turn_verified: bool
+) -> tuple[VerificationStatus, float, str] | None:
+    """(status, confidence, label) for a computation or reference-data tool (Dynamis, Physis, Axiom, Calcula), or None
+    for any other tool. Results are stored as COMPUTED_RESULT, never as "literature":
+    - Physis: a NIST CODATA lookup that returned constants is verified reference data whatever the turn's
+      verification; other Physis data (materials, units) is verified only in a fully verified turn;
+    - Axiom: verified when its own symbolic verifier says so, refuted when it refuted the answer;
+    - Calcula: the sandbox's output is verified in a fully verified turn that did not fail;
+    - Dynamis (and its legacy key vivarix): a simulation describes the model it ran, not the world, so it stays
+      provisional model output however well the turn verified."""
+    name = (tool_key or "").lower()
+    d = data if isinstance(data, dict) else {}
+    failed = str(d.get("status") or "").lower() in ("failed", "error") or d.get("success") is False
+    if "dynamis" in name or "vivarix" in name:
+        return (VerificationStatus.PROVISIONAL, 0.70 if turn_verified and not failed else 0.50,
+                "Dynamis simulation (model output, not empirical evidence)")
+    if "physis" in name:
+        codata = str(d.get("canonical_id") or "").upper().startswith("NIST:CODATA") and bool(d.get("constants"))
+        if codata:
+            return VerificationStatus.VERIFIED_EMPIRICAL, 0.95, "Physis reference values (NIST CODATA 2022)"
+        if turn_verified and not failed:
+            return VerificationStatus.VERIFIED_EMPIRICAL, 0.85, "Physis reference data"
+        return VerificationStatus.PROVISIONAL, 0.55, "Physis reference data"
+    if "axiom" in name:
+        status = str(d.get("status") or d.get("verification_status") or "").lower()
+        if d.get("verified") is True or status == "verified":
+            return VerificationStatus.VERIFIED_EMPIRICAL, 0.95, "Axiom symbolic result (verified by its checker)"
+        if status == "refuted":
+            return VerificationStatus.REFUTED, 0.0, "Axiom symbolic result (refuted by its checker; do not reuse)"
+        return VerificationStatus.PROVISIONAL, 0.60, "Axiom symbolic result (not verified)"
+    if "calcula" in name or name.endswith("run_python"):
+        if turn_verified and not failed:
+            return VerificationStatus.VERIFIED_EMPIRICAL, 0.85, "Calcula sandboxed computation"
+        return VerificationStatus.PROVISIONAL, 0.55, "Calcula sandboxed computation"
+    return None
+
+
 def _clean_subject(subject: dict[str, Any] | None) -> dict[str, str]:
     if not isinstance(subject, dict):
         return {}
@@ -343,6 +393,11 @@ def unresolved_claim_count(verification: dict[str, Any] | None) -> int | None:
     return sum(_count(verification.get(k)) for k in keys)
 
 
+# Written into each evidence node's metadata. Under this policy evidence is stored as verified only when the turn's
+# checks evaluated claims and left none unsupported, contradicted or unchecked.
+MEMORY_POLICY_VERSION = "memory-verification/2026-10-25"
+
+
 def turn_fully_verified(is_turn_verified: bool, verification: dict[str, Any] | None = None) -> bool:
     """Whether a turn's tool evidence may be stored as verified: the turn passed AND, when its report is given, it
     left no unsupported, contradicted or unchecked claims (a report's ``passed`` alone tolerates unsupported claims)."""
@@ -351,6 +406,10 @@ def turn_fully_verified(is_turn_verified: bool, verification: dict[str, Any] | N
     if not isinstance(verification, dict):
         return True
     if verification.get("passed") is False or verification.get("fully_verified") is False:
+        return False
+    # A check that evaluated nothing verified nothing: its tool evidence stays provisional.
+    coverage = verification.get("coverage")
+    if isinstance(coverage, dict) and not _count(coverage.get("evaluated")):
         return False
     unresolved = unresolved_claim_count(verification)
     return not unresolved
@@ -446,6 +505,8 @@ class ResearchMemoryEngine:
                 )
                 """
             )
+            # Stats count contradictions per user through node_id.
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_contra_node ON contradictions(node_id)")
 
             # 3. Active subject per user and thread, for resolving follow-ups ("What about its safety?")
             cursor.execute(
@@ -465,11 +526,38 @@ class ResearchMemoryEngine:
     # -------------------------------------------------------------------------
     @staticmethod
     def extract_entities(text: str) -> dict[str, list[str]]:
+        """Entities a memory node is about: STEM entities from the offline lexicon (named equations, dynamical
+        systems, materials, CODATA constants, concepts), plus the legacy gene / BioModels / disease patterns."""
+        from ...agents.entity_lexicon import (
+            find_offline_concepts,
+            find_offline_constants,
+            find_offline_equations,
+            find_offline_materials,
+            find_offline_systems,
+        )
+
         entities: dict[str, list[str]] = {
+            "equations": [],
+            "systems": [],
+            "materials": [],
+            "constants": [],
+            "concepts": [],
             "targets": [],
             "biomodels": [],
             "diseases": [],
         }
+        head = (text or "")[:_STEM_SCAN_CHARS]
+        for bucket, finder in (
+            ("equations", find_offline_equations),
+            ("systems", find_offline_systems),
+            ("materials", find_offline_materials),
+            ("constants", find_offline_constants),
+            ("concepts", find_offline_concepts),
+        ):
+            for hit in finder(head):
+                name = str(hit.get("display_name") or hit.get("canonical") or hit.get("key") or "").strip()
+                if name and name not in entities[bucket]:
+                    entities[bucket].append(name)
         for m in KNOWN_TARGET_PATTERN.finditer(text):
             val = m.group(1)
             if val not in entities["targets"]:
@@ -748,35 +836,39 @@ class ResearchMemoryEngine:
                 nodes_created += 1
 
             # 3. Record Empirical Evidence from Specialist Tools
+            stored_results: set[int] = set()
             for t_name, t_data in tool_results.items():
                 if not t_data:
                     continue
+                # Alias keys share one result object ("vivarix" is "dynamis", "lithoscribe" is "archivon"): store once.
+                if isinstance(t_data, (dict, list)):
+                    if id(t_data) in stored_results:
+                        continue
+                    stored_results.add(id(t_data))
                 t_data = apply_serialization_filters(t_name, t_data)
 
                 ents = self.extract_entities(_tool_text(t_data))
-                all_ents = ents["targets"] + ents["biomodels"] + ents["diseases"]
+                all_ents = [e for bucket in ents.values() for e in bucket]
                 body = summarize_tool_data(t_data, t_name)
                 assertion = " ".join(t_data.split())[:_ASSERTION_MAX] if isinstance(t_data, str) else body
 
                 # Determine Memory Type & Verification Status
-                if "vivarix" in t_name.lower():
-                    # A kinetic model's output describes the model, not patients: it stays provisional model output
-                    # however well the turn verified, so it is never recalled as verified empirical evidence.
+                computed = computed_result_class(t_name, t_data, turn_verified)
+                if computed is not None:
                     m_type = MemoryType.COMPUTED_RESULT
-                    status = VerificationStatus.PROVISIONAL
-                    confidence_val = 0.70 if turn_verified else 0.50
-                    label = "Vivarix ODE Kinetic Model (model output, not clinical evidence)"
+                    status, confidence_val, label = computed
                 elif "lumicell" in t_name.lower():
                     m_type = MemoryType.COMPUTED_RESULT
                     has_real_dataset = isinstance(t_data, dict) and bool(t_data.get("dataset_path"))
                     status = (VerificationStatus.VERIFIED_EMPIRICAL if (turn_verified and has_real_dataset) else VerificationStatus.PROVISIONAL)
                     confidence_val = 0.90 if (turn_verified and has_real_dataset) else 0.50
                     label = "Lumicell Single-Cell Transcriptomics"
-                elif "lithoscribe" in t_name.lower():
+                elif "lithoscribe" in t_name.lower() or "archivon" in t_name.lower():
                     m_type = MemoryType.RETRIEVED_EVIDENCE
                     status = VerificationStatus.VERIFIED_EMPIRICAL if turn_verified else VerificationStatus.PROVISIONAL
                     confidence_val = 0.95 if turn_verified else 0.60
-                    label = "Lithoscribe Peer-Reviewed Passage Evidence"
+                    # Retrieved is not reviewed: document type and relevance vary per passage (see their grades).
+                    label = "Literature passages (retrieved; peer review and relevance per passage)"
                 elif "synapta" in t_name.lower():
                     m_type = MemoryType.RETRIEVED_EVIDENCE
                     status = VerificationStatus.VERIFIED_EMPIRICAL if turn_verified else VerificationStatus.PROVISIONAL
@@ -795,7 +887,9 @@ class ResearchMemoryEngine:
                 self._insert_node(
                     cursor, "mem_ev", thread_id, user_id, m_type, f"{label}: {body}", all_ents,
                     {"tool": t_name, "timestamp": now, "turn_id": turn_id, "identifiers": self.collect_identifiers(t_data, t_name),
-                     "turn_verified": turn_verified, "unresolved_claims": unresolved_claim_count(verification)},
+                     "turn_verified": turn_verified, "unresolved_claims": unresolved_claim_count(verification),
+                     "claims_evaluated": _count(((verification or {}).get("coverage") or {}).get("evaluated")),
+                     "verification_policy": MEMORY_POLICY_VERSION},
                     status, confidence_val, now,
                 )
                 nodes_created += 1
@@ -809,10 +903,26 @@ class ResearchMemoryEngine:
                 )
                 nodes_created += 1
 
+            # 4b. Statements the verification contradicted: stored as refuted with what the check found, so a later turn
+            # that recalls this one sees them as wrong, never as reusable results.
+            contradicted = [c for c in ((verification or {}).get("contradicted_statements") or []) if isinstance(c, dict)]
+            for c in contradicted[:20]:
+                self._insert_node(
+                    cursor, "mem_ref", thread_id, user_id, MemoryType.COMPUTED_RESULT,
+                    f"Contradicted statement (do not reuse): {c.get('text', '')[:300]} — check: {c.get('detail', '')[:300]}",
+                    [], {"origin": "verification", "turn_id": turn_id, "context": c.get("context", "")},
+                    VerificationStatus.REFUTED, 0.0, now,
+                )
+                nodes_created += 1
+
             # 5. Record Dialogue Turn (as UNVERIFIED_GENERATED for the assistant response)
+            note = (f"[{len(contradicted)} statement(s) in this answer were contradicted by verification; see the refuted "
+                    "entries] " if contradicted else "")
             self._insert_node(
-                cursor, "mem_trn", thread_id, user_id, MemoryType.DIALOGUE_TURN, f"Synthesized Response: {(response or '')[:350]}...",
-                [], {"origin": "clinical_supervisor_synthesis", "turn_id": turn_id}, VerificationStatus.UNVERIFIED_GENERATED, 0.70, now,
+                cursor, "mem_trn", thread_id, user_id, MemoryType.DIALOGUE_TURN, f"{note}Synthesized Response: {(response or '')[:350]}...",
+                [], {"origin": SYNTHESIS_ORIGIN, "turn_id": turn_id,
+                     "verification_status": (verification or {}).get("status"), "contradicted": len(contradicted)},
+                VerificationStatus.UNVERIFIED_GENERATED, 0.70, now,
             )
             nodes_created += 1
 
@@ -826,6 +936,36 @@ class ResearchMemoryEngine:
             "nodes_created": nodes_created,
             "entities_updated": list(set(entities_updated)),
         }
+
+    def requalify_legacy_verified(self, dry_run: bool = False) -> dict[str, Any]:
+        """Evidence stored as VERIFIED_EMPIRICAL under the earlier policy, when a verification that evaluated no claims
+        still counted as passed, becomes PROVISIONAL. Content and provenance are kept; the reason is appended to
+        contradiction_notes (the node is not marked contradicted: it was never shown wrong, only never checked)."""
+        changed: list[str] = []
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, sources_json, contradiction_notes FROM memory_nodes WHERE verification_status = ? "
+                "AND memory_type = ?",
+                (VerificationStatus.VERIFIED_EMPIRICAL.value, MemoryType.RETRIEVED_EVIDENCE.value),
+            ).fetchall()
+            now = time.time()
+            for r in rows:
+                meta = _sources_of(r)
+                if meta.get("verification_policy") == MEMORY_POLICY_VERSION and _count(meta.get("claims_evaluated")):
+                    continue
+                changed.append(r["id"])
+                if dry_run:
+                    continue
+                note = ((r["contradiction_notes"] or "") + "; " if r["contradiction_notes"] else "") + (
+                    f"requalified {time.strftime('%Y-%m-%d', time.gmtime(now))} ({MEMORY_POLICY_VERSION}): stored as "
+                    "verified by a check that evaluated no claims; now provisional"
+                )
+                conn.execute(
+                    "UPDATE memory_nodes SET verification_status = ?, confidence = MIN(confidence, 0.6), "
+                    "contradiction_notes = ?, updated_at = ? WHERE id = ?",
+                    (VerificationStatus.PROVISIONAL.value, note, now, r["id"]),
+                )
+        return {"requalified": len(changed), "dry_run": dry_run, "ids": changed}
 
     async def consolidate_turn(
         self,
@@ -888,7 +1028,8 @@ class ResearchMemoryEngine:
         return subject or None
 
     def record_active_subject(self, user_id: str, thread_id: str, subject: dict[str, Any] | None) -> dict[str, str] | None:
-        """Store the subject (gene/drug/disease/biomodel_id) of the latest turn. Empty subjects are ignored."""
+        """Store the subject (SUBJECT_KEYS: concept/equation/system/material/quantity/constant, or a legacy key) of
+        the latest turn. Empty subjects are ignored."""
         user_id = _require_user(user_id)
         clean = _clean_subject(subject)
         if not clean:
@@ -919,14 +1060,26 @@ class ResearchMemoryEngine:
         user_id = _require_user(user_id)
         pkg = MemoryContextPackage(thread_id=thread_id)
 
+        evidence_types = (MemoryType.RETRIEVED_EVIDENCE.value, MemoryType.COMPUTED_RESULT.value,
+                          MemoryType.WORKING_HYPOTHESIS.value)
         with self._connect() as conn:
+            # Bounded scans, newest first: the instructions/history/lessons and the evidence that BM25 ranks.
             rows = conn.execute(
                 """
                 SELECT id, memory_type, content, entity_refs_json, sources_json, verification_status, created_at
                 FROM memory_nodes WHERE thread_id = ? AND user_id = ? AND is_contradicted = 0
-                ORDER BY created_at DESC
+                AND memory_type IN (?, ?, ?) ORDER BY created_at DESC LIMIT ?
                 """,
-                (thread_id, user_id),
+                (thread_id, user_id, MemoryType.QUERY_HISTORY.value, MemoryType.USER_INSTRUCTION.value,
+                 MemoryType.FAILURE_LESSON.value, MAX_RECALL_ROWS),
+            ).fetchall()
+            rows += conn.execute(
+                """
+                SELECT id, memory_type, content, entity_refs_json, sources_json, verification_status, created_at
+                FROM memory_nodes WHERE thread_id = ? AND user_id = ? AND is_contradicted = 0
+                AND memory_type IN (?, ?, ?) ORDER BY created_at DESC LIMIT ?
+                """,
+                (thread_id, user_id, *evidence_types, MAX_RANKED_EVIDENCE),
             ).fetchall()
             profile_rows = conn.execute(
                 """
@@ -1104,8 +1257,8 @@ class ResearchMemoryEngine:
     @staticmethod
     def collect_identifiers(data: Any, tool_key: str = "") -> dict[str, list[str]]:
         """
-        Extract canonical identifiers from a tool output: BioModels, PMIDs, DOIs, Ensembl and UniProt, plus
-        every identifier family (NCT, ChEMBL, HGNC, ...). Registered serialization filters run first.
+        Extract canonical identifiers from a tool output: every identifier family (arXiv, Zbl, MR, ADS, OpenAlex,
+        ...) plus the legacy BioModels, PMIDs, DOIs, Ensembl and UniProt. Registered serialization filters run first.
         """
         data = apply_serialization_filters(tool_key, data)
         ids: dict[str, set[str]] = {k: set() for k in (*_LEGACY_ID_KEYS, *family_names())}
@@ -1118,6 +1271,11 @@ class ResearchMemoryEngine:
                         ids["pmids"].add(str(p["pmid"]))
                     if p.get("doi"):
                         ids["dois"].add(str(p["doi"]))
+                    # Archivon passages name their scholarly ids in fields, not only in text.
+                    for family, field in (("arxiv", "arxiv_id"), ("zbl", "zbl_id"), ("mr", "mr_id"),
+                                          ("ads", "ads_bibcode"), ("openalex", "openalex_id")):
+                        if p.get(field) and family in ids:
+                            ids[family].add(str(p[field]))
         text = _tool_text(data)
         ids["biomodels"].update(re.findall(r"\bBIOMD\d{10}\b", text))
         ids["ensembl"].update(re.findall(r"\bENS(?:[A-Z]{3})?[GTP]\d{11}\b", text))

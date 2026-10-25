@@ -135,81 +135,85 @@ def test_confidence_from_agent_state_artifacts():
 
 
 # ---------------------------------------------------------------------------------------------------------------
-# Primary trial report
+# Primary paper next to a review (hand-built parser fixtures; the review's arXiv id is synthetic)
 # ---------------------------------------------------------------------------------------------------------------
 PRIMARY = {
-    "pmid": "30345884",
-    "title": "Maintenance Olaparib in Patients with Newly Diagnosed Advanced Ovarian Cancer",
+    "arxiv_id": "1602.03837",
+    "title": "Observation of Gravitational Waves from a Binary Black Hole Merger",
     "passage_text": (
-        "We conducted an international, randomized, double-blind, phase 3 trial to evaluate the efficacy of olaparib "
-        "as maintenance therapy. The risk of disease progression or death was 70% lower with olaparib than with "
-        "placebo (hazard ratio for disease progression or death, 0.30; 95% confidence interval, 0.23 to 0.41; "
-        "P<0.001). (Funded by AstraZeneca and Merck; SOLO1 ClinicalTrials.gov number, NCT01844986.)"
+        "On September 14, 2015 the two detectors of the Laser Interferometer Gravitational-Wave Observatory "
+        "simultaneously observed a transient gravitational-wave signal, GW150914. The source lies at a luminosity "
+        "distance of 410 Mpc, and the initial black hole masses are 36 and 29 solar masses; the final black hole "
+        "mass is 62 solar masses."
     ),
-    "evidence_grade": {"study_type": "rct"},
-    "pub_types": ["Randomized Controlled Trial", "Clinical Trial, Phase III"],
+    "evidence_grade": {"study_type": "experimental_measurement"},
 }
 REVIEW = {
-    "pmid": "42180878",
-    "title": "PARP inhibitors in BRCA-mutated ovarian cancer: a narrative review",
-    "passage_text": "In SOLO-1, olaparib maintenance markedly reduced the risk of progression (HR 0.30).",
+    "arxiv_id": "2101.00001",
+    "title": "Gravitational-wave astronomy: a review",
+    "passage_text": "GW150914 was produced by black holes of 36 and 29 solar masses merging into 62 solar masses.",
     "evidence_grade": {"study_type": "review"},
 }
 SENTENCE = (
-    "In SOLO-1, olaparib maintenance reduced the risk of progression or death (HR 0.30; 95% CI 0.23–0.41) "
-    "(PMID: 42180878; narrative review)."
+    "GW150914 was produced by black holes of 36 and 29 solar masses merging into one of 62 solar masses "
+    "(arXiv:2101.00001; review)."
 )
 
 
 def _tools(*passages: dict[str, Any]) -> dict[str, Any]:
-    return {"lithoscribe": SimpleNamespace(success=True, data={"ranked_passages": list(passages)})}
+    return {"archivon": SimpleNamespace(success=True, data={"ranked_passages": list(passages)})}
 
 
 def test_primary_report_is_cited_before_the_review():
+    from tribos.agents.prompts import evidence_level
+
     out, changes = prefer_primary_trial_reports(SENTENCE, _tools(REVIEW, PRIMARY))
-    assert "(PMID: 30345884; phase III RCT; PMID: 42180878; narrative review)" in out
-    assert changes == [{"trial": "SOLO-1", "primary": "PMID:30345884", "review": "PMID:42180878"}]
+    level = evidence_level(PRIMARY)
+    lead = f"arXiv:1602.03837; {level}; " if level not in ("", "unclassified") else "arXiv:1602.03837; "
+    assert f"({lead}arXiv:2101.00001; review)" in out
+    assert changes == [{"subject": "GW150914", "trial": "GW150914", "primary": "ARXIV:1602.03837",
+                        "review": "ARXIV:2101.00001"}]
 
 
-def test_citation_without_level_gets_bare_pmid():
-    text = "SOLO-1 showed an HR of 0.30 (95% CI 0.23-0.41) (PMID: 42180878)."
+def test_citation_without_level_gets_bare_key():
+    text = "GW150914 had component masses of 36 and 29 solar masses (arXiv:2101.00001)."
     out, _ = prefer_primary_trial_reports(text, _tools(REVIEW, PRIMARY))
-    assert "(PMID: 30345884; PMID: 42180878)" in out
+    assert "(arXiv:1602.03837; arXiv:2101.00001)" in out
 
 
 def test_figure_mismatch_leaves_text():
-    text = "In SOLO-1, the 7-year overall survival HR was 0.55 (95% CI 0.40-0.76) (PMID: 42180878; narrative review)."
+    text = "GW150914 radiated 5.0 solar masses in gravitational waves (arXiv:2101.00001; review)."
     assert prefer_primary_trial_reports(text, _tools(REVIEW, PRIMARY)) == (text, [])
 
 
-def test_no_figures_or_no_trial_name_leaves_text():
+def test_no_figures_or_no_named_result_leaves_text():
     for text in (
-        "SOLO-1 established olaparib maintenance (PMID: 42180878; narrative review).",
-        "Olaparib maintenance reduced risk (HR 0.30; 95% CI 0.23-0.41) (PMID: 42180878; narrative review).",
+        "GW150914 was the first direct detection of gravitational waves (arXiv:2101.00001; review).",
+        "Masses of 36 and 29 were inferred (arXiv:2101.00001; review).",
     ):
         assert prefer_primary_trial_reports(text, _tools(REVIEW, PRIMARY)) == (text, [])
 
 
 def test_primary_already_cited_or_cited_source_not_a_review():
-    text = "In SOLO-1 the HR was 0.30 (0.23-0.41) (PMID: 30345884; PMID: 42180878)."
+    text = "GW150914 had masses of 36 and 29 solar masses (arXiv:1602.03837; arXiv:2101.00001)."
     assert prefer_primary_trial_reports(text, _tools(REVIEW, PRIMARY)) == (text, [])
     unclassified = {**REVIEW, "evidence_grade": {"study_type": "unclassified"}}
     assert prefer_primary_trial_reports(SENTENCE, _tools(unclassified, PRIMARY)) == (SENTENCE, [])
 
 
-def test_candidate_must_be_a_trial_report_naming_the_trial():
-    other_review = {**PRIMARY, "pmid": "11111111", "evidence_grade": {"study_type": "systematic_review"}, "pub_types": []}
+def test_candidate_must_be_a_primary_paper_naming_the_result():
+    other_review = {**PRIMARY, "arxiv_id": "2101.00002", "evidence_grade": {"study_type": "systematic_review"}}
     assert prefer_primary_trial_reports(SENTENCE, _tools(REVIEW, other_review)) == (SENTENCE, [])
-    unnamed = {**PRIMARY, "passage_text": PRIMARY["passage_text"].replace("SOLO1", "the")}
+    unnamed = {**PRIMARY, "passage_text": PRIMARY["passage_text"].replace("GW150914", "the event")}
     assert prefer_primary_trial_reports(SENTENCE, _tools(REVIEW, unnamed)) == (SENTENCE, [])
 
 
 def test_other_sentences_are_untouched():
-    text = "BRCA2 loss sensitizes cells to PARP inhibition (PMID: 42180878). " + SENTENCE + "\n\nConfidence: high (RCT)"
+    text = "Gravitational waves carry energy away from binaries (arXiv:2101.00001). " + SENTENCE + "\n\nConfidence: high (detection paper)"
     out, changes = prefer_primary_trial_reports(text, _tools(REVIEW, PRIMARY))
     assert len(changes) == 1
-    assert out.startswith("BRCA2 loss sensitizes cells to PARP inhibition (PMID: 42180878). ")
-    assert out.count("PMID: 30345884") == 1
+    assert out.startswith("Gravitational waves carry energy away from binaries (arXiv:2101.00001). ")
+    assert out.count("arXiv:1602.03837") == 1
 
 
 def test_verify_helper_keeps_text_on_failure(monkeypatch):
@@ -218,7 +222,7 @@ def test_verify_helper_keeps_text_on_failure(monkeypatch):
     def boom(*_a: Any) -> Any:
         raise RuntimeError("x")
 
-    monkeypatch.setattr(verifier_mod, "prefer_primary_trial_reports", boom)
+    monkeypatch.setattr(verifier_mod, "prefer_primary_reports", boom)
     assert verify_stage.prefer_primary_reports(SENTENCE, _tools(REVIEW, PRIMARY)) == SENTENCE
 
 

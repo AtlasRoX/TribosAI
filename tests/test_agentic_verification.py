@@ -36,7 +36,7 @@ CONTRA = [5.0, -2.0, -1.0]
 PASSAGE = "KRAS signaling in pancreatic cancer."
 MECH_SUPPORTED = "KRAS signaling drives pancreatic tumour growth (PMID: 123456)."
 MECH_UNSUPPORTED = "BRAF amplification mediates acquired resistance to vemurafenib (PMID: 123456)."
-CLINICAL_UNSUPPORTED = "In the phase 3 trial, sotorasib improved overall survival to 12.5 months."
+CLINICAL_UNSUPPORTED = "In the cryostat experiments, the measured critical temperature of the film was 92.5 K."
 CONTRA_PASSAGE = "Sotorasib did not improve overall survival in KRAS G12C lung cancer patients."
 CLINICAL_CONTRADICTED = "Sotorasib improved overall survival in KRAS G12C lung cancer (PMID: 222222)."
 
@@ -200,7 +200,7 @@ def test_judge_downgrades_but_never_upgrades():
     base = _verify(response)
     assert claim_by_text(base, "drives pancreatic").status == "supported"
     assert claim_by_text(base, "BRAF amplification").status == "unsupported"
-    assert claim_by_text(base, "phase 3 trial").status == "unsupported"
+    assert claim_by_text(base, "critical temperature").status == "unsupported"
     assert claim_by_text(base, "G12C lung").status == "contradicted"
 
     # A judge that says "unsupported"/"contradicted" downgrades.
@@ -226,10 +226,10 @@ def test_judge_downgrades_but_never_upgrades():
         return {"status": "supported", "reason": "always yes"}
 
     up = _verify(response, yes)
-    assert claim_by_text(up, "phase 3 trial").status == "unsupported"
+    assert claim_by_text(up, "critical temperature").status == "unsupported"
     assert claim_by_text(up, "G12C lung").status == "contradicted"
     assert claim_by_text(up, "drives pancreatic").status == "supported"
-    assert not any("phase 3" in a or "G12C" in a for a in asked)
+    assert not any("92.5" in a or "G12C" in a for a in asked)
     assert up.passed == base.passed is False
 
 

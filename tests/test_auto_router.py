@@ -34,14 +34,32 @@ ROUTES = [
         AGENTIC, "default_backbone",
     ),
     ("Is sotorasib better than adagrasib for KRAS G12C NSCLC?", DEBATE, "contested_claim"),
-    ("What is the recommended dose of osimertinib for a 72-year-old patient with renal impairment?", AGENTIC, "default_backbone"),
-    ("What are the adverse events of pembrolizumab?", AGENTIC, "default_backbone"),
-    ("Interpret the variant BRAF V600E in melanoma.", AGENTIC, "default_backbone"),
+    # Focused questions take the direct workflow (the plan-and-execute runtime without its planner); a safety-critical
+    # one still gets critics through the after-draft escalation.
+    ("What is the recommended dose of osimertinib for a 72-year-old patient with renal impairment?", AGENTIC, "focused"),
+    ("What are the adverse events of pembrolizumab?", AGENTIC, "focused"),
+    ("Interpret the variant BRAF V600E in melanoma.", AGENTIC, "focused"),
     ("Evaluate PCSK9 as a drug target for cardiovascular disease.", SUPERVISOR, "open_multi_domain"),
     ("Propose novel drug repurposing candidates for glioblastoma.", DEBATE, "hypothesis_generation"),
     ("Simulate the MAPK cascade model BIOMD0000000010 for 100 seconds.", AGENTIC, "computational"),
-    ("Which cell clusters express CD19 in my single-cell dataset?", AGENTIC, "computational"),
+    ("Which cell clusters express CD19 in my single-cell dataset?", AGENTIC, "focused"),  # one computation: no plan
     ("Explore the connections between TP53 and ferroptosis and drugs that target that link.", SWARM, "exploratory_chain"),
+]
+
+
+# Engineering questions across the approach ladder: the cheapest adequate approach wins (router.score_terms).
+ENGINEERING_ROUTES = [
+    ("What is the Reynolds number?", "Direct workflow", "focused"),
+    ("Compute the terminal velocity of a 2 mm steel sphere falling in water.", "Direct workflow", "focused"),
+    ("Simulate the Lorenz system for 50 s and describe the attractor.", "Direct workflow", "focused"),
+    ("Give an overview of the state of the art in topology optimization for additive manufacturing.", "Direct workflow", "focused"),
+    ("Compare the Euler and RK4 methods for y' = -2y on [0, 5]: compute the global error for h = 0.1 and h = 0.05, "
+     "and plot both.", "Plan & execute", "computational"),
+    ("1) Find the eigenvalues of [[2,1],[1,2]]. 2) Compute the Laplace transform of t e^{-t}. 3) What is the speed "
+     "of light in glass?", "Plan & execute", "default_backbone"),
+    ("Explore connections between chaos theory and turbulence modelling.", "Swarm", "exploratory_chain"),
+    ("Propose three testable hypotheses for why the beam fails early in fatigue tests.", "Debate", "hypothesis_generation"),
+    ("Is the claim that LES always outperforms RANS for separated flows supported by evidence?", "Debate", "contested_claim"),
 ]
 
 
@@ -84,8 +102,12 @@ def test_deterministic_accuracy_on_the_routing_benchmarks(monkeypatch, name, str
 
 
 def test_safety_critical_question_is_flagged_for_escalation():
-    q = "What is the recommended dose of osimertinib for a 72-year-old patient with renal impairment?"
+    q = "What safety factor is required for the relief valve of a 20 bar pressure vessel?"
     assert router.rule_decision(q, asyncio.run(_ctx(q))).features["high_stakes"] == 1.0
+    # LOG-19: ordinary STEM words that clinical text also uses are not stakes.
+    for calm in ("How do fluid-structure interactions damp a flexible pipe?", "How many children can a B-tree node have?",
+                 "Estimate electron-phonon interactions in graphene.", "Fit a dose-response curve to this data."):
+        assert router.rule_decision(calm, asyncio.run(_ctx(calm))).features["high_stakes"] == 0.0, calm
 
 
 def test_non_research_message_routes_without_a_model_call():
@@ -156,7 +178,7 @@ def test_self_consistency_averages_samples(monkeypatch):
 
 def test_the_model_can_raise_but_never_clear_safety_flags():
     calm = {**CONTESTED_FEATURES, "high_stakes": False, "contested": False, "comparison": False, "asks_recommendation": False}
-    decision = _route("What dose of vancomycin is needed in dialysis patients?", _PhaseLLM(calm))
+    decision = _route("What wall thickness keeps a 700 bar hydrogen pressure vessel safe?", _PhaseLLM(calm))
     assert decision.features["high_stakes"] == 1.0
 
 
@@ -281,7 +303,7 @@ def test_auto_end_to_end_routes_explains_records_and_learns(monkeypatch, tmp_pat
     assert routing["requested"] == agent_config.AUTO and routing["chosen"] == AGENTIC
     assert routing["confidence"] >= router.UNCERTAIN_BELOW
     assert routing["escalation"] is None or routing["escalation"]["status"] == "escalated"
-    assert set(routing["probabilities"]) == set(router.ARCHITECTURES)
+    assert set(routing["probabilities"]) == set(router.APPROACHES)
     route_steps = _thought(events, "route")
     assert route_steps and route_steps[-1]["title"] == "Chose Plan & execute" and route_steps[-1]["text"]
     json.dumps(res.to_dict(), default=str)
@@ -303,7 +325,7 @@ def test_user_chosen_runs_are_learned_too(monkeypatch, tmp_path):
 
 def test_auto_escalates_a_safety_critical_question_to_the_critic_debate(monkeypatch, tmp_path):
     orch, _calls, llm = make_agentic_orchestrator(monkeypatch, tmp_path)
-    question = "What is the recommended dose of osimertinib for a 72-year-old patient with renal impairment?"
+    question = "What is the safety factor of a load-bearing steel column under its critical load?"
     res, events = asyncio.run(collect_events(orch, query=question, thread_id="auto-esc", framework=agent_config.AUTO))
     assert res.framework_used == AGENTIC  # the run keeps its architecture; only this draft is debated
     escalation = res.execution_artifacts["framework_routing"]["escalation"]
@@ -331,3 +353,25 @@ def test_api_lists_auto_and_accepts_it(monkeypatch):
     req = main.ChatRequest(message="What is KRAS?", framework=agent_config.AUTO)
     assert main._request_framework(req) == agent_config.AUTO
     assert main._request_framework(main.ChatRequest(message="What is KRAS?")) == agent_config.AUTO
+
+
+@pytest.mark.parametrize("question, label, rule", ENGINEERING_ROUTES, ids=[r[0][:40] for r in ENGINEERING_ROUTES])
+def test_engineering_questions_take_the_cheapest_adequate_approach(question, label, rule):
+    decision = router.rule_decision(question, asyncio.run(_ctx(question)))
+    assert (decision.display_label, decision.rule) == (label, rule), decision.probabilities
+    art = decision.to_artifact()
+    assert art["label"] == label and set(art["probabilities"]) == set(router.APPROACHES)
+    if label == "Direct workflow":
+        assert decision.framework == AGENTIC and art["approach"] == router.DIRECT  # the planner is skipped
+
+
+def test_a_direct_route_skips_the_planner_and_is_not_a_partial_answer():
+    from types import SimpleNamespace
+
+    from tribos.agentic.plan_execute import PlanExecutePhase
+    from tribos.agentic.state import AgentState
+
+    state = SimpleNamespace(options={}, ctx=SimpleNamespace(scope="research", evidence_need=None),
+                            bag={"routing": {"rule": "focused"}, "phases_ran": []}, framework=AGENTIC)
+    assert PlanExecutePhase().applies(state) is False
+    assert AgentState.core_phase_status(state) is None

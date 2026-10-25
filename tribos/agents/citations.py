@@ -20,6 +20,8 @@ from urllib.parse import quote, unquote
 from pydantic import BaseModel, Field
 
 from ..sources.base import CitationRecord
+from ..sources.keys import make_key as canonical_evidence_key
+from ..sources.keys import passage_keys
 from ..tools.registry import ToolResult
 from ..utils.source_authority import record_url, source_authority
 from ..utils.text import sentence_spans
@@ -28,7 +30,9 @@ from ..verify.verifier import TribosVerifier, truncate_words
 logger = logging.getLogger(__name__)
 
 CiteType = Literal[
-    "pmid", "doi", "nct", "chembl", "biomodel", "ensembl", "uniprot", "kegg", "clinvar", "rsid", "civic", "geo", "drugbank",
+    "arxiv", "doi", "zbl", "mr", "ads", "openalex", "pmid",
+    # Legacy biomedical registries, kept while tool results and stored history still carry them.
+    "nct", "chembl", "biomodel", "ensembl", "uniprot", "kegg", "clinvar", "rsid", "civic", "geo", "drugbank",
     "url",
 ]
 PassageKind = Literal["literature", "tool_output", "web_snippet", "mention"]
@@ -101,9 +105,42 @@ def _doi_url(doi: str) -> str:
     return "https://doi.org/" + quote(doi, safe="/:;()-._")
 
 
+def _canonical(prefix: str, strip: str) -> Callable[[str], str]:
+    """The value of tribos.sources.keys.make_key(prefix, value) after a written prefix ("arXiv:", "Zbl ", "MR") is
+    dropped, so citation keys are spelled exactly like the evidence keys of the verifier, NLI and debate code."""
+    strip_re = re.compile(strip, re.IGNORECASE)
+
+    def run(value: str) -> str:
+        return split_key(canonical_evidence_key(prefix, strip_re.sub("", value.strip())))[1]
+
+    return run
+
+
 _KEY_SPECS: dict[str, _KeySpec] = {
+    # Scholarly identifiers of the STEM literature sources (Archivon: arXiv, Crossref, zbMATH, NASA ADS, OpenAlex).
+    "ARXIV": _KeySpec(
+        "arxiv", re.compile(r"\d{4}\.\d{4,5}|[a-z][a-z\-]*(?:\.[a-z]{2})?/\d{7}"), _canonical("ARXIV", r"^arxiv\s*:\s*"),
+        lambda i: f"https://arxiv.org/abs/{i}",
+    ),
+    "ZBL": _KeySpec(
+        "zbl", re.compile(r"\d{4}\.\d{5}|\d{7,8}"), _canonical("ZBL", r"^(?:zbl|zbmath)\.?\s*[:=#]?\s*"),
+        lambda i: f"https://zbmath.org/?q=an:{i}",
+    ),
+    "MR": _KeySpec(
+        "mr", re.compile(r"\d{6,8}"), _canonical("MR", r"^mr\s*[:=#]?\s*"),
+        lambda i: f"https://mathscinet.ams.org/mathscinet-getitem?mr=MR{i}",
+    ),
+    "ADS": _KeySpec(
+        "ads", re.compile(r"\d{4}[A-Za-z0-9&.]{14}[A-Z.]"), _canonical("ADS", r"^(?:ads|bibcode)\s*:\s*"),
+        lambda i: f"https://ui.adsabs.harvard.edu/abs/{quote(i, safe='.&')}",
+    ),
+    "OPENALEX": _KeySpec(
+        "openalex", re.compile(r"W\d{7,12}"), _canonical("OPENALEX", r"^(?:openalex\s*:\s*|https?://openalex\.org/)"),
+        lambda i: f"https://openalex.org/{i}",
+    ),
     "PMID": _KeySpec("pmid", re.compile(r"\d{1,9}"), str, lambda i: f"https://pubmed.ncbi.nlm.nih.gov/{i}/"),
     "DOI": _KeySpec("doi", re.compile(r"10\.\d{4,9}/[-._;()/:a-z0-9]+"), str.lower, _doi_url),
+    # Legacy biomedical registry ids (no longer produced by the STEM tools; history and old tool data still carry them).
     "NCT": _KeySpec("nct", re.compile(r"NCT\d{8}"), str.upper, lambda i: f"https://clinicaltrials.gov/study/{i}"),
     "CHEMBL": _KeySpec(
         "chembl", re.compile(r"CHEMBL\d{1,9}"), str.upper, lambda i: f"https://www.ebi.ac.uk/chembl/explore/compound/{i}"
@@ -176,8 +213,13 @@ def type_for_key(key: str) -> str:
 # JavaScript's \s (it includes the no-break spaces models emit in "PMID: 123"), ASCII \s does not.
 _JS_SPACE = "[\t\n\v\f\r    -     　﻿]"
 _CITE_RE = re.compile(
-    r"\b(?i:PMID):?" + _JS_SPACE + r"*(?P<pmid>\d{1,9})\b"
+    r"\b(?i:arXiv):" + _JS_SPACE + r"*(?P<arxiv>\d{4}\.\d{4,5}(?:v\d+)?|[a-z-]+(?:\.[a-z]{2})?/\d{7}(?:v\d+)?)\b"
+    r"|\b(?i:PMID):?" + _JS_SPACE + r"*(?P<pmid>\d{1,9})\b"
     r"|(?P<doi>\b10\.\d{4,9}/[-._;()/:A-Za-z0-9]+\b)"
+    r"|\b(?i:Zbl)" + _JS_SPACE + r"*:?" + _JS_SPACE + r"*(?P<zbl>\d{4}\.\d{5}|\d{7,8})\b"
+    r"|\b(?i:MR)" + _JS_SPACE + r"*:?" + _JS_SPACE + r"*(?P<mr>\d{6,8})\b"
+    r"|\b(?:(?i:ADS):" + _JS_SPACE + r"*)?(?P<ads>\d{4}[A-Za-z&.\d]{14}[A-Z])\b"
+    r"|\b(?:(?i:OpenAlex):" + _JS_SPACE + r"*)?(?P<openalex>W\d{7,12})\b"
     r"|\b(?P<nct>(?i:NCT)\d{8})\b"
     r"|\b(?P<chembl>(?i:CHEMBL)\d{1,9})\b"
     r"|\b(?P<biomd>BIOMD\d{10})\b"
@@ -191,6 +233,7 @@ _CITE_RE = re.compile(
     re.ASCII,
 )
 _GROUP_PREFIX = {
+    "arxiv": "ARXIV", "zbl": "ZBL", "mr": "MR", "ads": "ADS", "openalex": "OPENALEX",
     "pmid": "PMID", "doi": "DOI", "nct": "NCT", "chembl": "CHEMBL", "biomd": "BIOMD", "ensg": "ENSG",
     "kegg": "KEGG", "vcv": "VCV", "rs": "RS", "geo": "GEO", "drugbank": "DRUGBANK",
 }
@@ -206,6 +249,21 @@ def _match_key(m: re.Match[str]) -> str | None:
     return make_key(_GROUP_PREFIX[group], m.group(group)) if group else None
 
 
+def _answer_spellings(text: str) -> list[tuple[str, str]]:
+    """(key as the answer renderer spells it, canonical key) where they differ: the renderer keeps an arXiv version
+    suffix ("ARXIV:2312.04511v2") and a bibcode's case, the canonical key drops / upper-cases them."""
+    out: list[tuple[str, str]] = []
+    for m in _CITE_RE.finditer(text or ""):
+        group = m.lastgroup
+        if group not in ("arxiv", "ads"):
+            continue
+        key = _match_key(m)
+        raw = f"{_GROUP_PREFIX[group]}:{m.group(group)}"
+        if key and raw != key:
+            out.append((raw, key))
+    return out
+
+
 def scan_keys(text: str) -> list[tuple[int, str]]:
     """(position, key) for every identifier in text, in order."""
     out: list[tuple[int, str]] = []
@@ -217,6 +275,12 @@ def scan_keys(text: str) -> list[tuple[int, str]]:
 
 
 _HREF_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"https?://(?:export\.|www\.)?arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5}(?:v\d+)?|[a-z-]+(?:\.[a-z]{2})?/\d{7}"
+                r"(?:v\d+)?)(?:\.pdf)?/?(?:[?#].*)?$", re.I), "ARXIV"),
+    (re.compile(r"https?://(?:www\.)?zbmath\.org/\?q=an(?::|%3A)(\d{4}\.\d{5}|\d{7,8})(?:[&#].*)?$", re.I), "ZBL"),
+    (re.compile(r"https?://mathscinet\.ams\.org/mathscinet-getitem\?mr=(?:MR)?(\d{6,8})(?:[&#].*)?$", re.I), "MR"),
+    (re.compile(r"https?://ui\.adsabs\.harvard\.edu/abs/([^/?#]{19,25})(?:/[a-z]*)?/?(?:[?#].*)?$", re.I), "ADS"),
+    (re.compile(r"https?://(?:api\.)?openalex\.org/(?:works/)?(W\d{7,12})/?(?:[?#].*)?$", re.I), "OPENALEX"),
     (re.compile(r"https?://pubmed\.ncbi\.nlm\.nih\.gov/(\d{1,9})/?(?:[?#].*)?$", re.I), "PMID"),
     (re.compile(r"https?://(?:dx\.)?doi\.org/(10\.[^?#]+)$", re.I), "DOI"),
     (re.compile(r"https?://(?:www\.)?clinicaltrials\.gov/(?:study|ct2/show)/(NCT\d{8})/?(?:[?#].*)?$", re.I), "NCT"),
@@ -232,7 +296,7 @@ def href_to_key(href: str) -> str | None:
     for pattern, prefix in _HREF_PATTERNS:
         m = pattern.match(href)
         if m:
-            value = unquote(m.group(1)) if prefix == "DOI" else m.group(1)
+            value = unquote(m.group(1)) if prefix in ("DOI", "ADS") else m.group(1)
             return make_key(prefix, value)
     return make_key("URL", href)
 
@@ -348,7 +412,7 @@ def _norm_sentence(text: str) -> str:
 def _claim_terms(sentence: str) -> set[str]:
     stripped = _URL_RE.sub(" ", sentence)
     stripped = _CITE_RE.sub(" ", stripped)
-    stripped = re.sub(r"\bPMID\b|\bDOI\b", " ", stripped, flags=re.IGNORECASE)
+    stripped = re.sub(r"\bPMID\b|\bDOI\b|\barXiv\b|\bZbl\b|\bOpenAlex\b", " ", stripped, flags=re.IGNORECASE)
     return {t for t in TribosVerifier._salient_terms(stripped) if t not in _AGENT_TERMS}
 
 
@@ -467,6 +531,7 @@ def _get(obj: Any, name: str, default: Any = None) -> Any:
 # -------------------------------------------------------------
 
 _DEFAULT_AGENTS = (
+    ("archivon", "Archivon"),
     ("lithoscribe", "Lithoscribe"),
     ("synapta", "Synapta"),
     ("vivarix", "Vivarix"),
@@ -474,11 +539,14 @@ _DEFAULT_AGENTS = (
     ("lumicell", "Lumicell"),
 )
 _RECORD_PREFIX = {
+    "arxiv": "ARXIV", "zbl": "ZBL", "mr": "MR", "ads": "ADS", "openalex": "OPENALEX",
     "pmid": "PMID", "doi": "DOI", "nct": "NCT", "chembl": "CHEMBL", "biomodel": "BIOMD", "ensembl": "ENSG",
     "kegg": "KEGG", "clinvar": "VCV", "rsid": "RS", "geo": "GEO", "drugbank": "DRUGBANK", "url": "URL", "dailymed": "URL",
 }
+_LITERATURE_TYPES = {"pmid", "doi", "arxiv", "zbl", "mr", "ads", "openalex"}
 _REGISTRY_TYPES = {"nct", "chembl", "ensembl", "kegg", "clinvar", "rsid", "civic", "geo", "drugbank"}
 _HISTORY_PREFIX = {
+    "arxiv": "ARXIV", "zbl": "ZBL", "mr": "MR", "ads": "ADS", "openalex": "OPENALEX",
     "pmids": "PMID", "dois": "DOI", "biomodels": "BIOMD", "ensembl": "ENSG", "nct": "NCT", "chembl": "CHEMBL",
     "clinvar": "VCV", "rsid": "RS", "geo": "GEO", "drugbank": "DRUGBANK",
 }
@@ -570,16 +638,16 @@ class _Builder:
     # --- extractors -------------------------------------------------
 
     def literature(self, tool_key: str, data: dict[str, Any]) -> list[tuple[CitationPassage, str]]:
-        """PMID/DOI entries merged per article. Returns (passage, owner label) pairs for mention scanning."""
-        agent = self.agent_for(tool_key, "Lithoscribe")
+        """One entry per article, keyed by its first valid identifier (PMID, arXiv, DOI, Zbl, MR, ADS, OpenAlex) with
+        the others as aliases. Returns (passage, owner label) pairs for mention scanning."""
+        agent = self.agent_for(tool_key, "Archivon")
         integrity = _integrity_index(data)
         texts: list[tuple[CitationPassage, str]] = []
         for p in data.get("ranked_passages") or []:
             if not isinstance(p, dict):
                 continue
-            pmid_key = make_key("PMID", p.get("pmid"))  # preprint ids such as 'PPR1337147' do not validate
-            doi_key = make_key("DOI", p.get("doi"))
-            key = pmid_key or doi_key
+            keys = _passage_citation_keys(p)  # preprint ids such as 'PPR1337147' do not validate
+            key = keys[0] if keys else None
             text = clean_text(p.get("passage_text"))
             passage = CitationPassage(
                 passage_id=str(p["passage_id"]) if p.get("passage_id") else None,
@@ -592,10 +660,18 @@ class _Builder:
                 if text:
                     texts.append((passage, "a retrieved passage"))
                 continue
+            is_new = self.resolve(key) not in self.entries
             entry = self.entry(key, source_agent=agent, source_tool=tool_key)
-            if pmid_key and doi_key:
-                self.alias(doi_key, pmid_key)
-                entry = self.entries[pmid_key]
+            for other in keys[1:]:
+                self.alias(other, entry.key)
+            entry = self.entries[self.resolve(key)]
+            bibcode = str(p.get("ads_bibcode") or p.get("bibcode") or "").strip()
+            if is_new and entry.type == "ads" and bibcode:
+                # Bibcodes are case-sensitive at ADS; the key is upper-cased, the link keeps the record's spelling.
+                entry.url = f"https://ui.adsabs.harvard.edu/abs/{quote(bibcode, safe='.&')}"
+            for spelling in _web_spellings(p):
+                if spelling not in self.entries and self.resolve(spelling) == spelling:
+                    self.aliases[spelling] = entry.key
             entry.title = entry.title or clean_title(p.get("title"))
             entry.authors = entry.authors or (str(p.get("authors")).strip() or None if p.get("authors") else None)
             entry.journal = entry.journal or (str(p.get("journal")).strip() or None if p.get("journal") else None)
@@ -614,8 +690,8 @@ class _Builder:
                 entry.retraction_notice = entry.retraction_notice or notice
             self.add_passage(entry.key, passage)
             if text:
-                label = f"PMID {split_key(pmid_key)[1]}" if pmid_key else f"DOI {split_key(doi_key)[1]}"
-                texts.append((passage, label))
+                prefix, value = split_key(entry.key)
+                texts.append((passage, f"{prefix} {value}"))
         return texts
 
     def synapta(self, tool_key: str, res: ToolResult) -> None:
@@ -749,7 +825,9 @@ class _Builder:
             entry.retracted = True
         text = clean_text(rec.passage)
         if text:
-            kind: PassageKind = "literature" if typ in ("pmid", "doi") else ("web_snippet" if typ == "url" else "tool_output")
+            kind: PassageKind = (
+                "literature" if typ in _LITERATURE_TYPES else ("web_snippet" if typ == "url" else "tool_output")
+            )
             self.add_passage(key, CitationPassage(text=text, section=rec.section or None, kind=kind))
 
     def mentions(self, tool_key: str, passages: list[tuple[CitationPassage, str]]) -> None:
@@ -792,13 +870,40 @@ def _literature_level(p: dict[str, Any], pub_types: list[str]) -> str | None:
     return level
 
 
+# The order a literature passage's own entry key is chosen in: PMID first (older answers and stored history cite
+# biomedical papers by it), then the scholarly identifiers in tribos.sources.keys order.
+_LITERATURE_KEY_ORDER = ("PMID", "ARXIV", "DOI", "ZBL", "MR", "ADS", "OPENALEX")
+
+
+def _passage_citation_keys(p: dict[str, Any]) -> list[str]:
+    """Every valid citation key of a literature passage, from tribos.sources.keys.passage_keys (so the keys match the
+    verifier's and the debate's evidence keys), validated per prefix and ordered by _LITERATURE_KEY_ORDER."""
+    found: list[str] = []
+    for raw in passage_keys({**p, "bibcode": p.get("bibcode") or p.get("ads_bibcode")}):
+        prefix, value = split_key(raw)
+        key = make_key(prefix, value) if prefix in _KEY_SPECS else None
+        if key and key not in found:
+            found.append(key)
+    return sorted(found, key=lambda k: _LITERATURE_KEY_ORDER.index(split_key(k)[0]))
+
+
+def _web_spellings(p: dict[str, Any]) -> list[str]:
+    """Keys the answer renderer (web/src/lib/citations.ts) builds for this passage's ids when they differ from the
+    canonical key: it keeps an ADS bibcode's case. Emitted as aliases so the chip still resolves."""
+    out = []
+    bibcode = str(p.get("ads_bibcode") or p.get("bibcode") or "").strip()
+    if bibcode and make_key("ADS", bibcode) and f"ADS:{bibcode}" != make_key("ADS", bibcode):
+        out.append(f"ADS:{bibcode}")
+    return out
+
+
 def _integrity_index(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Graded/excluded articles (grading feature) indexed by PMID: / DOI: / article_key."""
     index: dict[str, dict[str, Any]] = {}
     for art in [*(data.get("graded_articles") or []), *(data.get("excluded_articles") or [])]:
         if not isinstance(art, dict):
             continue
-        for k in (make_key("PMID", art.get("pmid")), make_key("DOI", art.get("doi")), art.get("article_key")):
+        for k in (*_passage_citation_keys(art), art.get("article_key")):
             if k:
                 index.setdefault(str(k), art)
     return index
@@ -814,7 +919,7 @@ def _literature_retraction(
     )
     notice: str | None = str(p["retraction_notice"]) if p.get("retraction_notice") else None
     art = None
-    for k in (p.get("article_key"), make_key("PMID", p.get("pmid")), make_key("DOI", p.get("doi"))):
+    for k in (p.get("article_key"), *_passage_citation_keys(p)):
         if k and str(k) in integrity:
             art = integrity[str(k)]
             break
@@ -876,6 +981,12 @@ def _history_keys(historical_identifiers: dict[str, Iterable[str]] | None) -> se
 
 _PMID_FIELDS = {"pmid", "pmids", "pubmed_id", "pubmed_ids"}
 _DOI_FIELDS = {"doi", "dois"}
+# Fields that hold one scholarly identifier family each (Archivon passages, articles and canonical_ids lists).
+_ID_FIELDS = {
+    **dict.fromkeys(_PMID_FIELDS, "PMID"), **dict.fromkeys(_DOI_FIELDS, "DOI"),
+    "arxiv_id": "ARXIV", "arxiv_ids": "ARXIV", "zbl_id": "ZBL", "zbl_ids": "ZBL", "mr_id": "MR", "mr_ids": "MR",
+    "ads_bibcode": "ADS", "ads_bibcodes": "ADS", "bibcode": "ADS", "openalex_id": "OPENALEX", "openalex_ids": "OPENALEX",
+}
 _SKIP_FIELD_RE = re.compile(r"base64|_png$", re.IGNORECASE)
 
 
@@ -900,8 +1011,8 @@ def _observed_keys(tool_results: dict[str, ToolResult]) -> set[str]:
                 walk(v, field, depth + 1)
         elif isinstance(value, (str, int)) and not isinstance(value, bool):
             text = str(value)
-            if field in _PMID_FIELDS or field in _DOI_FIELDS:
-                prefix = "PMID" if field in _PMID_FIELDS else "DOI"
+            prefix = _ID_FIELDS.get(field)
+            if prefix:
                 keys.update(k for k in (make_key(prefix, part) for part in re.split(r"[,;\s]+", text)) if k)
             if isinstance(value, str):
                 keys.update(k for _, k in scan_keys(text))
@@ -1001,6 +1112,8 @@ def build_citation_map(
         entry.verified = key in verified
         cmap.entries[key] = entry
     cmap.unverified = unverified
+    for spelling, key in _answer_spellings(response):
+        builder.aliases.setdefault(spelling, builder.resolve(key))
     cmap.aliases = {a: k for a, k in builder.aliases.items() if k in cmap.entries or k in unverified}
 
     _attach_supports(cmap, response, cited, claim_support, builder)
@@ -1032,6 +1145,7 @@ def _attach_supports(
         # identifier must resolve to the cited entry. A passage id alone is not enough, since ids from different
         # literature calls can repeat and point at another paper (LIT-001).
         prefix, value = split_key(evidence_key) if ":" in evidence_key else ("", "")
+        prefix = prefix.upper()
         key = make_key(prefix, value) if prefix in _KEY_SPECS else None
         if key:
             return builder.resolve(key) == entry.key

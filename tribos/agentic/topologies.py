@@ -32,6 +32,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
 
+from ..sources.keys import normalize_evidence_key
 from ..tools.arg_repair import adjustment_text, repair_arguments
 from .config import DEBATE, SUPERVISOR, SWARM
 from .guardrails import SPOTLIGHT_RULE, neutralise, spotlight
@@ -208,7 +209,7 @@ def _entities_line(state: Any) -> str:
 
 
 SPECIALIST_SYSTEM = (
-    "[phase:specialist] You are the {label} in a team of biomedical research agents. {role}\n"
+    "[phase:specialist] You are the {label} in a team of science and engineering research agents. {role}\n"
     "You may use only these tools (exact names and argument schemas):\n{cards}\n"
     "Work in a short ReAct loop: think, then either call one tool or finish. At most {max_calls} tool calls. "
     "Never invent identifiers, model ids or results; if no tool fits, finish and say so. Reply with only JSON: "
@@ -273,33 +274,54 @@ async def run_specialist(
 # Deterministic fallbacks ---------------------------------------------------------------------------------------
 # When the model gives no usable reply, the topologies still do the work the question asks for: each specialist
 # (or each step of the question, in the order the researcher named them) runs a fixed set of its own tools with
-# arguments filled from the resolved entities. Every call still goes through run_specialist_tool (policy, schema
-# validation, no repeated calls).
+# arguments filled from the question and its resolved entities. Every call still goes through run_specialist_tool
+# (policy, schema validation, no repeated calls); only registered tools are named here.
 LEG_CUES: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("target", re.compile(
-        r"(?i:\btargets?\b|\bsynthetic[- ]lethal\w*|\bPPIs?\b|\bprotein[- ]protein\b|\binteract\w*|\bhubs?\b"
-        r"|\bpartners?\b)|\bSL\b"
+    ("symbolic", re.compile(
+        r"(?i:\bderiv(?:e|es|ed|ing|ation|ations)\b|\bprove\b|\bproof\b|\bshow that\b|\bsolve\b|\bclosed[- ]form\b"
+        r"|\banalytic(?:al|ally)?\b|\bsimplif\w*|\bintegrals?\b|\bderivatives?\b|\beigen\w*|\blaplace\b|\bfourier\b"
+        r"|\btaylor\b|\bseries\b|\blimit of\b|\bidentity\b|\bfactori[sz]\w*|\bdeterminant\b|\bsafety factor\b)"
     )),
-    ("chemistry", re.compile(r"(?i:\bChEMBL\b|\bcompounds?\b|\bsmall[- ]molecules?\b|\bPROTACs?\b|\bdegraders?\b)")),
-    ("clinical", re.compile(r"(?i:\btrials?\b|\bopenFDA\b|\bsafety\b|\blabels?\b|\bFAERS\b)")),
+    ("numerical", re.compile(
+        r"(?i:\bsimulat\w*|\btrajector\w*|\btime[- ](?:course|evolution|history|series)\b|\bnumerical(?:ly)?\b"
+        r"|\bintegrate (?:the )?(?:ode|system|equations?)\b|\bparameter (?:scan|sweep)s?\b|\bsteady[- ]state\b"
+        r"|\bequilibri\w*|\bstability\b|\bbifurcat\w*|\bphase portrait\b|\bovershoot\w*|\bdynamics\b)"
+    )),
+    ("reference", re.compile(
+        r"(?i:\bconstants?\b|\bCODATA\b|\bunits?\b|\bconvert\w*|\bconversion\b|\bdimension(?:al|less)\b"
+        r"|\bmaterials?\b|\bcrystal\w*|\bband ?gap\b|\blattice\b|\byoung'?s modulus\b|\byield strength\b|\bOEIS\b)"
+    )),
+    ("literature", re.compile(
+        r"(?i:\bpapers?\b|\bliterature\b|\bpublications?\b|\bpublished\b|\breferences\b|\bcit(?:e|ations?)\b"
+        r"|\breview of\b|\bsurvey\b|\bprior work\b|\bstate of the art\b|\barXiv\b|\bpreprints?\b)"
+    )),
 )
-# Specialists that carry each step, in preference order (the clinical step spans trials and openFDA).
+# Specialists that carry each step, in preference order.
 LEG_SPECIALISTS: dict[str, tuple[str, ...]] = {
-    "target": ("target", "omics"),
-    "chemistry": ("chemistry",),
-    "clinical": ("literature", "chemistry"),
+    "symbolic": ("symbolic", "analysis"),
+    "numerical": ("numerical",),
+    "reference": ("reference",),
+    "literature": ("literature",),
 }
-_SL_RE = re.compile(r"(?i:\bsynthetic[- ]lethal\w*|\bdependenc\w*|\bessential\w*|\bCRISPR\b)|\bSL\b")
-_PPI_RE = re.compile(r"(?i:\bPPIs?\b|\bprotein[- ]protein\b|\binteract\w*|\bhubs?\b|\bpartners?\b)")
-_TRIAL_RE = re.compile(r"(?i:\btrials?\b|\bNCT\d{8}\b|clinicaltrials)")
-_SAFETY_RE = re.compile(r"(?i:\bopenFDA\b|\bFAERS\b|\bsafety\b|\blabels?\b|\bwarnings?\b|\badverse\b|\btoxicit\w*|\bboxed\b)")
-_DRUG_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9\- ]{2,40}$")
+# The fixed-plan steps each specialist runs when its own model loop gives nothing.
+SPECIALIST_LEGS: dict[str, tuple[str, ...]] = {
+    "literature": ("literature",),
+    "symbolic": ("symbolic",),
+    "numerical": ("numerical",),
+    "reference": ("reference",),
+}
+_UNIT_TOKEN = r"[A-Za-z\u00b5\u00b0\u03a9][\w^*.\u00b5\u00b0\u03a9]*(?:\s*/\s*[A-Za-z\u00b5\u00b0\u03a9][\w^*.]*)*"
+_CONVERSION_RE = re.compile(
+    rf"(?P<value>-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)\s*(?P<from>{_UNIT_TOKEN})\s+(?:to|into|in)\s+(?P<to>{_UNIT_TOKEN})"
+)
+_UNIT_STOPWORDS = frozenset({"the", "a", "an", "of", "and", "or", "which", "what", "this", "that", "it", "is", "its"})
 MAX_FALLBACK_SPECIALISTS = 3
 MAX_FALLBACK_CALLS = 2  # per specialist or per question step
 
 
 def question_legs(question: str) -> list[str]:
-    """The research steps the question names (target, chemistry, clinical), in the order it first mentions them."""
+    """The research steps the question names (symbolic, numerical, reference, literature), in the order it first
+    mentions them."""
     found: list[tuple[int, str]] = []
     for leg, rx in LEG_CUES:
         m = rx.search(question or "")
@@ -308,30 +330,72 @@ def question_legs(question: str) -> list[str]:
     return [leg for _pos, leg in sorted(found)]
 
 
-def _named_trials(question: str) -> list[str]:
-    """Trials the question names ("SOLO-1"), so the trials search lists and fetches them first."""
-    return []
+def unit_conversion(question: str) -> dict[str, Any] | None:
+    """physis_units arguments for a conversion the question states ("convert 5 eV to J"), else None."""
+    m = _CONVERSION_RE.search(question or "")
+    if not m or m.group("from").lower() in _UNIT_STOPWORDS or m.group("to").lower() in _UNIT_STOPWORDS:
+        return None
+    return {"value": float(m.group("value")), "from_unit": m.group("from"), "to_unit": m.group("to").rstrip(".")}
 
 
-def _found_drug_names(state: Any, limit: int = 4) -> list[str]:
-    """Drugs the question names, then approved/bioactive compounds ChEMBL returned this turn (names only)."""
-    names: list[str] = list(query_entities(state.ctx).get("drugs") or [])
-    for res in list(state.tool_results.values()):
-        if not getattr(res, "success", False) or not str(getattr(res, "tool_name", "")).startswith("chembl"):
-            continue
-        data = getattr(res, "data", None)
-        if not isinstance(data, dict):
-            continue
-        for field in ("drugs", "target_approved_drugs", "target_bioactive_compounds"):
-            for item in data.get(field) or []:
-                name = item.get("pref_name") if isinstance(item, dict) else None
-                if isinstance(name, str) and _DRUG_NAME_RE.match(name.strip()) and not name.upper().startswith("CHEMBL"):
-                    names.append(name.strip())
-    out: list[str] = []
-    for n in names:
-        if n.lower() not in {o.lower() for o in out}:
-            out.append(n)
-    return out[:limit]
+def _numerical_calls(state: Any) -> list[tuple[str, dict[str, Any]]]:
+    """Dynamis calls for the system the question names (a preset with the plan's duration and values)."""
+    from .hypothesis import dynamis_system
+
+    system = dynamis_system(state.ctx, state.clean_query or state.query or "")
+    if system is None:
+        return []
+    plan = getattr(state.ctx, "simulation_plan", None)
+    action = getattr(plan, "action", None)
+    calls: list[tuple[str, dict[str, Any]]] = []
+    scan = getattr(plan, "scan_parameter", None)
+    if action == "parameter_scan" and scan in system.parameters:
+        lo, hi, value = getattr(plan, "scan_start", None), getattr(plan, "scan_end", None), system.parameters[scan]
+        calls.append(("dynamis_parameter_scan", {
+            "rhs": dict(system.rhs), "initial_state": dict(system.initial_state), "parameter": scan,
+            "scan_range": (float(lo if lo is not None else 0.5 * value), float(hi if hi is not None else 2.0 * value)),
+            "num_points": int(getattr(plan, "scan_points", None) or 10), "t_span": tuple(system.t_span),
+            "base_parameters": dict(system.parameters),
+        }))
+    if action == "steady_state":
+        calls.append(("dynamis_equilibrium", {"rhs": dict(system.rhs), "guess": dict(system.initial_state),
+                                              "parameters": dict(system.parameters)}))
+    calls.append(("dynamis_simulate_ode", {
+        "rhs": dict(system.rhs), "initial_state": dict(system.initial_state), "parameters": dict(system.parameters),
+        "t_span": tuple(system.t_span), "model_name": system.name,
+    }))
+    return calls
+
+
+def leg_calls(state: Any, leg: str) -> list[tuple[str, dict[str, Any]]]:
+    """Fixed (tool, args) calls for one research step, from the question and its entities; empty args are dropped."""
+    from .specialists import resolve_literature_tool
+
+    question = state.clean_query or state.query or ""
+    ents = query_entities(state.ctx)
+    calls: list[tuple[str, dict[str, Any]]] = []
+    if leg == "symbolic":
+        if question.strip():
+            calls.append(("axiom_solve_problem", {"problem": question[:4000]}))
+    elif leg == "numerical":
+        calls.extend(_numerical_calls(state))
+    elif leg == "reference":
+        calls.extend(("physis_constants", {"query": c[:120]}) for c in (ents.get("constants") or [])[:2])
+        conversion = unit_conversion(question)
+        if conversion:
+            calls.append(("physis_units", conversion))
+        calls.extend(("physis_materials", {"formula": m[:80]}) for m in (ents.get("materials") or [])[:2])
+    elif leg == "literature":
+        calls.append((resolve_literature_tool(getattr(state, "registry", None), state), {"query": question[:300]}))
+    return [(tool, {k: v for k, v in args.items() if v not in (None, "", [], {})}) for tool, args in calls]
+
+
+def specialist_calls(state: Any, sp: Specialist) -> list[tuple[str, dict[str, Any]]]:
+    """Fixed calls a specialist makes when its own model loop gives nothing (only its own tools)."""
+    out: list[tuple[str, dict[str, Any]]] = []
+    for leg in SPECIALIST_LEGS.get(sp.name, ()):
+        out.extend(c for c in leg_calls(state, leg) if sp.get(c[0]) is not None and c not in out)
+    return out
 
 
 def _tool_ran(state: Any, tool: str, mention: str | None = None) -> bool:
@@ -342,63 +406,6 @@ def _tool_ran(state: Any, tool: str, mention: str | None = None) -> bool:
         if mention is None or mention.lower() in compact(getattr(res, "data", None), 6000).lower():
             return True
     return False
-
-
-def leg_calls(state: Any, leg: str) -> list[tuple[str, dict[str, Any]]]:
-    """Fixed (tool, args) calls for one research step, from the question's entities; empty args are dropped."""
-    question = state.clean_query or state.query or ""
-    ents = query_entities(state.ctx)
-    genes, drugs, diseases = ents.get("genes") or [], ents.get("drugs") or [], ents.get("diseases") or []
-    gene = genes[0] if genes else ""
-    calls: list[tuple[str, dict[str, Any]]] = []
-    if leg == "target":
-        if gene and _SL_RE.search(question):
-            calls.append(("depmap_gene_effect", {"gene": gene}))
-        if gene and _PPI_RE.search(question):
-            calls.append(("string_interaction_partners", {"gene": gene}))
-        if gene:
-            calls.append(("synapta_kegg_pathways", {"target_symbol": gene}))
-        calls.append(("primekg_investigate", {"query": question[:300], "genes": genes[:3], "drugs": drugs[:3],
-                                              "diseases": diseases[:2]}))
-    elif leg == "chemistry":
-        if gene:
-            calls.append(("chembl_drug_profile", {"target_symbol": gene}))
-        if drugs:
-            calls.append(("chembl_resolve_drugs", {"names": drugs[:5]}))
-    elif leg == "clinical":
-        found = _found_drug_names(state)
-        if _TRIAL_RE.search(question) or not _SAFETY_RE.search(question):
-            calls.append(("lithoscribe_clinical_trials_search", {
-                "condition": diseases[0] if diseases else None,
-                "intervention": " OR ".join(found[:3]) or None,
-                "term": None if found else (gene or None),
-                "trial_names": _named_trials(question),
-            }))
-        if _SAFETY_RE.search(question):
-            calls.extend(("openfda_drug_safety", {"ingredient": d}) for d in found[:2])
-    elif leg == "literature":
-        calls.append(("lithoscribe_literature_synthesis", {"query": question[:300]}))
-    elif leg == "omics":
-        if gene:
-            if _SL_RE.search(question):
-                calls.append(("depmap_gene_effect", {"gene": gene}))
-            calls.append(("string_interaction_partners", {"gene": gene}))
-            calls.append(("gtex_median_expression", {"gene": gene}))
-    return [(tool, {k: v for k, v in args.items() if v not in (None, "", [], {})}) for tool, args in calls]
-
-
-def specialist_calls(state: Any, sp: Specialist) -> list[tuple[str, dict[str, Any]]]:
-    """Fixed calls a specialist makes when its own model loop gives nothing (only its own tools)."""
-    question = state.clean_query or state.query or ""
-    legs = {"literature": ["literature"], "target": ["target"], "chemistry": ["chemistry"], "omics": ["omics"]}.get(sp.name, [])
-    if sp.name == "literature" and _TRIAL_RE.search(question):
-        legs.append("clinical")
-    if sp.name == "chemistry" and _SAFETY_RE.search(question):
-        legs.append("clinical")
-    out: list[tuple[str, dict[str, Any]]] = []
-    for leg in legs:
-        out.extend(c for c in leg_calls(state, leg) if sp.get(c[0]) is not None and c not in out)
-    return out
 
 
 async def run_fixed_calls(
@@ -436,7 +443,7 @@ async def run_fixed_calls(
 
 # Supervisor ----------------------------------------------------------------------------------------------------
 SUPERVISOR_SYSTEM = (
-    "[phase:supervisor] You are the Supervisor of a team of biomedical specialist agents (Magentic-One "
+    "[phase:supervisor] You are the Supervisor of a team of science and engineering specialist agents (Magentic-One "
     "orchestrator). Read the task ledger and the delegation history, then answer the progress ledger: is the "
     "research request satisfied by the evidence gathered (is_done)? Are we repeating the same requests "
     "(is_looping)? Is the last step adding new evidence (is_progressing)? Which specialist should act next "
@@ -455,8 +462,11 @@ def task_ledger(state: Any, specialists: dict[str, Specialist]) -> dict[str, Any
         given.append("Constraint: the researcher asked for no simulation.")
     if getattr(ctx, "source_allowlist", None) is not None:
         given.append(f"Constraint: sources restricted ({getattr(ctx, 'source_restriction_reason', '') or 'allowlist'}).")
-    if getattr(ctx, "biomodel_id", None):
-        given.append(f"Model: {ctx.biomodel_id}")
+    from .hypothesis import dynamis_system
+
+    system = dynamis_system(ctx, state.clean_query or state.query or "")
+    if system is not None:
+        given.append(f"System: {system.label} ({system.equations_text()})")
     gathered = []
     for key, res in list(state.tool_results.items())[:20]:
         status = "returned evidence" if getattr(res, "success", False) else "failed"
@@ -666,7 +676,7 @@ class SupervisorPhase(AgentPhase):
 
 # Swarm ---------------------------------------------------------------------------------------------------------
 SWARM_SYSTEM = (
-    "[phase:swarm] You are the {label} in a swarm of biomedical specialist agents that hand control to each other. "
+    "[phase:swarm] You are the {label} in a swarm of science and engineering specialist agents that hand control to each other. "
     "{role}\nYour tools (exact names and argument schemas):\n{cards}\nOther specialists you can hand off to:\n{others}\n"
     "Each turn do exactly one thing: call one of your tools, hand off to another specialist with a note saying what "
     "they should find, or finish when the evidence for the question is gathered. Never invent identifiers. Reply "
@@ -687,8 +697,8 @@ class SwarmPhase(AgentPhase):
 
     @staticmethod
     def _start(state: Any, specialists: dict[str, Specialist]) -> Specialist:
-        """The specialist for the first step the question names (target, then chemistry, then clinical, in the
-        order the researcher wrote them); otherwise the owner of the best-matching tool."""
+        """The specialist for the first step the question names (symbolic, numerical, reference or literature, in
+        the order the researcher wrote them); otherwise the owner of the best-matching tool."""
         for leg in question_legs(state.clean_query or state.query or ""):
             for name in LEG_SPECIALISTS.get(leg, ()):
                 if name in specialists:
@@ -771,7 +781,7 @@ class SwarmPhase(AgentPhase):
         # order the question names the steps: the deterministic handoff chain).
         legs = question_legs(state.clean_query or state.query or "")
         if fixed_chain and not legs:
-            legs = [{"target": "target", "chemistry": "chemistry", "omics": "omics"}.get(active.name, "literature")]
+            legs = [next(iter(SPECIALIST_LEGS.get(active.name, ())), "literature")]
         ensured, active = await self._ensure_legs(state, specialists, dialogue, legs, active, chain=fixed_chain)
         total_calls += ensured
         state.bag["swarm"] = {"handoffs": handoffs, "tool_calls": total_calls, "final": active.name,
@@ -795,8 +805,9 @@ class SwarmPhase(AgentPhase):
             if state.budget.exhausted() or total >= SWARM_MAX_ENSURE_CALLS:
                 break
             calls = [c for c in leg_calls(state, leg) if any(sp.get(c[0]) is not None for sp in specialists.values())]
-            if leg == "clinical":  # trials and each drug's openFDA lookup are separate asks
-                pending = [c for c in calls if not _tool_ran(state, c[0], str(c[1].get("ingredient") or "") or None)]
+            if leg == "reference":  # each constant, conversion and material is a separate ask
+                pending = [c for c in calls
+                           if not _tool_ran(state, c[0], str(c[1].get("query") or c[1].get("formula") or "") or None)]
             else:
                 swarm_tools = {t.get("tool") for t in state.trace if t.get("phase") == self.key}
                 covered = bool(calls) and (_tool_ran(state, calls[0][0]) or any(c[0] in swarm_tools for c in calls))
@@ -855,20 +866,20 @@ class SwarmPhase(AgentPhase):
 
 # Debate --------------------------------------------------------------------------------------------------------
 PERSONAS: tuple[tuple[str, str], ...] = (
-    ("methodologist", "Judge study design and strength of evidence: model system (in vitro, animal, human), sample "
-     "size, controls, statistics; flag claims generalised beyond what the cited study type can show."),
-    ("clinical skeptic", "Judge clinical relevance: whether human or trial data exist, trial phase, effect sizes, "
-     "safety; flag preclinical findings stated as clinical fact and benefits stated without trial evidence."),
-    ("mechanistic biologist", "Judge mechanism: pathway logic, target-disease links, direction of effects and "
-     "alternative mechanisms; flag mechanistic leaps the evidence does not show."),
+    ("mathematician", "Judge formal correctness: derivation steps, algebra, signs, limits, and initial or boundary "
+     "conditions; flag steps that do not follow and results that disagree with the computed tool outputs."),
+    ("physicist", "Judge first principles: governing laws, stated assumptions and regimes, dimensional consistency, "
+     "conservation and energy balance; flag physically implausible results and assumptions used outside their regime."),
+    ("engineer", "Judge practical validity: numerical method, step size, convergence and error bounds, parameter "
+     "realism and units; flag numbers that no computation or source in the evidence backs."),
 )
 
 DEBATE_SYSTEM = (
-    "[phase:debate] You are the {persona}, one of several critic agents reviewing a draft biomedical answer in a "
-    "multi-agent debate. Role: {focus}\nStandard operating procedure:\n"
+    "[phase:debate] You are the {persona}, one of several critic agents reviewing a draft mathematics, physics or "
+    "engineering answer in a multi-agent debate. Role: {focus}\nStandard operating procedure:\n"
     "1. List the draft's claims that fall within your role.\n"
-    "2. For each, find the evidence key ([PMID:...], [DOI:...] or a result key such as [synapta]) in the gathered "
-    "evidence that supports or contradicts it.\n"
+    "2. For each, find the evidence key ([DOI:...], [arXiv:...] or a result key such as [axiom], [dynamis] or "
+    "[calcula]) in the gathered evidence that supports or contradicts it.\n"
     "3. Report a critique only when you can name the claim and the evidence key behind your objection; use "
     'evidence_key "none" for a claim that no evidence supports.\n'
     "4. Severity: high = contradicted by the evidence or wrong; medium = overstated or missing a caveat; low = minor.\n"
@@ -881,11 +892,9 @@ _SEVERITY_RANK = {"high": 0, "medium": 1, "low": 2}
 
 
 def _norm_key(key: str) -> str:
-    k = re.sub(r"\s+", "", (key or "").strip().strip("[]"))
-    m = re.match(r"(?i)^(pmid|doi):?(.+)$", k)
-    if m:
-        return f"{m.group(1).upper()}:{m.group(2).lower() if m.group(1).lower() == 'doi' else m.group(2)}"
-    return k
+    """The canonical evidence key ("[arXiv:2312.04511v2]" -> "ARXIV:2312.04511", "PMID: 1" -> "PMID:1"); a result
+    or tool key ("axiom", "agent.plan_execute.dynamis_simulate_ode.1") is kept as written."""
+    return normalize_evidence_key(key)
 
 
 class DebatePhase(AgentPhase):
@@ -1032,11 +1041,12 @@ class DebatePhase(AgentPhase):
     def _valid_critiques(final: dict[str, DebateReply], valid_keys: set[str]) -> tuple[list[dict[str, Any]], int]:
         out: list[dict[str, Any]] = []
         dropped = 0
+        lowered = {k.lower() for k in valid_keys}  # "[Axiom]" names the axiom result
         for persona, reply in final.items():
             for c in reply.critiques:
                 claim, issue = neutralise(c.claim.strip())[:300], neutralise(c.issue.strip())[:300]
                 key = _norm_key(c.evidence_key)
-                if not claim or not issue or not key or (key.lower() != "none" and key not in valid_keys):
+                if not claim or not issue or not key or (key.lower() != "none" and key.lower() not in lowered):
                     dropped += 1
                     continue
                 severity = c.severity.strip().lower() if c.severity.strip().lower() in _SEVERITY_RANK else "medium"

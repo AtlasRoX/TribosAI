@@ -97,7 +97,7 @@ def test_composed_prompt_is_numbered_and_bounded():
     prompt = _composed_prompt_with_all_extensions()
     block = prompt.split("<additional_rules>\n", 1)[1].split("\n</additional_rules>", 1)[0]
     numbers = [int(line.split(".", 1)[0]) for line in block.splitlines()]
-    assert numbers == list(range(9, 9 + len(numbers))) and len(numbers) >= 3
+    assert numbers == list(range(8, 8 + len(numbers))) and len(numbers) >= 3
     components = prompt.split("<grounding_rules>", 1)[0].splitlines()
     bullets = [line for line in components if line.startswith("- ")]
     assert len(bullets) == len(set(bullets))
@@ -129,8 +129,9 @@ async def test_orchestrator_sends_structured_prompt(offline_orchestrator, monkey
     system, human = captured["messages"]
     # draft.py appends the effort level's deliberation instruction (medium by default) to the system prompt.
     assert system.content.startswith(get_synthesis_system_prompt())
-    assert system.content.endswith("[EFFORT LEVEL: MEDIUM / BALANCED]\nConduct standard scientific reasoning. "
-                                   "Balance depth with clarity, highlighting core evidence, mechanisms, and caveats.")
+    assert system.content.endswith("[EFFORT LEVEL: MEDIUM / BALANCED]\nConduct standard scientific and engineering reasoning. "
+                                   "Balance depth with clarity: state the governing equations and assumptions, show the key steps, "
+                                   "and note the validity regime and main caveats.")
     assert human.content.index("<evidence>") < human.content.index("<user_query")
     assert "asked not to run simulations" in human.content
     assert "Vivarix" not in human.content.split("<tool_status>", 1)[1].split("</tool_status>", 1)[0]

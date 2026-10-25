@@ -84,18 +84,27 @@ This project uses a modern Python development stack:
 
 ```
 Tribos/
-├── tribos/           # Main package
-│   ├── vivarix/        # Systems biology agent
-│   ├── synapta/  # Knowledge graph agent
-│   ├── lithoscribe/         # Scientific literature agent
-│   ├── lumicell/            # Single cell analysis agent
-│   └── tribos/  # Meta-agent (orchestrator)
-├── app/                       # Streamlit applications
-├── docs/                      # Documentation
+├── tribos/                   # Main package
+│   ├── agents/               # Orchestrator, query planning, prompts, citations
+│   ├── agentic/              # Agentic frameworks, Auto router, jobs, code sandbox
+│   ├── archivon/             # Literature search and citation grounding
+│   ├── axiom/                # Computer algebra and the verified mathematics agent
+│   ├── dynamis/              # Numerical simulation and optimization
+│   ├── physis/               # Constants, units, materials and reference data
+│   ├── datasets/             # Uploaded datasets (tables, HDF5, MAT)
+│   ├── vision/               # Image input (OCR and vision models)
+│   ├── verify/               # Claim verification
+│   ├── export/, provenance/  # Report export, run manifests and re-runs
+│   ├── config/               # Settings registry (TRIBOS_*)
+│   └── evals/                # Evaluation harness
+├── app/backend/              # FastAPI API (main.py, routers/)
+├── web/                      # Next.js web app
+├── docker/                   # backend/web Dockerfiles and compose.yml
+├── tests/                    # Test suite
+├── docs/                     # Documentation
 ├── pyproject.toml            # Project configuration (dependencies, tools)
 ├── uv.lock                   # Lock file for reproducible builds
-├── .pre-commit-config.yaml   # Pre-commit hooks configuration
-└── release_version.txt       # Version file
+└── .pre-commit-config.yaml   # Pre-commit hooks configuration
 ```
 
 ---
@@ -126,7 +135,7 @@ uv run ruff format .
 uv run pylint tribos/
 
 # Analyze specific component
-uv run pylint tribos/lithoscribe/
+uv run pylint tribos/axiom/
 
 # Generate JSON report for CI/CD
 uv run pylint tribos/ --output-format=json --reports=no > pylint-report.json
@@ -261,11 +270,11 @@ uv sync --extra dev --frozen
 # Run all tests
 uv run pytest
 
-# Run with coverage
-uv run pytest --cov=tribos
+# Run with coverage (as CI does)
+uv run coverage run --source=tribos,app --omit="*/tests/*" -m pytest tests/ && uv run coverage report
 
 # Run specific test file
-uv run pytest tribos/vivarix/tests/test_api.py
+uv run pytest tests/test_datasets.py
 
 # Run integration tests only
 uv run pytest -m integration
@@ -334,14 +343,17 @@ uv run bandit -c pyproject.toml -r tribos/
 
 ### Building Docker Images
 
-Each agent has its own Dockerfile:
+There are two images: the API and the web app.
 
 ```bash
-# Build specific agent
-docker build -f tribos/lithoscribe/Dockerfile -t lithoscribe .
+# API (context: the repository root)
+docker build -f docker/backend.Dockerfile -t tribos-backend .
 
-# Build all with docker-compose
-docker-compose build
+# Web app (context: web/; NEXT_PUBLIC_API_URL is inlined at build time)
+docker build -f docker/web.Dockerfile --build-arg NEXT_PUBLIC_API_URL=http://localhost:8000 -t tribos-web web
+
+# Both, with the data volume and loopback-only ports
+docker compose -f docker/compose.yml up --build
 ```
 
 ### Production Deployment
@@ -374,40 +386,14 @@ uv run bandit -c pyproject.toml -r tribos/
 uv run pip-audit --desc --format=json
 ```
 
-### Streamlit File Upload Security
+### Upload Security
 
-The project implements comprehensive file upload security:
-
-```python
-# Use secure file upload wrapper
-from app.frontend.utils.streamlit_utils import secure_file_upload
-
-# Secure PDF upload with validation
-pdf_file = secure_file_upload(
-    "Upload PDF",
-    allowed_types=["pdf"],
-    help_text="Upload a research paper",
-    max_size_mb=50,
-    accept_multiple_files=False
-)
-
-# Secure data upload with multiple types
-data_files = secure_file_upload(
-    "Upload Data",
-    allowed_types=["spreadsheet", "text"],
-    help_text="Upload CSV or Excel files",
-    max_size_mb=25,
-    accept_multiple_files=True
-)
-```
-
-#### Security Features
-
-- **File type validation** - Only allowed extensions (prevents malware.exe → report.pdf)
-- **MIME type checking** - Detects file masquerading attacks
-- **File size limits** - Prevents DoS attacks (configurable 25-50MB)
-- **Content scanning** - Blocks suspicious patterns and scripts
-- **Filename sanitization** - Prevents directory traversal attacks
+Uploads go to the API, never to a UI process: `POST /api/datasets` (`app/backend/routers/datasets.py`,
+`tribos/datasets/`) and `POST /api/vision/read` (`app/backend/routers/vision.py`). Both authenticate before the
+multipart body is parsed, refuse a `Content-Length` over the cap with 413, accept only listed extensions or image
+types, keep server-generated paths under the upload root (uploader file names are sanitized display names only)
+and validate the content before it is stored. `GET /api/datasets/limits` returns the accepted extensions and the
+per-kind caps (`TRIBOS_UPLOAD_MAX_MB_*`).
 
 ### Dependency Updates
 
@@ -545,7 +531,6 @@ uv lock --verbose
 - [pip-audit](https://pypi.org/project/pip-audit/) - Dependency vulnerability scanner
 - [Safety](https://pyup.io/safety/) - Dependency vulnerability checker
 - [python-magic](https://pypi.org/project/python-magic/) - File type detection
-- [Streamlit Security Guide](STREAMLIT_SECURITY.md) - File upload security implementation
 
 ### CI/CD & Quality
 

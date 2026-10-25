@@ -30,11 +30,19 @@ class PhysisConstantsInput(BaseModel):
 
 class PhysisUnitsInput(BaseModel):
     value: float = Field(default=1.0, description="Numerical magnitude of the physical quantity.")
-    from_unit: str = Field(default="", description="Source unit expression (e.g. 'eV', 'kcal/mol', 'GPa', 'N * m').")
+    from_unit: str = Field(
+        default="",
+        description="Source unit expression only (e.g. 'eV', 'kcal/mol', 'GPa', 'N * m'); never a value, variable or equation.",
+    )
     to_unit: str | None = Field(default=None, description="Target unit expression (e.g. 'J', 'kJ/mol', 'Pa'). Omit to reduce to base SI units.")
     check_equation: str | None = Field(
         default=None,
-        description="Optional equation 'lhs = rhs' (e.g. 'kg * m / s^2 = N') to verify dimensional homogeneity.",
+        description=(
+            "Optional 'lhs = rhs' written in UNITS ONLY, one unit expression per term, to verify dimensional "
+            "homogeneity. Translate each term of the physical equation into its units; no variables, derivatives, "
+            "numbers or primes. Example for m x'' + c x' + k x = F0 cos(wt): "
+            "'kg * m/s^2 + (N*s/m) * (m/s) + (N/m) * m = N'."
+        ),
     )
 
 
@@ -157,7 +165,7 @@ async def execute_physis_oeis(query: str, limit: int = 5) -> Any:
             success=False,
             tool_name="physis_oeis",
             error=f"{type(exc).__name__}: {exc}",
-            error_type=ErrorType.UPSTREAM_ERROR,
+            error_type=ErrorType.UPSTREAM_API_ERROR,
         )
 
 
@@ -190,7 +198,7 @@ async def execute_physis_materials(
             success=False,
             tool_name="physis_materials",
             error=f"{type(exc).__name__}: {exc}",
-            error_type=ErrorType.UPSTREAM_ERROR,
+            error_type=ErrorType.UPSTREAM_API_ERROR,
         )
 
 
@@ -211,7 +219,7 @@ async def execute_physis_wolfram(query: str) -> Any:
             success=False,
             tool_name="physis_wolfram",
             error=f"{type(exc).__name__}: {exc}",
-            error_type=ErrorType.UPSTREAM_ERROR,
+            error_type=ErrorType.UPSTREAM_API_ERROR,
         )
 
 
@@ -232,7 +240,7 @@ async def execute_physis_encyclopedia(query: str, limit: int = 3) -> Any:
             success=False,
             tool_name="physis_encyclopedia",
             error=f"{type(exc).__name__}: {exc}",
-            error_type=ErrorType.UPSTREAM_ERROR,
+            error_type=ErrorType.UPSTREAM_API_ERROR,
         )
 
 

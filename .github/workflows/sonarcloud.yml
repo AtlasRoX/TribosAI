@@ -23,8 +23,6 @@ on:
 env:
   OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
-  ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
-  ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
 
 jobs:
   sonarcloud:
@@ -51,34 +49,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          modules=(
-            tribos
-            vivarix
-            lumicell
-            synapta
-            lithoscribe
-          )
-
-          for module in "${modules[@]}"; do
-            src="tribos/${module}"
-            tests="${src}/tests"
-
-            uv run bandit -c pyproject.toml -r "${src}" -f json -o "bandit-${module}.json" || true
-            uv run pylint "${src}" --output-format=json --reports=no > "pylint-${module}.json" || true
-
-            if [ -d "${tests}" ]; then
-              uv run coverage run \
-                --data-file=".coverage.${module}" \
-                --include="${src}/*" \
-                -m pytest --cache-clear "${tests}"
-              uv run coverage xml \
-                --data-file=".coverage.${module}" \
-                -o "coverage-${module}.xml"
-            fi
-          done
-
-          # Top-level regression suite (tests/) covers the shared pipeline and the clinical modules.
-          uv run coverage run --data-file=.coverage.core --source=tribos -m pytest --cache-clear tests/
+          # One package (tribos) plus the API (app); the old per-module layout (tribos/<module>/tests) is gone.
+          uv run bandit -c pyproject.toml -r tribos app -f json -o bandit-tribos.json || true
+          uv run pylint tribos app --output-format=json --reports=no > pylint-tribos.json || true
+          uv run coverage run --data-file=.coverage.core --source=tribos,app --omit="*/tests/*" -m pytest --cache-clear tests/
           uv run coverage xml --data-file=.coverage.core -o coverage-core.xml
 
       - name: Read project version

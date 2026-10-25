@@ -6,7 +6,9 @@ import asyncio
 import time
 from typing import Any
 
+from .. import query_planner
 from ..query_context import TaskOutcome
+from ..result_keys import distinct_results
 from .context import RunContext, logger, orchestrator_module
 
 
@@ -16,6 +18,9 @@ def turn_fully_supported(report: Any) -> bool:
     evidence VERIFIED_EMPIRICAL in later answers."""
     if report is None or not getattr(report, "passed", False):
         return False
+    coverage = getattr(report, "coverage", None)
+    if isinstance(coverage, dict) and coverage and not coverage.get("evaluated"):
+        return False  # nothing was checked: nothing may be stored as verified
     bad = {"unsupported", "contradicted"}
     for c in getattr(report, "claims", None) or []:
         status = c.get("status") if isinstance(c, dict) else getattr(c, "status", "")
@@ -32,10 +37,17 @@ def turn_fully_supported(report: Any) -> bool:
 def _verification_counts(report: Any) -> dict[str, Any]:
     """The report fields session memory needs to decide what may be stored as verified."""
     out: dict[str, Any] = {"passed": bool(getattr(report, "passed", False))}
-    for attr in ("fully_verified", "unsupported_claims", "contradicted_claims", "unchecked_claims"):
+    for attr in ("fully_verified", "unsupported_claims", "contradicted_claims", "unchecked_claims", "coverage", "status"):
         value = getattr(report, attr, None)
         if value is not None:
             out[attr] = value
+    # Statements the checks contradicted, with what was found: stored as refuted, never as reusable facts.
+    audit = getattr(report, "math_audit", None) or {}
+    out["contradicted_statements"] = [
+        {"text": str(c.get("text") or "")[:300], "context": str(c.get("context") or "")[:120],
+         "detail": str(c.get("detail") or "")[:300]}
+        for c in (audit.get("claims") or []) if c.get("status") == "failed"
+    ][:20]
     return out
 
 
@@ -51,22 +63,19 @@ async def consolidate_memory(run: RunContext) -> None:
     # -------------------------------------------------------------
     if persist_memory:
         try:
-            active_subj: dict[str, str] = {}
-            if ctx.primary_target:
-                active_subj["gene"] = ctx.primary_target
-            if ctx.drugs:
-                active_subj["drug"] = ctx.drugs[0].label
-            if ctx.diseases:
-                active_subj["disease"] = ctx.diseases[0].label
-            if ctx.biomodel_id:
-                active_subj["biomodel_id"] = ctx.biomodel_id
+            # The turn's subject under its own kind (system, equation, concept, material, quantity, constant): a
+            # "gene" only when the question resolved a real gene entity, so a follow-up never turns "Lorenz" into one.
+            active_subj = query_planner.active_subject(ctx)
+            gene = getattr(ctx, "primary_gene", None)
+            if gene is not None and getattr(gene, "type", None) == "gene" and ctx.primary_target:
+                active_subj["gene"] = ctx.primary_target  # with its variant ("KRAS G12C"), as earlier turns stored it
             if active_subj:
                 orch.memory.record_active_subject(user_id, thread_id, active_subj)
             consolidation = await orch.memory.consolidate_turn(
                 thread_id=thread_id,
                 query=query,
                 response=candidate_response,
-                tool_results={k: v.data for k, v in tool_results.items() if v.success},
+                tool_results={k: v.data for k, v in distinct_results(tool_results).items() if v.success},
                 failure_lesson=verification_report.failure_lesson,
                 is_turn_verified=turn_fully_supported(verification_report),
                 verification=_verification_counts(verification_report),
@@ -136,6 +145,57 @@ def apply_incomplete_status(task_status: dict[str, Any], agent_state: Any) -> di
     return status
 
 
+def apply_deliverables(task_status: dict[str, Any], items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Completeness from the requested deliverables: a requested quantity the answer leaves out, or states with a
+    value the checks contradict, makes the answer partial with that reason; requests for prose are listed only."""
+    status = dict(task_status)
+    status["deliverables"] = items
+    missing = [i["item"] for i in items if i.get("status") == "missing" and i.get("quantity")]
+    failed = [i["item"] for i in items if i.get("status") == "failed_check"]
+    reasons = list(status.get("incomplete_reasons") or [])
+    if missing:
+        reasons.append(f"Not addressed: {', '.join(missing[:6])}.")
+    if failed:
+        reasons.append(f"Stated with values the checks contradict: {', '.join(failed[:6])}.")
+    status["incomplete_reasons"] = reasons
+    if (missing or failed) and status.get("task_status") == "completed":
+        status["task_status"] = "partial"
+        lead = " ".join(reasons)
+        reason = str(status.get("reason") or "")
+        status["reason"] = lead if reason in ("", "Evidence gathered and synthesized.") else f"{lead} {reason}"
+    return status
+
+
+# Wall time per kind of work, from the pipeline stages and agent phases (phase key -> kind). Planned tool calls
+# (plan_execute) include the planner's own model calls; they are counted as execution.
+_STAGE_KIND = {
+    "route": "planning", "decompose": "planning", "clarify": "planning", "router": "planning",
+    "evidence": "retrieval", "gaps": "retrieval", "counter_evidence": "retrieval",
+    "computations": "execution", "plan_execute": "execution", "math_agent": "execution",
+    "ode_verification": "execution", "specialists": "execution", "analyst": "execution",
+    "first_draft": "drafting", "verification": "verification", "nli": "verification", "critique": "verification",
+    "confidence": "verification", "memory": "memory",
+}
+
+
+def stage_seconds(phases: list[dict[str, Any]]) -> dict[str, float]:
+    """Seconds spent planning, retrieving, executing tools, drafting (first draft and rewrites) and verifying.
+
+    Only non-overlapping parts are summed: the pipeline stages, plus the agent phases that run between them (augment,
+    after_draft, finalize). Before-evidence phases run inside the "route" stage and are not added again."""
+    out: dict[str, float] = {}
+    for p in phases:
+        if p.get("stage") not in ("pipeline", "augment", "after_draft", "finalize"):
+            continue
+        name = str(p.get("phase") or "")
+        kind = "drafting" if name.startswith("rewrite_") else _STAGE_KIND.get(name, "other")
+        try:
+            out[kind] = round(out.get(kind, 0.0) + float(p.get("seconds") or 0.0), 2)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def merge_pipeline_phases(run: RunContext) -> None:
     """Put the pipeline stages' wall times next to the agent phases in the agent_run artifact (run order), and
     refresh its budget snapshot so it includes the verifier revision and the finalize phases."""
@@ -148,6 +208,7 @@ def merge_pipeline_phases(run: RunContext) -> None:
         if all("at" in p for p in merged):
             merged.sort(key=lambda p: float(p.get("at") or 0.0))
         art["phases"] = merged
+        art["stage_seconds"] = stage_seconds(merged)
         art["budget"] = run.agent_state.budget.to_dict()
         art["sub_questions"] = [q.to_dict() for q in run.agent_state.sub_questions]
     except Exception as exc:  # noqa: BLE001
@@ -178,6 +239,32 @@ async def assemble_result(run: RunContext) -> Any:
         logger.warning("Task outcome failed: %s", exc)
         outcome = TaskOutcome(task_status="partial", reason=f"Task status unavailable ({type(exc).__name__}).")
     task_status = apply_incomplete_status(outcome.model_dump(), agent_state)
+    # The typed record of what the run computed, stamped with the answer text and the record revision the final
+    # verification checked; cards, exports and the stored run read this one record.
+    try:
+        from ...verify.result_record import build_result_record
+
+        record_obj = build_result_record(run.resolved_query or run.query, tool_results)
+        checked = getattr(verification_report, "record_revision", "") or ""
+        record_obj.verification = {
+            "status": getattr(verification_report, "status", ""),
+            "coverage": getattr(verification_report, "coverage", {}) or {},
+            "answer_hash": getattr(verification_report, "answer_hash", ""),
+            "checked_revision": checked,
+            "current": not checked or checked == record_obj.revision,
+        }
+        execution_artifacts["result_record"] = record_obj.to_dict()
+    except Exception as exc:  # noqa: BLE001 - the record is additive
+        logger.warning("Result record failed: %s", exc)
+    if ctx is not None and getattr(ctx, "scope", "research") == "research" and llm_ok:
+        try:
+            from ..deliverables import assess as assess_deliverables
+
+            items = assess_deliverables(run.resolved_query or run.query, candidate_response,
+                                        getattr(verification_report, "math_audit", None))
+            task_status = apply_deliverables(task_status, items)
+        except Exception as exc:  # noqa: BLE001 - completeness notes are additive
+            logger.warning("Deliverable assessment failed: %s", exc)
     merge_pipeline_phases(run)
     record("note_step", "task_status", {}, task_status)
     await close_open_steps()

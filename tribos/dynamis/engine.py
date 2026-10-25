@@ -7,6 +7,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from typing import Any
 
 import numpy as np
@@ -14,6 +15,7 @@ import sympy as sp
 from scipy import integrate, optimize
 
 from tribos.axiom.engine import safe_parse_equation, safe_parse_expr
+from tribos.axiom.safe_expr import check_math_text
 
 ODE_PRESETS: dict[str, dict[str, Any]] = {
     "harmonic_oscillator": {
@@ -186,24 +188,45 @@ def dynamis_simulate_ode(
         t_eval=t_eval,
         rtol=1e-8,
         atol=1e-10,
+        dense_output=True,
     )
     if not sol.success:
         raise RuntimeError(f"ODE integration failed ({sol.message})")
+    # The output samples are where the solution is reported, not where the solver stepped: extremes between samples
+    # are found on the solver's dense (interpolating) output over a fine grid, and both are reported.
+    n_dense = int(min(200_000, max(20 * n_pts, 20_001)))
+    t_dense = np.linspace(t0, tf, n_dense)
+    y_dense = sol.sol(t_dense) if sol.sol is not None else None
+    internal_steps = int(len(sol.sol.ts) - 1) if sol.sol is not None and hasattr(sol.sol, "ts") else None
 
     t_list = [round(float(x), 8) for x in sol.t]
     trajectories: dict[str, list[float]] = {}
     summary: dict[str, dict[str, float]] = {}
 
+    extrema: dict[str, dict[str, float | int]] = {}
     for idx, name in enumerate(state_names):
         series = sol.y[idx]
         trajectories[name] = [round(float(v), 8) for v in series]
         summary[name] = {
             "initial": float(series[0]),
             "final": float(series[-1]),
-            "min": float(np.min(series)),
+            "min": float(np.min(series)),  # over the output samples (see "extrema" for the dense-output values)
             "max": float(np.max(series)),
             "mean": float(np.mean(series)),
         }
+        entry: dict[str, float | int] = {
+            "sampled_min": float(np.min(series)), "sampled_max": float(np.max(series)),
+            "t_sampled_min": float(sol.t[int(np.argmin(series))]), "t_sampled_max": float(sol.t[int(np.argmax(series))]),
+            "samples": int(len(series)),
+        }
+        if y_dense is not None:
+            dense = y_dense[idx]
+            entry.update({
+                "dense_min": float(np.min(dense)), "dense_max": float(np.max(dense)),
+                "t_dense_min": float(t_dense[int(np.argmin(dense))]), "t_dense_max": float(t_dense[int(np.argmax(dense))]),
+                "dense_grid_points": n_dense,
+            })
+        extrema[name] = entry
 
     # Check conservation law (either explicit preset invariant or sum of derivatives == 0)
     conserved_check: dict[str, Any] = {"checked": False, "conserved": True, "drift": 0.0}
@@ -239,9 +262,19 @@ def dynamis_simulate_ode(
         "state_variables": state_names,
         "t_span": [t0, tf],
         "method": method,
+        "rtol": 1e-8,
+        "atol": 1e-10,
         "t": t_list,
         "trajectories": trajectories,
         "summary": summary,
+        "extrema": extrema,
+        "solver": {
+            "method": str(method), "rtol": 1e-8, "atol": 1e-10, "t_span": [t0, tf],
+            "output_samples": n_pts, "output_spacing": (tf - t0) / (n_pts - 1),
+            "internal_steps": internal_steps, "function_evaluations": int(sol.nfev),
+            "step_control": "adaptive (error-controlled); output times are interpolated, not solver steps",
+            "extrema_note": "sampled_* are over the output samples; dense_* over the solver's dense output on a fine grid",
+        },
         "conserved_check": conserved_check,
         "verified": bool(sol.success and conserved_check.get("conserved", True)),
         "canonical_id": cid,
@@ -374,6 +407,37 @@ def dynamis_parameter_scan(
     }
 
 
+_RELATION_RE = re.compile(r"(<=|>=|==|=|<|>)")
+
+
+def _constraint_function(text: str, ctype: str, local_env: dict[str, Any]) -> tuple[str, sp.Expr]:
+    """(SLSQP type, fun) for one constraint. A relation decides the type: "lhs >= rhs" is ineq with fun = lhs - rhs
+    (SLSQP requires fun >= 0), "lhs <= rhs" is ineq with fun = rhs - lhs (strict < and > are read as their closures,
+    which is all a continuous optimiser can enforce), and "lhs = rhs" / "lhs == rhs" is eq with fun = lhs - rhs. A
+    bare expression keeps the declared type ("eq": fun = 0, "ineq": fun >= 0)."""
+    cleaned = check_math_text(text)
+    if cleaned.startswith("Eq("):
+        _lhs, _rhs, eq = safe_parse_equation(cleaned, local_dict=local_env)
+        return "eq", eq.lhs - eq.rhs
+    if "!=" in cleaned:
+        raise ValueError(f"Constraint {text!r}: '!=' cannot be enforced by a continuous optimiser.")
+    parts = _RELATION_RE.split(cleaned)
+    if len(parts) == 1:
+        if ctype not in ("eq", "ineq"):
+            raise ValueError(f"Constraint type must be 'eq' or 'ineq', got {ctype!r}.")
+        return ctype, safe_parse_expr(cleaned, local_dict=local_env)
+    if len(parts) != 3:
+        raise ValueError(f"Constraint {text!r} must have exactly one relation (=, ==, <=, >=, <, >).")
+    lhs = safe_parse_expr(parts[0], local_dict=local_env)
+    rhs = safe_parse_expr(parts[2], local_dict=local_env)
+    op = parts[1]
+    if op in (">=", ">"):
+        return "ineq", lhs - rhs
+    if op in ("<=", "<"):
+        return "ineq", rhs - lhs
+    return "eq", lhs - rhs
+
+
 def dynamis_optimize(
     objective: str,
     variables: list[str],
@@ -426,15 +490,10 @@ def dynamis_optimize(
 
     scipy_constraints = []
     for c in constraints or []:
-        ctype = str(c.get("type", "eq")).strip().lower()
         cexpr_str = str(c.get("expr") or c.get("fun") or "").strip()
         if not cexpr_str:
             continue
-        if "=" in cexpr_str and not cexpr_str.startswith("Eq("):
-            lhs_c, rhs_c, _ = safe_parse_equation(cexpr_str, local_dict=local_env)
-            cexpr = lhs_c - rhs_c
-        else:
-            cexpr = safe_parse_expr(cexpr_str, local_dict=local_env)
+        ctype, cexpr = _constraint_function(cexpr_str, str(c.get("type", "eq")).strip().lower(), local_env)
         c_fn = sp.lambdify(var_syms, cexpr, modules="numpy")
         scipy_constraints.append({
             "type": ctype,

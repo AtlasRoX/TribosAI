@@ -1,15 +1,14 @@
 """
-What to search the literature and the web for, for any kind of biomedical question.
+What to search the literature and the web for.
 
 A SearchPlan holds the question type and up to three concept groups (the central topic first; each group lists
-a term as written plus its synonyms). It compiles into EuropePMC queries in two tiers:
-- tier 1, run together: a citation-ranked "landmark" search over the last LANDMARK_YEARS (pivotal trials,
-  guidelines, consensus definitions) and a relevance-ranked "recent" search over the last RECENT_YEARS; when the
-  question is about an intervention's efficacy in a named disease, a citation-ranked "pivotal" search for
-  randomized / phase 3 trials of (any of) the drugs in that disease; and, when trial names are known
-  ("KEYNOTE-716", "SOLO-1"), a "trial_names" search for them as quoted phrases;
-- tier 2, run only when tier 1 finds too little: the same searches relaxed (no question-type facet, title
-  anchor widened to title/abstract, no year window).
+a term as written plus its synonyms). `SearchPlan.scholarly_queries()` compiles it into plain-text queries for the
+Archivon sources (arXiv, Semantic Scholar, OpenAlex, Crossref, zbMATH Open, NASA ADS), which read no field syntax:
+- tier 1: a citation-ranked "landmark" query (the concepts plus the question type's facet words) and a "recent"
+  query over the last RECENT_YEARS;
+- tier 2 and 3, used only when tier 1 finds too little: the planner's synonyms, the anchor concept alone, and the
+  concepts' content words.
+`keywords()` lists the ranking terms passed to the search as `keywords`.
 
 The deterministic plan is built from the resolved entities and the content phrases of the question. A planner
 model may supply a better plan (synonyms, a cleaner web query); its concept groups are kept only when they share
@@ -38,7 +37,6 @@ QUESTION_TYPES = (
     "genetics", "target", "methods", "statistics", "comparison", "biomarker", "guideline", "regulatory", "general",
 )
 
-LANDMARK_YEARS = 12
 RECENT_YEARS = 3
 MAX_GROUPS = 3
 MAX_TERMS = 4
@@ -102,18 +100,6 @@ _FACETS: dict[str, list[str]] = {
     "mechanism": ["mechanism*", "pathway*", "pathogenesis", "mode of action"],
     "methods": ["protocol*", "guide*", "design", "best practice*", "method*"],
     "target": ["therapeutic target", "therapeutic targets", "drug target", "novel therapies", "treatment"],
-}
-# Question types whose landmark papers name the facet in their title ("...Definitions for Sepsis", "Global
-# epidemiology of...", "Mechanisms of insulin resistance"). Treatment and trial titles rarely say "treatment"
-# ("Pertuzumab, trastuzumab, and docetaxel in HER2-positive..."), so those match the facet in the abstract.
-_TITLE_FACET_TYPES = frozenset(
-    {"epidemiology", "diagnosis", "safety", "mechanism", "pharmacology", "biomarker", "statistics", "prognosis", "methods"}
-)
-_TITLE_FACETS: dict[str, list[str]] = {
-    "safety": ["adverse", "toxicit*", "cardiotoxicit*", "hepatotoxicit*", "safety", "side effect*"],
-    "epidemiology": ["prevalence", "incidence", "epidemiolog*", "burden"],
-    "diagnosis": ["diagnos*", "criteria", "definition*"],
-    "biomarker": ["biomarker*", "predict*", "marker*"],
 }
 
 _STOP = frozenset(
@@ -205,12 +191,6 @@ _PIVOTAL_RE = re.compile(
 )
 # Alternatives between two drug mentions ("pembrolizumab or nivolumab"): one concept group, not an AND of two.
 _DRUG_ALTERNATIVE_RE = re.compile(r"^\s*(?:,\s*)?(?:or|and/or|vs\.?|versus|/|,)\s*$", re.I)
-_TRIAL_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*(?:[\s\-]?[A-Za-z0-9]+){0,3}$")
-PIVOTAL_SLOTS = 3
-PIVOTAL_LIMIT = 8
-MAX_TRIAL_NAMES = 6
-THERAPEUTIC_YEARS = 5
-TOPIC_LIMIT = 4
 
 # What a question asks about its subject, beyond the subject and the disease: (name, pattern in the question,
 # terms showing a paper covers it). Every aspect ranks the retrieved articles; the ones in _TOPIC_SEARCH also get
@@ -230,12 +210,6 @@ _ASPECTS = (
      ["real-world", "electronic health record*", "electronic medical record*", "retrospective", "registry"]),
 )
 _ASPECT_RES = [(name, re.compile(pat, re.I), terms) for name, pat, terms in _ASPECTS]
-# Aspects searched for on their own (subject AND disease AND aspect), with their search terms and sort.
-_TOPIC_SEARCH: dict[str, tuple] = {
-    "therapy": (["inhibitor*", "targeted therapy", "targeted therapies"], "CITED desc"),
-    "repurposing": (["repurpos*", "reposition*"], None),
-    "in_silico": (["docking", "virtual screening", "molecular dynamics", "in silico"], None),
-}
 # A question asks for treatments when it says so ("repurposed", "drug discovery"), or names treating and a drug
 # kind together, or is a treatment-type question naming a drug or therapy.
 _THERAPEUTIC_STRONG_RE = re.compile(r"\b(?:repurpos\w*|re-?position\w*|drug\s+(?:discovery|candidates?|re-?use))\b", re.I)
@@ -300,10 +274,6 @@ def off_topic_title_terms(query: str) -> list[str]:
         if f" {stem}" not in text:
             out.append(term)
     return out
-_PIVOTAL_DESIGN = (
-    '(PUB_TYPE:"Randomized Controlled Trial" OR PUB_TYPE:"Clinical Trial, Phase III" '
-    'OR TITLE_ABS:"phase 3" OR TITLE_ABS:"phase III")'
-)
 
 
 @dataclass
@@ -360,128 +330,48 @@ class SearchPlan:
         words = [w.lower().rstrip("*") for t in terms for w in _WORD_RE.findall(t.replace("*", ""))]
         return list(dict.fromkeys(w for w in words if len(w) > 2 and w not in _STOP))
 
-    def europepmc_queries(self, year: int | None = None) -> list[dict[str, Any]]:
-        """Tiered EuropePMC searches: [{"query", "sort", "tier", "label"}]. Empty when there is nothing to search."""
-        if not self.concepts:
-            return []
-        year = year or _dt.date.today().year
-        anchor, others = self.concepts[0], self.concepts[1:MAX_GROUPS]
-        facet_type = self.facet_type
-        facet = _FACETS.get(facet_type)
-        peer = "HAS_ABSTRACT:y AND SRC:MED"
-
-        def clause(*parts: str | None) -> str:
-            return " AND ".join(p for p in parts if p)
-
-        rest = [_group("TITLE_ABS", g) for g in others]
-        facet_clause = _group("TITLE_ABS", facet) if facet else None
-        # Citation ranking favours famous papers, so the landmark search needs the facet where it is most telling.
-        landmark_facet = facet_clause
-        if facet_type in _TITLE_FACET_TYPES and facet:
-            landmark_facet = _group("TITLE", _TITLE_FACETS.get(facet_type, facet))
-        landmark = clause(_group("TITLE", anchor), *rest, landmark_facet, peer, f"PUB_YEAR:[{year - LANDMARK_YEARS} TO {year}]")
-        recent = clause(_group("TITLE_ABS", anchor), *rest, facet_clause, peer, f"PUB_YEAR:[{year - RECENT_YEARS} TO {year}]")
-        queries: list[dict[str, Any]] = [
-            {"query": landmark, "sort": "CITED desc", "tier": 1, "label": "landmark"},
-            {"query": recent, "sort": None, "tier": 1, "label": "recent"},
-        ]
-        kept = rest[: max(1, min(self.hard_groups, MAX_GROUPS) - 1)]
-        relaxed_landmark = clause(_group("TITLE_ABS", anchor), *kept, peer, f"PUB_YEAR:[{year - LANDMARK_YEARS} TO {year}]")
-        relaxed = clause(_group("TITLE_ABS", anchor), *kept, "HAS_ABSTRACT:y")
-        if self.pivotal:
-            pivotal = pivotal_trial_query(self.intervention_terms, self.disease_terms)
-            if pivotal is not None:
-                queries.append(pivotal)
-        if self.trial_names:
-            named = trial_name_query(self.trial_names, self.disease_terms)
-            if named is not None:
-                queries.append(named)
-        queries.extend(self._topic_queries(year))
-        for q, sort, label in ((relaxed_landmark, "CITED desc", "landmark_relaxed"), (relaxed, None, "relaxed")):
-            if q not in (landmark, recent):
-                queries.append({"query": q, "sort": sort, "tier": 2, "label": label})
-        # Last resort: every content word of the first two concepts, unquoted ("CAR-T cytokine release syndrome").
-        words = [w for g in self.concepts[:2] for w in _WORD_RE.findall(g[0]) if len(w) > 2 and w.lower() not in _STOP]
-        if len(words) > 1:
-            queries.append({
-                "query": clause(*(f"TITLE_ABS:{_lucene_word(w)}" for w in dict.fromkeys(words)), "HAS_ABSTRACT:y"),
-                "sort": None, "tier": 3, "label": "words",
-            })
-        topic = self.topic()
-        for q in queries:
-            if self.disease_terms:
-                # The ranking step demotes retrieved articles that never mention the question's disease.
-                q["disease"] = list(self.disease_terms)
-            if topic:
-                # ... and ranks articles by the question's aspects (repurposing, docking, safety).
-                q["topic"] = topic
-        return queries
-
     def scholarly_queries(self, year: int | None = None) -> list[dict[str, Any]]:
-        """Tiered scholarly searches for OpenAlex / Semantic Scholar / arXiv / ADS / Crossref."""
+        """Plain-text searches the Archivon sources (arXiv, Semantic Scholar, OpenAlex, Crossref, zbMATH, NASA ADS)
+        understand: [{"query", "concepts", "sort", "tier", "label", "from_year"?}], best first. No field syntax: each
+        source reads a plain query its own way. Empty when there is nothing to search.
+
+        - tier 1 "landmark": the lead term of every concept group plus the question type's two facet words;
+        - tier 1 "recent": the lead terms alone, from RECENT_YEARS back;
+        - tier 2 "synonyms": the groups' second terms where the planner supplied synonyms;
+        - tier 2 "relaxed": the anchor concept alone;
+        - tier 3 "words": the content words of the first two concepts, unphrased."""
         if not self.concepts:
             return []
         year = year or _dt.date.today().year
-        anchor, others = self.concepts[0], self.concepts[1:MAX_GROUPS]
-        facet = _FACETS.get(self.facet_type) or []
-        lead_terms = [g[0] for g in [anchor, *others] if g]
-        primary_query = " ".join(lead_terms)
-        faceted_query = " ".join([*lead_terms, *(facet[:2] if facet else [])]).strip()
-        queries: list[dict[str, Any]] = [
-            {
-                "query": faceted_query or primary_query,
-                "concepts": [list(g) for g in [anchor, *others]],
-                "sort": "cited_by_count:desc",
-                "tier": 1,
-                "label": "landmark",
-                "from_year": year - LANDMARK_YEARS,
-                "to_year": year,
-            },
-            {
-                "query": primary_query,
-                "concepts": [list(g) for g in [anchor, *others]],
-                "sort": "publication_year:desc",
-                "tier": 1,
-                "label": "recent",
-                "from_year": year - RECENT_YEARS,
-                "to_year": year,
-            },
-        ]
-        if len(lead_terms) > 1:
-            queries.append({
-                "query": anchor[0],
-                "concepts": [list(anchor)],
-                "sort": "cited_by_count:desc",
-                "tier": 2,
-                "label": "relaxed",
-            })
-        return queries
-
-    def _topic_queries(self, year: int) -> list[dict[str, Any]]:
-        """For a treatment question about a subject (a gene or target, not a drug or disease): the subject in the
-        disease AND each searched aspect the question asks about ("KRAS" AND pancreatic cancer AND (inhibitor* OR
-        "targeted therapy"); ... AND (repurpos* OR reposition*); ... AND (docking OR "virtual screening")).
-        Treatment papers are citation-ranked over the last THERAPEUTIC_YEARS; the others by relevance."""
-        if not self.therapeutic:
+        groups = [list(g) for g in self.concepts[:MAX_GROUPS] if g]
+        if not groups:
             return []
-        subject = self.concepts[0] if self.subject_groups else None
-        diseases = disease_search_terms(self.disease_terms)
-        disease_clause = _group("TITLE_ABS", diseases) if diseases else None
-        out: list[dict[str, Any]] = []
-        for name, (terms, sort) in _TOPIC_SEARCH.items():
-            if name not in self.aspects:
+        lead_terms = [_plain(g[0]) for g in groups]
+        facet = [_plain(f) for f in _FACETS.get(self.facet_type) or []][:2]
+        primary = " ".join(t for t in lead_terms if t)
+        candidates: list[dict[str, Any]] = [
+            {"query": " ".join([primary, *(f for f in facet if f.lower() not in primary.lower())]),
+             "sort": "cited_by_count:desc", "tier": 1, "label": "landmark"},
+            {"query": primary, "sort": "publication_year:desc", "tier": 1, "label": "recent",
+             "from_year": year - RECENT_YEARS},
+        ]
+        synonyms = [_plain(g[1]) if len(g) > 1 else _plain(g[0]) for g in groups]
+        if synonyms != lead_terms:
+            candidates.append({"query": " ".join(t for t in synonyms if t), "sort": None, "tier": 2, "label": "synonyms"})
+        if len(groups) > 1:
+            candidates.append({"query": lead_terms[0], "sort": "cited_by_count:desc", "tier": 2, "label": "relaxed"})
+        words = [w for g in groups[:2] for w in _WORD_RE.findall(g[0]) if len(w) > 2 and w.lower() not in _STOP]
+        if len(words) > 1:
+            candidates.append({"query": " ".join(dict.fromkeys(words)), "sort": None, "tier": 3, "label": "words"})
+        queries: list[dict[str, Any]] = []
+        seen: set[tuple[str, Any]] = set()
+        for q in candidates:
+            text = " ".join(str(q["query"]).split())
+            if not text or (text.lower(), q.get("from_year")) in seen:
                 continue
-            if subject is None and not (name == "repurposing" and disease_clause):
-                continue  # a treatment or docking search needs a target; repurposing can be for a disease alone
-            parts = [
-                _group("TITLE" if name == "therapy" else "TITLE_ABS", subject) if subject else None,
-                disease_clause, _group("TITLE_ABS", terms), "HAS_ABSTRACT:y AND SRC:MED",
-            ]
-            if name == "therapy":
-                parts.append(f"PUB_YEAR:[{year - THERAPEUTIC_YEARS} TO {year}]")
-            out.append({"query": " AND ".join(p for p in parts if p), "sort": sort, "tier": 1, "label": name,
-                        "limit": TOPIC_LIMIT})
-        return out
+            seen.add((text.lower(), q.get("from_year")))
+            queries.append({**q, "query": text, "concepts": groups})
+        return queries
 
     def to_dict(self) -> dict[str, Any]:
         return {"question_type": self.question_type, "concepts": [list(g) for g in self.concepts],
@@ -491,6 +381,11 @@ class SearchPlan:
                 "trial_names": list(self.trial_names), "aspects": {k: list(v) for k, v in self.aspects.items()},
                 "therapeutic": self.therapeutic, "subject_groups": self.subject_groups,
                 "off_topic_terms": list(self.off_topic_terms)}
+
+
+def _plain(term: str) -> str:
+    """A term as plain query text: no prefix wildcard ("mechanism*"), quotes or brackets."""
+    return re.sub(r"\s+", " ", re.sub(r'[*"()\[\]{}]', " ", term or "")).strip()
 
 
 def _clean_term(term: str) -> str:
@@ -505,17 +400,6 @@ def _variants(term: str) -> list[str]:
     if plain != term:
         out.append(plain)
     return out
-
-
-def _lucene_word(word: str) -> str:
-    """One word for an unquoted query clause, quoted when it holds a character Lucene would parse ("CAR-T")."""
-    return word if re.fullmatch(r"[A-Za-z0-9]+\*?", word) else f'"{word}"'
-
-
-def _group(field_name: str, terms: Sequence[str]) -> str:
-    # A single word ending in * is a prefix search and must stay unquoted ("toxicit*").
-    parts = [f"{field_name}:{t}" if re.fullmatch(r"[A-Za-z]+\*", t) else f'{field_name}:"{t}"' for t in terms if t]
-    return parts[0] if len(parts) == 1 else "(" + " OR ".join(parts) + ")"
 
 
 def disease_search_terms(terms: Sequence[str], limit: int = 6) -> list[str]:
@@ -562,64 +446,6 @@ def disease_relevance_terms(terms: Sequence[str]) -> list[str]:
                     break
             out.append(stem + "*" if stem else low)
     return list(dict.fromkeys(out))
-
-
-def _intervention_terms(terms: Sequence[str]) -> list[str]:
-    """Intervention names plus the singular of a drug-class plural ("PARP inhibitors" -> "PARP inhibitor")."""
-    out: list[str] = []
-    for t in terms:
-        if not isinstance(t, str):
-            continue
-        t = _clean_term(t)
-        singular = re.sub(r"\b(inhibitor|agonist|antagonist|blocker)s\b", r"\1", t, flags=re.I)
-        singular = re.sub(r"\bantibodies\b", "antibody", singular, flags=re.I)
-        for v in (t, singular):
-            if len(v) >= 3 and v.lower() not in (o.lower() for o in out):
-                out.append(v)
-    return out[:6]
-
-
-def pivotal_trial_query(interventions: Sequence[str], disease_terms: Sequence[str]) -> dict[str, Any] | None:
-    """Citation-ranked randomized / phase 3 trials of (any of) the interventions in the disease:
-    (drug1 OR drug2) AND disease AND (RCT OR phase 3). Its hits are guaranteed up to "slots" ranked articles."""
-    drugs, diseases = _intervention_terms(interventions), disease_search_terms(disease_terms)
-    if not drugs or not diseases:
-        return None
-    query = " AND ".join([_group("TITLE_ABS", drugs), _group("TITLE_ABS", diseases), _PIVOTAL_DESIGN, "SRC:MED"])
-    return {"query": query, "sort": "CITED desc", "tier": 1, "label": "pivotal", "limit": PIVOTAL_LIMIT,
-            "slots": PIVOTAL_SLOTS}
-
-
-def clean_trial_names(names: Sequence[Any] | None) -> list[str]:
-    """Trial names safe to search as quoted phrases ("KEYNOTE-716", "CheckMate 76K", "SOLO-1")."""
-    out: list[str] = []
-    for raw in names or []:
-        if not isinstance(raw, str):
-            continue
-        name = " ".join(raw.split()).strip(" .,;:()[]")
-        if 3 <= len(name) <= 40 and _TRIAL_NAME_RE.match(name) and name.lower() not in (o.lower() for o in out):
-            out.append(name)
-    return out[:MAX_TRIAL_NAMES]
-
-
-def trial_name_query(names: Sequence[Any] | None, disease_terms: Sequence[str] = ()) -> dict[str, Any] | None:
-    """Named trials as quoted title/abstract phrases. A name with a number ("KEYNOTE-716") is specific on its own;
-    a bare word ("PRIMA", "PROfound") must appear together with the disease when one is known."""
-    cleaned = clean_trial_names(names)
-    if not cleaned:
-        return None
-    numbered = [n for n in cleaned if re.search(r"\d", n)]
-    plain = [n for n in cleaned if n not in numbered]
-    diseases = disease_search_terms(disease_terms)
-    parts = []
-    if numbered:
-        parts.append(_group("TITLE_ABS", numbered))
-    if plain:
-        named = _group("TITLE_ABS", plain)
-        parts.append(f"({named} AND {_group('TITLE_ABS', diseases)})" if diseases else named)
-    clause = parts[0] if len(parts) == 1 else "(" + " OR ".join(parts) + ")"
-    return {"query": f"{clause} AND SRC:MED", "sort": "CITED desc", "tier": 1, "label": "trial_names",
-            "limit": min(10, 2 * len(cleaned) + 2), "slots": min(len(cleaned), 4), "trial_names": cleaned}
 
 
 def _normalize_group(terms: Sequence[Any]) -> list[str]:
@@ -1027,7 +853,7 @@ def _kept_subject_groups(base: SearchPlan, groups: Sequence[Sequence[str]]) -> i
 
 
 __all__ = [
-    "QUESTION_TYPES", "SearchPlan", "build_search_plan", "classify_question", "clean_trial_names",
-    "disease_relevance_terms", "disease_search_terms", "is_therapeutic_question", "merge_llm_plan", "normalize_dashes",
-    "off_topic_title_terms", "pivotal_trial_query", "question_aspects", "trial_name_query",
+    "QUESTION_TYPES", "SearchPlan", "build_search_plan", "classify_question", "disease_relevance_terms",
+    "disease_search_terms", "is_therapeutic_question", "merge_llm_plan", "normalize_dashes", "off_topic_title_terms",
+    "question_aspects",
 ]

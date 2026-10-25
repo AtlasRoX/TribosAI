@@ -61,6 +61,6 @@
     {"q": "Explore the connections between TP53 and ferroptosis and drugs that target that link.", "gold": "swarm", "also": ["supervisor"], "kind": "exploration"},
     {"q": "Brainstorm links between gut microbiome metabolites and immunotherapy response.", "gold": "swarm", "also": ["debate", "supervisor"], "kind": "exploration"},
     {"q": "Map out how inflammation, insulin resistance and Alzheimer's disease are connected.", "gold": "swarm", "also": ["supervisor"], "kind": "exploration"},
-    {"q": "Explore the connections between SGLT2 inhibitors and heart failure in pregnant patients.", "gold": "plan_execute", "also": ["supervisor", "debate"], "kind": "exploration"}
+    {"q": "Explore the connections between hydrogen embrittlement and pressure vessel failures.", "gold": "plan_execute", "also": ["supervisor", "debate"], "kind": "exploration"}
   ]
 }

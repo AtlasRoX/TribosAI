@@ -25,14 +25,30 @@ function prediction(h: Hypothesis): string {
 
 function tested(h: Hypothesis): boolean {
   const r = h.result;
-  return Boolean(r && typeof r === "object" && (isNum(r.log2_fold_change) || r.supports != null));
+  return Boolean(r && typeof r === "object" && (isNum(r.relative_change) || isNum(r.log2_fold_change) || r.supports != null));
+}
+
+/** "≥ 5 %" for the support threshold (the server's threshold_relative_change), or "" when it did not send one. */
+function thresholdText(threshold: number | null | undefined): string {
+  return isNum(threshold) ? `≥ ${fmt(threshold * 100, 1)} %` : "";
+}
+
+/** "+12.5 %" for a relative change. */
+function percent(change: number): string {
+  return `${change > 0 ? "+" : ""}${fmt(change * 100, 1)} %`;
 }
 
 /** The in-silico verdict; untested hypotheses get no chip (the card meta says whether anything was tested). */
-function SupportBadge({ h }: { h: Hypothesis }) {
+function SupportBadge({ h, threshold }: { h: Hypothesis; threshold?: number | null }) {
   if (!tested(h)) return null;
   const r = h.result!;
-  if (r.supports === true) return <Pill tone="ok" title="Effect in the predicted direction with |log2FC| ≥ 0.58">supported</Pill>;
+  const t = thresholdText(threshold);
+  if (r.supports === true)
+    return (
+      <Pill tone="ok" title={`Effect in the predicted direction${t ? ` with a relative change ${t}` : ""}`}>
+        supported
+      </Pill>
+    );
   if (r.supports === false) return <Pill tone="bad" title="Effect absent or opposite to the prediction">not supported</Pill>;
   return <Pill tone="neutral">inconclusive</Pill>;
 }
@@ -41,12 +57,15 @@ function clip(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
 }
 
-function HypothesisItem({ h, rank }: { h: Hypothesis; rank: number }) {
+function HypothesisItem({ h, rank, threshold }: { h: Hypothesis; rank: number; threshold?: number | null }) {
   const iv = intervention(h);
   const pred = prediction(h);
   const evidence = hypothesisEvidence(h);
   const keys = arr<string>(h.evidence_keys);
   const lfc = h.result?.log2_fold_change;
+  const rel = h.result?.relative_change;
+  const metric = h.result?.metric;
+  const values = `baseline ${fmt(h.result?.baseline)} → perturbed ${fmt(h.result?.perturbed)}`;
   return (
     <li className={`${styles.divItem} ${styles.hypItem}`}>
       <span className={styles.hypRank}>{rank}</span>
@@ -54,19 +73,21 @@ function HypothesisItem({ h, rank }: { h: Hypothesis; rank: number }) {
         <span className={styles.itemHead}>{h.statement || "(no statement)"}</span>
         {h.mechanism && <span className={styles.itemSub}>{h.mechanism}</span>}
         <div className={styles.itemMeta}>
-          <SupportBadge h={h} />
+          <SupportBadge h={h} threshold={threshold} />
           {iv && (
             <span>
               intervention <span className={styles.mono}>{iv}</span>
             </span>
           )}
           {pred && <span>predicts {pred}</span>}
-          {isNum(lfc) && (
-            <span
-              title={`log2 fold-change of the readout endpoint, perturbed vs baseline: baseline ${fmt(h.result?.baseline)} → perturbed ${fmt(h.result?.perturbed)}`}
-            >
-              log2FC {fmt(lfc, 2)}
+          {isNum(rel) && (
+            <span title={`Relative change of the readout${metric ? ` (${metric})` : ""}, perturbed vs baseline: ${values}`}>
+              {metric ? `${metric} ` : ""}
+              {percent(rel)}
             </span>
+          )}
+          {isNum(lfc) && (
+            <span title={`log2 fold-change of the readout, perturbed vs baseline: ${values}`}>log2FC {fmt(lfc, 2)}</span>
           )}
           {isNum(h.elo) && <span title="Elo rating from the pairwise tournament">Elo {Math.round(h.elo)}</span>}
         </div>
@@ -106,7 +127,9 @@ export function HypothesesArtifact({ data }: { data: HypothesesData }) {
     method ? `Ranked by ${method}.` : "",
     data.model_id ? `Simulation model ${data.model_id}; ${experiments} in-silico experiment${experiments === 1 ? "" : "s"} run.` : "No simulation model was available.",
     data.model_id
-      ? "Supported means the simulated effect had the predicted direction with |log2FC| ≥ 0.58. In-silico results are model predictions, not experimental evidence."
+      ? `Supported means the simulated effect had the predicted direction${
+          thresholdText(data.threshold_relative_change) ? ` with a relative change ${thresholdText(data.threshold_relative_change)}` : ""
+        }. In-silico results are model predictions, not experimental evidence.`
       : "",
   ]
     .filter(Boolean)
@@ -127,7 +150,7 @@ export function HypothesesArtifact({ data }: { data: HypothesesData }) {
         <Section title="Ranked" meta={method || undefined}>
           <ol className={styles.divList}>
             {items.map((h, i) => (
-              <HypothesisItem key={h.id || i} h={h} rank={isNum(h.rank) ? h.rank : i + 1} />
+              <HypothesisItem key={h.id || i} h={h} rank={isNum(h.rank) ? h.rank : i + 1} threshold={data.threshold_relative_change} />
             ))}
           </ol>
         </Section>

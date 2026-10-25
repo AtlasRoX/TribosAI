@@ -9,6 +9,8 @@ import type { AgenticArtifacts } from "./agentic";
 export interface ExecutionArtifacts extends AgenticArtifacts {
   dynamis?: Record<string, any>;
   dynamis_scan?: Record<string, any>;
+  /** Computed check of a solved ODE: residual, RK4 convergence, sample comparison, energy balance, reproduction script. */
+  ode_verification?: Record<string, any>;
   vivarix?: Record<string, any>;
   vivarix_scan?: Record<string, any>;
   derivation?: Record<string, any>;
@@ -36,9 +38,32 @@ export interface TaskOutcome {
   incomplete_reasons?: string[];
   /** Sub-questions the answer did not fully answer. */
   unresolved?: string[];
+  /** Failed attempts a later call with the same purpose replaced: history, not a gap in the answer. */
+  recovered_failures?: { step: string; recovered_by: string }[];
+  /** Failed steps nothing replaced, with what their failure means for the answer. */
+  unresolved_failures?: { step: string; error?: string; effect?: string }[];
+  /** What the question asked for and whether the answer provides it. */
+  deliverables?: Deliverable[];
 }
 
-export type ClaimStatus = "supported" | "contradicted" | "unsupported" | "not_checked";
+export interface Deliverable {
+  item: string;
+  status: "verified" | "addressed" | "failed_check" | "missing";
+  where?: string;
+  quantity?: boolean;
+}
+
+/** How much of an answer the checks covered, apart from how it scored. */
+export interface VerificationCoverage {
+  extracted?: number;
+  evaluated?: number;
+  passed?: number;
+  failed?: number;
+  unsupported?: number;
+  inconclusive?: number;
+}
+
+export type ClaimStatus = "supported" | "contradicted" | "unsupported" | "not_checked" | "inconclusive";
 
 /** One checked claim from the verifier (audit F01). */
 export interface ClaimCheck {
@@ -57,6 +82,9 @@ export interface VerificationReport {
   verification_score?: number;
   defects?: { description?: string; claim?: string; [k: string]: any }[];
   claims?: ClaimCheck[];
+  coverage?: VerificationCoverage;
+  /** verified | checked | failed | not_evaluated (nothing in the answer could be checked) */
+  status?: string;
   [k: string]: any;
 }
 
@@ -101,6 +129,8 @@ export interface Message {
   run_manifest?: RunManifest;
   /** Datasets attached to a user message (ids and display names only). */
   attachments?: MessageAttachment[];
+  /** Images attached to a user message: names and small thumbnails (their transcriptions went with the question). */
+  images?: { name: string; thumbUrl?: string }[];
   query_context?: Record<string, any>;
   /** Agentic run id (from the run_control event), for run-control calls and display. */
   run_id?: string;

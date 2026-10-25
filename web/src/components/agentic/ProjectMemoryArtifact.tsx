@@ -122,7 +122,7 @@ export function PlanApprovalArtifact({ data }: { data: PlanApprovalData }) {
       }
       label="Plan approval"
       collapsible
-      defaultOpen
+      defaultOpen={false}
     >
       {sources.length === 0 && <p className={styles.muted}>No source list was recorded for this plan.</p>}
       {ran.length > 0 && (

@@ -21,6 +21,11 @@ DEBATE = "multi-agent-debate"
 AUTO = "auto"
 
 AGENTIC_FRAMEWORKS = (AGENTIC, SUPERVISOR, SWARM, DEBATE)
+# Auto routes that run the fixed workflow and skip the tool planner on purpose (router.is_fully_specified and the
+# scored direct approach): the planner not running is the plan, not a failure.
+DIRECT_ROUTES = frozenset({"closed_computation", "fully_specified", "focused", "llm_tie_break_direct"})
+# The direct routes of a parsed math problem: they lean on the mathematics agent.
+MATH_DIRECT_ROUTES = frozenset({"closed_computation", "fully_specified"})
 ALL_FRAMEWORKS = (AUTO, CLASSIC, *AGENTIC_FRAMEWORKS)
 
 FRAMEWORK_DESCRIPTIONS: dict[str, str] = {
@@ -33,7 +38,10 @@ FRAMEWORK_DESCRIPTIONS: dict[str, str] = {
         "Breaks complex questions into steps, runs search & analysis tools in parallel, "
         "and double-checks claims against counter-evidence for maximum accuracy."
     ),
-    SUPERVISOR: "A central manager coordinates and delegates tasks to domain specialists (literature, disease targets, simulations, omics).",
+    SUPERVISOR: (
+        "A central manager coordinates and delegates tasks to domain specialists (literature, symbolic mathematics, "
+        "numerical simulation, data analysis, physical reference data)."
+    ),
     SWARM: "Specialist agents collaborate peer-to-peer, handing control directly to each other until the question is answered.",
     DEBATE: "Multiple agents cross-examine and challenge each other's reasoning and evidence to eliminate bias and ensure rigorous conclusions.",
 }
@@ -41,6 +49,12 @@ FRAMEWORK_DESCRIPTIONS: dict[str, str] = {
 # -----------------------------------------------------------------------------
 # Effort / Thinking Levels (analogous to ChatGPT reasoning_effort and Claude extended thinking)
 # -----------------------------------------------------------------------------
+# What the backend reads from a profile: reasoning_effort (passed to the synthesis model; utils.llm.llm_factory turns
+# it into the provider's own switch: OpenAI o-series reasoning_effort, NVIDIA NIM chat_template_kwargs.enable_thinking
+# = effort != "low"), and the budgets max_subqueries, max_passages, max_draft_rounds, max_tool_calls, max_llm_calls and
+# max_seconds. The model factory has no thinking-token budget parameter, so thinking_budget_tokens and enable_thinking
+# are descriptive, for the effort picker (GET /api/effort-levels): enable_thinking states what reasoning_effort already
+# selects, and thinking_budget_tokens is the nominal budget shown to the user, not a limit sent to the model.
 EFFORT_LOW = "low"
 EFFORT_MEDIUM = "medium"
 EFFORT_HIGH = "high"
@@ -104,7 +118,7 @@ EFFORT_PROFILES: dict[str, dict[str, Any]] = {
         "label": "Ultra",
         "badge": "🚀 Ultra / Max",
         "short_desc": "Exhaustive scientific investigation",
-        "description": "Exhaustive exploration: full multi-agent orchestration, ODE kinetics, 25+ passages, up to 5 draft rounds.",
+        "description": "Exhaustive exploration: full multi-agent orchestration, numerical simulation, 25+ passages, up to 5 draft rounds.",
         "reasoning_effort": "high",
         "thinking_budget_tokens": 32768,
         "max_subqueries": 8,

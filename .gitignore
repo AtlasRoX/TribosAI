@@ -205,9 +205,12 @@ eval_runs/
 data/*.h5ad
 data/*.h5ad.*
 
-# NOTE: tribos/synapta/tests/files (~334 MB of fixtures) is deliberately NOT ignored: the Synapta
-# tests need it. Moving it to Git LFS or a fixture-download step is a pending decision.
-
 # Runtime state written by the app (job queue, router outcomes)
 data/jobs/
 data/router/
+
+# Full-page browser screenshots (GoFullPage extension) saved into the working tree
+gofullpage-*.pdf
+
+# Stray upload directory left by a local run (the app uploads to TRIBOS_UPLOAD_ROOT or <data dir>/uploads)
+/test_uploads/

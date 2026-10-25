@@ -429,13 +429,24 @@ MATERIAL_LEXICON: dict[str, dict[str, Any]] = {
 # Dynamical Systems & Canonical Models
 # ---------------------------------------------------------------------------
 SYSTEM_LEXICON: dict[str, dict[str, Any]] = {
+    # The two entries match the Dynamis presets of the same canonical name (tribos/dynamis/engine.py ODE_PRESETS).
     "harmonic oscillator": {
         "canonical": "harmonic_oscillator",
-        "display_name": "Damped Harmonic Oscillator",
-        "aliases": ("damped harmonic oscillator", "simple harmonic oscillator", "mass-spring-damper", "mass spring damper", "sho"),
+        "display_name": "Simple Harmonic Oscillator",
+        "aliases": ("simple harmonic oscillator", "undamped oscillator", "undamped harmonic oscillator",
+                    "mass-spring system", "spring-mass system", "mass-spring", "spring-mass", "sho"),
         "state_vars": ("x", "v"),
-        "params": {"omega0": 1.0, "zeta": 0.1},
-        "description": "Second-order linear oscillator dx/dt = v, dv/dt = -2*zeta*omega0*v - omega0^2*x.",
+        "params": {"omega": 1.0},
+        "description": "Undamped linear oscillator dx/dt = v, dv/dt = -omega^2*x.",
+    },
+    "damped oscillator": {
+        "canonical": "damped_oscillator",
+        "display_name": "Damped Harmonic Oscillator",
+        "aliases": ("damped harmonic oscillator", "forced damped oscillator", "damped driven oscillator",
+                    "forced oscillator", "mass-spring-damper", "damped spring mass", "damped mass spring"),
+        "state_vars": ("x", "v"),
+        "params": {"omega": 2.0, "zeta": 0.15},
+        "description": "Second-order linear oscillator dx/dt = v, dv/dt = -2*zeta*omega*v - omega^2*x.",
     },
     "van der pol": {
         "canonical": "van_der_pol",
@@ -511,7 +522,9 @@ def _match_lexicon(text: str, lexicon: dict[str, dict[str, Any]]) -> list[dict[s
         for cand in candidates:
             if not cand:
                 continue
-            pattern = r"(?<![a-z0-9])" + re.escape(cand.lower()) + r"(?![a-z0-9])"
+            # "mass-spring", "mass spring" and "mass–spring" (en dash) are the same name.
+            words = re.split(r"[\s\-‐‑‒–—]+", cand.lower())
+            pattern = r"(?<![a-z0-9])" + r"[\s\-‐‑‒–—]+".join(re.escape(w) for w in words) + r"(?![a-z0-9])"
             m = re.search(pattern, lower)
             if m:
                 seen.add(canonical)
@@ -543,23 +556,71 @@ def find_offline_materials(text: str) -> list[dict[str, Any]]:
 
 
 def find_offline_systems(text: str) -> list[dict[str, Any]]:
-    """Return dynamical systems matched in ``text``."""
-    return _match_lexicon(text, SYSTEM_LEXICON)
+    """Return dynamical systems matched in ``text``. A match inside a longer one is dropped: "damped harmonic
+    oscillator" is the damped system, not also the undamped "harmonic oscillator" it contains."""
+    found = _match_lexicon(text, SYSTEM_LEXICON)
+
+    def inside(a: dict[str, Any], b: dict[str, Any]) -> bool:
+        (s1, e1), (s2, e2) = a.get("span") or (0, 0), b.get("span") or (0, 0)
+        return s2 <= s1 and e1 <= e2 and (e2 - s2) > (e1 - s1)
+
+    return [m for m in found if not any(inside(m, other) for other in found if other is not m)]
 
 
 _QUANTITY_RE = re.compile(
     r"(?<![A-Za-z0-9_])"
+    r"(?:([A-Za-z][A-Za-z0-9_\']*(?:\([0-9]+\))?)\s*=\s*)?"
     r"([+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?)\s*"
     r"(m/s\^2|m/s2|m/s|km/s|km/h|m\^2|m\^3|mm|cm|km|nm|um|"
     r"kg/m\^3|kg|g|mg|"
     r"GPa|MPa|kPa|Pa|bar|atm|"
-    r"GN|MN|kN|N|N\*m|N·m|"
+    r"GN|MN|kN|N\*s/m|N·s/m|N s/m|N/m|kN/m|N/mm|N|N\*m|N·m|"
     r"GeV|MeV|keV|eV|GJ|MJ|kJ|J|mJ|GW|MW|kW|W|mW|"
     r"GHz|MHz|kHz|Hz|rad/s|rpm|"
     r"K|degC|°C|"
     r"kV|V|mV|kA|A|mA|uA|MOhm|kOhm|Ohm|Ω|mF|uF|nF|pF|F|mH|uH|H|T|"
-    r"mol/L|mol)\b"
+    r"mol/L|mol|ms|s|m)\b"
 )
+
+
+def _infer_physical_type(unit: str, param_name: str | None = None) -> str:
+    u = (unit or "").lower()
+    p = (param_name or "").lower()
+    if p.startswith("m") and u in ("kg", "g", "mg"):
+        return "mass"
+    if p.startswith("c") and ("s/m" in u or "kg/s" in u):
+        return "damping"
+    if p.startswith("k") and ("/m" in u or "n/mm" in u):
+        return "stiffness"
+    if p.startswith("f") and u in ("n", "kn", "mn"):
+        return "force"
+    if ("w" in p or "omega" in p) and "rad/s" in u:
+        return "frequency"
+    if u in ("kg", "g", "mg", "kg/m^3"):
+        return "mass"
+    if "s/m" in u or u == "kg/s":
+        return "damping"
+    if ("/m" in u or "n/mm" in u) and "s" not in u:
+        return "stiffness"
+    if u in ("n", "kn", "mn"):
+        return "force"
+    if u in ("rad/s", "hz", "khz", "mhz", "ghz", "rpm"):
+        return "frequency"
+    if u in ("m/s", "km/h", "km/s"):
+        return "velocity"
+    if u in ("m/s^2", "m/s2"):
+        return "acceleration"
+    if u in ("pa", "kpa", "mpa", "gpa", "bar", "atm"):
+        return "pressure"
+    if u in ("j", "kj", "mj", "ev"):
+        return "energy"
+    if u in ("w", "kw", "mw"):
+        return "power"
+    if u in ("s", "ms"):
+        return "time"
+    if u in ("m", "mm", "cm", "km", "nm", "um"):
+        return "length"
+    return "quantity"
 
 
 def find_offline_quantities(text: str) -> list[dict[str, Any]]:
@@ -571,16 +632,23 @@ def find_offline_quantities(text: str) -> list[dict[str, Any]]:
         if raw in seen:
             continue
         seen.add(raw)
+        param_name = m.group(1)
         try:
-            val = float(m.group(1))
-        except ValueError:
+            val = float(m.group(2))
+        except (ValueError, TypeError):
             val = None
+        units = m.group(3)
+        phys_type = _infer_physical_type(units, param_name)
+        label = f"{param_name} = {val:g} {units}" if param_name and val is not None else raw
         hits.append({
-            "canonical": raw,
+            "canonical": label,
             "mention": raw,
+            "label": label,
             "span": (m.start(), m.end()),
             "value": val,
-            "units": m.group(2),
+            "units": units,
+            "param_name": param_name,
+            "physical_type": phys_type,
         })
     return hits
 
@@ -612,6 +680,8 @@ ENGLISH_WORD_SYMBOLS: frozenset[str] = frozenset(
     }
 )
 
+# Deliberately empty: Tribos resolves no diseases. Kept only because tribos.agents.query_planner still imports it
+# (with find_offline_diseases / coordinated_disease_terms below); delete all three once that import is gone.
 DISEASE_HEAD_WORDS: frozenset[str] = frozenset()
 
 
@@ -671,11 +741,15 @@ def is_gene_mention(text: str, start: int = 0, end: int = 0) -> bool:
 
 
 def find_offline_diseases(text: str) -> list[tuple[str, str, tuple[int, int]]]:
-    """Legacy no-op helper retained for backward compatibility."""
+    """Always empty, whatever ``text`` says: there is no disease lexicon in Tribos. A documented no-op kept for the
+    remaining query_planner import (see DISEASE_HEAD_WORDS)."""
+    del text
     return []
 
 
 def coordinated_disease_terms(text: str) -> list[tuple[str, str, tuple[int, int]]]:
-    """Legacy no-op helper retained for backward compatibility."""
+    """Always empty, whatever ``text`` says (no disease lexicon). A documented no-op kept for the remaining
+    query_planner import (see DISEASE_HEAD_WORDS)."""
+    del text
     return []
 

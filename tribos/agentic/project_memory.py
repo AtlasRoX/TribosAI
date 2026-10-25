@@ -16,8 +16,8 @@ Phases:
   Writes `state.project_memory` (a text block the orchestrator appends to the memory summary) and the
   artifact `project_memory.recalled`.
 - `project_memory_consolidate` (finalize, order 50): extracts facts deterministically from `state.tool_results`
-  (gene-disease association scores, drug mechanisms and targets, trial to condition, BioModel to topic,
-  variant classifications), the `hypotheses` artifact and the researcher's lasting instructions
+  (symbolic results, equilibria and simulated end states of a named system, CODATA constants, unit
+  conversions, material properties, literature findings), the `hypotheses` artifact and the researcher's lasting instructions
   (`classify_instructions`, investigation or profile scope). Facts are `verified` only when the turn's
   verification passed; otherwise they are tagged `unverified`. Artifact `project_memory.written/invalidated`.
 """
@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Iterable
 from typing import Any
 
 from ..utils.memory.project_store import FactInput, ProjectStore, get_project_store
@@ -46,14 +45,15 @@ def _store() -> ProjectStore:
 
 
 def query_entities(state: AgentState) -> list[str]:
-    """Entity strings for the PPR seeds: resolved genes, drugs, diseases, variants, the BioModel id."""
+    """Entity strings for the PPR seeds: the resolved concepts, equations, systems, constants and materials and the
+    question's subject."""
     ctx = state.ctx
     out: list[str] = []
     for e in list(getattr(ctx, "entities", None) or []):
         for value in (getattr(e, "label", None), getattr(e, "mention", None)):
             if value:
                 out.append(str(value))
-    for value in (getattr(ctx, "primary_symbol", None), getattr(ctx, "biomodel_id", None)):
+    for value in (_topic(ctx), getattr(ctx, "system_name", None)):
         if value:
             out.append(str(value))
     return list(dict.fromkeys(out))
@@ -110,95 +110,87 @@ def _num(value: Any) -> float | None:
         return None
 
 
-def _iter_dicts(data: Any, key: str, depth: int = 0) -> Iterable[dict[str, Any]]:
-    """Dicts that carry `key`, found in data, its lists, or one level of nested dicts."""
-    if depth > 2:
-        return
-    if isinstance(data, dict):
-        if key in data:
-            yield data
-        for v in data.values():
-            if isinstance(v, (list, dict)):
-                yield from _iter_dicts(v, key, depth + 1)
-    elif isinstance(data, list):
-        for item in data[:50]:
-            yield from _iter_dicts(item, key, depth + 1)
+def _topic(ctx: Any) -> str | None:
+    """The question's subject (a named system, equation, concept or material), for facts that need one."""
+    for name in ("primary_display", "primary_target", "system_name", "primary_symbol"):
+        value = getattr(ctx, name, None)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 
 
-def _associations(subject: str, data: dict[str, Any]) -> list[FactInput]:
-    out: list[FactInput] = []
-    for a in (data.get("associations") or [])[:10]:
-        if not isinstance(a, dict):
-            continue
-        nested = a.get("disease") if isinstance(a.get("disease"), dict) else {}
-        disease = a.get("disease_name") or nested.get("name")
-        score = _num(a.get("overall_association_score", a.get("score")))
-        if subject and disease:
-            out.append(
-                FactInput(
-                    subject=subject,
-                    relation="association_score_with",
-                    object=str(disease),
-                    value=f"{score:.3f}" if score is not None else None,
-                    confidence=min(0.95, 0.5 + 0.5 * score) if score is not None else 0.6,
-                )
-            )
-    return out
+def _fmt_value(value: Any, unit: Any = None) -> str:
+    num = _num(value)
+    text = f"{num:.6g}" if num is not None else str(value)
+    return f"{text} {unit}".strip() if unit else text
 
 
-def _drugs(data: dict[str, Any]) -> list[FactInput]:
-    out: list[FactInput] = []
-    for d in (data.get("drugs") or [])[:10]:
-        if not isinstance(d, dict):
-            continue
-        name = d.get("pref_name") or d.get("chembl_id") or d.get("name")
-        if not name:
-            continue
-        for m in (d.get("mechanisms") or [])[:5]:
-            if not isinstance(m, dict):
-                continue
-            moa = m.get("mechanism_of_action")
-            if moa:
-                out.append(FactInput(subject=str(name), relation="mechanism", object=str(moa), confidence=0.85))
-            target = m.get("target_pref_name") or m.get("target_chembl_id")
-            if target:
-                out.append(FactInput(subject=str(name), relation="targets", object=str(target), confidence=0.85))
-    for d in (data.get("target_approved_drugs") or [])[:10]:
-        if isinstance(d, dict) and (d.get("pref_name") or d.get("chembl_id")) and d.get("mechanism_of_action"):
-            out.append(
-                FactInput(subject=str(d.get("pref_name") or d.get("chembl_id")), relation="mechanism", object=str(d["mechanism_of_action"]), confidence=0.85)
-            )
-    return out
+def _symbolic(data: dict[str, Any], topic: str | None) -> list[FactInput]:
+    """An Axiom answer (axiom_solve_problem's answer text, or another tool's result), with its verification status."""
+    answer = data.get("answer") if isinstance(data.get("answer"), dict) else {}
+    text = answer.get("text") or data.get("result") or data.get("latex")
+    if not text:
+        return []
+    status = str(data.get("status") or (data.get("verification") or {}).get("status") or "") or None
+    subject = topic or str(data.get("problem") or data.get("expression") or data.get("equation") or "symbolic computation")
+    return [FactInput(subject=subject[:200], relation="symbolic_result", object=str(text)[:300], value=status,
+                      confidence=0.95 if status == "verified" else 0.75, tags=["symbolic"])]
 
 
-def _trials(data: dict[str, Any]) -> list[FactInput]:
-    out: list[FactInput] = []
-    for t in (data.get("trials") or [])[:15]:
-        if not isinstance(t, dict) or not t.get("nct_id"):
-            continue
-        for cond in (t.get("conditions") or [])[:3]:
-            out.append(FactInput(subject=str(t["nct_id"]), relation="studies_condition", object=str(cond), confidence=0.9))
-    return out
-
-
-def _variants(data: Any) -> list[FactInput]:
-    out: list[FactInput] = []
-    for v in _iter_dicts(data, "clinvar"):
-        gene = v.get("gene") or ""
-        change = v.get("protein_change") or v.get("hgvs_c") or v.get("rsid") or ""
-        subject = f"{gene} {change}".strip()
-        for rec in (v.get("clinvar") or [])[:1]:
-            if isinstance(rec, dict) and rec.get("germline_classification") and subject:
-                out.append(FactInput(subject=subject, relation="classification", object=str(rec["germline_classification"]), confidence=0.85))
-    return out
-
-
-def _model(data: dict[str, Any], topic: str | None) -> list[FactInput]:
-    model_id = data.get("model_id")
-    obj = topic or data.get("model_name")
-    if model_id and obj:
-        return [FactInput(subject=str(model_id), relation="models_topic", object=str(obj), confidence=0.8)]
+def _dynamics(data: dict[str, Any], topic: str | None) -> list[FactInput]:
+    """An equilibrium with its stability, or a simulated end state over the integration interval."""
+    subject = topic or str(data.get("model_name") or "dynamical system")
+    point = data.get("fixed_point")
+    if isinstance(point, dict) and point:
+        obj = ", ".join(f"{k}={_fmt_value(v)}" for k, v in list(point.items())[:8])
+        return [FactInput(subject=subject, relation="equilibrium", object=obj, value=str(data.get("stability") or "") or None,
+                          confidence=0.9 if data.get("converged", True) else 0.6, tags=["numerical"])]
+    summary = data.get("summary")
+    if isinstance(summary, dict) and summary:
+        finals = {k: v.get("final") for k, v in summary.items() if isinstance(v, dict) and v.get("final") is not None}
+        if finals:
+            span = data.get("t_span") or []
+            when = f"t = {_fmt_value(span[-1])}" if span else None
+            obj = ", ".join(f"{k}={_fmt_value(v)}" for k, v in list(finals.items())[:8])
+            return [FactInput(subject=subject, relation="simulated_final_state", object=obj, value=when,
+                              confidence=0.9 if data.get("verified", True) else 0.6, tags=["numerical"])]
     return []
+
+
+def _constants(data: dict[str, Any]) -> list[FactInput]:
+    out: list[FactInput] = []
+    for c in (data.get("constants") or [])[:5]:
+        if isinstance(c, dict) and c.get("name") and c.get("value") is not None:
+            out.append(FactInput(subject=str(c["name"]), relation="physical_constant",
+                                 object=str(c.get("symbol") or c["name"]), value=_fmt_value(c["value"], c.get("unit")),
+                                 confidence=1.0, tags=["constant"]))
+    return out
+
+
+def _conversion(data: dict[str, Any]) -> list[FactInput]:
+    if data.get("converted_value") is None or not data.get("input_unit"):
+        return []
+    return [FactInput(subject=_fmt_value(data.get("input_value"), data["input_unit"]), relation="converts_to",
+                      object=_fmt_value(data["converted_value"], data.get("converted_unit")), confidence=0.95,
+                      tags=["units"])]
+
+
+_MATERIAL_PROPERTIES = (("band_gap", "band gap", "eV"), ("density", "density", "g/cm^3"),
+                        ("youngs_modulus_gpa", "Young's modulus", "GPa"), ("yield_strength_mpa", "yield strength", "MPa"),
+                        ("thermal_conductivity_w_mk", "thermal conductivity", "W/(m K)"))
+
+
+def _materials(data: dict[str, Any]) -> list[FactInput]:
+    out: list[FactInput] = []
+    for m in (data.get("materials") or [])[:3]:
+        if not isinstance(m, dict) or not (m.get("formula_pretty") or m.get("name")):
+            continue
+        subject = str(m.get("formula_pretty") or m.get("name"))
+        for field, label, unit in _MATERIAL_PROPERTIES:
+            if _num(m.get(field)) is not None:
+                out.append(FactInput(subject=subject, relation="property", object=label, value=_fmt_value(m[field], unit),
+                                     confidence=0.85, tags=["material", str(m.get("source") or "")]))
+    return out
 
 
 def _hypotheses(artifact: Any) -> list[FactInput]:
@@ -212,8 +204,11 @@ def _hypotheses(artifact: Any) -> list[FactInput]:
         supports = (h.get("result") or {}).get("supports") if isinstance(h.get("result"), dict) else None
         relation = "hypothesis_supported" if supports is True else "hypothesis_not_supported" if supports is False else "hypothesis_untested"
         value = None
-        lfc = _num((h.get("result") or {}).get("log2_fold_change")) if isinstance(h.get("result"), dict) else None
-        if lfc is not None:
+        result = h.get("result") if isinstance(h.get("result"), dict) else {}
+        rel, lfc = _num(result.get("relative_change")), _num(result.get("log2_fold_change"))
+        if rel is not None:
+            value = f"relative change {rel:+.3f}"
+        elif lfc is not None:
             value = f"log2FC {lfc:.2f}"
         out.append(
             FactInput(subject=subject or "hypothesis", relation=relation, object=str(h["statement"]), value=value, confidence=0.6, tags=["hypothesis"])
@@ -223,67 +218,37 @@ def _hypotheses(artifact: Any) -> list[FactInput]:
 
 def extract_facts(state: AgentState) -> list[FactInput]:
     """Facts from this turn's tool results, artifacts and lasting instructions (deterministic)."""
-    ctx = state.ctx
-    symbol = getattr(ctx, "primary_symbol", None)
-    topic = symbol  # a Vivarix model is recorded against the target it was simulated for, else its own name
+    topic = _topic(state.ctx)
     facts: list[FactInput] = []
+    seen: set[int] = set()  # the pipeline stores some results under two keys ("dynamis" and its "vivarix" alias)
     for key, result in list(state.tool_results.items()):
         ok, data, tool = _data(result)
-        if not ok or data is None:
+        if not ok or not isinstance(data, dict) or id(result) in seen:
             continue
+        seen.add(id(result))
         name = f"{key} {tool}".lower()
         src = {"tool": key}
         found: list[FactInput] = []
-        if isinstance(data, dict) and data.get("associations") and ("synapta" in name or "association" in name):
-            subject = symbol or str(getattr(result, "canonical_ids", {}).get("target_symbol", "") or "")
-            found = _associations(subject, data)
-        elif isinstance(data, dict) and ("chembl" in name or "drug" in name) and (data.get("drugs") or data.get("target_approved_drugs")):
-            found = _drugs(data)
-        elif isinstance(data, dict) and ("trial" in name) and data.get("trials"):
-            found = _trials(data)
-        elif "vivarix" in name and isinstance(data, dict):
-            found = _model(data, topic)
-        elif "variant" in name:
-            found = _variants(data)
-        elif isinstance(data, dict) and ("lithoscribe" in name or "archivon" in name or "literature" in name) and data.get("ranked_passages"):
+        if "physis_constants" in name or data.get("constants"):
+            found = _constants(data)
+        elif "physis_units" in name or "converted_value" in data:
+            found = _conversion(data)
+        elif "physis_materials" in name or isinstance(data.get("materials"), list):
+            found = _materials(data)
+        elif "axiom" in name or "symbolic" in name:
+            found = _symbolic(data, topic)
+        elif "dynamis" in name or "vivarix" in name:
+            found = _dynamics(data, topic)
+        elif ("lithoscribe" in name or "archivon" in name or "literature" in name) and data.get("ranked_passages"):
             for p in (data.get("ranked_passages") or [])[:5]:
-                text = p.get("passage_text") or p.get("text") or ""
+                text = p.get("passage_text") or p.get("text") or "" if isinstance(p, dict) else ""
                 if text:
                     found.append(FactInput(
-                        subject=symbol or "literature",
+                        subject=topic or "literature",
                         relation="literature_finding",
                         object=text[:120],
                         confidence=0.75,
                         tags=["literature"],
-                    ))
-        elif isinstance(data, dict) and ("axiom" in name or "symbolic" in name) and data.get("result"):
-            found.append(FactInput(
-                subject=symbol or str(data.get("equation", "expression")),
-                relation="symbolic_solution",
-                object=str(data["result"]),
-                value=str(data.get("latex", "")),
-                confidence=0.95,
-                tags=["symbolic"],
-            ))
-        elif isinstance(data, dict) and ("dynamis" in name or "simulation" in name):
-            summary = data.get("summary") or {}
-            found.append(FactInput(
-                subject=symbol or str(data.get("canonical_id", "simulation")),
-                relation="simulation_trajectory",
-                object=str(list(summary.keys()) if summary else "trajectory"),
-                confidence=0.90,
-                tags=["numerical"],
-            ))
-        elif isinstance(data, dict) and ("physis" in name or "constant" in name) and data.get("constants"):
-            for c in (data.get("constants") or [])[:5]:
-                if isinstance(c, dict) and c.get("name"):
-                    found.append(FactInput(
-                        subject=str(c.get("symbol") or c["name"]),
-                        relation="physical_constant",
-                        object=str(c["name"]),
-                        value=str(c.get("value")),
-                        confidence=1.0,
-                        tags=["constant"],
                     ))
         for f in found:
             f.source = {**src, **(f.source or {})}

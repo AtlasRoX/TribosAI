@@ -17,7 +17,7 @@ Precedence for state directories: a specific variable (`TRIBOS_MEMORY_DIR`, `TRI
 `TRIBOS_UPLOAD_ROOT`, `TRIBOS_JOBS_DIR`, `TRIBOS_TOOL_CACHE_DIR`) wins over `TRIBOS_DATA_DIR`; with
 neither set, every store keeps its historical location under the workspace.
 
-130 variables.
+150 variables.
 
 ## State directories
 
@@ -61,8 +61,11 @@ neither set, every store keeps its historical location under the workspace.
 | `TRIBOS_ALLOWED_HOSTS` | list | unset | `app/backend/security.py` | Allowed HTTP Host header values (comma-separated; defaults to loopback when auth is disabled). |
 | `TRIBOS_CORS_ORIGINS` | list | `http://localhost:3000,http://127.0.0.1:3000` | `app/backend/routers/mcp.py`<br>`app/backend/security.py` | Comma-separated browser origins allowed by CORS (also allowed by the MCP endpoint). |
 | `TRIBOS_HEALTH_CACHE_S` | float (>= 0) | `60.0` | `app/backend/main.py` | Seconds the upstream readiness probes of /api/health are cached. |
+| `TRIBOS_MAX_BODY_MB` | float (>= 0.01) | `2.0` | `app/backend/security.py` | Largest request body in MB (larger requests get 413). |
 | `TRIBOS_MAX_CONCURRENT_CHATS_PER_USER` | int (>= 1) | `2` | `app/backend/main.py` | Questions one user may have running at once (over it the request is refused). |
 | `TRIBOS_MAX_CONCURRENT_TITLES_PER_USER` | int (>= 1) | `2` | `app/backend/main.py` | Model-generated thread titles per user at once (over it a heuristic title is used). |
+| `TRIBOS_MAX_EXPORT_BODY_MB` | float (>= 0.01) | `16.0` | `app/backend/security.py` | Largest request body in MB for the export and report endpoints. |
+| `TRIBOS_PUBLIC_URL` | str | unset | `app/backend/routers/a2a.py` | Public base URL of the API (e.g. https://tribos.example.org) used in the A2A Agent Card; default: the request's own base URL. |
 | `TRIBOS_SSE_HEARTBEAT_S` | float (>= 0.05) | `15.0` | `app/backend/main.py`<br>`app/backend/routers/jobs.py` | Seconds between keep-alive comments on chat and job event streams. |
 | `TRIBOS_STRICT_CONFIG` | bool | `false` | `app/backend/main.py` | Fail startup when configuration validation reports a problem instead of only logging it. |
 | `TRIBOS_STRICT_ROUTERS` | bool | `false` | `app/backend/main.py` | Fail startup when an optional API router cannot be imported instead of disabling it. |
@@ -99,7 +102,7 @@ neither set, every store keeps its historical location under the workspace.
 | `TRIBOS_ALLOWED_MODELS` | list | unset | `tribos/utils/llm/llm_factory.py` | Extra comma-separated model ids callers may select besides the built-in catalog. |
 | `TRIBOS_LLM_FALLBACK` | bool | `true` | `tribos/utils/llm/llm_factory.py` | Allow fallback to an available provider when the requested model key is unset. |
 | `TRIBOS_LLM_MODEL` | str | unset | `tribos/evals/cassette.py`<br>`tribos/evals/runner.py`<br>`tribos/utils/llm/llm_factory.py` | Default model id when a request names none (the orchestrator default when unset; gpt-4o-mini for the Lumicell SCP agent). |
-| `TRIBOS_SYNTHESIS_MODEL` | str | unset | `tribos/agents/orchestration/draft.py` | Model that writes the final answer (default: the turn's model). |
+| `TRIBOS_SYNTHESIS_MODEL` | str | unset | `tribos/agents/orchestration/draft.py`<br>`tribos/utils/llm/llm_factory.py` | Model that writes the final answer (default: the turn's model). |
 
 ## TRIBOS_AGENT_*: Agentic runtime
 
@@ -118,7 +121,7 @@ neither set, every store keeps its historical location under the workspace.
 | `TRIBOS_AGENT_MAX_SECONDS` | float (0 to 7200) | `0.0` | `tribos/agentic/budget.py` | Run budget: wall-clock seconds (0 = no limit). |
 | `TRIBOS_AGENT_MAX_TOKENS` | int (1000 to 2000000) | `250000` | `tribos/agentic/budget.py` | Run budget: model tokens. |
 | `TRIBOS_AGENT_MAX_TOOL_CALLS` | int (1 to 200) | `40` | `tribos/agentic/budget.py` | Run budget: tool calls. |
-| `TRIBOS_AGENT_MODEL` | str | unset | `tribos/agentic/config.py` | Model for agentic planning/critique calls (default: the turn's model). |
+| `TRIBOS_AGENT_MODEL` | str | unset | `tribos/agentic/config.py`<br>`tribos/utils/llm/llm_factory.py` | Model for agentic planning/critique calls (default: the turn's model). |
 | `TRIBOS_AGENT_OUTPUT_RESERVE_TOKENS` | int (>= 1) | `4096` | `tribos/agentic/llm.py` | Output tokens admitted per agent model call; also its max_tokens, so concurrent calls cannot overshoot the budget together. |
 | `TRIBOS_AGENT_PLAN` | off \| auto \| on | `auto` | `tribos/agentic/plan_execute.py` | Plan-and-execute phase: off disables it. |
 | `TRIBOS_AGENT_PLAN_CONCURRENCY` | int (1 to 16) | `4` | `tribos/agentic/executor.py` | Plan nodes executed in parallel. |
@@ -211,17 +214,43 @@ neither set, every store keeps its historical location under the workspace.
 | --- | --- | --- | --- | --- |
 | `TRIBOS_UPLOAD_MAX_DATASETS` | int | `50` | `tribos/datasets/store.py` | Uploaded datasets kept per user. |
 | `TRIBOS_UPLOAD_MAX_MB_CSV` | float | `100.0` | `tribos/datasets/store.py` | Largest table (CSV/TSV) upload in MB. |
-| `TRIBOS_UPLOAD_MAX_MB_H5AD` | float | `500.0` | `tribos/datasets/store.py` | Largest .h5ad upload in MB. |
+| `TRIBOS_UPLOAD_MAX_MB_H5AD` | float | `500.0` | `tribos/datasets/store.py` | Deprecated: fallback for TRIBOS_UPLOAD_MAX_MB_HDF5. |
 | `TRIBOS_UPLOAD_MAX_MB_HDF5` | float | `500.0` | `tribos/datasets/store.py` | Largest HDF5 (.h5/.hdf5) upload in MB. |
+| `TRIBOS_UPLOAD_MAX_MB_MAT` | float | `100.0` | `tribos/datasets/store.py` | Largest MATLAB (.mat) upload in MB. |
 | `TRIBOS_UPLOAD_MAX_TOTAL_MB` | float | `2048.0` | `tribos/datasets/store.py` | Total upload storage per user in MB. |
 
 ## TRIBOS_SANDBOX_*: Code sandbox
 
 | Variable | Type | Default | Read at | Description |
 | --- | --- | --- | --- | --- |
-| `TRIBOS_SANDBOX` | bool | `false` | `tribos/agentic/sandbox/__init__.py` | Enable the code-execution sandbox tool (on/1/true/yes). |
+| `TRIBOS_SANDBOX` | bool | `true` | `tribos/agentic/sandbox/__init__.py` | Code-execution sandbox tool; on by default, off/0/false/no disables it. |
 | `TRIBOS_SANDBOX_MEMORY_MB` | int (256 to 16384) | `2048` | `tribos/agentic/sandbox/__init__.py` | Memory limit of one sandboxed execution in MB. |
 | `TRIBOS_SANDBOX_TIMEOUT_S` | int (5 to 110) | `60` | `tribos/agentic/sandbox/__init__.py` | Seconds one sandboxed execution may run. |
+
+## TRIBOS_MATH_*: Mathematics agent
+
+| Variable | Type | Default | Read at | Description |
+| --- | --- | --- | --- | --- |
+| `TRIBOS_MATH_AGENT` | bool | `true` | `tribos/agentic/math_agent.py` | Run the verified mathematics agent (bounded ReAct loop over the Axiom tools with an independent verifier) on mathematical questions. |
+| `TRIBOS_MATH_AGENT_MAX_REPAIRS` | int (0 to 10) | `4` | `tribos/axiom/agent.py` | Local repairs of one failed step before the agent switches strategy. |
+| `TRIBOS_MATH_AGENT_MAX_STEPS` | int (2 to 40) | `12` | `tribos/axiom/agent.py` | Tool calls one mathematics-agent run may make. |
+| `TRIBOS_MATH_TRAJECTORY_DIR` | path | unset | `tribos/axiom/agent.py` | Append every mathematics-agent trajectory here as JSONL (tool calls, observations, verification labels) for evaluation and fine-tuning data. |
+| `TRIBOS_SAGEMATH_PATH` | str | unset | `tribos/axiom/sagemath.py` | SageMath executable, or `wsl:<wsl.exe arguments>` to run it inside WSL; discovered on PATH and in WSL when unset. |
+
+## TRIBOS_VISION_*: Image input (OCR and vision)
+
+| Variable | Type | Default | Read at | Description |
+| --- | --- | --- | --- | --- |
+| `TRIBOS_VISION` | bool | `true` | `tribos/vision/reader.py`<br>`app/backend/routers/vision.py` | Accept images attached to questions (POST /api/vision/read); they are read into text before the question is solved. |
+| `TRIBOS_VISION_MAX_IMAGES` | int (1 to 10) | `4` | `app/backend/main.py` | Images one question may carry. |
+| `TRIBOS_VISION_MAX_MB` | int (1 to 50) | `10` | `tribos/vision/reader.py`<br>`app/backend/routers/vision.py` | Largest image upload in MB. |
+| `TRIBOS_VISION_MAX_PAGES` | int (1 to 20) | `4` | `tribos/vision/reader.py` | Pages of an attached PDF that are read (each like one image). |
+| `TRIBOS_VISION_MODEL` | str | `nvidia/nemotron-3.5-super-vl-120b-a12b` | `tribos/vision/vlm.py` | NVIDIA NIM vision model for `nim` (must be in the allowed model list). |
+| `TRIBOS_VISION_OCR_MATH` | bool | `true` | `tribos/vision/ocr.py` | Load Indra OCR's math models so formulas are read as LaTeX (about 60% slower OCR on math lines). |
+| `TRIBOS_VISION_OLLAMA_MODEL` | str | unset | `tribos/vision/vlm.py` | Ollama vision model for `ollama` (e.g. qwen2.5vl:7b); the first installed vision-family model when unset. |
+| `TRIBOS_VISION_OLLAMA_URL` | str | `http://127.0.0.1:11434` | `tribos/vision/vlm.py` | Base URL of the local Ollama server. |
+| `TRIBOS_VISION_PROVIDER` | nim \| ollama \| ocr | `nim` | `tribos/vision/vlm.py` | Vision model that corrects the OCR draft: `nim` (NVIDIA NIM, TRIBOS_VISION_MODEL), `ollama` (a local model through Ollama), or `ocr` (Indra OCR only; the image never leaves this machine). |
+| `TRIBOS_VISION_TIMEOUT_S` | int (10 to 1800) | `300` | `tribos/vision/vlm.py` | Seconds one vision-model transcription may take (CPU inference of a 7B model can need minutes). |
 
 ## TRIBOS_EVAL_*: Evaluations
 
@@ -230,6 +259,7 @@ neither set, every store keeps its historical location under the workspace.
 | `HF_TOKEN` | str | (secret, unset) | `tribos/evals/datasets.py` | Hugging Face user access token for gated benchmark downloads (GPQA Diamond). |
 | `TRIBOS_CASSETTE_PROMPTS` | bool | `false` | `tribos/evals/cassette.py` | Store full normalised prompts in recorded eval cassettes (easier miss diagnosis, larger files). |
 | `TRIBOS_EVAL_CACHE` | path | unset | `tribos/evals/datasets.py` | Downloaded benchmark datasets cache (default ~/.cache/tribos/evals). |
+| `TRIBOS_EVAL_JUDGE_MODEL` | str | unset | `tribos/utils/llm/llm_factory.py` | Model id of the evaluation judge; also added to the models callers may select. |
 | `TRIBOS_EVAL_TOKEN` | str | (secret, unset) | `tribos/evals/runner.py` | Bearer token the eval runner sends to a remote Tribos API. |
 
 ## Testing

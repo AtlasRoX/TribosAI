@@ -15,25 +15,27 @@ dependencies:
   - changed-files:
     - any-glob-to-any-file: ['pyproject.toml', 'uv.lock']
 
-# Vivarix module
-vivarix:
+# Specialist agents
+archivon:
   - changed-files:
-    - any-glob-to-any-file: ['tribos/vivarix/**']
+    - any-glob-to-any-file: ['tribos/archivon/**']
 
-# Lithoscribe module
-lithoscribe:
+axiom:
   - changed-files:
-    - any-glob-to-any-file: ['tribos/lithoscribe/**']
+    - any-glob-to-any-file: ['tribos/axiom/**']
 
-# Lumicell module
-lumicell:
+dynamis:
   - changed-files:
-    - any-glob-to-any-file: ['tribos/lumicell/**']
+    - any-glob-to-any-file: ['tribos/dynamis/**']
 
-# Synapta module
-synapta:
+physis:
   - changed-files:
-    - any-glob-to-any-file: ['tribos/synapta/**']
+    - any-glob-to-any-file: ['tribos/physis/**']
+
+# Image input (OCR and vision models)
+vision:
+  - changed-files:
+    - any-glob-to-any-file: ['tribos/vision/**']
 
 # Tests
 tests:
@@ -43,27 +45,22 @@ tests:
 # Docker
 docker:
   - changed-files:
-    - any-glob-to-any-file: ['**/Dockerfile*', '**/docker-compose*.yml']
+    - any-glob-to-any-file: ['docker/**', '**/Dockerfile*', '**/docker-compose*.yml']
 
-# Frontend/App (Streamlit apps and the Next.js web app)
+# Frontend (the Next.js web app)
 frontend:
   - changed-files:
-    - any-glob-to-any-file: ['app/frontend/**', 'web/**']
+    - any-glob-to-any-file: ['web/**']
 
 # FastAPI backend
 backend:
   - changed-files:
     - any-glob-to-any-file: ['app/backend/**']
 
-# Shared pipeline: orchestrator, planner, verifier, tools, memory
+# Shared pipeline: orchestrator, planner, agentic runtime, verifier, tools, memory, configuration
 core:
   - changed-files:
-    - any-glob-to-any-file: ['tribos/agents/**', 'tribos/tribos/**', 'tribos/tools/**', 'tribos/utils/**', 'tribos/sources/**', 'tribos/extensions/**']
-
-# Clinical R&D modules
-clinical:
-  - changed-files:
-    - any-glob-to-any-file: ['tribos/trials/**', 'tribos/drugintel/**', 'tribos/diseaseintel/**', 'tribos/variants/**']
+    - any-glob-to-any-file: ['tribos/agents/**', 'tribos/agentic/**', 'tribos/verify/**', 'tribos/tools/**', 'tribos/utils/**', 'tribos/sources/**', 'tribos/extensions/**', 'tribos/config/**']
 
 # Datasets, provenance, export and evaluation
 data-provenance:

@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .budget import BudgetExhausted, RunBudget
-from .config import AGENTIC, DEBATE, SUPERVISOR, SWARM
+from .config import AGENTIC, DEBATE, DIRECT_ROUTES, SUPERVISOR, SWARM
 from .control import RunControl
 from .llm import AgentLLM
 
@@ -254,6 +254,8 @@ class AgentState:
             return None
         label = CORE_PHASE_LABELS.get(key, key)
         ran = [p for p in self.bag.get("phases_ran") or [] if isinstance(p, dict) and p.get("phase") == key]
+        if not ran and (self.bag.get("routing") or {}).get("rule") in DIRECT_ROUTES:
+            return None  # the router chose the fixed workflow: the planner is skipped by design
         if ran:
             last = ran[-1]
             return {"phase": key, "label": label, "status": str(last.get("status") or "ok"), "reason": str(last.get("reason") or "")}

@@ -80,11 +80,9 @@ def test_policy_allows_ordinary_analysis_code():
         "result = {'r': float(r), 'p': float(p), 'n': int(df.shape[0])}\n"
     )
     assert check_code(code, ["data.csv"]) == []
-    # The deterministic no-model scripts pass the policy for both dataset kinds.
+    # The deterministic no-model table script passes the policy.
     table = ResolvedInput(dataset_id="ds_0123456789ab", name="atlas.csv", path="", kind="table", display_name="atlas.csv", sep=",")
-    h5ad = ResolvedInput(dataset_id="ds_0123456789ab", name="atlas.h5ad", path="", kind="h5ad", display_name="atlas.h5ad")
     assert check_code(deterministic_script(table, "plot the distribution"), ["atlas.csv"]) == []
-    assert check_code(deterministic_script(h5ad, "plot the distribution"), ["atlas.h5ad"]) == []
 
 
 def test_analysis_intent_regex():

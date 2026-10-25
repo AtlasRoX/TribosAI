@@ -5,6 +5,7 @@ import { Activity, Download } from "lucide-react";
 import { Card, Disclosure, ExtLink, Pill, Section, Stats, arr, fmt, isNum, str, styles as ui } from "./agentic/ui";
 import { changeText, checkSteadyState, largestChange } from "@/lib/simulationMath";
 import styles from "./SimulationArtifact.module.css";
+import { TrajectoryCharts } from "./TrajectoryCharts";
 
 interface SimulationArtifactProps {
   data?: Record<string, any> | null;
@@ -36,16 +37,31 @@ function downloadName(raw: unknown): string {
 export function SimulationArtifact({ data, scan }: SimulationArtifactProps) {
   if (!data && !scan) return null;
 
-  const modelId = str(data?.model_id ?? data?.system ?? data?.name);
+  const modelId = str(data?.model_id ?? data?.system ?? data?.name ?? data?.model_name);
   const modelUrl =
     modelId && /^BIOMD\d{10}$/i.test(modelId) ? `https://www.ebi.ac.uk/biomodels/${modelId.toUpperCase()}` : null;
   const backend = str(data?.backend ?? data?.method) || "SciPy";
+  // Kinetic models report time_span/duration; the Dynamis ODE engine reports t_span and the sample times t.
+  const span = Array.isArray(data?.time_span) ? data.time_span : Array.isArray(data?.t_span) ? data.t_span : null;
   const duration = isNum(data?.duration)
     ? data.duration
-    : Array.isArray(data?.time_span) && data.time_span.length === 2 && isNum(data.time_span[1]) && isNum(data.time_span[0])
-      ? data.time_span[1] - data.time_span[0]
+    : span && span.length === 2 && isNum(span[1]) && isNum(span[0])
+      ? span[1] - span[0]
       : null;
-  const steps = isNum(data?.steps) ? data.steps : isNum(data?.n_points) ? data.n_points : null;
+  const times = arr<number>(data?.t).filter(isNum);
+  // Output samples (where the solution is reported), not integrator steps: adaptive solvers choose their own steps.
+  const samples = isNum(data?.n_points) ? data.n_points : times.length > 1 ? times.length : isNum(data?.steps) ? data.steps : null;
+  const t0 = span && span.length === 2 && isNum(span[0]) ? span[0] : 0;
+  const adaptive = /^(?:RK45|RK23|DOP853|Radau|BDF|LSODA)$/i.test(backend);
+  const tolerance = isNum(data?.rtol) ? `rtol ${data.rtol.toExponential(0)}` : "";
+  const trajectories =
+    data?.trajectories && typeof data.trajectories === "object" && !Array.isArray(data.trajectories)
+      ? (data.trajectories as Record<string, number[]>)
+      : null;
+  // Per-variable start and end values of an ODE run ({x: {initial, final, min, max, mean}}).
+  const summary = data?.summary && typeof data.summary === "object" ? (data.summary as Record<string, any>) : {};
+  const fromSummary = (key: "initial" | "final") =>
+    Object.fromEntries(Object.entries(summary).filter(([, s]) => isNum(s?.[key])).map(([k, s]) => [k, s[key]]));
   const status = str(data?.steady_state_status ?? data?.status);
   const plot = safePng(data?.plot_base64 ?? data?.figure_base64);
   const scanPlot = safePng(scan?.plot_base64 ?? scan?.figure_base64);
@@ -55,13 +71,13 @@ export function SimulationArtifact({ data, scan }: SimulationArtifactProps) {
       ? (data.initial_concentrations as Record<string, any>)
       : data?.initial_state && typeof data.initial_state === "object"
         ? (data.initial_state as Record<string, any>)
-        : {};
+        : fromSummary("initial");
   const finals =
     data?.final_concentrations && typeof data.final_concentrations === "object"
       ? (data.final_concentrations as Record<string, any>)
       : data?.final_state && typeof data.final_state === "object"
         ? (data.final_state as Record<string, any>)
-        : {};
+        : fromSummary("final");
   const steady =
     data?.steady_state && typeof data.steady_state === "object"
       ? (data.steady_state as Record<string, any>)
@@ -80,6 +96,9 @@ export function SimulationArtifact({ data, scan }: SimulationArtifactProps) {
     ? speciesList
     : Array.from(new Set([...Object.keys(initials), ...Object.keys(finals), ...Object.keys(steady)]));
   const hasSteady = species.some((sp) => isNum(steady[sp]));
+  const hasAnyValues = species.some(
+    (sp) => initials[sp] !== undefined || finals[sp] !== undefined || steady[sp] !== undefined
+  );
 
   const equilibria = arr<Record<string, any>>(data?.equilibria ?? data?.fixed_points);
   const eigenvalues = arr<any>(data?.eigenvalues ?? data?.jacobian_eigenvalues);
@@ -88,7 +107,14 @@ export function SimulationArtifact({ data, scan }: SimulationArtifactProps) {
   const ssCheck = hasSteady ? checkSteadyState(species, finals, steady, initials) : null;
   const ssReached = ssCheck?.status === "reached";
   const ssUnknown = ssCheck?.status === "unknown";
-  const largest = largestChange(species, initials, finals);
+  // An ODE run reports each variable's range; start-to-end change says nothing about an oscillation ("x: -397%"),
+  // so its table shows the range instead and no "largest change" is ranked.
+  const ranges = species.length > 0 && species.every((sp) => isNum(summary[sp]?.min) && isNum(summary[sp]?.max));
+  // Extremes between output samples, from the solver's dense output (tribos.dynamis.engine "extrema").
+  const extrema = data?.extrema && typeof data.extrema === "object" ? (data.extrema as Record<string, any>) : {};
+  const hasDense = species.length > 0 && species.some((sp) => isNum(extrema[sp]?.dense_min));
+  const solver = data?.solver && typeof data.solver === "object" ? (data.solver as Record<string, any>) : null;
+  const largest = ranges ? null : largestChange(species, initials, finals);
 
   const overrideKeys = Object.keys(overrides);
   const scanRows = arr<Record<string, any>>(scan?.results);
@@ -120,8 +146,9 @@ export function SimulationArtifact({ data, scan }: SimulationArtifactProps) {
       )
     );
   }
-  metaParts.push(backend);
-  if (duration !== null) metaParts.push(`${fmt(duration)} s${steps !== null ? ` · ${steps} steps` : ""}`);
+  metaParts.push(adaptive ? `${backend} (adaptive step${tolerance ? `, ${tolerance}` : ""})` : backend);
+  if (duration !== null) metaParts.push(`${fmt(t0)}–${fmt(t0 + duration)} s`);
+  if (samples !== null) metaParts.push(`${samples.toLocaleString()} samples`);
   const meta = metaParts.reduce<React.ReactNode[]>((acc, part, i) => (i === 0 ? [part] : [...acc, " · ", part]), []);
 
   return (
@@ -155,15 +182,11 @@ export function SimulationArtifact({ data, scan }: SimulationArtifactProps) {
       <Stats
         items={[
           { label: "State variables", value: species.length || "—" },
-          ...(duration !== null
-            ? [
-                {
-                  label: "Integration window",
-                  value: `${fmt(duration)} s`,
-                  sub: steps !== null ? `(${steps} steps)` : undefined,
-                },
-              ]
+          ...(duration !== null ? [{ label: "Time span", value: `${fmt(t0)}–${fmt(t0 + duration)} s` }] : []),
+          ...(samples !== null
+            ? [{ label: "Output samples", value: samples.toLocaleString(), sub: duration ? `(every ${fmt(duration / Math.max(1, samples - 1), 4)} s)` : undefined }]
             : []),
+          ...(adaptive ? [{ label: "Solver", value: backend, sub: tolerance ? `(${tolerance})` : undefined }] : []),
           ...(ssCheck
             ? [
                 {
@@ -195,7 +218,7 @@ export function SimulationArtifact({ data, scan }: SimulationArtifactProps) {
         ]}
       />
 
-      {plot && (
+      {plot ? (
         <Section title="Trajectory" meta={duration !== null ? `0–${fmt(duration)} s` : undefined}>
           {/* eslint-disable-next-line @next/next/no-img-element -- data: URL from the solver */}
           <img
@@ -204,9 +227,18 @@ export function SimulationArtifact({ data, scan }: SimulationArtifactProps) {
             className={styles.plot}
           />
         </Section>
-      )}
+      ) : trajectories && times.length > 1 ? (
+        <Section title="Trajectory" meta="hover for values">
+          <TrajectoryCharts
+            t={times}
+            series={trajectories}
+            timeUnit={(data?.units as Record<string, string> | undefined)?.t || "s"}
+            units={(data?.units as Record<string, string> | undefined) || {}}
+          />
+        </Section>
+      ) : null}
 
-      {species.length > 0 && (
+      {species.length > 0 && hasAnyValues && (
         <Section
           title="State variables"
           meta={
@@ -220,7 +252,9 @@ export function SimulationArtifact({ data, scan }: SimulationArtifactProps) {
             </span>
           }
           caveat={
-            ssCheck && !ssReached
+            ranges && !ssCheck
+              ? `Min and max are taken over the ${samples ? samples.toLocaleString() + " " : ""}output samples${hasDense ? "; the dense columns use the solver's interpolating output on a fine grid and catch peaks between samples" : " and can miss peaks between them"}.${solver && isNum(solver.internal_steps) ? ` The adaptive solver took ${solver.internal_steps.toLocaleString()} internal steps (${solver.function_evaluations?.toLocaleString?.() ?? "?"} evaluations); output times are interpolated, not solver steps.` : ""}`
+              : ssCheck && !ssReached
               ? ssUnknown
                 ? `End or equilibrium values were not reported for ${ssCheck.unmatched.slice(0, 4).join(", ")}${ssCheck.unmatched.length > 4 ? ` and ${ssCheck.unmatched.length - 4} more` : ""}, so convergence could not be checked across all variables.`
                 : `${ssCheck.notReached.slice(0, 4).join(", ")}${ssCheck.notReached.length > 4 ? ` and ${ssCheck.notReached.length - 4} more` : ""} had not reached the solver's equilibrium by ${fmt(duration)} s.`
@@ -235,7 +269,24 @@ export function SimulationArtifact({ data, scan }: SimulationArtifactProps) {
                   <th scope="col" className={ui.num}>Initial</th>
                   <th scope="col" className={ui.num}>Final{duration !== null ? ` (${fmt(duration)} s)` : ""}</th>
                   {hasSteady && <th scope="col" className={ui.num}>Equilibrium</th>}
-                  <th scope="col" className={ui.num}>Change</th>
+                  {ranges ? (
+                    <>
+                      <th scope="col" className={ui.num} title="Smallest value among the reported output samples; peaks between samples can be missed">
+                        Min (samples)
+                      </th>
+                      <th scope="col" className={ui.num} title="Largest value among the reported output samples; peaks between samples can be missed">
+                        Max (samples)
+                      </th>
+                      {hasDense && (
+                        <>
+                          <th scope="col" className={ui.num} title="From the solver's dense output on a fine grid">Min (dense)</th>
+                          <th scope="col" className={ui.num} title="From the solver's dense output on a fine grid">Max (dense)</th>
+                        </>
+                      )}
+                    </>
+                  ) : (
+                    <th scope="col" className={ui.num}>Change</th>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -253,7 +304,24 @@ export function SimulationArtifact({ data, scan }: SimulationArtifactProps) {
                       <td className={ui.num}>{fmt(s, 4)}</td>
                       <td className={ui.num}>{fmt(e, 4)}</td>
                       {hasSteady && <td className={`${ui.num} ${styles.muted}`}>{fmt(ss, 4)}</td>}
-                      <td className={ui.num}>{changeText(s, e, largest?.floor)}</td>
+                      {ranges ? (
+                        <>
+                          <td className={ui.num}>{fmt(summary[sp].min, 4)}</td>
+                          <td className={ui.num}>{fmt(summary[sp].max, 4)}</td>
+                          {hasDense && (
+                            <>
+                              <td className={ui.num} title={isNum(extrema[sp]?.t_dense_min) ? `at t = ${fmt(extrema[sp].t_dense_min, 4)} s` : undefined}>
+                                {fmt(extrema[sp]?.dense_min, 5)}
+                              </td>
+                              <td className={ui.num} title={isNum(extrema[sp]?.t_dense_max) ? `at t = ${fmt(extrema[sp].t_dense_max, 4)} s` : undefined}>
+                                {fmt(extrema[sp]?.dense_max, 5)}
+                              </td>
+                            </>
+                          )}
+                        </>
+                      ) : (
+                        <td className={ui.num}>{changeText(s, e, largest?.floor)}</td>
+                      )}
                     </tr>
                   );
                 })}

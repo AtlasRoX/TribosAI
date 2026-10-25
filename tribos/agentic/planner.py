@@ -24,29 +24,33 @@ from typing import Any
 
 from .guardrails import SPOTLIGHT_RULE, spotlight
 from .plan_graph import PlanGraph, policy_violation
+from .specialists import LEGACY_LITERATURE_TOOL, resolve_literature_tool
+from .specialists import LITERATURE_TOOL as LITERATURE_TOOL
 from .tool_retrieval import retrieve_tools, tool_card
 
 logger = logging.getLogger(__name__)
 
 PLAN_PHASE = "plan_execute"
 JOIN_PHASE = "plan_join"
-LITERATURE_TOOL = "lithoscribe_literature_synthesis"
 
+# Identifier fields worth showing the planner from a result's list items (the first two present per item).
 _ID_FIELDS = (
-    "id", "pmid", "doi", "nct_id", "nctId", "chembl_id", "molecule_chembl_id", "ensembl_id", "efo_id", "disease_id",
-    "disease_name", "name", "symbol", "approved_symbol", "model_id", "rsid", "pdb_id", "accession",
+    "id", "arxiv_id", "doi", "zbl_id", "mr_id", "bibcode", "openalex_id", "oeis_id", "mp_id", "material_id",
+    "system", "equation", "expression", "name", "symbol", "title", "model_id", "accession",
 )
 _MAX_SUMMARY_RESULTS = 24
 
 PLAN_SYSTEM = """[phase:plan_execute]
-You are the planning agent of a biomedical research assistant. Let's first understand the problem and devise a plan to solve the problem. Then, let's carry out the plan and solve the problem step by step.
+You are the planning agent of a mathematics, physics and engineering research assistant. Let's first understand the problem and devise a plan to solve the problem. Then, let's carry out the plan and solve the problem step by step.
 
 The research pipeline has already run its standard searches; their results are summarised for you. Your job is to plan the FOLLOW-UP tool calls that would fill what is still missing for the question and its sub-questions, as a small DAG in the LLMCompiler format:
-- Each node is {"id": "n1", "tool": "<tool name>", "args": {...}, "depends_on": ["..."], "purpose": "<why, one line; name the sub-question id if any>"}.
+- Each node is {"id": "n1", "tool": "<tool name>", "args": {...}, "depends_on": ["..."], "purpose": "<why, one line; name the sub-question id if any>"}, optionally with "timeout_s": <seconds> for the node's deadline. "depends_on" and "timeout_s" belong on the node, never inside "args"; "args" holds only the tool's own arguments.
+- To give a computation script earlier results, pass them as data in the script tool's "inputs" argument (e.g. "inputs": {"trajectory": "$n2.time_series"}); never paste data, arrays or tables into the code. Scripts must stay under 20,000 characters.
 - Use ONLY the tools listed in <tools>, with EXACTLY the argument names and types of their cards. Required arguments must be present.
-- An argument may use an earlier node's output: "$n1.drugs[0].chembl_id" (path into that node's result data; list indexes are numbers, "[*]" maps over a list, e.g. "$n1.drugs[*].pref_name"). Use only the paths listed in that tool's "returns"; never invent field names such as "results". A whole-string reference keeps the value's type. Referencing a node makes it a dependency.
+- An argument may use an earlier node's output: "$n1.solutions[0]" (path into that node's result data; list indexes are numbers, "[*]" maps over a list, e.g. "$n1.papers[*].arxiv_id"). Use only the paths listed in that tool's "returns"; never invent field names such as "results". A whole-string reference keeps the value's type. Referencing a node makes it a dependency.
 - Nodes without dependencies between them run in parallel, so keep chains short and only add depends_on when a node truly needs another's output.
 - Never repeat a call the pipeline already made with the same arguments, and do not plan a call whose answer is already in the pipeline results.
+- A request for computed results (an error between two methods, residuals, step-size or grid convergence, an energy balance, a parameter study) is filled by a computation call such as sandboxed Python, never by a search. Plan it whenever the question asks for those numbers and no pipeline result already reports them. Keep each script short and focused (well under 300 lines).
 - At most @MAX_NODES@ nodes. If the pipeline results already cover the question, return an empty node list.
 - Respect the constraints listed in <constraints>; tools they forbid are not offered.
 @MODE_RULE@
@@ -132,16 +136,20 @@ def constraint_lines(ctx: Any, max_nodes: int) -> list[str]:
         lines.append(f"only these sources may be used: {', '.join(sorted(allow))} ({getattr(ctx, 'source_restriction_reason', '')})")
     if not getattr(ctx, "enable_web_search", True):
         lines.append("web search is switched off")
+    need = getattr(ctx, "evidence_need", None)
+    if need is not None and getattr(need, "skip_retrieval", False):
+        lines.append(f"no literature or web search: {getattr(need, 'reason', '') or 'no outside evidence is needed'}")
     if getattr(ctx, "primary_symbol", None):
-        lines.append(f"primary gene: {ctx.primary_symbol}" + (f" ({ctx.primary_ensembl_id})" if getattr(ctx, "primary_ensembl_id", None) else ""))
-    if getattr(ctx, "biomodel_id", None):
-        lines.append(f"BioModel in play: {ctx.biomodel_id}")
+        lines.append(f"primary subject: {ctx.primary_symbol}")
+    system = getattr(ctx, "system_name", None) or getattr(getattr(ctx, "simulation_plan", None), "system_name", None)
+    if system:
+        lines.append(f"dynamical system in play: {system}")
     ids = list(getattr(ctx, "literature_ids", None) or [])
     if ids:
         lines.append(
-            f"the question names these papers: {', '.join(ids)}; fetch them with lithoscribe_literature_synthesis "
-            f"pinned_ids={ids} (Europe PMC has no 'PMID:' search field, so a free-text PMID query finds nothing); a "
-            "failed lookup means not retrieved, not that the paper does not exist"
+            f"the question names these papers: {', '.join(ids)}; fetch each one with archivon_paper_details "
+            "identifier=<id> (an arXiv id, DOI or zbMATH id) rather than a free-text search; a failed lookup means "
+            "not retrieved, not that the paper does not exist"
         )
     excluded = sorted(getattr(ctx, "excluded_modules", None) or set())
     if excluded:
@@ -157,6 +165,10 @@ def select_tools(state: Any, sub_questions: Sequence[Any], k: int = 8, per_sub: 
     except Exception:  # noqa: BLE001
         return []
     excluded = [e.name for e in entries if policy_violation(e, state.ctx)]
+    # The legacy literature alias runs the same search as archivon_literature_search: offer only one of them.
+    lit_tool = resolve_literature_tool(registry)
+    if lit_tool != LEGACY_LITERATURE_TOOL:
+        excluded.append(LEGACY_LITERATURE_TOOL)
     picked: list[Any] = []
 
     def add(found: list[Any]) -> None:
@@ -164,7 +176,8 @@ def select_tools(state: Any, sub_questions: Sequence[Any], k: int = 8, per_sub: 
             if e not in picked and len(picked) < cap:
                 picked.append(e)
 
-    add(retrieve_tools(registry, state.clean_query or state.query, k=k, exclude=excluded, always=[LITERATURE_TOOL]))
+    # The literature tool is always offered, unless the policy rules it out (evidence_need.skip_retrieval, "no web"...).
+    add(retrieve_tools(registry, state.clean_query or state.query, k=k, exclude=excluded, always=[lit_tool]))
     for sq in sub_questions:
         text = getattr(sq, "text", "") or ""
         focus = getattr(sq, "focus", "") or ""

@@ -147,9 +147,9 @@ export function artifactDisclosure(input: DisclosureInput): Record<string, boole
     if (data === null || data === undefined) continue;
     switch (key) {
       case "plan_approval":
-      case "literature":
-      case "archivon":
       case "sandbox_analysis":
+      case "math_agent":
+      case "ode_verification": // produced only when the question asks for numerical checks
       case "model_calibration":
         out[key] = true;
         break;

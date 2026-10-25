@@ -5,11 +5,9 @@
 # * @gurdeep330
 
 # Specific module owners
-# /tribos/vivarix/ @gurdeep330
-# /tribos/lithoscribe/ @gurdeep330
-# /tribos/lumicell/ @gurdeep330
-# /tribos/synapta/ @gurdeep330
-# /tribos/tribos/ @gurdeep330
+# /tribos/ @gurdeep330
+# /app/ @gurdeep330
+# /web/ @gurdeep330
 
 # CI/CD and configuration
 # /.github/ @gurdeep330

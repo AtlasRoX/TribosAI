@@ -5,28 +5,33 @@ on:
   pull_request:
     branches: [main, master]
     paths:
-      - "tribos/tribos/**"
-      - "tribos/vivarix/**"
-      - "tribos/synapta/**"
+      - "tribos/**"
+      - "app/**"
+      - "tests/**"
+      - "scripts/gen_env_reference.py"
       - "pyproject.toml"
       - "uv.lock"
+      - ".github/workflows/tests_tribos.yml"
   push:
     branches: [main, master]
     paths:
-      - "tribos/tribos/**"
-      - "tribos/vivarix/**"
-      - "tribos/synapta/**"
+      - "tribos/**"
+      - "app/**"
+      - "tests/**"
+      - "scripts/gen_env_reference.py"
       - "pyproject.toml"
       - "uv.lock"
+      - ".github/workflows/tests_tribos.yml"
   workflow_dispatch:
 
-env:
-  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-  NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+# The offline suite needs no keys: tests/conftest.py removes every key-like variable and blocks non-loopback
+# network access; @pytest.mark.network cases only run with TRIBOS_LIVE_TESTS=1.
 
 jobs:
-  # Code quality checks. pylint and ruff report without blocking: this legacy module had pre-existing
-  # findings (ruff: dozens to hundreds per module on 2026-10-17). Bandit blocks.
+  # Code quality checks. Blocking: ruff's pyflakes (F) and syntax (E9) rules, bandit at high severity, and the
+  # generated environment reference (every TRIBOS_* the code reads must be a registered setting, and
+  # docs/configuration.md / .env.example must match the registry). pylint and the full ruff rule set only report:
+  # the code base still has legacy findings (3.4k E501 alone).
   quality-checks:
     name: Code Quality
     runs-on: ubuntu-latest
@@ -44,16 +49,26 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen --extra dev
 
+      - name: Run ruff (pyflakes and syntax errors)
+        run: uv run ruff check --select F,E9 tribos app tests
+
+      - name: Run ruff, all configured rules (report only)
+        continue-on-error: true
+        run: uv run ruff check tribos app
+
       - name: Run pylint (report only)
         continue-on-error: true
-        run: uv run pylint tribos/tribos
+        run: uv run pylint tribos app
 
-      - name: Run ruff linting (report only)
+      - name: Run bandit security scan (high severity blocks)
+        run: uv run bandit -c pyproject.toml -r tribos app --severity-level high
+
+      - name: Run bandit, all severities (report only)
         continue-on-error: true
-        run: uv run ruff check tribos/tribos
+        run: uv run bandit -c pyproject.toml -r tribos app
 
-      - name: Run bandit security scan
-        run: uv run bandit -c pyproject.toml -r tribos/tribos
+      - name: Check the environment reference and the settings registry
+        run: uv run python scripts/gen_env_reference.py --check
 
   # Cross-platform testing
   test-matrix:
@@ -81,25 +96,25 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen --extra dev
 
+      # --source/--omit on the command line override [tool.coverage.run] (source = tribos, omit = app/*), so the
+      # API package is measured too.
       - name: Run tests with coverage
-        run: |
-          uv run coverage run --include=tribos/tribos/* -m pytest --cache-clear tribos/tribos/tests/
+        run: uv run coverage run --source=tribos,app --omit="*/tests/*" -m pytest --cache-clear tests/
 
       - name: Generate coverage report
         run: |
-          uv run coverage report -m --include="tribos/tribos/*"
-          uv run coverage xml --include="tribos/tribos/*" -o coverage-tribos.xml
+          uv run coverage report
+          uv run coverage xml -o coverage-tribos.xml
 
       - name: Check coverage threshold
         shell: bash
         run: |
-          # --include: [tool.coverage.run] source=tribos overrides `coverage run --include`, so an unfiltered
-          # TOTAL is the whole package. Measured 4% for tribos/tribos on 2026-10-17 (tribos/tribos/tests has 8 tests for the legacy Streamlit orchestrator);
-          # the gate sits 2 points below. The old COVERAGE_MIN=100 could never pass. Raise it as tests land.
-          TOTAL_COVERAGE=$(uv run coverage report --include="tribos/tribos/*" | awk 'END {print int($NF)}')
-          COVERAGE_MIN=2
-          if [[ $TOTAL_COVERAGE -lt $COVERAGE_MIN ]]; then
-            echo "Code coverage $TOTAL_COVERAGE% is below $COVERAGE_MIN%. Please check the coverage report."
+          # Measured 79% (tribos + app, tests/ offline suite) on 2026-10-25; the gate sits a few points below so
+          # platform-specific skips (OCR models, sandbox limits) do not fail it. Raise it as tests land.
+          TOTAL_COVERAGE=$(uv run coverage report | awk '/^TOTAL/ {print int($NF)}')
+          COVERAGE_MIN=75
+          if [[ -z "$TOTAL_COVERAGE" || $TOTAL_COVERAGE -lt $COVERAGE_MIN ]]; then
+            echo "Code coverage ${TOTAL_COVERAGE:-unknown}% is below $COVERAGE_MIN%. Please check the coverage report."
             exit 1
           fi
 
@@ -107,7 +122,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         uses: codecov/codecov-action@v5
         with:
-          file: ./coverage-tribos.xml
+          files: ./coverage-tribos.xml
           flags: tribos
           name: tribos-coverage
           token: ${{ secrets.CODECOV_TOKEN }}

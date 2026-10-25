@@ -2,8 +2,8 @@
 
 Classifies mathematical, physical, and engineering works into evidence tiers:
 1. Formal proof / theorem (`formal_proof`) or Monograph / standard (`monograph_standard`)
-2. Peer-reviewed journal (`peer_reviewed`) or Survey / review (`review`)
-3. Conference proceedings (`conference`)
+2. Journal article (`peer_reviewed`; the key is historical: a journal venue, peer review not verified) or Survey / review
+3. Conference proceedings (`conference`) or Book chapter (`book_chapter`)
 4. Preprint (`preprint`, e.g., arXiv without journal publication)
 5. Technical report (`technical_report`)
 6. Unclassified (`unclassified`)
@@ -19,7 +19,15 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-GRADING_POLICY_VERSION = "archivon-grading/2026-10-23"
+GRADING_POLICY_VERSION = "archivon-grading/2026-10-25"
+
+# Registry work types (Crossref and OpenAlex `type`) decide the document type before any heuristic: a DOI is a
+# registration, not a venue, so a chapter of a book is never a journal article because it has a DOI.
+_CHAPTER_TYPES = {"book-chapter", "book-section", "book-part", "reference-entry", "chapter", "book-track"}
+_BOOK_TYPES = {"book", "monograph", "edited-book", "reference-book", "book-set", "book-series", "standard"}
+_PROCEEDINGS_TYPES = {"proceedings-article", "proceedings", "conference-paper", "proceedings-series"}
+_REPORT_TYPES = {"report", "report-component", "dissertation", "thesis"}
+_JOURNAL_TYPES = {"journal-article", "article", "review", "letter", "editorial"}
 
 
 class StudyType(str, Enum):
@@ -28,6 +36,7 @@ class StudyType(str, Enum):
     EXPERIMENTAL_MEASUREMENT = "experimental_measurement"
     NUMERICAL_SIMULATION = "numerical_simulation"
     MONOGRAPH_STANDARD = "monograph_standard"
+    BOOK_CHAPTER = "book_chapter"
     PEER_REVIEWED = "peer_reviewed"
     REVIEW = "review"
     CONFERENCE = "conference"
@@ -50,6 +59,7 @@ STUDY_TYPE_POLICY: dict[StudyType, tuple[int, float]] = {
     StudyType.EXPERIMENTAL_MEASUREMENT: (2, 0.95),
     StudyType.NUMERICAL_SIMULATION: (2, 0.9),
     StudyType.MONOGRAPH_STANDARD: (1, 0.95),
+    StudyType.BOOK_CHAPTER: (3, 0.8),
     StudyType.PEER_REVIEWED: (2, 0.9),
     StudyType.REVIEW: (2, 0.85),
     StudyType.CONFERENCE: (3, 0.75),
@@ -64,7 +74,8 @@ STUDY_TYPE_LABELS: dict[StudyType, tuple[str, str, str]] = {
     StudyType.EXPERIMENTAL_MEASUREMENT: ("Experimental measurement", "experimental measurement", "experimental measurements"),
     StudyType.NUMERICAL_SIMULATION: ("Numerical simulation", "numerical simulation", "numerical simulations"),
     StudyType.MONOGRAPH_STANDARD: ("Monograph / standard", "monograph/standard", "monographs/standards"),
-    StudyType.PEER_REVIEWED: ("Peer-reviewed journal", "peer-reviewed article", "peer-reviewed articles"),
+    StudyType.BOOK_CHAPTER: ("Book chapter", "book chapter", "book chapters"),
+    StudyType.PEER_REVIEWED: ("Journal article", "journal article", "journal articles"),
     StudyType.REVIEW: ("Survey / review", "review", "reviews"),
     StudyType.CONFERENCE: ("Conference proceedings", "conference paper", "conference papers"),
     StudyType.PREPRINT: ("Preprint", "preprint", "preprints"),
@@ -124,6 +135,11 @@ class EvidenceGrade(BaseModel):
     mixed_design: bool = False
     design_note: str = ""
     indexed_design: str | None = None
+    # Kept apart: what the document is, whether it is published, what is known about review, where the metadata came from.
+    document_type: str = "unknown"  # journal article | book chapter | book | conference paper | preprint | report | unknown
+    publication_status: str = "unknown"  # published | preprint | unknown
+    peer_review: str = "unknown"  # "journal venue (review not verified)" | "not peer reviewed" | "unknown"
+    metadata_source: str = ""  # crossref | openalex | arxiv | zbmath | ...
 
 
 def _plain(text: Any) -> str:
@@ -176,7 +192,37 @@ def is_integrity_notice(article: dict[str, Any]) -> bool:
 
 
 def grade_article(article: dict[str, Any]) -> EvidenceGrade:
-    """Classify an article into an EvidenceGrade based on venue, zbMATH MSC, DOI, and text cues."""
+    """Classify an article into an EvidenceGrade, with its document type, publication status and review status."""
+    grade = _grade(article)
+    pub_type = str(article.get("type") or article.get("pub_type") or "").strip().lower()
+    st = grade.study_type
+    if pub_type in _CHAPTER_TYPES:
+        doc = "book chapter"
+    elif pub_type in _BOOK_TYPES or st == StudyType.MONOGRAPH_STANDARD:
+        doc = "book"
+    elif pub_type in _PROCEEDINGS_TYPES or st == StudyType.CONFERENCE:
+        doc = "conference paper"
+    elif grade.is_preprint or st == StudyType.PREPRINT:
+        doc = "preprint"
+    elif pub_type in _REPORT_TYPES or st == StudyType.TECHNICAL_REPORT:
+        doc = "report"
+    elif pub_type in _JOURNAL_TYPES or (st in (StudyType.PEER_REVIEWED, StudyType.REVIEW) and article.get("journal")):
+        doc = "journal article"
+    else:
+        doc = "unknown"
+    grade.document_type = doc
+    grade.publication_status = "preprint" if doc == "preprint" else ("published" if doc != "unknown" else "unknown")
+    grade.peer_review = (
+        "not peer reviewed" if doc == "preprint"
+        else "journal venue (review not verified)" if doc == "journal article"
+        else "unknown"
+    )
+    grade.metadata_source = str(article.get("source") or "")
+    return grade
+
+
+def _grade(article: dict[str, Any]) -> EvidenceGrade:
+    """The tier-bearing study type from the registry work type, venue, zbMATH MSC, DOI, and text cues."""
     title = _plain(article.get("title"))
     abstract = _plain(article.get("summary") or article.get("abstract") or article.get("passage_text"))
     journal = _plain(article.get("journal") or article.get("venue"))
@@ -186,6 +232,21 @@ def grade_article(article: dict[str, Any]) -> EvidenceGrade:
     preprint_flag = is_preprint(article)
 
     combined = f"{title} {abstract}"
+    work_type = str(article.get("type") or article.get("pub_type") or "").strip().lower()
+
+    # 0. The registry's work type, when given, is the document type.
+    if work_type in _CHAPTER_TYPES:
+        return make_grade(StudyType.BOOK_CHAPTER, GradeBasis.SOURCE_METADATA, [f"type: {work_type}", journal or doi],
+                          confidence="high", is_preprint=False)
+    if work_type in _BOOK_TYPES:
+        return make_grade(StudyType.MONOGRAPH_STANDARD, GradeBasis.SOURCE_METADATA, [f"type: {work_type}", journal or doi],
+                          confidence="high", is_preprint=False)
+    if work_type in _PROCEEDINGS_TYPES:
+        return make_grade(StudyType.CONFERENCE, GradeBasis.SOURCE_METADATA, [f"type: {work_type}", journal or doi],
+                          confidence="high", is_preprint=preprint_flag)
+    if work_type in _REPORT_TYPES:
+        return make_grade(StudyType.TECHNICAL_REPORT, GradeBasis.SOURCE_METADATA, [f"type: {work_type}"],
+                          confidence="high", is_preprint=False)
 
     # 1. zbMATH or explicit mathematical proof/theorem
     if source == "zbmath" or msc or article.get("zbl_id"):
@@ -264,13 +325,14 @@ def grade_article(article: dict[str, Any]) -> EvidenceGrade:
             is_preprint=preprint_flag,
         )
 
-    # 6. Peer-reviewed journal (has DOI not starting with 10.48550/arxiv, or has journal venue)
-    if not preprint_flag and ((doi and not doi.startswith("10.48550/arxiv")) or (journal and "arxiv" not in journal.lower())):
+    # 6. Journal article: a journal venue (from the record), not a DOI alone. A DOI with no venue and no work type is
+    # a registered work of unknown type (below).
+    if not preprint_flag and journal and "arxiv" not in journal.lower() and (work_type in _JOURNAL_TYPES or not work_type):
         return make_grade(
             StudyType.PEER_REVIEWED,
             GradeBasis.JOURNAL_VENUE,
-            [journal or f"DOI:{doi}"],
-            confidence="high",
+            [journal],
+            confidence="high" if work_type in _JOURNAL_TYPES else "medium",
             is_preprint=False,
         )
 

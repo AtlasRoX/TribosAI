@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import re
 import uuid
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Literal
@@ -96,6 +98,19 @@ def _rerun_lock(user_id: str) -> asyncio.Semaphore:
     if sem.locked():
         raise HTTPException(status_code=429, detail="A re-run is already in progress for this user.")
     return sem
+
+
+@contextlib.asynccontextmanager
+async def _chat_slot(user_id: str) -> AsyncIterator[None]:
+    """A full re-run is a whole orchestration, so it takes one of the user's chat slots like a question does
+    (app.backend.main is imported lazily: it imports this router while loading)."""
+    from app.backend import main as backend_main
+
+    backend_main._chat_slots.acquire_or_429(user_id, backend_main._CHAT_BUSY_DETAIL)
+    try:
+        yield
+    finally:
+        backend_main._chat_slots.release(user_id)
 
 
 def _slug(text: str) -> str:
@@ -253,7 +268,7 @@ async def rerun_stored(run_id: str, req: RerunRequest, user_id: str = Depends(ge
     agent_options = request.get("agent_options") if isinstance(request.get("agent_options"), dict) else {}
     project_id = request.get("project_id") if isinstance(request.get("project_id"), str) else None
     orch = _get_orchestrator()
-    async with _rerun_lock(user_id):
+    async with _rerun_lock(user_id), _chat_slot(user_id):
         result = await orch.execute_inquiry(
             original.get("query") or "",
             thread_id=f"rerun:{run_id}:{uuid.uuid4().hex[:8]}",

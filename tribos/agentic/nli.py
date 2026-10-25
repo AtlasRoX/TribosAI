@@ -60,6 +60,7 @@ from typing import Any
 
 import numpy as np
 
+from ..sources.keys import make_key, normalize_evidence_key, passage_keys
 from ..utils.text import sentence_spans
 from .budget import BudgetExhausted
 from .config import env_float, env_int
@@ -130,7 +131,7 @@ def claim_key(text: str) -> str:
 
 
 def passage_sha1(text: str) -> str:
-    return hashlib.sha1(_norm(str(text or "")[:PASSAGE_KEY_CHARS]).lower().encode("utf-8")).hexdigest()
+    return hashlib.sha1(_norm(str(text or "")[:PASSAGE_KEY_CHARS]).lower().encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
 def find_scores(nli_scores: dict[str, Scores] | None, text: str) -> Scores | None:
@@ -388,11 +389,13 @@ class NLIStore:
         ck = claim_key(claim).lower()
         hit = self.pairs.get((ck, passage_sha1(passage)))
         if hit is None and source_key:
-            hit = self.by_source.get((ck, source_key))
+            hit = self.by_source.get((ck, normalize_evidence_key(source_key)))
         return hit
 
     def record(self, claim: str, source_key: str, passage: str, scores: Scores) -> None:
         t_entail, t_contra, _ = thresholds()
+        # One spelling per document ("doi: 10.1/ABC" and "DOI:10.1/abc" are one source), as tribos.sources.keys.
+        source_key = normalize_evidence_key(source_key) if source_key else source_key
         key = claim_key(claim)
         ck = key.lower()
         s = {k: float(scores.get(k, 0.0)) for k in NLI_LABELS}
@@ -603,7 +606,25 @@ _BM25_STOP = {
     "the", "and", "for", "with", "that", "this", "were", "was", "from", "have", "has", "had", "been", "into", "their",
     "which", "these", "those", "than", "then", "also", "such", "are", "not", "but", "can", "may", "its", "our", "who",
 }
-_CITED_RE = re.compile(r"\bPMID:?\s*(\d{1,9})\b|\b(10\.\d{4,9}/[-._;()/:A-Za-z0-9]+)", re.IGNORECASE)
+# Identifiers a claim cites: arXiv ids (new and old style), DOIs, zbMATH and MR numbers, PMIDs.
+_CITED_RE = re.compile(
+    r"\barXiv:?\s*((?:\d{4}\.\d{4,5}|[a-z\-]+(?:\.[A-Z]{2})?/\d{7})(?:v\d+)?)"
+    r"|\b(10\.\d{4,9}/[-._;()/:A-Za-z0-9]+)"
+    r"|\bZbl:?\s*(\d{4}\.\d{5}|\d{7})\b"
+    r"|\bMR:?\s*(\d{5,8})\b"
+    r"|\bPMID:?\s*(\d{1,9})\b",
+    re.IGNORECASE,
+)
+
+
+def cited_keys(text: str) -> set[str]:
+    """Canonical keys (tribos.sources.keys) of the identifiers a claim cites."""
+    out: set[str] = set()
+    for arxiv, doi, zbl, mr, pmid in _CITED_RE.findall(text or ""):
+        for prefix, value in (("ARXIV", arxiv), ("DOI", doi.rstrip(".,;)")), ("ZBL", zbl), ("MR", mr), ("PMID", pmid)):
+            if value:
+                out.add(make_key(prefix, value))
+    return out
 
 
 def _bm25_tokens(text: str) -> list[str]:
@@ -612,9 +633,10 @@ def _bm25_tokens(text: str) -> list[str]:
 
 def collect_documents(tool_results: dict[str, Any]) -> list[dict[str, Any]]:
     """
-    Literature passages (and web results) from every successful tool result, keyed exactly like the verifier
-    ('PMID:<id>', 'DOI:<doi>', 'passage:<id>', 'tool:<name>') with the verifier's document text (lowercased
-    'title. passage'), plus the passage's evidence grade.
+    Literature passages (and web results) from every successful tool result, keyed by tribos.sources.keys (the
+    passage's most specific identifier: 'ARXIV:<id>', 'DOI:<doi>', 'ZBL:<id>', ..., else 'passage:<id>' or
+    'tool:<name>'; `keys` lists all of them) with the verifier's document text (lowercased 'title. passage'), plus
+    the passage's evidence grade.
     """
     try:
         from ..extensions.hooks import apply_serialization_filters
@@ -636,19 +658,14 @@ def collect_documents(tool_results: dict[str, Any]) -> list[dict[str, Any]]:
             if not isinstance(p, dict) or not p.get("passage_text"):
                 continue
             text = str(p["passage_text"]).lower()
-            if p.get("pmid"):
-                key = f"PMID:{p['pmid']}"
-            elif p.get("doi"):
-                key = f"DOI:{str(p['doi']).lower()}"
-            elif p.get("passage_id"):
-                key = f"passage:{p['passage_id']}"
-            else:
-                key = f"tool:{name}"
+            local = make_key("passage", p["passage_id"]) if p.get("passage_id") else make_key("tool", name)
+            keys = passage_keys(p)
             title = str(p.get("title") or "").lower()
             grade = p.get("evidence_grade") if isinstance(p.get("evidence_grade"), dict) else {}
             docs.append(
                 {
-                    "source_key": key,
+                    "source_key": keys[0] if keys else local,
+                    "keys": keys or [local],  # every identifier of the document, for citation and own-source matches
                     "text": f"{title}. {text}" if title else text,
                     "grade_label": p.get("grade_label") or grade.get("label"),
                     "grade_weight": grade.get("weight"),
@@ -662,6 +679,7 @@ def collect_documents(tool_results: dict[str, Any]) -> list[dict[str, Any]]:
                     docs.append(
                         {
                             "source_key": f"web:{r.get('url') or name}",
+                            "keys": [f"web:{r.get('url') or name}"],
                             "text": str(r.get("snippet") or r.get("content") or "")[:2000].lower(),
                             "grade_label": "web",
                             "grade_weight": None,
@@ -703,14 +721,13 @@ def bm25_rank(query: str, docs: Sequence[dict[str, Any]], k: int = MAX_PASSAGES_
 
 
 def candidate_passages(claim: str, docs: Sequence[dict[str, Any]], k: int = MAX_PASSAGES_PER_CLAIM) -> list[tuple[str, str]]:
-    """Passages the claim cites first, then the best BM25 matches; (source_key, text), at most k."""
-    cited: set = set()
-    for pmid, doi in _CITED_RE.findall(claim or ""):
-        cited.add(f"PMID:{pmid}" if pmid else f"DOI:{doi.rstrip('.,;)').lower()}")
+    """Passages the claim cites first (by any identifier of the document), then the best BM25 matches;
+    (source_key, text), at most k."""
+    cited = cited_keys(claim)
     out: list[tuple[str, str]] = []
     seen: set = set()
     for d in docs:
-        if d["source_key"] in cited and d["source_key"] not in seen:
+        if cited & set(d.get("keys") or [d["source_key"]]) and d["source_key"] not in seen:
             out.append((d["source_key"], d["text"]))
             seen.add(d["source_key"])
     for _, i in bm25_rank(claim, docs, k=k + len(out)):

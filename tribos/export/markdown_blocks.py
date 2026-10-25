@@ -25,9 +25,30 @@ def _image_as_text(self: Any, tokens: Any, idx: int, options: Any, env: Any) -> 
     return f"<i>[{escapeHtml(alt)}]</i>"
 
 
+# The delimiters the equation renderer reads (equation_renderer.MATH_TOKEN_RE): $$...$$, and $...$ with no space just
+# inside either dollar, so "$5 and $10" stays text.
+_MATH_SPAN = re.compile(r"\$\$[\s\S]+?\$\$|\$(?!\s)(?:\\\$|[^\$\n])+?(?<!\s)\$")
+
+
+def _math_span(state: Any, silent: bool) -> bool:
+    """Keep $...$ and $$...$$ as literal text: without this, "*" and "_" in "$a_1 * b_2 * c$" become emphasis and
+    "\\{" loses its backslash, so the PDF export cannot find or render the equation."""
+    if state.src[state.pos] != "$":
+        return False
+    m = _MATH_SPAN.match(state.src, state.pos)
+    if m is None:
+        return False
+    if not silent:
+        token = state.push("text", "", 0)
+        token.content = m.group(0)
+    state.pos = m.end()
+    return True
+
+
 @functools.lru_cache(maxsize=1)
 def markdown_parser() -> MarkdownIt:
     md = MarkdownIt("commonmark", {"html": False}).enable("table").enable("strikethrough")
+    md.inline.ruler.before("escape", "math_span", _math_span)
     md.add_render_rule("image", _image_as_text)
     return md
 

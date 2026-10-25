@@ -4,7 +4,8 @@
 // attaches to direct replies and clarification stops ({passed: true, verification_score: 1.0, defects: []} with none of
 // the fields a real verifier run carries), is "not checked", never silently treated as verified.
 
-export type VerificationKind = "not_checked" | "verified" | "checked" | "problems";
+// "not_evaluated": a check ran but nothing in the answer could be evaluated; never shown as a pass.
+export type VerificationKind = "not_checked" | "not_evaluated" | "verified" | "checked" | "problems";
 
 interface ClaimLike {
   status?: string;
@@ -17,6 +18,8 @@ export interface VerificationLike {
   defects?: unknown[];
   claims?: ClaimLike[];
   fully_verified?: boolean;
+  coverage?: { extracted?: number; evaluated?: number; passed?: number; failed?: number; inconclusive?: number };
+  status?: string;
   [k: string]: unknown;
 }
 
@@ -24,7 +27,7 @@ export interface VerificationState {
   kind: VerificationKind;
   /** One short line for quiet states; problem summaries are built by the notice itself. */
   text: string;
-  counts: { supported: number; contradicted: number; unsupported: number; not_checked: number };
+  counts: { supported: number; contradicted: number; unsupported: number; not_checked: number; inconclusive: number };
 }
 
 /** Fields only a real verifier run produces (tribos VerificationReport); the placeholder has none of them. */
@@ -51,7 +54,7 @@ export function isPlaceholderReport(report: VerificationLike): boolean {
 }
 
 export function verificationState(report: VerificationLike | null | undefined): VerificationState {
-  const counts = { supported: 0, contradicted: 0, unsupported: 0, not_checked: 0 };
+  const counts = { supported: 0, contradicted: 0, unsupported: 0, not_checked: 0, inconclusive: 0 };
   if (!report || typeof report !== "object") {
     return { kind: "not_checked", text: "Not checked against the evidence", counts };
   }
@@ -65,10 +68,24 @@ export function verificationState(report: VerificationLike | null | undefined): 
   if (isPlaceholderReport(report)) {
     return { kind: "not_checked", text: "No evidence check ran for this reply", counts };
   }
+  const coverage = report.coverage;
+  const evaluated = coverage && typeof coverage.evaluated === "number" ? coverage.evaluated : null;
+  if (report.passed !== false && defects.length === 0 && (report.status === "not_evaluated" || evaluated === 0)) {
+    // A defect-free score over zero evaluated claims is not a result: say that nothing could be checked.
+    const n = coverage?.extracted || 0;
+    return {
+      kind: "not_evaluated",
+      text: n
+        ? `No claims could be checked (${n} statement${n === 1 ? "" : "s"} found, none decidable)`
+        : "No claims could be checked; cited identifiers match the tool outputs",
+      counts,
+    };
+  }
   const problems = counts.contradicted + counts.unsupported;
   if (!report.passed || problems > 0 || counts.not_checked > 0 || defects.length > 0) {
     return { kind: "problems", text: "", counts };
   }
+  const notCheckable = counts.inconclusive ? `; ${counts.inconclusive} could not be checked` : "";
   if (report.fully_verified === true && claims.length > 0) {
     return {
       kind: "verified",
@@ -79,8 +96,8 @@ export function verificationState(report: VerificationLike | null | undefined): 
   return {
     kind: "checked",
     text: claims.length
-      ? `${counts.supported} of ${claims.length} claim${claims.length === 1 ? "" : "s"} checked and supported`
-      : "Checked: no checkable claims; cited identifiers match the tool outputs",
+      ? `${counts.supported} of ${claims.length} claim${claims.length === 1 ? "" : "s"} checked and supported${notCheckable}`
+      : "Checked: cited identifiers match the tool outputs (no literature claims to check)",
     counts,
   };
 }

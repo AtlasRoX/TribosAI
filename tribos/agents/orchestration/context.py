@@ -114,6 +114,7 @@ class RunContext:
     lithoscribe_summary: str = ""
     synapta_summary: str = ""
     scope_notes: list[str] = field(default_factory=list)
+    gather_notes: list[str] = field(default_factory=list)  # what the gather stages did not run, for the scope notes
     synthesis_prompt: str = ""
     system_prompt: str = ""
     synthesis_model: str = ""
@@ -362,6 +363,9 @@ class RunContext:
             extra_parts.extend(p for p in (parts or []) if p)
         if extra_parts:
             detail = " · ".join(p for p in [detail, *extra_parts] if p)
+        if (res.metadata or {}).get("skipped_by_user"):
+            await self.emit(name, f"Skipped: {title}", "skipped at your request", status="skipped", agent=agent)
+            return res
         await self.emit(name, title, detail, status="done" if res.success else "error", agent=agent)
         return res
 

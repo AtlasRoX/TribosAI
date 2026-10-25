@@ -33,15 +33,12 @@ from typing import Any, cast
 from pydantic import BaseModel
 
 from .entity_lexicon import (
-    DISEASE_HEAD_WORDS,
     ENGLISH_WORD_SYMBOLS,
     NON_GENE_ACRONYMS,
-    coordinated_disease_terms,
     defined_acronyms,
     family_members,
     find_offline_concepts,
     find_offline_constants,
-    find_offline_diseases,
     find_offline_equations,
     find_offline_materials,
     find_offline_quantities,
@@ -49,6 +46,7 @@ from .entity_lexicon import (
     is_gene_mention,
     lookup_symbol,
 )
+from .evidence_need import assess_evidence_need
 from .query_context import (
     SIM_DURATION_MAX_SECONDS,
     SIM_DURATION_MIN_SECONDS,
@@ -357,6 +355,23 @@ _DURATION_RE = re.compile(
     r"(?:long\s+)?(?:simulations?|time[\s\-]*courses?|runs?|integrations?)\b",
     re.I,
 )
+# A request for the steady state (equilibrium) itself. "Steady-state amplitude", "transient and steady-state components"
+# or "the steady-state response" name part of a solution, not a request to compute an equilibrium.
+_STEADY_STATE_REQUEST_RE = re.compile(
+    r"\bsteady[\s\-]*states?\b(?![\s\-]*(?:amplitudes?|responses?|components?|solutions?|phases?|oscillations?|errors?|"
+    r"terms?|parts?|behaviou?rs?|regimes?|periodic|motions?|vibrations?|displacements?|gains?|outputs?|values?\s+of\s+x))",
+    re.I,
+)
+# A time span: "over 0–20 s", "from 0 to 20 s", "t ∈ [0, 20] s", "0 ≤ t ≤ 20 s". After over/for/during it must start at
+# zero ("for 2–3 hours" is an approximate length, not a span); from/between/t= spans may start anywhere.
+_DURATION_RANGE_RE = re.compile(
+    rf"\b(?P<lead>over|for|during|from|between)\s+\[?\s*(?P<start>{_NUMBER})\s*(?:–|—|-|to|until|through|and|\.\.)\s*"
+    rf"(?P<end>{_NUMBER})\s*\]?\s*(?P<unit>{_DURATION_UNITS})(?![\w\-/])"
+    rf"|\bt\s*(?:=|∈|\bin\b)\s*\[?\s*(?P<start2>{_NUMBER})\s*(?:,|–|—|-|to|\.\.)\s*(?P<end2>{_NUMBER})\s*\]?\s*"
+    rf"(?P<unit2>{_DURATION_UNITS})(?![\w\-/])"
+    rf"|(?P<start3>{_NUMBER})\s*(?:≤|<=|<)\s*t\s*(?:≤|<=|<)\s*(?P<end3>{_NUMBER})\s*(?P<unit3>{_DURATION_UNITS})(?![\w\-/])",
+    re.I,
+)
 _UNSUPPORTED_DURATION_RE = re.compile(_DURATION_PREFIX + rf"(?P<value>{_NUMBER})\s*(?P<unit>{_UNSUPPORTED_UNITS})(?![\w\-/])", re.I)
 # A bare number after a duration word with no unit ("for 100.", "duration: 50").
 _UNITLESS_DURATION_RE = re.compile(_DURATION_PREFIX + rf"(?P<value>{_NUMBER})\s*(?=$|[.,;:!?)])", re.I)
@@ -385,6 +400,18 @@ def parse_duration(query: str) -> DurationParse:
             message=f"'{unsupported.group(0).strip()}' uses an unsupported unit; use ms, s, min or h.",
         )
     found: list[tuple[float, str]] = []
+    for m in _DURATION_RANGE_RE.finditer(query):
+        for i in ("", "2", "3"):
+            start, end, unit = m.group(f"start{i}"), m.group(f"end{i}"), m.group(f"unit{i}")
+            if start is None:
+                continue
+            if i == "" and m.group("lead").lower() in ("over", "for", "during") and float(start) != 0:
+                break
+            try:
+                seconds = (float(end) - float(start)) * _UNIT_SECONDS[unit.lower()]
+            except (OverflowError, ValueError):
+                seconds = float("inf")
+            found.append((seconds, m.group(0).strip()))
     for m in _DURATION_RE.finditer(query):
         value, unit = (m.group("value"), m.group("unit")) if m.group("value") is not None else (m.group("value2"), m.group("unit2"))
         try:
@@ -701,10 +728,6 @@ def _ngrams(query: str) -> list[str]:
     masked = re.sub(r"\b[A-Za-z]+_\w+|\b[A-Za-z]+:\d+\b", " ", masked)
     words = [w for w in _WORD_RE.findall(masked) if not _ACCESSION_RE.match(w.upper())]
     out: list[str] = []
-    # Disease noun phrases go first so the MAX_TERMS cap never drops them on a long question: the expansions of
-    # coordinated phrases ("ovarian and prostate cancers" -> "ovarian cancer", "prostate cancer"), then every
-    # n-gram ending in a disease head word ("prostate cancers", "lung adenocarcinoma").
-    priority: list[str] = [term for term, _mention, _span in coordinated_disease_terms(masked)]
     for n in (1, 2, 3, 4):
         for i in range(len(words) - n + 1):
             gram = words[i:i + n]
@@ -715,13 +738,11 @@ def _ngrams(query: str) -> list[str]:
                 continue
             if n == 1 and (len(gram[0]) < 2 or re.fullmatch(r"rs\d+", first)):
                 continue
-            if last in DISEASE_HEAD_WORDS:
-                priority.append(" ".join(gram))
             out.append(" ".join(gram))
             head = _HYPHEN_HEAD_RE.match(gram[0]) if n == 1 else None
             if head and head.group(1).lower() not in _STOPWORDS:
                 out.append(head.group(1))  # "sepsis-induced", "cisplatin-resistant": the head is a name of its own
-    return list(dict.fromkeys(priority + out))[:MAX_TERMS]
+    return list(dict.fromkeys(out))[:MAX_TERMS]
 
 
 def extract_candidates(query: str) -> Candidates:
@@ -1075,6 +1096,14 @@ def planner_mode() -> str:
 
 SCOPES = ("research", "conversational", "unclear")
 
+# The question types the planner model is offered: the STEM ones (search_plan.QUESTION_TYPES also keeps legacy
+# clinical types, which merge_llm_plan still accepts, but which no STEM question should be routed as).
+PLANNER_QUESTION_TYPES = tuple(
+    t for t in QUESTION_TYPES
+    if t in ("proof", "derivation", "numerical", "design_sizing", "modelling", "conceptual", "literature_review",
+             "methods", "statistics", "comparison", "general")
+)
+
 _PLANNER_SYSTEM = (
     "You read one message sent to Tribos, a scientific research assistant for mathematics, physics, engineering, "
     "and computational science, and return a routing plan as JSON only, with no prose:\n"
@@ -1086,7 +1115,7 @@ _PLANNER_SYSTEM = (
     "conversational for a greeting, thanks, farewell, small talk, or a question about the assistant itself; "
     "unclear for gibberish, a typo-only message, or words with no evident scientific meaning.\n"
     f"Allowed intents: {', '.join(INTENTS)}.\n"
-    f"question_type: one of {', '.join(QUESTION_TYPES)}.\n"
+    f"question_type: one of {', '.join(PLANNER_QUESTION_TYPES)}.\n"
     "concepts: the 1-3 technical concepts the question is about, central topic first, for a scholarly search. Each "
     'group lists the term as written plus up to 3 standard synonyms or abbreviations (["Navier-Stokes equations", '
     '"incompressible Navier-Stokes"]). Take concepts only from the question: never add a candidate answer the '
@@ -1222,7 +1251,12 @@ async def plan_with_llm(
         text, kind = item.get("text"), item.get("type")
         if (
             isinstance(text, str)
-            and kind in ("concept", "equation", "quantity", "constant", "material", "system", "gene", "drug", "disease")
+            and kind in (
+                "concept", "equation", "quantity", "constant", "material", "system",
+                "mass", "damping", "stiffness", "force", "frequency", "displacement",
+                "velocity", "acceleration", "pressure", "energy", "power", "time", "length",
+                "gene", "drug", "disease",
+            )
             and text.strip()
             and text in query
         ):
@@ -1264,23 +1298,23 @@ def _llm_entities(query: str, mentions: Sequence[tuple[str, str]], existing: Seq
 def decide_builtin_sources(ctx: QueryContext) -> None:
     """Record run/skip decisions (with reasons) for the built-in agents."""
     if ctx.scope != "research":
-        for name in ("synapta", "lithoscribe", "websurfer", "vivarix", "lumicell", "axiom", "archivon", "dynamis", "calcula", "physis"):
+        for name in ("archivon", "websurfer", "axiom", "calcula", "physis", "dynamis"):
             ctx.decisions[name] = SourceDecision(run=False, reason="not a research question")
         return
-    if not ctx.primary_target:
-        families = [g for g in ctx.genes if g.ambiguous_with]
-        ctx.decisions["synapta"] = SourceDecision(run=False, reason="gene family is ambiguous" if families else "no gene named")
-    elif ctx.biomodel_id and ctx.is_simulation_intent:
-        ctx.decisions["synapta"] = SourceDecision(run=False, reason="BioModel simulation requested")
+
+    # Literature and web search only when the answer can depend on outside evidence (agents.evidence_need).
+    need = ctx.evidence_need
+    if need is not None and need.skip_retrieval:
+        ctx.decisions["archivon"] = SourceDecision(run=False, reason=need.reason)
+        ctx.decisions["websurfer"] = SourceDecision(run=False, reason=need.reason)
     else:
-        ctx.decisions["synapta"] = SourceDecision(run=True, reason="")
-    ctx.decisions["lithoscribe"] = SourceDecision(run=True, reason="")
-    ctx.decisions["archivon"] = SourceDecision(run=True, reason="")
-    ctx.decisions["websurfer"] = SourceDecision(
-        run=ctx.enable_web_search, reason="" if ctx.enable_web_search else "web search off"
-    )
+        ctx.decisions["archivon"] = SourceDecision(run=True, reason="")
+        ctx.decisions["websurfer"] = SourceDecision(
+            run=ctx.enable_web_search, reason="" if ctx.enable_web_search else "web search off"
+        )
     wants_axiom = bool(
         {"derive", "solve", "prove"} & set(ctx.intents)
+        or (need is not None and need.kind == "closed_computation")
         or ctx.equations
         or ctx.concepts
         or re.search(r"\\(?:frac|int|sum|prod|sqrt|partial|nabla)|=", ctx.clean_query)
@@ -1309,24 +1343,17 @@ def decide_builtin_sources(ctx: QueryContext) -> None:
     if ctx.is_simulation_intent and plan is not None and plan.validation_errors:
         # Rejected before any computation: the orchestrator reports plan.validation_errors, never a substitute run.
         reason = "request rejected: " + "; ".join(e.get("message", "") for e in plan.validation_errors[:2])
-        ctx.decisions["vivarix"] = SourceDecision(run=False, reason=reason)
         ctx.decisions["dynamis"] = SourceDecision(run=False, reason=reason)
     elif ctx.is_simulation_intent:
         reason = _simulation_reason(plan)
-        ctx.decisions["vivarix"] = SourceDecision(run=True, reason=reason)
         ctx.decisions["dynamis"] = SourceDecision(run=True, reason=reason)
     else:
         reason = _suppression_reason(ctx.clean_query) if ctx.suppress_simulation else "no simulation requested"
-        ctx.decisions["vivarix"] = SourceDecision(run=False, reason=reason)
         ctx.decisions["dynamis"] = SourceDecision(run=False, reason=reason)
-    if ctx.single_cell_dataset_path and not ctx.extras.get("single_cell_forbidden"):
-        ctx.decisions["lumicell"] = SourceDecision(run=True, reason="")
-    elif ctx.extras.get("single_cell_forbidden"):
-        ctx.decisions["lumicell"] = SourceDecision(run=False, reason="single-cell analysis excluded at your request")
-    else:
-        ctx.decisions["lumicell"] = SourceDecision(
-            run=False, reason="dataset required" if ctx.has_single_cell_intent else "no dataset"
-        )
+
+    # Legacy compatibility aliases for internal code querying ctx.decisions
+    ctx.decisions["lithoscribe"] = ctx.decisions["archivon"]
+    ctx.decisions["vivarix"] = ctx.decisions["dynamis"]
     for name in list(ctx.decisions):
         ctx.decisions[name] = ctx.gate_decision(name, ctx.decisions[name])
 
@@ -1339,8 +1366,9 @@ def _simulation_reason(plan: SimulationPlan | None) -> str:
     return "steady state requested" if plan.action == "steady_state" else f"{plan.duration_seconds:g}s time course"
 
 
-# The sources a "papers only" or "trials only" turn may run.
-_ALLOWLISTS = {"papers": {"lithoscribe", "archivon"}, "trials": {"clinical_trials", "lithoscribe", "archivon"}}
+# The sources a "papers only" or "trials only" turn may run: Tribos has no trial registry, so both mean the
+# literature search.
+_ALLOWLISTS = {"papers": {"lithoscribe", "archivon"}, "trials": {"lithoscribe", "archivon"}}
 
 
 def apply_simulation_request(ctx: QueryContext, query: str, *, model_known: bool = False) -> None:
@@ -1352,7 +1380,7 @@ def apply_simulation_request(ctx: QueryContext, query: str, *, model_known: bool
     ctx.is_simulation_intent = not ctx.suppress_simulation and (
         constraints.simulation_requested or ctx.model_attachment is not None or model_known
     )
-    ctx.wants_steady_state = ctx.is_simulation_intent and bool(re.search(r"\bsteady[\s\-]*state\b", query, re.I))
+    ctx.wants_steady_state = ctx.is_simulation_intent and bool(_STEADY_STATE_REQUEST_RE.search(query))
     ctx.simulation_plan = None
     ctx.sim_duration = DEFAULT_SIM_DURATION_S
     if ctx.is_simulation_intent:
@@ -1419,13 +1447,6 @@ def _merge(primary: list[ResolvedEntity], fallback: list[ResolvedEntity]) -> lis
     return out
 
 
-def _offline_diseases(query: str) -> list[ResolvedEntity]:
-    return [
-        ResolvedEntity(type="disease", mention=m, span=span, label=label, source="local_lexicon", matched_on="name", validated=False)
-        for m, label, span in find_offline_diseases(query)
-    ]
-
-
 def _offline_stem_entities(query: str, covered_spans: Sequence[tuple[int, int]]) -> list[ResolvedEntity]:
     """Offline STEM entities (equations, systems, materials, constants, concepts, quantities) from entity_lexicon."""
     out: list[ResolvedEntity] = []
@@ -1433,13 +1454,23 @@ def _offline_stem_entities(query: str, covered_spans: Sequence[tuple[int, int]])
 
     def push(kind: EntityType, items: Sequence[Any], source: str) -> None:
         for item in items:
+            item_metadata: dict[str, Any] = {}
+            item_ids: dict[str, str] = {}
             if isinstance(item, dict):
                 mention = str(item.get("mention") or item.get("canonical") or item.get("key") or "")
-                label = str(item.get("canonical") or item.get("key") or mention)
+                label = str(item.get("label") or item.get("canonical") or item.get("key") or mention)
                 span = item.get("span")
                 if span is None:
                     idx = query.lower().find(mention.lower())
                     span = (idx, idx + len(mention)) if idx >= 0 else (0, len(query))
+                phys = item.get("physical_type")
+                if phys:
+                    item_ids["physical_type"] = str(phys)
+                if item.get("display_name"):
+                    item_metadata["display_name"] = str(item["display_name"])  # shown to the reader; label stays the id
+                for k in ("value", "units", "param_name", "physical_type"):
+                    if k in item and item[k] is not None:
+                        item_metadata[k] = item[k]
             elif isinstance(item, (list, tuple)) and len(item) == 3:
                 mention, label, span = item
             else:
@@ -1454,9 +1485,11 @@ def _offline_stem_entities(query: str, covered_spans: Sequence[tuple[int, int]])
                     mention=mention,
                     span=span,
                     label=label,
+                    ids=item_ids,
                     source=source,
                     matched_on="name",
                     validated=True,
+                    metadata=item_metadata,
                 )
             )
 
@@ -1526,7 +1559,7 @@ def _apply_resolution(
 ) -> tuple[list[ResolvedEntity], list[ResolvedEntity], list[ResolvedEntity]]:
     """Return (genes, drugs, diseases) and enrich variants in place."""
     if data is None:
-        return list(cands.lexicon_genes), list(cands.offline_drugs), _offline_diseases(query)
+        return list(cands.lexicon_genes), list(cands.offline_drugs), []
     resolved = _entities_from(data, query)
     ctx.source_status.update({str(k): str(v) for k, v in (data.get("source_status") or {}).items()})
     ctx.extras["resolver_timings_ms"] = {
@@ -1534,7 +1567,7 @@ def _apply_resolution(
     }
     genes = [e for e in resolved if e.type == "gene"]
     drugs = [e for e in resolved if e.type == "drug"]
-    diseases = _merge([e for e in resolved if e.type == "disease"], _offline_diseases(query))
+    diseases = [e for e in resolved if e.type == "disease"]
     # A protein's common name inside an exact disease or phenotype name ("insulin resistance") is not a gene mention.
     named = [d.span for d in diseases if d.matched_on == "name" and d.span != (0, 0)]
     lexicon = [
@@ -1794,14 +1827,15 @@ async def _build_query_context(
     ctx.primary_gene = primary
     if primary is not None:
         ctx.primary_target = _primary_target_string(primary, variants)
-    elif stem_entities:
-        lead_stem = next(
-            (e for e in stem_entities if e.type in ("equation", "system", "concept", "material", "constant")),
-            stem_entities[0],
-        )
-        ctx.primary_target = lead_stem.label
     else:
-        ctx.primary_target = None
+        # A given value ("m = 2 kg", "k = 50 N/m") is never the subject: without a named system, equation, concept,
+        # material or constant the question has no subject.
+        lead_stem = next(
+            (e for e in stem_entities if e.type in ("equation", "system", "concept", "material", "constant")), None
+        )
+        ctx.primary_target = (
+            ((lead_stem.metadata or {}).get("display_name") or lead_stem.label) if lead_stem is not None else None
+        )
     sys_ent = next((e for e in stem_entities if e.type == "system"), None)
     if sys_ent is not None and not ctx.system_name:
         ctx.system_name = sys_ent.label
@@ -1817,6 +1851,7 @@ async def _build_query_context(
     ]
     ctx.intents.update(_deterministic_intents(ctx, clean_query))
     ctx.scope = _decide_scope(ctx, clean_query, cands, planner_scope)
+    ctx.evidence_need = assess_evidence_need(clean_query, ctx)
     decide_builtin_sources(ctx)
     ctx.search_plan = build_search_plan(ctx, clean_query)
     if plan is not None:
@@ -1851,24 +1886,26 @@ _GENERIC_REFERENT_RE = re.compile(
 # "Is it true that ...", "it is known that ...": an expletive "it", not a reference to anything.
 _EXPLETIVE_IT_RE = re.compile(r"\b(?:is|was|isn'?t|wasn'?t)\s+it\s+(?:true|possible|likely|known|the\s+case)\b|\bit\s+(?:is|was|seems|appears)\s+(?:true|possible|likely|known|reported|unclear)\b", re.I)
 _FOLLOWUP_RUN_RE = re.compile(r"\b(?:run|re-?run|simulat\w*|repeat|scan|sweep)\b", re.I)
-_SUBJECT_KEYS = ("concept", "equation", "material", "system", "gene", "drug", "disease", "biomodel_id")
+# The subject kinds a follow-up can point back to; the STEM kinds match research_memory.SUBJECT_KEYS.
+_STEM_SUBJECT_KEYS = ("concept", "equation", "system", "material", "quantity", "constant")
+_SUBJECT_KEYS = (*_STEM_SUBJECT_KEYS, "gene", "drug", "disease", "biomodel_id")
 
 
 def active_subject(ctx: QueryContext) -> dict[str, str]:
-    """This turn's subject ({concept, equation, material, system, gene, drug, disease, biomodel_id}), to store and pass as the next turn's prior_subject."""
+    """This turn's subject ({concept, equation, system, material, quantity, constant, gene, drug, disease,
+    biomodel_id}), to store and pass as the next turn's prior_subject. "gene" is set only for a resolved gene
+    entity: primary_symbol falls back to a STEM subject's label, which is no gene (LOG-27)."""
     out: dict[str, str] = {}
-    if ctx.concepts:
-        out["concept"] = ctx.concepts[0].label or ctx.concepts[0].mention
-    if ctx.equations:
-        out["equation"] = ctx.equations[0].label or ctx.equations[0].mention
-    if ctx.materials:
-        out["material"] = ctx.materials[0].label or ctx.materials[0].mention
+    for key, group in (("concept", ctx.concepts), ("equation", ctx.equations), ("material", ctx.materials),
+                       ("quantity", ctx.quantities), ("constant", ctx.constants)):
+        if group:
+            out[key] = group[0].label or group[0].mention
     if ctx.systems:
         out["system"] = ctx.systems[0].label or ctx.systems[0].mention
     elif ctx.system_name:
         out["system"] = ctx.system_name
-    if ctx.primary_symbol:
-        out["gene"] = ctx.primary_symbol
+    if ctx.primary_gene is not None and ctx.primary_gene.type == "gene":
+        out["gene"] = ctx.primary_gene.label
     if ctx.drugs:
         out["drug"] = ctx.drugs[0].label or ctx.drugs[0].mention
     established = [d for d in ctx.diseases if not (not d.validated and d.matched_on == "planner")]
@@ -1928,7 +1965,7 @@ def _apply_followup(
         diseases.append(ResolvedEntity(type="disease", mention=prior["disease"], label=prior["disease"], source="memory", matched_on="followup"))
         used["disease"] = prior["disease"]
     if stem_entities is not None:
-        for stem_key in ("equation", "system", "material", "concept"):
+        for stem_key in ("equation", "system", "material", "concept", "quantity", "constant"):
             if prior.get(stem_key) and stem_key in kinds:
                 stem_entities.append(
                     ResolvedEntity(
@@ -1951,7 +1988,8 @@ def _apply_followup(
         return None
     subject = (
         used.get("drug") or used.get("gene") or used.get("equation") or used.get("system")
-        or used.get("material") or used.get("concept") or used.get("disease") or used.get("biomodel_id", "")
+        or used.get("material") or used.get("concept") or used.get("quantity") or used.get("constant")
+        or used.get("disease") or used.get("biomodel_id", "")
     )
     if "gene" in kinds and "drug" not in kinds:
         subject = used.get("gene") or subject

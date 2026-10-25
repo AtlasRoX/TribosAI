@@ -12,11 +12,13 @@
  * Quota (UI-008): when a thread does not fit, messages are slimmed and, as a last resort, an old thread's messages are
  * removed. Every such step is reported (return value + listeners) and marked on the data, never silent.
  *
- * Imports are type-only and relative, so `node --test` can load this module with a fake `window`.
+ * Imports are relative (value imports with an explicit `.ts`), so `node --test` can load this module with a fake
+ * `window`.
  */
 
 import type { Message } from "../types/chat";
 import type { AgentOptionsSettings } from "../types/agentic";
+import { normalizeLegacyAgentName } from "../lib/legacyNames.ts";
 
 export interface InvestigationItem {
   id: string;
@@ -31,6 +33,17 @@ export interface InvestigationItem {
   isCustomTitle?: boolean;
   /** Set when this thread's messages were removed to free browser storage (UI-008). */
   messagesPruned?: boolean;
+  /** Pinned by the user: listed above the others. */
+  pinned?: boolean;
+}
+
+/** One match of a history search: the conversation, the message and a snippet around the match. */
+export interface HistoryMatch {
+  threadId: string;
+  title: string;
+  messageId: string;
+  sender: "user" | "assistant";
+  snippet: string;
 }
 
 export interface UserSettings {
@@ -78,11 +91,59 @@ const STORAGE_KEYS = {
   THREAD_MESSAGES_PREFIX: "tribos_thread_messages_v2_",
   SETTINGS: "tribos_user_settings_v2",
   HISTORY_PREFS: "tribos_history_prefs_v1",
+  DRAFT_PREFIX: "tribos_draft_v1_",
 };
+
+/** Key prefix of the release before the rename (phronesis -> tribos): "phronesis_*" and "phronesis-*" keys. */
+const LEGACY_PREFIX = "phronesis";
+
+/**
+ * One-time rename migration (CI-6 / SUP-8): copies every "phronesis_*" / "phronesis-*" key (history, settings,
+ * drafts, access token, backend URL, theme) to its "tribos_*" / "tribos-*" name, never overwriting a value the
+ * current version already saved, then deletes the old key so it stops using quota. Returns the migrated new keys.
+ * Storage that throws (private mode, blocked) is left alone.
+ */
+export function migrateLegacyKeys(storage: KV | null | undefined): string[] {
+  const migrated: string[] = [];
+  if (!storage) return migrated;
+  try {
+    const legacy: string[] = [];
+    for (let i = 0; i < storage.length; i++) {
+      const key = storage.key(i);
+      if (key && (key.startsWith(`${LEGACY_PREFIX}_`) || key.startsWith(`${LEGACY_PREFIX}-`) || key === `__${LEGACY_PREFIX}_storage_test__`)) {
+        legacy.push(key);
+      }
+    }
+    for (const oldKey of legacy) {
+      try {
+        const value = storage.getItem(oldKey);
+        if (oldKey.startsWith(`${LEGACY_PREFIX}_`) || oldKey.startsWith(`${LEGACY_PREFIX}-`)) {
+          const newKey = `tribos${oldKey.slice(LEGACY_PREFIX.length)}`;
+          if (value !== null && storage.getItem(newKey) === null) {
+            storage.setItem(newKey, value);
+            migrated.push(newKey);
+          }
+        }
+        storage.removeItem(oldKey);
+      } catch {
+        // A key that does not fit stays under its old name; the next load tries again.
+      }
+    }
+  } catch {
+    // storage unavailable
+  }
+  return migrated;
+}
 
 const LEGACY_DUMMY_IDS = new Set(["thread-kras", "thread-her2", "thread-insulin", "thread-nsclc"]);
 
 type KV = Pick<Storage, "getItem" | "setItem" | "removeItem" | "key" | "length">;
+
+/** The parts of `window` this service touches (tests install a fake window with just these). */
+interface BrowserStorages {
+  localStorage?: KV;
+  sessionStorage?: KV;
+}
 
 /** Storage that lives only as long as this page ("don't keep history"). */
 class MemoryStorage implements KV {
@@ -142,37 +203,53 @@ function stripCitationPassageText(messages: Message[]): Message[] {
   });
 }
 
-/** The artifact without its plot, marked so the card can say the plot was not kept (UI-008). */
-function withoutPlot(value: any): any {
-  if (!value || typeof value !== "object" || !("plot_base64_png" in value)) return value;
-  const { plot_base64_png: _plot, ...rest } = value;
-  return { ...rest, plot_dropped_for_storage: true };
+/** Fields holding an embedded base64 image: simulation plots, Axiom/SageMath and sandbox figures. */
+const IMAGE_KEYS = new Set(["plot_base64_png", "png_base64", "plot_png"]);
+
+/** A copy without embedded images at any depth; each object that lost one is marked so its card can say so (UI-008). */
+function withoutImages<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(withoutImages) as T;
+  if (!value || typeof value !== "object") return value;
+  let dropped = false;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value)) {
+    if (IMAGE_KEYS.has(k) && typeof v === "string") {
+      dropped = true;
+      continue;
+    }
+    out[k] = withoutImages(v);
+  }
+  if (dropped) out.plot_dropped_for_storage = true;
+  return out as T;
 }
 
 /**
  * Messages reduced to what the thread view, re-run and export still need after a reload. The full run
  * manifest is stored server-side (re-run and export look it up by run_id); query_context and the source
- * list are diagnostic. With dropPlots, simulation/single-cell images and citation passage text go too.
+ * list are diagnostic. With dropPlots, every embedded image and citation passage text go too.
  * Slimmed assistant messages carry `storage_slimmed` so the reloaded view can say what was dropped.
  */
 export function slimMessages(messages: Message[], dropPlots = false): Message[] {
   const slim = messages.map((m) => {
     if (m.sender !== "assistant") return m;
     const { query_context: _qc, ...rest } = m;
-    const out: Message = { ...rest, storage_slimmed: dropPlots ? "plots" : "diagnostics" };
-    if (m.run_manifest) out.run_manifest = { run_id: m.run_manifest.run_id } as Message["run_manifest"];
+    const out: Message = { ...compactMessage(rest as Message), storage_slimmed: dropPlots ? "plots" : "diagnostics" };
     if (m.execution_artifacts) {
       const { sources: _sources, ...artifacts } = m.execution_artifacts;
-      if (dropPlots) {
-        artifacts.vivarix = withoutPlot(artifacts.vivarix);
-        artifacts.vivarix_scan = withoutPlot(artifacts.vivarix_scan);
-        artifacts.lumicell = withoutPlot(artifacts.lumicell);
-      }
-      out.execution_artifacts = artifacts;
+      out.execution_artifacts = dropPlots ? withoutImages(artifacts) : artifacts;
     }
     return out;
   });
   return dropPlots ? stripCitationPassageText(slim) : slim;
+}
+
+/**
+ * What every save keeps of a message: the full run manifest lives on the server (re-run and export look it up by
+ * run_id), so only its id is stored. Nothing the thread view shows is dropped, so no notice is needed.
+ */
+function compactMessage(m: Message): Message {
+  if (!m.run_manifest || Object.keys(m.run_manifest).length <= 1) return m;
+  return { ...m, run_manifest: { run_id: m.run_manifest.run_id } as Message["run_manifest"] };
 }
 
 function normalizePrefs(raw: unknown): HistoryPrefs {
@@ -193,8 +270,8 @@ export class LocalStorageService {
   // STORAGE SELECTION, SCOPE AND RETENTION
   // ==========================================
 
-  private win(): any {
-    return typeof window === "undefined" ? null : (window as any);
+  private win(): BrowserStorages | null {
+    return typeof window === "undefined" ? null : (window as unknown as BrowserStorages);
   }
 
   /** localStorage, for settings and the history preference (never conversation content). */
@@ -214,7 +291,7 @@ export class LocalStorageService {
     const w = this.win();
     try {
       if (!w) return null;
-      return (mode === "session" ? w.sessionStorage : w.localStorage) as KV;
+      return (mode === "session" ? w.sessionStorage : w.localStorage) ?? null;
     } catch {
       return null;
     }
@@ -239,6 +316,25 @@ export class LocalStorageService {
 
   private msgKey(threadId: string): string {
     return `${STORAGE_KEYS.THREAD_MESSAGES_PREFIX}${this.scope ? `${this.scope}__` : ""}${threadId}`;
+  }
+
+  private draftKey(threadId: string): string {
+    return this.k(`${STORAGE_KEYS.DRAFT_PREFIX}${threadId}`);
+  }
+
+  /** Runs the phronesis -> tribos key migration on device and session storage (call once, before reading). */
+  public migrateLegacyStorage(): string[] {
+    const w = this.win();
+    if (!w) return [];
+    const out: string[] = [];
+    for (const name of ["localStorage", "sessionStorage"] as const) {
+      try {
+        out.push(...migrateLegacyKeys(w[name] as KV | undefined));
+      } catch {
+        // storage unavailable
+      }
+    }
+    return out;
   }
 
   /** Listen for slimming / pruning / expiry notices; returns an unsubscribe function. */
@@ -281,7 +377,11 @@ export class LocalStorageService {
     const snapshot = {
       list: from?.getItem(this.k(STORAGE_KEYS.INVESTIGATIONS)) ?? null,
       active: from?.getItem(this.k(STORAGE_KEYS.ACTIVE_THREAD)) ?? null,
-      msgs: ids.map((id) => [this.msgKey(id), from?.getItem(this.msgKey(id)) ?? null] as const),
+      // Unsent drafts move with their conversations, so nothing typed stays behind on the device.
+      msgs: ids.flatMap((id) => [
+        [this.msgKey(id), from?.getItem(this.msgKey(id)) ?? null] as const,
+        [this.draftKey(id), from?.getItem(this.draftKey(id)) ?? null] as const,
+      ]),
     };
     try {
       this.device()?.setItem(STORAGE_KEYS.HISTORY_PREFS, JSON.stringify(prefs));
@@ -385,7 +485,9 @@ export class LocalStorageService {
           (inv) => !LEGACY_DUMMY_IDS.has(inv.id) || (inv.messageCount && inv.messageCount > 0)
         );
         return valid.sort(
-          (a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime()
+          (a, b) =>
+            Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) ||
+            new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime()
         );
       }
       return [];
@@ -442,12 +544,67 @@ export class LocalStorageService {
     return true;
   }
 
+  /** Pins or unpins a conversation (pinned ones are listed first); the order of the rest is unchanged. */
+  public setPinned(id: string, pinned: boolean): void {
+    const list = this.getInvestigations();
+    const target = list.find((i) => i.id === id);
+    if (!target) return;
+    target.pinned = pinned || undefined;
+    this.saveInvestigationsList(list);
+  }
+
+  /** The unsent text of a conversation's composer ("" when none). */
+  public getDraft(threadId: string): string {
+    if (!this.isAvailable() || !threadId) return "";
+    try {
+      return this.store()!.getItem(this.draftKey(threadId)) || "";
+    } catch {
+      return "";
+    }
+  }
+
+  /** Keeps (or, when empty, clears) the unsent text of a conversation's composer. */
+  public saveDraft(threadId: string, text: string): void {
+    if (!this.isAvailable() || !threadId) return;
+    const key = this.draftKey(threadId);
+    try {
+      if (text.trim()) this.store()!.setItem(key, text.slice(0, 20000));
+      else this.store()!.removeItem(key);
+    } catch {
+      // a draft is a convenience; a full store simply does not keep it
+    }
+  }
+
+  /** Searches the saved conversations' messages (case-insensitive, LaTeX included), newest conversations first. */
+  public searchHistory(query: string, limit = 30): HistoryMatch[] {
+    const q = query.trim().toLowerCase();
+    if (q.length < 2) return [];
+    const out: HistoryMatch[] = [];
+    for (const inv of this.getInvestigations()) {
+      if (inv.title.toLowerCase().includes(q)) {
+        out.push({ threadId: inv.id, title: inv.title, messageId: "", sender: "user", snippet: inv.preview || inv.title });
+      }
+      for (const m of this.getMessages(inv.id)) {
+        const text = String(m.content || "");
+        const at = text.toLowerCase().indexOf(q);
+        if (at < 0) continue;
+        const start = Math.max(0, at - 50);
+        const snippet = (start ? "…" : "") + text.slice(start, at + q.length + 70).replace(/\s+/g, " ") + "…";
+        out.push({ threadId: inv.id, title: inv.title, messageId: m.id, sender: m.sender, snippet });
+        if (out.length >= limit) return out;
+      }
+    }
+    return out;
+  }
+
   public deleteInvestigation(id: string): void {
     if (!this.isAvailable()) return;
     const list = this.getInvestigations().filter((i) => i.id !== id);
     this.saveInvestigationsList(list);
     try {
       this.store()!.removeItem(this.msgKey(id));
+      // The conversation's unsent draft goes with it (deleted or expired).
+      this.store()!.removeItem(this.draftKey(id));
     } catch {
       // ignore
     }
@@ -520,10 +677,7 @@ export class LocalStorageService {
       if (!raw) return [];
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return [];
-      return parsed.map((m: any) => ({
-        ...m,
-        agent: m.agent === "Clinical Orchestrator" ? "Tribos Orchestrator" : (m.agent || "Tribos Orchestrator"),
-      }));
+      return parsed.map((m: Message) => ({ ...m, agent: normalizeLegacyAgentName(m.agent) || "Tribos Orchestrator" }));
     } catch (e) {
       console.warn(`TribosLocalStorage: failed to get messages for ${threadId}`, e);
       return [];
@@ -534,24 +688,29 @@ export class LocalStorageService {
     const none: SaveResult = { saved: false, level: "none", prunedThreadIds: [] };
     if (!this.isAvailable() || !threadId) return none;
     const key = this.msgKey(threadId);
-    // Full payload first, then slimmer copies; pruning another thread's history is the last resort.
-    const attempts: Array<[SaveResult["level"], () => Message[]]> = [
-      ["full", () => messages],
-      ["slim", () => slimMessages(messages)],
-      ["no_plots", () => slimMessages(messages, true)],
-    ];
-    let level: SaveResult["level"] = "none";
-    for (const [lvl, build] of attempts) {
-      if (this.trySetItem(key, build())) {
-        level = lvl;
-        break;
+    const full = messages.map(compactMessage);
+    // The open investigation is the one the reader is looking at, so space is made elsewhere first: older
+    // investigations give up their plots, then the oldest are pruned, and only then does this one lose anything.
+    let level: SaveResult["level"] = this.trySetItem(key, full) ? "full" : "none";
+    if (level === "none") {
+      const slim = slimMessages(messages);
+      level = this.trySetItem(key, slim) ? "slim" : "none";
+      for (const other of level === "none" ? this.olderThreads(threadId) : []) {
+        this.slimStoredThread(other);
+        if (this.trySetItem(key, slim)) {
+          level = "slim";
+          break;
+        }
       }
     }
-    let pruned: string[] = [];
-    if (level === "none") {
-      pruned = this.handleQuotaExceeded(new Error(`thread ${threadId} does not fit in browser storage`), undefined, threadId);
-      if (this.trySetItem(key, slimMessages(messages, true))) level = "no_plots";
+    const pruned: string[] = [];
+    while (level === "none") {
+      const removed = this.handleQuotaExceeded(new Error(`thread ${threadId} does not fit in browser storage`), undefined, threadId);
+      if (!removed.length) break;
+      pruned.push(...removed);
+      if (this.trySetItem(key, slimMessages(messages))) level = "slim";
     }
+    if (level === "none" && this.trySetItem(key, slimMessages(messages, true))) level = "no_plots";
     const result: SaveResult = { saved: level !== "none", level, prunedThreadIds: pruned };
     if (level === "none") {
       this.notify({
@@ -630,6 +789,33 @@ export class LocalStorageService {
       console.warn(`TribosLocalStorage: failed to update the investigation record for ${threadId}`, e);
     }
     return result;
+  }
+
+  /** Other saved investigations, oldest first (the active one and `keep` excluded). */
+  private olderThreads(keep: string): InvestigationItem[] {
+    const activeId = this.getActiveThreadId();
+    return this.getInvestigations()
+      .filter((i) => i.id !== keep && i.id !== activeId && !i.messagesPruned)
+      .reverse();
+  }
+
+  /** Rewrites an older investigation's saved messages without plots and passage text, and says so (UI-008). */
+  private slimStoredThread(inv: InvestigationItem): void {
+    try {
+      const raw = this.store()!.getItem(this.msgKey(inv.id));
+      const msgs = raw ? JSON.parse(raw) : null;
+      if (!Array.isArray(msgs)) return;
+      const slim = JSON.stringify(slimMessages(msgs, true));
+      if (slim.length >= raw!.length) return;
+      this.store()!.setItem(this.msgKey(inv.id), slim);
+      this.notify({
+        kind: "slimmed",
+        message: `Browser storage was full: plots and citation passages of the older investigation "${inv.title}" were removed to make room.`,
+        threadIds: [inv.id],
+      });
+    } catch {
+      // left as it was; pruning is the next step
+    }
   }
 
   private trySetItem(key: string, value: unknown): boolean {

@@ -62,11 +62,13 @@ class DiscoveryHypothesisReport(BaseModel):
     """Structured report prioritizing therapeutic hypotheses and laboratory validation plans."""
     inquiry: str
     primary_target: str
-    status: str = "COMPLETED"  # COMPLETED | INSUFFICIENT_EVIDENCE
+    status: str = "COMPLETED"  # COMPLETED | INSUFFICIENT_EVIDENCE | NOT_APPLICABLE (the question names no molecular target)
     candidates: list[PrioritizedCandidate] = Field(default_factory=list)
     iterative_update_summary: str | None = None
 
     def to_markdown_summary(self) -> str:
+        if self.status == "NOT_APPLICABLE":
+            return ""  # no molecular target: target prioritization has nothing to say, so nothing reaches the prompt
         if self.status == "INSUFFICIENT_EVIDENCE" or not self.candidates:
             return (
                 f"### Evidence-Backed Target & Combination Prioritization (DiscoveryAgent)\n"
@@ -127,7 +129,7 @@ class DiscoveryEngine:
                 primary_target="Unspecified",
                 status="INSUFFICIENT_EVIDENCE",
                 candidates=[],
-                iterative_update_summary="No specific biological target identified in query. Hypothesis prioritization requires a defined molecular target.",
+                iterative_update_summary="No specific STEM target identified in query. Hypothesis prioritization requires a defined subject or parameter.",
             )
 
         # 1. Audit observed evidence across tools
@@ -266,7 +268,7 @@ class DiscoveryEngine:
 
         rationale_str = " ".join(rationale_parts)
 
-        candidate_name = f"{clean_target} Targeted Modality / Combination"
+        candidate_name = f"{clean_target} Governing Model / Regime Hypothesis"
         all_sources = ot_sources + lit_sources
 
         candidates.append(
@@ -277,20 +279,20 @@ class DiscoveryEngine:
                 observed_components=components,
                 rationale=rationale_str,
                 prediction_label=tier,
-                proposed_validation_experiment=f"In vitro target engagement assay, Western blot analysis, and dose-response synergy screen for {clean_target} measuring cellular proliferation and downstream pathway phosphorylation.",
+                proposed_validation_experiment=f"Calibrated empirical physical measurement, drop / wind-tunnel experiment, or numerical / CFD simulation for {clean_target} measuring drag forces, velocity profiles, and dimensionless numbers.",
                 supporting_sources=all_sources,
             )
         )
 
-        summary_parts = [
-            f"Disease association: {_fmt(components['disease_association'])}",
-            f"Literature: {_fmt(components['literature_support'])}",
-        ]
-        # Kinetics and single-cell appear only when they were attempted: an analysis nobody asked for is not a gap.
+        summary_parts = []
+        if components.get("disease_association") is not None:
+            summary_parts.append(f"Domain association: {_fmt(components['disease_association'])}")
+        if components.get("literature_support") is not None:
+            summary_parts.append(f"Literature: {_fmt(components['literature_support'])}")
         if viv_res is not None:
-            summary_parts.append(f"Kinetics: {_fmt(components['pathway_kinetics'])}")
+            summary_parts.append(f"Dynamics: {_fmt(components.get('pathway_kinetics'))}")
         if lum_res is not None:
-            summary_parts.append(f"Single-Cell: {_fmt(components['single_cell_marker_evidence'])}")
+            summary_parts.append(f"Dataset / Analysis: {_fmt(components.get('single_cell_marker_evidence'))}")
         update_summary = (
             f"Prioritization computed across {n_modalities} observed modality(ies). " + "; ".join(summary_parts) + "."
         )

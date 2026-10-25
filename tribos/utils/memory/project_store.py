@@ -42,9 +42,10 @@ PROJECT_ID_RE = re.compile(r"^prj_[A-Za-z0-9]{6,40}$")
 FACT_ID_RE = re.compile(r"^fct_[0-9a-f]{16}$")
 
 # Relations with one current object per subject: a new object contradicts the old one.
-SINGLE_VALUED_RELATIONS = frozenset({"classification", "mechanism", "germline_classification", "preferred_model"})
-# Relations whose (subject, object) pair carries one current value: a new value contradicts the old one.
-VALUED_RELATIONS = frozenset({"association_score_with"})
+SINGLE_VALUED_RELATIONS = frozenset({"classification", "preferred_model"})
+# Relations whose (subject, object) pair carries one current value: a new value contradicts the old one (a material's
+# band gap, a constant's value; association_score_with is a legacy relation still found in older projects).
+VALUED_RELATIONS = frozenset({"property", "physical_constant", "association_score_with"})
 
 _BUSY_TIMEOUT_S = 5.0
 _ALNUM = string.ascii_letters + string.digits
@@ -172,6 +173,35 @@ class ProjectStore:
             )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_fact_project ON facts(project_id, user_id, invalid_at)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_fact_key ON facts(project_id, subject_norm, relation)")
+            self._ensure_unique_current_facts(conn)
+
+    @staticmethod
+    def _ensure_unique_current_facts(conn: sqlite3.Connection) -> None:
+        """At most one current fact per (project, user, subject, relation, object): a partial unique index on the
+        facts that are still valid. Duplicates written before it existed (concurrent runs racing upsert_facts) are
+        merged first: the best copy (verified, then most confident, then oldest) stays, the others are invalidated
+        as superseded by it, so the index can be added to an existing database."""
+        exists = conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'uq_fact_current'").fetchone()
+        if exists:
+            return
+        groups = conn.execute(
+            "SELECT project_id, user_id, subject_norm, relation, object_norm FROM facts WHERE invalid_at IS NULL "
+            "GROUP BY project_id, user_id, subject_norm, relation, object_norm HAVING COUNT(*) > 1"
+        ).fetchall()
+        now = time.time()
+        for g in groups:
+            rows = conn.execute(
+                "SELECT id FROM facts WHERE invalid_at IS NULL AND project_id = ? AND user_id = ? AND subject_norm = ? "
+                "AND relation = ? AND object_norm = ? ORDER BY verified DESC, confidence DESC, recorded_at ASC",
+                tuple(g),
+            ).fetchall()
+            keeper = rows[0]["id"]
+            for r in rows[1:]:
+                ProjectStore._invalidate(conn, r["id"], now, keeper, f"duplicate of {keeper} (merged)")
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_fact_current ON facts(project_id, user_id, subject_norm, relation, "
+            "object_norm) WHERE invalid_at IS NULL"
+        )
 
     # Projects ------------------------------------------------------------------------------------------------
     @staticmethod
@@ -310,8 +340,10 @@ class ProjectStore:
             ).fetchall()
         return [self._fact_dict(r) for r in rows]
 
-    def _insert(self, conn: sqlite3.Connection, project_id: str, user_id: str, f: FactInput, now: float) -> str:
-        fid = new_fact_id()
+    def _insert(
+        self, conn: sqlite3.Connection, project_id: str, user_id: str, f: FactInput, now: float, fid: str | None = None
+    ) -> str:
+        fid = fid or new_fact_id()
         tags = list(f.tags or [])
         if not f.verified and "unverified" not in tags:
             tags.append("unverified")
@@ -356,6 +388,9 @@ class ProjectStore:
             batch_keys.setdefault((norm(f.subject), f.relation), set()).add(norm(f.object))
         written = invalidated = 0
         with self._connect() as conn:
+            # One writer at a time from the first read: two runs of one project would otherwise both read "no such
+            # fact" and both add it, or each miss the other's contradiction (LOG-30).
+            conn.execute("BEGIN IMMEDIATE")
             for f in cleaned:
                 s_norm, o_norm = norm(f.subject), norm(f.object)
                 existing = conn.execute(
@@ -366,9 +401,11 @@ class ProjectStore:
                 if f.relation in VALUED_RELATIONS and same and f.value is not None:
                     differing = [r for r in same if r["value"] is not None and r["value"] != f.value]
                     if differing:
-                        new_id = self._insert(conn, project_id, user_id, f, now)
+                        # The old value is invalidated before the new one is added (one current fact per key).
+                        new_id = new_fact_id()
                         for r in differing:
                             self._invalidate(conn, r["id"], now, new_id, f"value changed from {r['value']} to {f.value}")
+                        self._insert(conn, project_id, user_id, f, now, fid=new_id)
                         ops.append({"op": "INVALIDATE", "fact_id": new_id, "invalidated": [r["id"] for r in differing]})
                         ops.append({"op": "ADD", "fact_id": new_id})
                         written += 1
@@ -447,23 +484,31 @@ class ProjectStore:
                 tags=[t for t in (tags if tags is not None else old["tags"]) if t != "unverified"] + ["edited"],
             ).clean()
             with self._connect() as conn:
-                new_id = self._insert(conn, project_id, user_id, f, now)
+                conn.execute("BEGIN IMMEDIATE")
+                new_id = new_fact_id()
                 self._invalidate(conn, fact_id, now, new_id, "edited by the researcher")
+                self._insert(conn, project_id, user_id, f, now, fid=new_id)
                 self.touch_project(conn, project_id, user_id)
             return self.get_fact(project_id, new_id, user_id)
-        sets, args = [], []
+        sets: list[str] = []
+        args: list[Any] = []
         if confidence is not None:
             sets.append("confidence = ?")
             args.append(max(0.0, min(1.0, float(confidence))))
         if verified is not None:
             sets.append("verified = ?")
             args.append(int(bool(verified)))
-        if tags is not None:
+        if tags is not None or verified is not None:
+            # The "unverified" tag follows the verified flag: verifying a fact drops it, unverifying adds it.
+            new_tags = [str(t)[:40] for t in (tags if tags is not None else old["tags"] or [])]
+            is_verified = verified if verified is not None else bool(old["verified"])
+            new_tags = [t for t in new_tags if t != "unverified"] + ([] if is_verified else ["unverified"])
             sets.append("tags_json = ?")
-            args.append(json.dumps([str(t)[:40] for t in tags][:10]))
+            args.append(json.dumps(list(dict.fromkeys(new_tags))[:10]))
         if sets:
             with self._connect() as conn:
                 conn.execute(f"UPDATE facts SET {', '.join(sets)} WHERE id = ? AND user_id = ?", (*args, fact_id, user_id))
+                self.touch_project(conn, project_id, user_id)
         return self.get_fact(project_id, fact_id, user_id)
 
     def delete_fact(self, project_id: str, fact_id: str, user_id: str) -> bool:

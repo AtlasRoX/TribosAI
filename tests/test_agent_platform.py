@@ -199,7 +199,9 @@ def test_plan_approval_edit_switches_a_source_off(monkeypatch, tmp_path, only_ph
     )
     assert len(seen) == 1 and seen[0]["run_id"] == control.run_id and seen[0]["kind"] == "plan"
     keys = {r["key"]: r for r in seen[0]["payload"]["sources"]}
-    assert keys["websurfer"]["run"] and keys["lithoscribe"]["run"] and keys["websurfer"]["label"] == "Web search"
+    assert keys["websurfer"]["run"] and keys["archivon"]["run"] and keys["websurfer"]["label"] == "Web search"
+    # Legacy aliases and tools this installation lacks are not offered as switches.
+    assert not {"lithoscribe", "vivarix", "synapta"} & set(keys)
     art = res.execution_artifacts["plan_approval"]
     assert art["status"] == "edited" and art["switched_off"] == ["websurfer"] and art["approval_id"] == seen[0]["approval_id"]
     assert not called(calls, "websurfer_search")
@@ -502,53 +504,71 @@ def test_project_memory_routes(api, stores):
 
 
 def _tool_results() -> dict[str, Any]:
+    sim = ToolResult(success=True, tool_name="dynamis_simulate_ode", data={
+        "model_name": "damped_oscillator", "t_span": [0.0, 15.0], "verified": True,
+        "summary": {"x": {"initial": 1.0, "final": -0.0037, "min": -0.614, "max": 1.0, "mean": 0.015}}})
     return {
-        "synapta": ToolResult(success=True, tool_name="synapta_opentargets_associations", canonical_ids={"target_symbol": "KRAS"},
-                              data={"associations": [{"disease_name": "pancreatic carcinoma", "overall_association_score": 0.83}]}),
-        "chembl": ToolResult(success=True, tool_name="chembl_drug_profile", data={"drugs": [{"chembl_id": "CHEMBL4535757", "pref_name": "SOTORASIB", "mechanisms": [
-            {"mechanism_of_action": "GTPase KRas inhibitor", "action_type": "INHIBITOR", "target_chembl_id": "CHEMBL2189121", "target_pref_name": "GTPase KRas"}]}]}),
-        "clinical_trials": ToolResult(success=True, tool_name="lithoscribe_clinical_trials_search", data={"trials": [{"nct_id": "NCT03600883", "conditions": ["Non-small Cell Lung Cancer"]}]}),
-        "vivarix": ToolResult(success=True, tool_name="vivarix_simulate_time_course", data={"model_id": "BIOMD0000000010", "model_name": "Kholodenko2000 MAPK"}),
+        "axiom": ToolResult(success=True, tool_name="axiom_solve_problem",
+                            data={"status": "verified", "answer": {"text": "x = -2; x = 2"}}),
+        "dynamis": sim,
+        "vivarix": sim,  # the pipeline's alias key for the same result
+        "dynamis_steady": ToolResult(success=True, tool_name="dynamis_equilibrium", data={
+            "fixed_point": {"x": 0.0, "v": 0.0}, "stability": "stable_spiral", "converged": True}),
+        "physis_constants": ToolResult(success=True, tool_name="physis_constants", data={"constants": [
+            {"name": "Planck constant", "symbol": "h", "value": 6.62607015e-34, "unit": "J Hz^-1"}]}),
+        "physis_units": ToolResult(success=True, tool_name="physis_units", data={
+            "input_value": 5.0, "input_unit": "eV", "converted_value": 8.01088317e-19, "converted_unit": "J"}),
+        "physis_materials": ToolResult(success=True, tool_name="physis_materials", data={"materials": [
+            {"formula_pretty": "Si", "band_gap": 1.12, "density": 2.329, "source": "builtin_reference"}]}),
         "websurfer": ToolResult(success=False, tool_name="websurfer_search", error="down"),
     }
 
 
 def test_consolidation_extracts_facts_and_recall_injects_them(stores):
-    from tribos.utils.memory.project_store import get_project_store
+    from tribos.utils.memory.project_store import VALUED_RELATIONS, get_project_store
 
     store = get_project_store()
-    pid = store.create_project("alice", "KRAS")["id"]
-    ctx = _ctx(primary_symbol="KRAS", primary_target="KRAS")
-    state = _state(ctx, _tool_results(), project_id=pid, query="From now on always cite PMIDs. " + KRAS_Q)
+    pid = store.create_project("alice", "Oscillator")["id"]
+    ctx = _ctx(primary_target="damped oscillator")
+    query = "From now on always cite arXiv ids. How does damping change the damped oscillator's overshoot?"
+    state = _state(ctx, _tool_results(), project_id=pid, query=query)
     state.verification = {"passed": True}
-    state.artifacts["hypotheses"] = {"target": "KRAS", "hypotheses": [{"statement": "KRAS knockdown lowers ERK-PP", "result": {"supports": True, "log2_fold_change": -1.2}}]}
+    state.artifacts["hypotheses"] = {"target": "damped oscillator", "hypotheses": [
+        {"statement": "Raising zeta lowers the overshoot of x", "result": {"supports": True, "relative_change": -0.38}}]}
     phase = pm_mod.ProjectConsolidatePhase()
     assert phase.applies(state)
     asyncio.run(phase.run(state))
     art = state.artifacts["project_memory"]
-    assert art["written"] >= 7 and art["invalidated"] == 0 and art["verified"] is True
-    facts = {(f["subject"], f["relation"], f["object"]) for f in store.list_facts(pid, "alice")}
-    assert ("KRAS", "association_score_with", "pancreatic carcinoma") in facts
-    assert ("SOTORASIB", "mechanism", "GTPase KRas inhibitor") in facts and ("SOTORASIB", "targets", "GTPase KRas") in facts
-    assert ("NCT03600883", "studies_condition", "Non-small Cell Lung Cancer") in facts
-    assert ("BIOMD0000000010", "models_topic", "KRAS") in facts
-    assert ("KRAS", "hypothesis_supported", "KRAS knockdown lowers ERK-PP") in facts
+    assert art["written"] >= 8 and art["invalidated"] == 0 and art["verified"] is True
+    rows = store.list_facts(pid, "alice")
+    facts = {(f["subject"], f["relation"], f["object"]) for f in rows}
+    assert ("damped oscillator", "symbolic_result", "x = -2; x = 2") in facts
+    assert ("damped oscillator", "simulated_final_state", "x=-0.0037") in facts
+    assert ("damped oscillator", "equilibrium", "x=0, v=0") in facts
+    assert ("Planck constant", "physical_constant", "h") in facts
+    assert ("5 eV", "converts_to", "8.01088e-19 J") in facts
+    assert ("Si", "property", "band gap") in facts and ("Si", "property", "density") in facts
+    assert ("damped oscillator", "hypothesis_supported", "Raising zeta lowers the overshoot of x") in facts
     assert any(r == "instructs" for _s, r, _o in facts)
-    assert all(f["verified"] and f["source"]["thread_id"] == "t-state" for f in store.list_facts(pid, "alice"))
+    assert sum(1 for f in rows if f["relation"] == "simulated_final_state") == 1  # the alias key is not a second fact
+    assert all(f["verified"] and f["source"]["thread_id"] == "t-state" for f in rows)
+    assert not any(r in ("association_score_with", "studies_condition", "models_topic") for _s, r, _o in facts)
 
-    # A later unverified turn with a different score supersedes the old score and is tagged unverified.
-    results = _tool_results()
-    results["synapta"].data = {"associations": [{"disease_name": "pancreatic carcinoma", "overall_association_score": 0.71}]}
-    later = _state(ctx, {"synapta": results["synapta"]}, project_id=pid)
-    later.verification = {"passed": False}
-    asyncio.run(phase.run(later))
-    assert later.artifacts["project_memory"]["invalidated"] == 1
-    current = [f for f in store.list_facts(pid, "alice") if f["relation"] == "association_score_with"]
-    assert len(current) == 1 and current[0]["value"] == "0.710" and "unverified" in current[0]["tags"]
+    if "property" in VALUED_RELATIONS:
+        # A later unverified turn with a different value supersedes the old one and is tagged unverified.
+        newer = ToolResult(success=True, tool_name="physis_materials", data={"materials": [
+            {"formula_pretty": "Si", "band_gap": 1.11, "source": "materials_project"}]})
+        later = _state(ctx, {"physis_materials": newer}, project_id=pid)
+        later.verification = {"passed": False}
+        asyncio.run(phase.run(later))
+        assert later.artifacts["project_memory"]["invalidated"] == 1
+        current = [f for f in store.list_facts(pid, "alice") if f["relation"] == "property" and f["object"] == "band gap"]
+        assert len(current) == 1 and current[0]["value"] == "1.11 eV" and "unverified" in current[0]["tags"]
 
-    recall_state = _state(_ctx(primary_symbol="KRAS", entities=[SimpleNamespace(label="KRAS", mention="KRAS")]), project_id=pid, clean_query="KRAS resistance")
+    recall_state = _state(_ctx(primary_target="Si", entities=[SimpleNamespace(label="Si", mention="silicon")]),
+                          project_id=pid, clean_query="Si band gap")
     asyncio.run(pm_mod.ProjectRecallPhase().run(recall_state))
-    assert recall_state.project_memory.startswith('<project_memory project="KRAS">') and "pancreatic carcinoma" in recall_state.project_memory
+    assert recall_state.project_memory.startswith('<project_memory project="Oscillator">') and "band gap" in recall_state.project_memory
     assert 0 < len(recall_state.artifacts["project_memory"]["recalled"]) <= 12
     stranger = _state(_ctx(), project_id=pid, user_id="bob", control_user="bob")
     asyncio.run(pm_mod.ProjectRecallPhase().run(stranger))
@@ -697,3 +717,13 @@ def test_a2a_tasks_backed_by_jobs(api, stores):
     _a2a(api, "CancelTask", {"id": slow["id"]})
     _wait_job(api, slow["id"], jobs_mod.TERMINAL)
     assert _a2a(api, "GetTask", {"id": slow["id"]})["result"]["status"]["state"] == "canceled"
+
+
+def test_switching_a_source_off_also_switches_its_legacy_alias():
+    from tribos.agents.query_context import QueryContext, SourceDecision
+
+    ctx = QueryContext(raw_query="q", clean_query="q")
+    ctx.decisions = {k: SourceDecision(run=True, reason="") for k in ("archivon", "lithoscribe", "dynamis", "vivarix")}
+    assert approval_mod._switch_off(ctx, ["archivon", "dynamis"]) == ["archivon", "dynamis"]
+    assert not any(d.run for d in ctx.decisions.values())  # "lithoscribe" and "vivarix" gate the same work
+    assert ctx.suppress_simulation

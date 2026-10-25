@@ -86,7 +86,7 @@ def _posix_limits(memory_mb, cpu_s):
     import resource
     mem = int(memory_mb) * 1024 * 1024
     for name, value in (("RLIMIT_AS", mem), ("RLIMIT_CPU", int(cpu_s)), ("RLIMIT_NOFILE", 256),
-                        ("RLIMIT_FSIZE", 256 * 1024 * 1024)):
+                        ("RLIMIT_NPROC", 64), ("RLIMIT_FSIZE", 256 * 1024 * 1024)):
         lim = getattr(resource, name, None)
         if lim is None:
             continue
@@ -188,9 +188,22 @@ class _Capped(_io.TextIOBase):
         if self._left <= 0:
             self.truncated = True
             return len(s)
-        piece = s[: self._left]
-        self._left -= len(piece)
-        if len(piece) < len(s):
+        # The cap is a byte budget (the output file and the server-side cap are measured in bytes), so keep the
+        # longest prefix whose UTF-8 encoding fits rather than counting characters.
+        data = s.encode("utf-8", "replace")
+        if len(data) <= self._left:
+            piece = s
+            self._left -= len(data)
+        else:
+            lo, hi = 0, len(s)
+            while lo < hi:
+                mid = (lo + hi + 1) // 2
+                if len(s[:mid].encode("utf-8", "replace")) <= self._left:
+                    lo = mid
+                else:
+                    hi = mid - 1
+            piece = s[:lo]
+            self._left -= len(piece.encode("utf-8", "replace"))
             self.truncated = True
         self._inner.write(piece)
         return len(s)
@@ -277,9 +290,23 @@ def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
         if str(item).startswith("__") or item in _BANNED_ATTRS:
             raise ImportError(f"importing '{item}' is not allowed in the analysis sandbox")
     module = _real_import(name, globals, locals, fromlist, level)
-    if str(name).split(".", 1)[0] in _READER_ROOTS:
+    root = str(name).split(".", 1)[0]
+    if root in _READER_ROOTS:
         _guard_readers()
+    if root == "numpy":
+        _numpy_compat()
+    if root == "sympy":
+        _harden_sympy()
     return module
+
+
+def _numpy_compat():
+    """Models write NumPy 2 names; on NumPy 1.x the same functions exist under their old names, so alias them."""
+    np = _sys.modules.get("numpy")
+    if np is None:
+        return
+    if not hasattr(np, "trapezoid") and hasattr(np, "trapz"):
+        np.trapezoid = np.trapz  # NumPy 2.0 renamed trapz to trapezoid
 
 
 def _guarded_open(file, mode="r", *args, **kwargs):
@@ -350,6 +377,213 @@ def _restricted_builtins():
     safe = {k: v for k, v in vars(_builtins).items() if k not in banned}
     safe.update(__import__=_guarded_import, open=_guarded_open, getattr=_guarded_getattr, hasattr=_guarded_hasattr)
     return safe
+
+
+# --- Process-wide file-access guard (SEC-1/SEC-3) ------------------------------------------------------------------
+# The AST policy and the restricted user builtins only guard code the user namespace runs. Library internals and
+# SymPy's string parser reach the real builtins.open / io.open / os.open, so a second, process-wide guard allows
+# reads only inside a set of trusted roots (the work dir, the scrubbed temp dir and the read-only Python install),
+# and writes only inside the work dir and the temp dir. This is the real file-system boundary.
+_real_io_open = _io.open
+_real_os_open = _os.open
+_DISK = {"left": int(_CFG.get("max_disk_bytes") or 0)}
+
+
+def _norm(path):
+    return _os.path.normcase(_os.path.realpath(path))
+
+
+def _read_roots():
+    # The work dir, the scrubbed temp/cache dirs and the read-only Python installation (stdlib under base_prefix,
+    # third-party packages under prefix). sys.path is deliberately NOT trusted: an editable install adds the
+    # project source root to it, and nothing in work should read the repository.
+    roots = {_norm(_WORK)}
+    for var in ("TEMP", "TMP", "TMPDIR", "MPLCONFIGDIR", "NUMBA_CACHE_DIR"):
+        value = _os.environ.get(var)
+        if value:
+            roots.add(_norm(value))
+    for base in (_sys.base_prefix, _sys.prefix, _sys.exec_prefix, getattr(_sys, "base_exec_prefix", None)):
+        if base:
+            roots.add(_norm(base))
+    return frozenset(roots)
+
+
+def _write_roots():
+    roots = {_norm(_WORK)}
+    for var in ("TEMP", "TMP", "TMPDIR", "MPLCONFIGDIR", "NUMBA_CACHE_DIR"):
+        value = _os.environ.get(var)
+        if value:
+            roots.add(_norm(value))
+    return frozenset(roots)
+
+
+_READ_ROOTS = None
+_WRITE_ROOTS = None
+
+
+def _under(real, roots):
+    nc = _os.path.normcase(real)
+    for root in roots:
+        try:
+            if _os.path.commonpath([nc, root]) == root:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _fspath_str(file):
+    if hasattr(file, "__fspath__"):
+        file = _os.fspath(file)
+    if isinstance(file, bytes):
+        return file.decode("utf-8", "replace")
+    return file if isinstance(file, str) else None
+
+
+def _check_access(file, writing):
+    text = _fspath_str(file)
+    if text is None:
+        return  # a file descriptor or buffer, not a path
+    real = _os.path.realpath(text if _os.path.isabs(text) else _os.path.join(_WORK, text))
+    roots = _WRITE_ROOTS if writing else _READ_ROOTS
+    if not _under(real, roots):
+        verb = "write" if writing else "read"
+        raise PermissionError(f"file access outside the analysis work directory is not allowed (cannot {verb} {text!r})")
+
+
+class _CappedHandle:
+    """Wraps a writable file handle so the child cannot fill the host disk (Windows has no RLIMIT_FSIZE)."""
+
+    def __init__(self, inner):
+        self.__dict__["_inner"] = inner
+
+    def write(self, data):
+        size = len(data) if isinstance(data, (bytes, bytearray, memoryview)) else len(str(data).encode("utf-8", "replace"))
+        if _DISK["left"] >= 0 and size > _DISK["left"]:
+            raise OSError("the analysis sandbox disk-write limit was exceeded")
+        _DISK["left"] -= size
+        return self._inner.write(data)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def __setattr__(self, name, value):
+        setattr(self._inner, name, value)
+
+    def __iter__(self):
+        return iter(self._inner)
+
+    def __enter__(self):
+        self._inner.__enter__()
+        return self
+
+    def __exit__(self, *exc):
+        return self._inner.__exit__(*exc)
+
+
+def _is_write_mode(mode):
+    return any(ch in str(mode) for ch in "wax+")
+
+
+def _make_open_guard(real_open):
+    def guarded(file, mode="r", *args, **kwargs):
+        writing = _is_write_mode(mode)
+        _check_access(file, writing)
+        handle = real_open(file, mode, *args, **kwargs)
+        if writing and _DISK["left"] >= 0:
+            return _CappedHandle(handle)
+        return handle
+    return guarded
+
+
+def _os_open_guard(real_os_open):
+    def guarded(path, flags, *args, **kwargs):
+        writing = bool(flags & (_os.O_WRONLY | _os.O_RDWR | getattr(_os, "O_CREAT", 0) | getattr(_os, "O_APPEND", 0)))
+        _check_access(path, writing)
+        return real_os_open(path, flags, *args, **kwargs)
+    return guarded
+
+
+def _install_io_guard():
+    global _READ_ROOTS, _WRITE_ROOTS
+    _READ_ROOTS, _WRITE_ROOTS = _read_roots(), _write_roots()
+    _builtins.open = _make_open_guard(_real_open)
+    _io.open = _make_open_guard(_real_io_open)
+    _os.open = _os_open_guard(_real_os_open)
+
+
+# --- SymPy string-parser hardening (SEC-1) -------------------------------------------------------------------------
+# sympify / S / parse_expr / parse_latex compile their string argument and eval it with the real builtins, so
+# `sympify("__import__('os')")` reaches os. Harden every string entry point to (1) reject dunders after NFKC
+# normalisation and (2) eval with a global_dict whose __builtins__ is the restricted set (guarded import/open).
+_SYMPY_HARDENED = [False]
+_SYMPY_GLOBALS = [None]
+
+
+def _sympy_eval_globals():
+    if _SYMPY_GLOBALS[0] is None:
+        g = {}
+        exec("from sympy import *", g)  # real builtins here; populates the sympy namespace once
+        g["__builtins__"] = _restricted_builtins()
+        _SYMPY_GLOBALS[0] = g
+    return dict(_SYMPY_GLOBALS[0])
+
+
+def _reject_dunder(value):
+    import unicodedata as _ud
+    if isinstance(value, str) and "__" in _ud.normalize("NFKC", value):
+        raise ValueError("expressions containing '__' are not allowed in the analysis sandbox")
+
+
+def _harden_sympy():
+    if _SYMPY_HARDENED[0]:
+        return
+    sp = _sys.modules.get("sympy")
+    if sp is None:
+        return
+    _SYMPY_HARDENED[0] = True
+    try:
+        parser = _real_import("sympy.parsing.sympy_parser", None, None, ("parse_expr",), 0)
+    except Exception:
+        parser = None
+
+    if parser is not None:
+        _orig_parse_expr = parser.parse_expr
+
+        def _safe_parse_expr(s="", local_dict=None, transformations=parser.standard_transformations,
+                             global_dict=None, evaluate=True):
+            _reject_dunder(s)
+            if global_dict is None:
+                global_dict = _sympy_eval_globals()
+            elif "__builtins__" not in global_dict:
+                global_dict = {**global_dict, "__builtins__": _restricted_builtins()}
+            return _orig_parse_expr(s, local_dict=local_dict, transformations=transformations,
+                                    global_dict=global_dict, evaluate=evaluate)
+
+        parser.parse_expr = _safe_parse_expr
+        if getattr(sp, "parse_expr", None) is _orig_parse_expr:
+            sp.parse_expr = _safe_parse_expr
+
+    core = _sys.modules.get("sympy.core.sympify")
+    if core is not None and hasattr(core, "sympify"):
+        _orig_sympify = core.sympify
+
+        def _safe_sympify(a, *args, **kwargs):
+            _reject_dunder(a)
+            return _orig_sympify(a, *args, **kwargs)
+
+        core.sympify = _safe_sympify
+        sp.sympify = _safe_sympify
+        sp.S = core.S if hasattr(core, "S") else sp.S
+
+    if hasattr(sp, "lambdify"):
+        _orig_lambdify = sp.lambdify
+
+        def _safe_lambdify(args, expr, *a, **k):
+            _reject_dunder(expr)
+            return _orig_lambdify(args, expr, *a, **k)
+
+        sp.lambdify = _safe_lambdify
 
 
 def _scalar(v):
@@ -424,12 +658,20 @@ def _main():
     with _real_open(_CFG["code_path"], encoding="utf-8") as fh:
         src = fh.read()
     lines = src.splitlines()
+    if _CFG.get("install_guards", True):
+        _install_io_guard()
+        if "sympy" in _sys.modules:
+            _harden_sympy()
     g = {
         "__builtins__": _restricted_builtins(),
         "__name__": "__analysis__",
         "INPUT_FILES": list(_CFG["inputs"]),
         "load_dataset": _load_dataset,
     }
+    if _CFG.get("data_path"):
+        # Values passed as data (earlier results a plan node refers to), never pasted into the code text.
+        with _real_open(_CFG["data_path"], encoding="utf-8") as fh:
+            g["inputs"] = _json.load(fh)
     status, error = "ok", None
     t0 = _time.perf_counter()
     try:
@@ -593,13 +835,14 @@ def run_code(
     memory_mb: int = 2048,
     *,
     max_figures: int = MAX_FIGURES,
+    data: dict[str, Any] | None = None,
     _unsafe_skip_policy: bool = False,
 ) -> dict[str, Any]:
     """
     Execute one analysis/computation cell. input_files maps the name the code reads (a plain file name) to a server path
     the caller has already validated; each is copied read-only into the work dir. Returns
     {status: ok|error|timeout|policy_violation|failed, stdout, stderr, result, figures[{name,png_base64}], tables,
-    seconds, error, violations, limits}.
+    seconds, error, violations, limits}. `data` (JSON-serialisable) is available to the code as the variable `inputs`.
 
     _unsafe_skip_policy (tests only) disables the AST policy and the runtime import/builtins guards so a test can
     inspect the child's environment; the subprocess, env scrubbing and network stub still apply.
@@ -640,7 +883,13 @@ def run_code(
             boot = boot.replace('"__builtins__": _restricted_builtins(),', '"__builtins__": _builtins,')
         with open(boot_path, "w", encoding="utf-8") as fh:
             fh.write(boot)
+        data_path = ""
+        if data is not None:
+            data_path = os.path.join(io_dir, f"data_{token}.json")
+            with open(data_path, "w", encoding="utf-8") as fh:
+                json.dump(data, fh, default=str)
         cfg = {
+            "data_path": data_path,
             "work_dir": work,
             "out_path": out_path,
             "code_path": code_path,
@@ -648,6 +897,10 @@ def run_code(
             "memory_mb": int(memory_mb),
             "cpu_s": int(timeout_s) + 5,
             "max_output_bytes": max_bytes,
+            "install_guards": not _unsafe_skip_policy,
+            # POSIX already caps file size with RLIMIT_FSIZE; Windows has no equivalent, so the open guard counts
+            # bytes written and refuses once the budget is spent. -1 means no byte counting (POSIX).
+            "max_disk_bytes": 256 * 1024 * 1024 if os.name == "nt" else -1,
             "max_figures": max(0, min(MAX_FIGURES, int(max_figures))),
             "max_figure_bytes": MAX_FIGURE_BYTES,
             "max_tables": MAX_TABLES,

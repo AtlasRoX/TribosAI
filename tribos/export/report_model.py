@@ -85,7 +85,7 @@ class ReportCitation(BaseModel):
     tool: str = ""
     cited_in_answer: bool = False
     retracted: bool | None = None
-    grade: str = ""  # Lithoscribe study-design grade label, when the article was graded
+    grade: str = ""  # Archivon evidence-grade label (journal article, preprint, review...), when graded
     integrity: str = ""  # e.g. "expression_of_concern"; blank when none was reported
     # Who published a web source (utils.source_authority): regulatory | trial_registry | manufacturer | literature | web
     authority: str = ""
@@ -93,18 +93,24 @@ class ReportCitation(BaseModel):
 
 
 class SimulationRow(BaseModel):
-    species: str
+    variable: str
     initial: float | None = None
     final: float | None = None
-    steady_state: float | None = None
+    steady_state: float | None = None  # equilibrium (fixed point) value, when one was computed
 
 
 class SimulationSection(BaseModel):
+    """The simulated system and its solver settings; the state values are in the Dynamis data table."""
+
     model_id: str = ""
-    model_name: str = ""
+    model_name: str = ""  # the system: a Dynamis preset name or the right-hand sides
     duration: float | None = None
     time_unit: str = ""
     quantity_unit: str = ""
+    method: str = ""  # integrator (RK45, LSODA, ...)
+    rtol: float | None = None
+    atol: float | None = None
+    t_span: list[float] = Field(default_factory=list)
     convergence_status: str | None = None
     rows: list[SimulationRow] = Field(default_factory=list)
 
@@ -134,6 +140,12 @@ class VerificationSection(BaseModel):
     numerical_checks_passed: int | None = None
     numerical_checks_failed: int | None = None
     verified_identifiers: list[str] = Field(default_factory=list)
+    # How much was checked (extracted, evaluated, passed, failed, unsupported, inconclusive) and the overall status
+    # (verified | checked | failed | not_evaluated); the answer text and result revision the check describes.
+    coverage: dict[str, int] = Field(default_factory=dict)
+    status: str = ""
+    answer_hash: str = ""
+    record_revision: str = ""
 
 
 class TaskSection(BaseModel):
@@ -145,10 +157,14 @@ class TaskSection(BaseModel):
     request_match: bool | None = None
     reason: str = ""
     grounding_status: str = ""
+    incomplete_reasons: list[str] = Field(default_factory=list)
+    recovered_failures: list[dict[str, str]] = Field(default_factory=list)
+    unresolved_failures: list[dict[str, str]] = Field(default_factory=list)
+    deliverables: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class DataTable(BaseModel):
-    """A structured result table (trials, drugs, safety, variants) rendered the same way in every format."""
+    """A structured result table (computations, reference data, simulations, literature), same in every format."""
 
     title: str
     header: list[str]
@@ -188,6 +204,8 @@ class ReportModel(BaseModel):
     reproducibility: list[list[str]] = Field(default_factory=list)  # pins and versions, [label, value]
     footer: str = FOOTER_TEXT
     manifest: dict[str, Any] | None = Field(default=None, exclude=True)
+    # The run's typed result record (tribos.verify.result_record), exported as result_record.json.
+    result_record: dict[str, Any] | None = Field(default=None, exclude=True)
 
     @property
     def has_plot(self) -> bool:
@@ -314,39 +332,86 @@ def _clean_strings(value: Any) -> Any:
     return value
 
 
-def _simulation(viv: Any) -> SimulationSection | None:
-    if not isinstance(viv, dict):
+def _simulation(sim: Any) -> SimulationSection | None:
+    """The simulated system and solver settings of a Dynamis output. Older posted messages carry per-variable initial
+    and final values (initial_/final_concentrations); those become rows so an old export still renders."""
+    if not isinstance(sim, dict):
         return None
-    initial = viv.get("initial_concentrations") if isinstance(viv.get("initial_concentrations"), dict) else {}
-    final = viv.get("final_concentrations") if isinstance(viv.get("final_concentrations"), dict) else {}
-    steady_src = viv.get("steady_state") if isinstance(viv.get("steady_state"), dict) else {}
-    steady = steady_src.get("steady_state_concentrations") if isinstance(steady_src.get("steady_state_concentrations"), dict) else {}
-    species = list(dict.fromkeys(list(final) + list(initial) + list(steady)))
-    units = viv.get("units") if isinstance(viv.get("units"), dict) else {}
-    diagnostics = viv.get("diagnostics") if isinstance(viv.get("diagnostics"), dict) else {}
+    initial = sim.get("initial_concentrations") if isinstance(sim.get("initial_concentrations"), dict) else {}
+    final = sim.get("final_concentrations") if isinstance(sim.get("final_concentrations"), dict) else {}
+    steady_src = sim.get("steady_state") if isinstance(sim.get("steady_state"), dict) else {}
+    steady = next((steady_src[k] for k in ("fixed_point", "steady_state_concentrations") if isinstance(steady_src.get(k), dict)), {})
+    variables = list(dict.fromkeys(list(final) + list(initial)))
+    units = sim.get("units") if isinstance(sim.get("units"), dict) else {}
+    diagnostics = sim.get("diagnostics") if isinstance(sim.get("diagnostics"), dict) else {}
+    solver = sim.get("solver") if isinstance(sim.get("solver"), dict) else {}
+    span = solver.get("t_span") or sim.get("t_span") or []
+    rhs = sim.get("rhs") if isinstance(sim.get("rhs"), dict) else {}
+    system = _text(sim.get("model_name")) or "; ".join(f"d{k}/dt = {v}" for k, v in list(rhs.items())[:6])
     rows = [
-        SimulationRow(species=str(sp), initial=_num(initial.get(sp)), final=_num(final.get(sp)), steady_state=_num(steady.get(sp)))
-        for sp in species[:60]
+        SimulationRow(variable=str(v), initial=_num(initial.get(v)), final=_num(final.get(v)), steady_state=_num(steady.get(v)))
+        for v in variables[:60]
     ]
     return SimulationSection(
-        model_id=_text(viv.get("model_id")),
-        model_name=_text(viv.get("model_name")),
-        duration=_num(viv.get("duration")),
+        model_id=_text(sim.get("model_id")),
+        model_name=system,
+        duration=_num(sim.get("duration")),
         time_unit=_text(units.get("time")),
         quantity_unit=_text(units.get("quantity")),
+        method=_text(solver.get("method") or sim.get("method")),
+        rtol=_num(solver["rtol"] if solver.get("rtol") is not None else sim.get("rtol")),
+        atol=_num(solver["atol"] if solver.get("atol") is not None else sim.get("atol")),
+        t_span=[float(x) for x in span if _num(x) is not None][:2] if isinstance(span, (list, tuple)) else [],
         convergence_status=_text(diagnostics.get("convergence_status")) or None,
         rows=rows,
     )
 
 
+def simulation_line(sim: SimulationSection) -> str:
+    """'System: lorenz; integrator RK45, rtol 1e-08, atol 1e-10, t from 0 to 100 s' for every format."""
+    parts: list[str] = []
+    label = " ".join(x for x in (sim.model_id, f"({sim.model_name})" if sim.model_id and sim.model_name else sim.model_name) if x)
+    if label:
+        parts.append(f"System: {label}")
+    solver = []
+    if sim.method:
+        solver.append(f"integrator {sim.method}")
+    if sim.rtol is not None:
+        solver.append(f"rtol {sim.rtol:g}")
+    if sim.atol is not None:
+        solver.append(f"atol {sim.atol:g}")
+    if len(sim.t_span) == 2:
+        solver.append(f"t from {fmt_number(sim.t_span[0])} to {fmt_number(sim.t_span[1])} {sim.time_unit}".rstrip())
+    elif sim.duration is not None:
+        solver.append(f"duration {fmt_number(sim.duration)} {sim.time_unit}".rstrip())
+    if sim.convergence_status:
+        solver.append(sim.convergence_status)
+    if solver:
+        parts.append(", ".join(solver))
+    return "; ".join(parts)
+
+
+def simulation_table(sim: SimulationSection) -> tuple[list[str], list[list[str]]]:
+    """(header, rows) of the simulation section's variable table (empty rows when the values are in the data table)."""
+    unit = f" ({sim.quantity_unit})" if sim.quantity_unit else ""
+    has_ss = any(r.steady_state is not None for r in sim.rows)
+    header = ["Variable", f"Initial{unit}", f"Final{unit}"] + ([f"Equilibrium{unit}"] if has_ss else [])
+    rows = [
+        [r.variable, fmt_number(r.initial), fmt_number(r.final)] + ([fmt_number(r.steady_state)] if has_ss else [])
+        for r in sim.rows
+    ]
+    return header, rows
+
+
 def _answer_identifiers(answer: str) -> dict[str, set]:
     from tribos.extensions.id_families import extract_family_ids
-    from tribos.verify.verifier import TribosVerifier
+    from tribos.verify.verifier import TribosVerifier, cited_keys
 
     base = TribosVerifier._extract_identifiers(answer)
     families = extract_family_ids(answer)
     other = {str(i).upper() for ids in families.values() for i in ids}
-    other |= {i.upper() for key in ("biomodels", "ensembl", "uniprot") for i in base.get(key, [])}
+    # Bare ids of the cited scholarly keys ("2312.04511" for arXiv:2312.04511v2), as typed citation rows carry them.
+    other |= {k.split(":", 1)[1].upper() for k in cited_keys(answer)}
     return {
         "pmids": set(base.get("pmids", [])),
         "dois": {d.lower() for d in base.get("dois", [])},
@@ -471,6 +536,10 @@ def _task(task: Any) -> TaskSection | None:
         request_match=match if isinstance(match, bool) else None,
         reason=_text(task.get("reason")),
         grounding_status=_text(task.get("grounding_status")),
+        incomplete_reasons=[_text(r) for r in task.get("incomplete_reasons") or [] if _text(r)][:12],
+        recovered_failures=[r for r in task.get("recovered_failures") or [] if isinstance(r, dict)][:12],
+        unresolved_failures=[r for r in task.get("unresolved_failures") or [] if isinstance(r, dict)][:12],
+        deliverables=[d for d in task.get("deliverables") or [] if isinstance(d, dict)][:30],
     )
 
 
@@ -758,6 +827,10 @@ def _verification(report: Any) -> VerificationSection | None:
         numerical_checks_passed=report.get("numerical_checks_passed") if isinstance(report.get("numerical_checks_passed"), int) else None,
         numerical_checks_failed=report.get("numerical_checks_failed") if isinstance(report.get("numerical_checks_failed"), int) else None,
         verified_identifiers=[_text(i) for i in report.get("verified_identifiers") or [] if _text(i)][:60],
+        coverage={str(k): int(v) for k, v in (report.get("coverage") or {}).items() if isinstance(v, (int, float))},
+        status=_text(report.get("status")),
+        answer_hash=_text(report.get("answer_hash")),
+        record_revision=_text(report.get("record_revision")),
     )
 
 
@@ -780,7 +853,7 @@ def _limitations(manifest: dict[str, Any], artifacts: dict[str, Any], verificati
         if isinstance(call, dict) and not call.get("success"):
             err = _text(call.get("error"))[:200]
             out.append(f"{call.get('tool_name')} failed ({call.get('error_type') or 'error'})" + (f": {err}" if err else ""))
-        elif isinstance(call, dict) and call.get("tool_name") == "lithoscribe_literature_synthesis":
+        elif isinstance(call, dict) and call.get("tool_name") in ("lithoscribe_literature_synthesis", "archivon_literature_search"):
             sufficiency = (call.get("output_digest") or {}).get("evidence_sufficiency")
             if sufficiency and sufficiency != "SUFFICIENT":
                 out.append(f"Literature evidence sufficiency: {sufficiency}.")
@@ -789,23 +862,15 @@ def _limitations(manifest: dict[str, Any], artifacts: dict[str, Any], verificati
         for lim in lit.get("limitations") or []:
             if _text(lim):
                 out.append(_text(lim))
-    trials = artifacts.get("clinical_trials")
-    if isinstance(trials, dict):
-        out.extend(_text(lim) for lim in trials.get("limitations") or [] if _text(lim))
-    drugs = artifacts.get("drug_intel")
-    if isinstance(drugs, dict):
-        for entry in drugs.get("safety") or []:
-            if isinstance(entry, dict):
-                out.extend(f"FAERS ({_text(entry.get('ingredient'))}): {_text(c)}" for c in entry.get("caveats") or [] if _text(c))
-        for skipped in drugs.get("safety_skipped") or []:
-            if isinstance(skipped, dict):
-                out.append(f"openFDA was not queried for {_text(skipped.get('drug'))}: {_text(skipped.get('reason'))}.")
-    variants = artifacts.get("variant_intel")
-    if isinstance(variants, dict):
-        for src in variants.get("sources") or []:
-            if isinstance(src, dict) and _text(src.get("status")) in ("failed", "skipped"):
-                detail = _text(src.get("detail"))
-                out.append(f"Variant source {_text(src.get('name'))} {_text(src.get('status'))}" + (f": {detail}" if detail else "") + ".")
+    sim = artifacts.get("dynamis") if isinstance(artifacts.get("dynamis"), dict) else {}
+    conserved = sim.get("conserved_check") if isinstance(sim.get("conserved_check"), dict) else {}
+    if conserved.get("checked") and conserved.get("conserved") is False:
+        out.append(f"The simulation did not conserve {_text(conserved.get('invariant')) or 'its invariant'} "
+                   f"(drift {fmt_number(_num(conserved.get('drift')))}).")
+    for name in ("calcula", "sandbox"):
+        run = artifacts.get(name)
+        if isinstance(run, dict) and _text(run.get("error")):
+            out.append(f"The sandboxed computation reported an error: {_text(run.get('error'))[:200]}")
     if verification:
         for c in verification.claims:
             if c.status in ("contradicted", "unsupported"):
@@ -851,23 +916,68 @@ def _model_label(manifest: dict[str, Any], message: ExportMessage) -> str:
     return requested
 
 
-def _reproducibility(manifest: dict[str, Any]) -> list[list[str]]:
+# Tool-name prefixes of the computations a re-run repeats.
+_SIMULATION_TOOLS = ("dynamis_",)
+_SANDBOX_TOOLS = ("calcula", "sandbox")
+_CONSTANT_TOOLS = ("physis",)
+_LITERATURE_DIGEST_KEYS = (("arxiv_ids", "arXiv:"), ("dois", "DOI:"), ("zbl_ids", "Zbl "), ("mr_ids", "MR"), ("pmids", "PMID:"))
+
+
+def _code_sha256(inputs: dict[str, Any]) -> str:
+    code = next((inputs[k] for k in ("code", "script", "source") if isinstance(inputs.get(k), str) and inputs.get(k)), "")
+    return hashlib.sha256(code.encode("utf-8")).hexdigest() if code else ""
+
+
+def _simulation_pin(inputs: dict[str, Any], digest: dict[str, Any]) -> str:
+    solver = digest.get("solver") if isinstance(digest.get("solver"), dict) else {}
+    rhs = inputs.get("rhs") if isinstance(inputs.get("rhs"), dict) else {}
+    system = _text(inputs.get("model_name")) or "; ".join(f"d{k}/dt = {v}" for k, v in list(rhs.items())[:4])
+    parts = [system or "system not recorded"]
+    method = _text(solver.get("method") or inputs.get("method"))
+    if method:
+        parts.append(f"integrator {method}")
+    for tol in ("rtol", "atol"):
+        value = _num(solver[tol] if solver.get(tol) is not None else digest.get(tol))
+        if value is not None:
+            parts.append(f"{tol} {value:g}")
+    span = inputs.get("t_span") or solver.get("t_span")
+    if isinstance(span, (list, tuple)) and len(span) == 2:
+        parts.append(f"t_span [{fmt_number(_num(span[0]))}, {fmt_number(_num(span[1]))}]")
+    params = inputs.get("parameters")
+    if isinstance(params, dict) and params:
+        parts.append("parameters " + ", ".join(f"{k}={v}" for k, v in list(params.items())[:8]))
+    return "; ".join(parts)
+
+
+def _reproducibility(manifest: dict[str, Any], artifacts: dict[str, Any] | None = None) -> list[list[str]]:
+    """What a re-run needs: each simulation's system, integrator and tolerances, each sandbox program's sha256, the
+    reference-constant data set, the literature identifiers retrieved, and the upstream data-source versions. Old
+    manifests with BioModels pins still render; those pins are not inputs of a STEM run and are not listed."""
+    artifacts = artifacts or {}
     rows: list[list[str]] = []
-    for pin in manifest.get("biomodels") or []:
-        if not isinstance(pin, dict):
+    for c in manifest.get("tool_calls") or []:
+        if not isinstance(c, dict) or not c.get("success"):
             continue
-        parts = []
-        if pin.get("latest_revision") is not None:
-            parts.append(f"revision {pin['latest_revision']}")
-        if pin.get("main_file"):
-            parts.append(_text(pin["main_file"]))
-        if pin.get("main_file_sha256"):
-            parts.append(f"sha256 {_text(pin['main_file_sha256'])[:16]}")
-        if pin.get("local_cache_sha256"):
-            parts.append(f"local cache {_text(pin['local_cache_sha256'])[:12]}")
-        if pin.get("error"):
-            parts.append(f"unresolved: {_text(pin['error'])[:120]}")
-        rows.append([f"BioModels {pin.get('accession')}", "; ".join(parts) or "not resolved"])
+        name = _text(c.get("tool_name"))
+        inputs = c.get("inputs") if isinstance(c.get("inputs"), dict) else {}
+        digest = c.get("output_digest") if isinstance(c.get("output_digest"), dict) else {}
+        seq = c.get("seq")
+        if name.startswith(_SIMULATION_TOOLS):
+            rows.append([f"Simulation (call {seq}, {name})", _simulation_pin(inputs, digest)])
+        elif name.startswith(_SANDBOX_TOOLS):
+            sha = _code_sha256(inputs)
+            rows.append([f"Sandbox code (call {seq})", f"sha256 {sha[:16]}" if sha else "code not recorded"])
+        elif name.startswith(_CONSTANT_TOOLS):
+            source = _text(digest.get("source") or digest.get("codata_version"))
+            rows.append([f"Reference constants (call {seq})", source or "Physis CODATA (version not recorded)"])
+        ids = [f"{label}{_text(i)}" for key, label in _LITERATURE_DIGEST_KEYS for i in digest.get(key) or [] if _text(i)]
+        if ids:
+            rows.append([f"Literature identifiers (call {seq})", ", ".join(ids[:15]) + (" ..." if len(ids) > 15 else "")])
+    # Constants posted with the answer name their data set ("NIST CODATA 2022") when no call digest recorded it.
+    physis = artifacts.get("physis") if isinstance(artifacts.get("physis"), dict) else {}
+    sources = {_text(c.get("source")) for c in physis.get("constants") or [] if isinstance(c, dict) and _text(c.get("source"))}
+    if sources and not any(r[0].startswith("Reference constants") for r in rows):
+        rows.append(["Reference constants", ", ".join(sorted(sources))])
     for key, value in (manifest.get("source_versions") or {}).items():
         if not isinstance(value, dict):
             continue
@@ -911,14 +1021,14 @@ def build_report_model(
         )
 
     verification = _verification(msg.verification_report)
-    viv = artifacts.get("vivarix")
+    viv = artifacts.get("dynamis") if isinstance(artifacts.get("dynamis"), dict) else artifacts.get("vivarix")
     citations = _citations(artifacts, msg.citations, answer)
     tables = _data_tables(artifacts)
     shown_question = _question(question)
     task_source = msg.task_status or manifest.get("task_status")
     check = None
     if provenance == "server_store":
-        notices += _stored_run_mismatches(manifest, verification, viv)
+        notices += _stored_run_mismatches(manifest, verification, artifacts.get("vivarix") or viv)
         # PRV-001: compare every section the stored manifest can confirm; the stored question and task win.
         from .provenance_check import check_report, mark_rows
 
@@ -953,6 +1063,7 @@ def build_report_model(
         data_tables=tables,
         citations=citations,
         verification=verification,
+        result_record=artifacts.get("result_record") if isinstance(artifacts.get("result_record"), dict) else None,
         limitations=_limitations(manifest, artifacts, verification),
         run_metadata=metadata,
         checked_against_run=list(check.checked) if check is not None else [],
@@ -969,7 +1080,7 @@ def build_report_model(
             for i, c in enumerate(manifest.get("tool_calls") or [], start=1)
             if isinstance(c, dict)
         ],
-        reproducibility=_reproducibility(manifest),
+        reproducibility=_reproducibility(manifest, artifacts),
     )
     return ReportModel.model_validate({
         **_clean_strings(report.model_dump()),
@@ -1028,20 +1139,8 @@ def _stored_run_mismatches(
             for k in recorded
         )
         if not same:
-            out.append("The simulation values differ from the Vivarix output recorded for this run.")
+            out.append("The simulation values differ from the simulation output recorded for this run.")
     return out
-
-
-def _frequency(value: Any) -> str:
-    """Allele frequencies at three significant figures: 1.369283412911521e-06 -> '1.37e-6'."""
-    try:
-        f = float(value)
-    except (TypeError, ValueError):
-        return _text(value)
-    if f == 0:
-        return "0"
-    text = f"{f:.3g}"
-    return re.sub(r"e([+-])0*(\d)", lambda m: "e" + ("-" if m.group(1) == "-" else "") + m.group(2), text)
 
 
 def fmt_number(value: float | None) -> str:
@@ -1091,20 +1190,16 @@ def report_markdown(report: ReportModel, plot_path: str | None = None) -> str:
     if report.simulation and (report.simulation.rows or report.plot_png):
         sim = report.simulation
         out += ["## Simulation", ""]
-        title = " ".join(x for x in (sim.model_id, f"({sim.model_name})" if sim.model_name else "") if x)
-        if title:
-            out += [f"Model: {title}" + (f", duration {fmt_number(sim.duration)} {sim.time_unit}".rstrip() if sim.duration is not None else ""), ""]
+        line = simulation_line(sim)
+        if line:
+            out += [line, ""]
         if report.plot_png:
             out += [f"![Simulation time course]({plot_path})" if plot_path
                     else "_The simulation time-course plot is included in the PDF and Word exports._", ""]
         if sim.rows:
-            unit = f" ({sim.quantity_unit})" if sim.quantity_unit else ""
-            has_ss = any(r.steady_state is not None for r in sim.rows)
-            out += [f"| Species | Initial{unit} | Final{unit} |" + (f" Steady state{unit} |" if has_ss else ""),
-                    "| --- | --- | --- |" + (" --- |" if has_ss else "")]
-            for r in sim.rows:
-                line = f"| {_md_cell(r.species)} | {fmt_number(r.initial)} | {fmt_number(r.final)} |"
-                out.append(line + (f" {fmt_number(r.steady_state)} |" if has_ss else ""))
+            header, rows = simulation_table(sim)
+            out += ["| " + " | ".join(header) + " |", "|" + " --- |" * len(header)]
+            out += ["| " + " | ".join(_md_cell(c) for c in row) + " |" for row in rows]
             out.append("")
     for table in report.data_tables:
         out += [f"## {table.title}", ""]
@@ -1216,6 +1311,21 @@ def task_lines(t: TaskSection) -> list[str]:
         lines.append(f"Reason: {t.reason}")
     if t.grounding_status:
         lines.append(f"Evidence grounding: {t.grounding_status.replace('_', ' ')}")
+    for r in t.incomplete_reasons:
+        if r not in t.reason:
+            lines.append(f"Incomplete: {r}")
+    for f in t.unresolved_failures:
+        lines.append(f"Failed step {f.get('step', '?')}: {f.get('effect', 'its result is missing')}")
+    if t.recovered_failures:
+        lines.append(f"Recovered: {len(t.recovered_failures)} failed attempt(s) replaced by a retry")
+    if t.deliverables:
+        counts: dict[str, int] = {}
+        for d in t.deliverables:
+            counts[str(d.get("status"))] = counts.get(str(d.get("status")), 0) + 1
+        lines.append("Requested items: " + ", ".join(f"{n} {k.replace('_', ' ')}" for k, n in sorted(counts.items())))
+        for d in t.deliverables:
+            if d.get("status") in ("missing", "failed_check"):
+                lines.append(f"  {d.get('item')}: {str(d.get('status')).replace('_', ' ')}")
     return lines
 
 
@@ -1223,8 +1333,21 @@ def verification_lines(v: VerificationSection | None) -> list[str]:
     if v is None:
         return ["No verification report accompanies this answer."]
     status = "passed" if v.passed else "did not pass" if v.passed is False else "unknown"
-    score = f"{v.score:.2f} / 1.00" if v.score is not None else "not recorded"
-    lines = [f"- Status: {status}", f"- Verification score: {score}"]
+    cov = v.coverage or {}
+    if v.status == "not_evaluated" or (cov and not cov.get("evaluated")):
+        # A score over zero evaluated claims says nothing about the answer; it is not printed.
+        lines = ["- Status: not evaluated (no claim in the answer could be checked)"]
+    else:
+        score = f"{v.score:.2f} / 1.00" if v.score is not None else "not recorded"
+        lines = [f"- Status: {status}" + (f" ({v.status})" if v.status else ""), f"- Verification score: {score}"]
+    if cov:
+        lines.append(
+            f"- Coverage: {cov.get('evaluated', 0)} of {cov.get('extracted', 0)} claims evaluated; "
+            f"{cov.get('passed', 0)} passed, {cov.get('failed', 0)} failed, {cov.get('unsupported', 0)} unsupported, "
+            f"{cov.get('inconclusive', 0)} not checkable"
+        )
+    if v.answer_hash or v.record_revision:
+        lines.append(f"- Checked text {v.answer_hash or '?'} against computed results revision {v.record_revision or '?'}")
     if v.numerical_checks_passed is not None or v.numerical_checks_failed is not None:
         lines.append(f"- Numerical checks: {v.numerical_checks_passed or 0} passed, {v.numerical_checks_failed or 0} failed")
     if v.verified_identifiers:

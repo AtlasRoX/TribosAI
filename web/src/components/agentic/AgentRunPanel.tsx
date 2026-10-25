@@ -9,6 +9,7 @@ import { Bar, Card, ChipList, CopyButton, Disclosure, Pill, Section, arr, fmt, h
 
 export const FRAMEWORK_NAMES: Record<string, string> = {
   auto: "Auto",
+  direct: "Direct workflow",
   "authoritative-react-compiler": "Classic pipeline",
   "agentic-plan-execute": "Plan & execute",
   "multi-agent-supervisor": "Supervisor",
@@ -257,7 +258,7 @@ function RoutingSection({ routing }: { routing: FrameworkRoutingArtifact }) {
               value={probs[fw] ?? 0}
               max={1}
               display={pct(probs[fw])}
-              tone={fw === routing.chosen ? "ok" : "info"}
+              tone={fw === (routing.approach || routing.chosen) ? "ok" : "info"}
             />
           ))}
         </div>
@@ -300,7 +301,10 @@ export function AgentRunPanel({ data, routing }: { data: AgentRunArtifact; routi
   const budget = data.budget || {};
   const used = budget.used || {};
   const failures = trace.filter((t) => !t.success).length;
-  const fw = data.framework ? FRAMEWORK_NAMES[data.framework] || data.framework : "Agentic run";
+  // A fixed-workflow route ("Direct workflow") names itself; otherwise the architecture's name.
+  const fw =
+    (routing?.requested === "auto" && routing.label) ||
+    (data.framework ? FRAMEWORK_NAMES[data.framework] || data.framework : "Agentic run");
   const coreChip = corePhaseChip((data as AgentRunArtifact & { core_phase?: CorePhaseStatus | null }).core_phase);
 
   const pipelineGroups = groupPhases(phases.filter(isPipelineStage));
@@ -318,6 +322,13 @@ export function AgentRunPanel({ data, routing }: { data: AgentRunArtifact; routi
     runSeconds != null ? `run time ${formatSeconds(runSeconds)}` : "",
   ]
     .filter(Boolean)
+    .join(" · ");
+  // Non-overlapping time per kind of work (backend stage_seconds): where a slow run spent its time.
+  const kinds = (data as AgentRunArtifact & { stage_seconds?: Record<string, number> }).stage_seconds || {};
+  const kindOrder = ["planning", "retrieval", "execution", "drafting", "verification", "memory", "other"];
+  const byKind = kindOrder
+    .filter((k) => isNum(kinds[k]) && kinds[k] > 0)
+    .map((k) => `${k} ${formatSeconds(kinds[k])}`)
     .join(" · ");
   const untimed =
     runSeconds != null && runSeconds > 0 && Math.max(pipelineTotal, agentTotal) < 0.8 * runSeconds
@@ -421,6 +432,7 @@ export function AgentRunPanel({ data, routing }: { data: AgentRunArtifact; routi
             <span className={styles.sectionTitle}>Timing</span>
             <span className={styles.meta}>in run order{timing ? ` · ${timing}` : ""}</span>
           </div>
+          {byKind && <p className={styles.meta} style={{ margin: "0 0 6px" }}>By kind of work: {byKind}</p>}
           {[
             { label: "Pipeline", items: pipelineGroups },
             { label: "Agent phases", items: agentGroups },

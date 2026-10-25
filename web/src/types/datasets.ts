@@ -1,37 +1,66 @@
-// Dataset upload types (owned by UPLOADS, feature 8). Additive changes only.
+// Dataset upload types (owned by UPLOADS, feature 8), mirroring tribos/datasets/models.py.
 
-export type DatasetKind = "h5ad" | "table" | "sbml";
+/** Kinds an upload can have (EXTENSION_KINDS in tribos/datasets/store.py). */
+export type UploadKind = "table" | "hdf5" | "mat";
 
-export type ConsentStatus =
-  | "public_deidentified"
-  | "irb_approved"
-  | "consent_obtained_no_irb"
-  | "not_human_subjects"
-  | "unknown";
+/**
+ * A stored dataset's kind. "legacy" is a biomedical-release upload (h5ad or SBML) the server still lists and
+ * counts against the quota but no longer analyses; its original kind is in `legacy_kind`.
+ */
+export type DatasetKind = UploadKind | "legacy";
 
+/** Provenance sources offered for new uploads (DatasetSource in tribos/datasets/models.py). */
+export type DatasetSource =
+  | "experiment"
+  | "simulation"
+  | "benchmark"
+  | "public_repository"
+  | "literature"
+  | "in_house"
+  | "collaborator"
+  | "other";
+
+/** Sources of the biomedical release: shown on old records, never offered. */
+export type LegacyDatasetSource = "geo" | "cellxgene" | "biomodels";
+
+/** Provenance declared by the uploader. */
 export interface DatasetProvenance {
-  source: "geo" | "cellxgene" | "biomodels" | "in_house" | "collaborator" | "other";
-  geo_accession?: string | null;
-  organism?: string | null;
-  consent_status: ConsentStatus;
-  irb_protocol_id?: string | null;
+  source: DatasetSource | LegacyDatasetSource;
+  /** The engineering or science field the data comes from, e.g. "structural mechanics". */
+  domain?: string | null;
   description?: string | null;
   attests_no_direct_identifiers: boolean;
-  table_orientation?: "cells_by_genes" | "genes_by_cells" | null;
+  /** Column -> unit, e.g. {"stress": "MPa"}. */
+  units?: Record<string, string>;
+  // Fields of the biomedical release, present on old records only; the form neither shows nor sends them.
+  geo_accession?: string | null;
+  organism?: string | null;
+  consent_status?: string;
+  irb_protocol_id?: string | null;
+  table_orientation?: string | null;
 }
 
-export interface GeoVerification {
-  status: "verified" | "not_found" | "lookup_failed" | "not_requested";
-  accession?: string;
-  title?: string;
-  taxon?: string;
-  n_samples?: number;
-  pdat?: string;
-  pubmedids?: string[];
-  organism_matches?: boolean | null;
-  bioproject?: string | null;
-  samples?: string[];
-  checked_at?: string | null;
+/** GET /api/datasets/limits: accepted extensions (with their kind) and the byte cap of each kind. */
+export interface DatasetLimits {
+  extensions: Record<string, UploadKind>;
+  max_bytes: Record<UploadKind, number>;
+}
+
+export interface DatasetValidation {
+  format: string;
+  n_rows?: number | null;
+  n_columns?: number | null;
+  columns?: string[];
+  dtypes?: Record<string, string>;
+  /** HDF5 dataset paths or MAT variable names. */
+  datasets?: string[];
+  shapes?: Record<string, number[]>;
+  units?: Record<string, string>;
+  warnings: string[];
+  // Biomedical-release fields (legacy records).
+  n_obs?: number | null;
+  n_vars?: number | null;
+  n_species?: number | null;
 }
 
 export interface DatasetRecord {
@@ -43,22 +72,16 @@ export interface DatasetRecord {
   uploaded_at: string;
   declared_by: "uploader";
   provenance: DatasetProvenance;
-  geo_verification: GeoVerification;
-  validation: {
-    format: string;
-    n_obs?: number;
-    n_vars?: number;
-    n_species?: number;
-    sbml_model_id?: string;
-    sbml_model_name?: string;
-    units?: Record<string, string>;
-    warnings: string[];
-  };
+  validation: DatasetValidation;
   original_extension?: string;
   derived_sha256?: string | null;
-  /** Server-formatted dimensions, e.g. "2,700 cells × 1,838 genes" or "8 species". */
+  /** Server-formatted dimensions, e.g. "1,200 rows × 8 columns". */
   dims?: string | null;
-  provenance_history?: { changed_at: string; previous: Record<string, any> }[];
+  /** False for a legacy upload: listed and deletable, never analysed (see unsupported_reason). */
+  analysable?: boolean;
+  unsupported_reason?: string;
+  legacy_kind?: string | null;
+  provenance_history?: { changed_at: string; previous: Record<string, unknown> }[];
 }
 
 export interface MessageAttachment {
@@ -66,7 +89,6 @@ export interface MessageAttachment {
   kind: DatasetKind;
   display_name: string;
   dims?: string;
-  geo_verified?: boolean;
 }
 
 /** One entry of execution_artifacts.datasets, i.e. DatasetRef.to_public(); it never contains server paths. */
@@ -74,10 +96,6 @@ export interface DatasetPublic {
   id: string;
   kind: DatasetKind;
   display_name: string;
-  public_provenance: Record<string, any>;
+  public_provenance: Record<string, unknown>;
   dims?: string | null;
-  geo_accession?: string | null;
-  geo_verified?: boolean;
-  pmids?: string[];
-  sbml_model_id?: string | null;
 }

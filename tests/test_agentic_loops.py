@@ -170,6 +170,16 @@ def test_hedge_detection_and_query_rewrite():
     assert rewrite_query(hedged[0], ["KRAS G12D"]) == "KRAS G12D predicts survival"
 
 
+def test_a_caveat_about_the_runs_own_tools_is_not_a_literature_gap():
+    # Searched as "tool-trace provenance agent computation record original problem statement" before.
+    draft = (
+        "The solution set is [-1/2, 0) U (0, 45/8). The mathematics agent's computation record carries the caveat "
+        "that the tool call could not be matched against the original problem statement. Whether the bound is sharp "
+        "remains to be established in the literature."
+    )
+    assert hedged_sentences(draft) == ["Whether the bound is sharp remains to be established in the literature."]
+
+
 # F4 topologies ---------------------------------------------------------------------------------------------------
 def sequence(*replies: dict[str, Any]):
     state = {"n": 0}
@@ -266,9 +276,9 @@ def test_debate_feedback_triggers_resynthesis(monkeypatch, tmp_path, phases):
     claim = "KRAS is associated with pancreatic carcinoma"
 
     def debate(system: str, user: str) -> str:
-        if "methodologist" in system:
+        if "mathematician" in system:
             return json.dumps({"critiques": [critique(claim, "synapta"), {"claim": "x", "issue": "no key"}], "verdict": "revise"})
-        if "clinical skeptic" in system:
+        if "physicist" in system:
             return json.dumps({"critiques": [critique(claim, "PMID: 123456", "high")], "verdict": "revise"})
         return json.dumps({"critiques": [], "verdict": "accept"})
 
@@ -280,18 +290,18 @@ def test_debate_feedback_triggers_resynthesis(monkeypatch, tmp_path, phases):
     assert sum("Using the opinion of other agents as additional advice" in c[2] for c in prompts) == 3
     synth = llm.prompts("synthesis")
     assert len(synth) == 2
-    assert "raised by clinical skeptic, methodologist" in synth[1] or "raised by methodologist, clinical skeptic" in synth[1]
+    assert "raised by physicist, mathematician" in synth[1] or "raised by mathematician, physicist" in synth[1]
     assert "PMID:123456" in synth[1] and "no key" not in synth[1]
     dialogue = res.execution_artifacts["agent_dialogue"]
     assert dialogue["topology"] == "debate"
-    assert {"Critic: methodologist", "Critic: clinical skeptic", "Critic: mechanistic biologist"} <= {t["agent"] for t in dialogue["turns"]}
+    assert {"Critic: mathematician", "Critic: physicist", "Critic: engineer"} <= {t["agent"] for t in dialogue["turns"]}
 
 
 def test_debate_majority_accept_keeps_draft(monkeypatch, tmp_path, phases):
     phases(DEBATE_PHASE)
 
     def debate(system: str, _user: str) -> str:
-        if "methodologist" in system:
+        if "mathematician" in system:
             return json.dumps({"critiques": [critique("KRAS is associated with pancreatic carcinoma", "synapta")], "verdict": "revise"})
         return json.dumps({"critiques": [], "verdict": "accept"})
 
@@ -315,15 +325,16 @@ def test_specialists_follow_registry_and_policy():
     s = S()
     s.ctx = QueryContext(raw_query=QUERY, clean_query=QUERY)
     groups = build_specialists(s)
-    assert {"literature", "target", "simulation", "omics", "chemistry"}.issubset(set(groups))
+    assert {"literature", "target", "numerical", "omics", "chemistry"}.issubset(set(groups))
+    assert "simulation" not in groups  # the Vivarix aliases run Dynamis: they join the numerical specialist
     assert "pubchem_compound_properties" in groups["chemistry"].tool_names()  # new tools join automatically
     assert "gtex_median_expression" in groups["omics"].tool_names()
-    assert groups["simulation"].tool_names() == [
-        "vivarix_simulate_time_course", "vivarix_compute_steady_state", "vivarix_parameter_scan"
-    ]
+    assert {"vivarix_simulate_time_course", "vivarix_compute_steady_state", "vivarix_parameter_scan"} <= set(
+        groups["numerical"].tool_names()
+    )
 
     s.ctx = QueryContext(raw_query=QUERY, clean_query=QUERY, suppress_simulation=True)
-    assert "simulation" not in build_specialists(s)
+    assert "numerical" not in build_specialists(s) and "simulation" not in build_specialists(s)
 
     s.ctx = QueryContext(raw_query=QUERY, clean_query=QUERY, source_allowlist={"lithoscribe"}, enable_web_search=True)
     papers = build_specialists(s)
@@ -347,21 +358,32 @@ def test_supervisor_team_has_no_simulation_specialist_when_suppressed(monkeypatc
 
 
 # F7 counter-evidence ---------------------------------------------------------------------------------------------
+NS_QUERY = "What are the limits of the Navier-Stokes equations at high Knudsen number?"
+NS_BREAKDOWN = {  # paraphrase of the textbook rarefied-gas result; the identifier is a test fixture, not a real paper
+    "arxiv_id": "0000.00001",
+    "passage_text": "The Navier-Stokes equations with no-slip boundary conditions break down in the transition regime "
+    "above a Knudsen number of about 0.1, where rarefied gas flows deviate from the continuum predictions.",
+    "citation": "Fixture et al., 2000",
+}
+NS_NEGATIONS = ["Navier-Stokes equations limitations", "Navier-Stokes equations counterexample",
+                "Navier-Stokes equations breakdown regime"]
+
+
 def test_counter_evidence_heuristic_flags_possible_conflict(monkeypatch, tmp_path, phases):
     phases(COUNTER_EVIDENCE_PHASE)
     orch, calls, llm = make_agentic_orchestrator(
-        monkeypatch, tmp_path, extra_tools=literature_tool({"resistance": ADAGRASIB_RESISTANCE})
+        monkeypatch, tmp_path, extra_tools=literature_tool({"limitations": NS_BREAKDOWN})
     )
     disable_agent_model(monkeypatch, llm)
-    res, _ = run(orch)
-    assert lit_queries(calls)[1:] == ["KRAS resistance", "KRAS no significant effect", "KRAS failed trial"]
+    res, _ = run(orch, query=NS_QUERY)
+    assert lit_queries(calls)[1:] == NS_NEGATIONS  # STEM negations, never drug-safety or trial searches
     art = res.execution_artifacts["evidence_conflicts"]
     assert art["classifier"] == "heuristic" and art["claims_checked"] >= 1
-    row = next(r for r in art["conflicts"] if r["pmid"] == "34161704")
-    assert row["claim"] in ("KRAS is associated with pancreatic carcinoma", "What diseases is KRAS associated with?")
+    row = next(r for r in art["conflicts"] if r["source_key"] == "ARXIV:0000.00001")
+    assert row["claim"] == NS_QUERY
     assert row["classifier"] == "heuristic" and row["likert"] == 7 and row["label"] == "neutral"  # possible, not certain
     synth = llm.prompts("synthesis")[0]
-    assert "<evidence_conflicts" in synth and 'flag="possible"' in synth and "34161704" in synth
+    assert "<evidence_conflicts" in synth and 'flag="possible"' in synth and "ARXIV:0000.00001" in synth
     assert "Discuss these conflicts explicitly" in synth and "not as established contradictions" in synth
     assert "<untrusted_data" in synth.split("<evidence_conflicts", 1)[1]
 
@@ -371,7 +393,7 @@ def test_counter_evidence_uses_injected_nli_judge(monkeypatch, tmp_path, phases)
 
     def judge(claim: str, passages: list[dict[str, str]]) -> dict[str, str]:
         judged.append((claim, passages))
-        return {"status": "contradicted", "reason": "acquired resistance limits the benefit"}
+        return {"status": "contradicted", "reason": "the continuum model breaks down in the transition regime"}
 
     async def judge_async(claim: str, passages: list[dict[str, str]]):
         judged.append(("async", passages[0]["source_key"]))
@@ -388,11 +410,11 @@ def test_counter_evidence_uses_injected_nli_judge(monkeypatch, tmp_path, phases)
 
     phases(InstallJudge(), COUNTER_EVIDENCE_PHASE)
     orch, _calls, llm = make_agentic_orchestrator(
-        monkeypatch, tmp_path, extra_tools=literature_tool({"resistance": ADAGRASIB_RESISTANCE})
+        monkeypatch, tmp_path, extra_tools=literature_tool({"limitations": NS_BREAKDOWN})
     )
-    res, _ = run(orch)
-    assert judged[0] == ("async", "PMID:34161704")  # the async judge is asked first
-    assert judged[1][1][0]["source_key"] == "PMID:34161704"
+    res, _ = run(orch, query=NS_QUERY)
+    assert judged[0] == ("async", "ARXIV:0000.00001")  # the async judge is asked first
+    assert judged[1][1][0]["source_key"] == "ARXIV:0000.00001"
     art = res.execution_artifacts["evidence_conflicts"]
     assert art["classifier"] == "nli"
     assert art["conflicts"][0]["label"] == "contradicts" and art["conflicts"][0]["likert"] == 9
@@ -402,45 +424,53 @@ def test_counter_evidence_uses_injected_nli_judge(monkeypatch, tmp_path, phases)
 
 def test_counter_evidence_model_likert_rating(monkeypatch, tmp_path, phases):
     phases(COUNTER_EVIDENCE_PHASE)
-    reply = json.dumps({"ratings": [{"pair": 1, "likert": 6, "reason": "different setting"}]})
+    reply = json.dumps({"ratings": [{"pair": 1, "likert": 6, "reason": "different regime"}]})
     orch, _calls, llm = make_agentic_orchestrator(
         monkeypatch, tmp_path, responses={"counter_evidence": reply},
-        extra_tools=literature_tool({"resistance": ADAGRASIB_RESISTANCE}),
+        extra_tools=literature_tool({"limitations": NS_BREAKDOWN}),
     )
-    res, _ = run(orch)
+    res, _ = run(orch, query=NS_QUERY)
     art = res.execution_artifacts["evidence_conflicts"]
     assert art["classifier"] == "llm" and art["conflicts"][0]["likert"] == 6
-    assert llm.calls[llm.phases().index("counter_evidence")][1].startswith("[phase:counter_evidence]")
+    system = llm.calls[llm.phases().index("counter_evidence")][1]
+    assert system.startswith("[phase:counter_evidence]") and "negative trial" not in system
     assert "<evidence_conflicts" not in llm.prompts("synthesis")[0]  # nothing at or above the flag threshold
 
 
 def test_counter_evidence_switches_off(monkeypatch, tmp_path, phases):
     phases(COUNTER_EVIDENCE_PHASE)
     orch, calls, _llm = make_agentic_orchestrator(monkeypatch, tmp_path)
-    res, _ = run(orch, agent_options={"enable_counter_evidence": False})
+    res, _ = run(orch, query=NS_QUERY, agent_options={"enable_counter_evidence": False})
     assert len(lit_queries(calls)) == 1 and "evidence_conflicts" not in res.execution_artifacts
 
     class St:
         options: dict[str, Any] = {}
         registry = build_recording_registry()[0]
+        sub_questions: list[Any] = []
 
     st = St()
-    st.ctx = QueryContext(raw_query=QUERY, clean_query=QUERY, source_allowlist={"clinical_trials"})
+    st.ctx = QueryContext(raw_query=NS_QUERY, clean_query=NS_QUERY, source_allowlist={"clinical_trials"})
     assert not CounterEvidencePhase().applies(st)
-    st.ctx = QueryContext(raw_query=QUERY, clean_query=QUERY, scope="conversational")
+    st.ctx = QueryContext(raw_query=NS_QUERY, clean_query=NS_QUERY, scope="conversational")
     assert not CounterEvidencePhase().applies(st)
-    st.ctx = QueryContext(raw_query=QUERY, clean_query=QUERY, source_allowlist={"lithoscribe"})
+    st.ctx = QueryContext(raw_query=NS_QUERY, clean_query=NS_QUERY, source_allowlist={"lithoscribe"})
     assert CounterEvidencePhase().applies(st)
 
 
 def test_negation_queries_and_heuristic():
-    ents = {"genes": ["KRAS"], "drugs": ["sotorasib"], "diseases": []}
-    assert negation_queries(ents) == ["KRAS resistance", "sotorasib adverse events", "KRAS no significant effect"]
-    assert negation_queries({"genes": [], "drugs": [], "diseases": ["asthma"]}) == []
-    likert, _ = heuristic_rating("KRAS mutation predicts cetuximab benefit", "KRAS mutant tumours showed no significant benefit from cetuximab.")
+    assert negation_queries({"equations": ["Navier-Stokes equations"]}) == NS_NEGATIONS
+    assert negation_queries({"concepts": ["Euler-Bernoulli beam theory"], "materials": ["Ti-6Al-4V"]}) == [
+        "Euler-Bernoulli beam theory limitations", "Ti-6Al-4V failure mode", "Euler-Bernoulli beam theory counterexample",
+    ]
+    assert negation_queries({"materials": ["Ti-6Al-4V"]})[0] == "Ti-6Al-4V failure mode"
+    assert negation_queries({"concepts": [], "equations": [], "systems": [], "materials": []}) == []
+    likert, _ = heuristic_rating(
+        "The Navier-Stokes equations predict the slip flow in microchannels",
+        "The Navier-Stokes equations fail to predict the measured flow rate in microchannels at high Knudsen number.",
+    )
     # AGT-008: cue words alone stop just below the contradiction flag (FLAG_AT = 8): a possible conflict, not a verdict.
     assert likert == 7
-    assert heuristic_rating("KRAS drives pancreatic cancer", "EGFR signalling in lung tissue.")[0] == 5
+    assert heuristic_rating("Euler-Bernoulli beam theory holds for slender beams", "Graphene phonon dispersion.")[0] == 5
 
 
 # Classic pipeline ------------------------------------------------------------------------------------------------

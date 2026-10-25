@@ -17,37 +17,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # The two images docker/compose.yml builds: the API (context = repository root) and the web app (context = web/).
         include:
-          - image: tribos
-            dockerfile: tribos/tribos/Dockerfile
-            suffix: ""
-            latest_tag: latest
-            install_cuda: "true"
-          - image: tribos
-            dockerfile: tribos/tribos/Dockerfile
-            suffix: "-cpu"
-            latest_tag: latest-cpu
-            install_cuda: "false"
-          - image: vivarix
-            dockerfile: tribos/vivarix/Dockerfile
-            suffix: ""
-            latest_tag: latest
-            install_cuda: "false"
-          - image: lithoscribe
-            dockerfile: tribos/lithoscribe/Dockerfile
-            suffix: ""
-            latest_tag: latest
-            install_cuda: "false"
-          - image: synapta
-            dockerfile: tribos/synapta/Dockerfile
-            suffix: ""
-            latest_tag: latest
-            install_cuda: "true"
-          - image: synapta
-            dockerfile: tribos/synapta/Dockerfile
-            suffix: "-cpu"
-            latest_tag: latest-cpu
-            install_cuda: "false"
+          - image: tribos-backend
+            dockerfile: docker/backend.Dockerfile
+            context: .
+          - image: tribos-web
+            dockerfile: docker/web.Dockerfile
+            context: web
 
     steps:
       - name: Checkout repository
@@ -80,11 +57,10 @@ jobs:
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
+          context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           push: true
           platforms: linux/amd64
           tags: |
-            vpatientengine/${{ matrix.image }}:${{ steps.version.outputs.version }}${{ matrix.suffix }}
-            vpatientengine/${{ matrix.image }}:${{ matrix.latest_tag }}
-          build-args: |
-            INSTALL_CUDA=${{ matrix.install_cuda }}
+            ${{ vars.DOCKERHUB_NAMESPACE || 'vpatientengine' }}/${{ matrix.image }}:${{ steps.version.outputs.version }}
+            ${{ vars.DOCKERHUB_NAMESPACE || 'vpatientengine' }}/${{ matrix.image }}:latest

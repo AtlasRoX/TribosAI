@@ -76,6 +76,21 @@ async def steer_run(req: SteerRequest, run_id: str = RunIdPath, user_id: str = D
     return {"success": True, "run_id": control.run_id, "queued_steering": len(control.peek_steering())}
 
 
+class SkipRequest(BaseModel):
+    what: str = Field("search", max_length=32, description="What to skip: 'search' (the literature and web search)")
+
+
+@router.post("/runs/{run_id}/skip")
+async def skip_step(req: SkipRequest, run_id: str = RunIdPath, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
+    """Skip a running evidence step; the answer is written from the evidence gathered so far."""
+    control = _control(run_id, user_id)
+    if control.cancelled:
+        raise HTTPException(status_code=409, detail="The run was cancelled")
+    if not control.request_skip(req.what):
+        raise HTTPException(status_code=422, detail=f"Cannot skip {req.what[:32]!r}; skippable: search")
+    return {"success": True, "run_id": control.run_id, "skipped": req.what}
+
+
 @router.post("/runs/{run_id}/cancel")
 async def cancel_run(req: CancelRequest | None = None, run_id: str = RunIdPath, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     control = _control(run_id, user_id)

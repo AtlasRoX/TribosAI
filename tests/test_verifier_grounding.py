@@ -1,8 +1,9 @@
 """Verifier grounding regressions from Tribos_Source_Audit_2026-10-18.md (findings F6-F9) and operational claims.
 
-F6: FDA eligibility comes from the record's own URL host, never from a URL quoted in its text.
-F7: population checks cover typed clinical tool records (CIViC/variant evidence), not only articles.
-F8: numbers are grounded as relationships (subgroup/arm/denominator); an explicit relational judge verdict is honoured.
+The FDA eligibility (F6) and disease-population (F7) checks were biomedical and are gone; the source-authority policy
+they relied on is still checked here.
+F8: numbers are grounded as relationships (which case, condition or regime owns a figure); an explicit relational
+judge verdict is honoured.
 F9: the PMID 39369609 positive control uses the real, provenance-tracked abstract (tests/fixtures/primary/).
 Operational sentences (a lookup failed, a record was not retrieved) are grounded in the run's tool outcomes, never in
 a scientific citation.
@@ -25,12 +26,9 @@ from tribos.verify.verifier import (
     ClaimRecord,
     TribosVerifier,
     VerificationReport,
-    _Doc,
-    is_regulatory_doc,
 )
 
 Q = "KRAS G12C inhibitors in NSCLC and colorectal cancer: FDA-approved indications and clinical evidence"
-APPROVAL = "Sotorasib received FDA accelerated approval for KRAS G12C-mutated NSCLC."
 FIXTURE = Path(__file__).parent / "fixtures" / "primary" / "pmid_39369609.json"
 
 
@@ -50,64 +48,8 @@ def categories(report: VerificationReport) -> list[str]:
     return [d.category for d in report.defects]
 
 
-# F6: regulatory origin from the record's own host -------------------------------------------------------------
+# Source authority policy (record origin, not a quoted link) ------------------------------------------------------
 SNIPPET = "Sotorasib accelerated approval for KRAS G12C-mutated NSCLC."
-
-
-def web(results: list[dict[str, Any]], top_page: dict[str, Any] | None = None) -> ToolResult:
-    return tool("websurfer_search", {"query": "sotorasib approval", "results": results, "top_page": top_page})
-
-
-@pytest.mark.parametrize(
-    "url",
-    [
-        "https://www.fda.gov.example.test/fake",  # lookalike: the host is example.test
-        "https://fda.gov@evil.example.test/drugs",  # userinfo names FDA; the host is evil.example.test
-        "https://fda.gov.evil.example.test",
-        "ftp://www.fda.gov/drugs",  # not a web page
-        "https://203.0.113.7/fda.gov",  # an address literal, not a host
-        "",
-    ],
-)
-def test_lookalike_userinfo_and_missing_urls_are_not_fda_records(url):
-    report = TribosVerifier().verify_response(Q, APPROVAL, {"websurfer": web([{"title": "FDA", "url": url, "snippet": SNIPPET}])})
-    c = claim_for(report, "accelerated approval")
-    assert c.status == "unsupported" and "no FDA label or approval record" in c.reason
-
-
-def test_a_third_party_page_quoting_an_fda_link_is_not_an_fda_record():
-    page = {"title": "News", "url": "https://example.test/article",
-            "snippet": SNIPPET + " Source: https://www.fda.gov/drugs/resources-information-approved-drugs/sotorasib"}
-    report = TribosVerifier().verify_response(Q, APPROVAL, {"websurfer": web([page])})
-    assert claim_for(report, "accelerated approval").status == "unsupported"
-
-
-@pytest.mark.parametrize(
-    "url",
-    ["https://www.fda.gov/drugs/resources-information-approved-drugs/sotorasib",
-     "https://accessdata.fda.gov/scripts/cder/daf/index.cfm?event=overview.process&ApplNo=214665",
-     "https://WWW.FDA.GOV./drugs/notice"],
-)
-def test_genuine_fda_hosts_are_eligible(url):
-    report = TribosVerifier().verify_response(Q, APPROVAL, {"websurfer": web([{"title": "FDA", "url": url, "snippet": SNIPPET}])})
-    assert claim_for(report, "accelerated approval").status == "supported"
-
-
-def test_origin_alone_does_not_establish_the_claim():
-    unrelated = {"title": "FDA", "url": "https://www.fda.gov/drugs/notice", "snippet": "Guidance on bioequivalence studies for generic tablets."}
-    report = TribosVerifier().verify_response(Q, APPROVAL, {"websurfer": web([unrelated])})
-    assert claim_for(report, "accelerated approval").status == "unsupported"
-
-
-def test_a_redirect_is_judged_by_its_final_host():
-    redirected_away = {"title": "FDA", "url": "https://www.fda.gov/drugs/sotorasib", "final_url": "https://example.test/landing",
-                       "content": SNIPPET}
-    report = TribosVerifier().verify_response(Q, APPROVAL, {"websurfer": web([], top_page=redirected_away)})
-    assert claim_for(report, "accelerated approval").status == "unsupported"
-    redirected_in = dict(redirected_away, url="https://example.test/go", final_url="https://www.fda.gov/drugs/sotorasib")
-    report = TribosVerifier().verify_response(Q, APPROVAL, {"websurfer": web([], top_page=redirected_in)})
-    assert claim_for(report, "accelerated approval").status == "supported"
-    assert sa.record_url({"url": "https://a.example.test", "redirects": ["https://b.example.test", "https://www.fda.gov/x"]}) == "https://www.fda.gov/x"
 
 
 def test_one_authority_policy_is_shared():
@@ -118,74 +60,22 @@ def test_one_authority_policy_is_shared():
     assert sa.source_authority("https://www.fda.gov.example.test/fake") == "web"
     assert sa.source_authority("https://fda.gov@evil.example.test") == "web"
     assert sa.source_authority("https://www.prnewswire.com/news/x") in ("vendor", "manufacturer")
-    doc = _Doc("tool:websurfer", "sotorasib approval https://www.fda.gov/x", None, "", "https://example.test/a")
-    assert not is_regulatory_doc(doc, APPROVAL)
 
 
-# F7: population checks for typed clinical tool records ----------------------------------------------------------
-NSCLC_TEXT = ("In advanced non-small cell lung cancer (NSCLC), KRAS mutations were associated with resistance to "
-              "gefitinib and erlotinib; the objective response rate to erlotinib was 5.0% in KRAS-mutant tumours.")
-CRC_CLAIM = "In colorectal cancer, the objective response rate to erlotinib was 5.0% in KRAS-mutant tumours."
-
-
-def variant_tool() -> ToolResult:
-    return tool("variant_intel", {"civic": {"evidence": [
-        {"disease": "Lung Non-small Cell Carcinoma", "therapies": "erlotinib", "evidence_level": "B",
-         "description": NSCLC_TEXT, "variant": "KRAS mutation"},
-    ]}})
-
-
-def _relational_judge(claim: str, passages: list[dict[str, str]]) -> dict[str, str]:
-    return {"status": "supported", "reason": "the passage reports the same response rate"}
-
-
-@pytest.mark.parametrize("judge", [None, _relational_judge])
-def test_a_variant_record_about_nsclc_cannot_support_a_crc_claim(judge):
-    report = TribosVerifier().verify_response(Q, CRC_CLAIM, {"variants": variant_tool()}, entailment_judge=judge)
-    c = claim_for(report, "5.0%")
-    assert c.status == "unsupported" and "population mismatch" in c.reason
-    assert "POPULATION_MISMATCH" in categories(report)
-
-
-@pytest.mark.parametrize("judge", [None, _relational_judge])
-def test_the_same_data_through_the_article_path_fails_the_same_way(judge):
-    passage = {"pmid": "00000002", "passage_id": "a", "title": "Synthetic NSCLC cohort", "passage_text": NSCLC_TEXT}
-    report = TribosVerifier().verify_response(Q, CRC_CLAIM + " (PMID: 00000002)", {"lit": lit([passage])}, entailment_judge=judge)
-    assert claim_for(report, "5.0%").status == "unsupported" and "POPULATION_MISMATCH" in categories(report)
-
-
-def test_a_variant_record_in_the_claims_disease_still_supports_it():
-    right = CRC_CLAIM.replace("In colorectal cancer", "In NSCLC")
-    report = TribosVerifier().verify_response(Q, right, {"variants": variant_tool()})
-    assert claim_for(report, "5.0%").status == "supported" and "POPULATION_MISMATCH" not in categories(report)
-
-
-def test_a_label_listing_unrelated_warnings_is_not_a_population_mismatch():
-    label = tool("openfda_drug_safety", {"safety": [{
-        "ingredient": "sotorasib",
-        "label": {"indications_and_usage": "LUMAKRAS is indicated for KRAS G12C-mutated locally advanced or metastatic NSCLC.",
-                  "warnings": "Hepatotoxicity; interstitial lung disease. Secondary acute myeloid leukemia (AML) was not observed."},
-        "approval": {"status": "approved", "application_number": "NDA214665", "first_approval_date": "2021-05-28"},
-    }]})
-    report = TribosVerifier().verify_response(Q, APPROVAL, {"openfda": label})
-    c = claim_for(report, "accelerated approval")
-    assert "population mismatch" not in (c.reason or "") and "POPULATION_MISMATCH" not in categories(report)
-
-
-# F8: numerical relationships, not a bag of numbers --------------------------------------------------------------
-COHORT = {
-    "pmid": "00000003", "passage_id": "r", "title": "Synthetic KRAS-mutant cohort treated with sotorasib",
-    "passage_text": "Of 45 patients with KRAS-mutant NSCLC, 16 had KRAS G12C. In the KRAS G12C subgroup (n=16), "
-                    "median progression-free survival with sotorasib was 19.9 months.",
+# F8 (STEM): numbers are grounded as relationships (which case or condition owns a figure) -------------------------
+TC_PASSAGE = {
+    "arxiv_id": "2401.01234", "passage_id": "r", "title": "Synthetic: pressure dependence of Tc in a hydride film",
+    "passage_text": "At ambient pressure the film has a critical temperature of 39 K; under 2 GPa the critical "
+                    "temperature measured in the same cell is 41 K.",
 }
-WRONG_N = "In the KRAS G12C subgroup (n=45), median progression-free survival with sotorasib was 19.9 months (PMID: 00000003)."
-RIGHT_N = WRONG_N.replace("(n=45)", "(n=16)")
+WRONG_CASE = "Under 2 GPa, experiments measured a critical temperature of 39 K for the hydride film (arXiv:2401.01234)."
+RIGHT_CASE = WRONG_CASE.replace("39 K", "41 K")
 
 
-def _denominator_judge(claim: str, passages: list[dict[str, str]]) -> dict[str, str]:
-    if "n=45" in claim:
+def _condition_judge(claim: str, passages: list[dict[str, str]]) -> dict[str, str]:
+    if "39 K" in claim:
         return {"status": "unsupported",
-                "reason": "denominator mismatch: n=45 is the whole KRAS-mutant cohort; the G12C subgroup is n=16"}
+                "reason": "condition mismatch: 39 K refers to ambient pressure, not the 2 GPa case"}
     return {"status": "supported", "reason": "matches"}
 
 
@@ -193,40 +83,26 @@ def _inconclusive_judge(claim: str, passages: list[dict[str, str]]) -> dict[str,
     return {"status": "unsupported", "reason": "the excerpt does not clearly state this"}
 
 
-# The subgroup's own size is not stated in this text, so only a reader of the relationship (the judge) can tell that
-# n=45 is the whole cohort: the numbers all occur, and the deterministic binding check has nothing to compare.
-COHORT_UNSTATED = dict(COHORT, passage_text="The KRAS-mutant NSCLC cohort comprised 45 patients (n=45) treated with "
-                                            "sotorasib; median progression-free survival in the KRAS G12C subgroup was "
-                                            "19.9 months.")
-
-
-def test_an_explicit_denominator_error_from_the_judge_is_not_overridden_by_matching_numbers():
-    report = TribosVerifier().verify_response(Q, WRONG_N, {"lit": lit([COHORT_UNSTATED])})
-    assert claim_for(report, "19.9 months").status == "supported"  # numbers all present: deterministic check passes
-    report = TribosVerifier().verify_response(Q, WRONG_N, {"lit": lit([COHORT_UNSTATED])}, entailment_judge=_denominator_judge)
-    c = claim_for(report, "19.9 months")
-    assert c.status == "unsupported" and "denominator" in c.reason
-    assert report.defects and "NUMERIC_RELATION_MISMATCH" in categories(report)
+def test_an_explicit_condition_error_from_the_judge_is_not_overridden_by_matching_numbers():
+    report = TribosVerifier().verify_response(Q, WRONG_CASE, {"lit": lit([TC_PASSAGE])})
+    assert claim_for(report, "39 K").status == "supported"  # the figure occurs: the deterministic check passes
+    report = TribosVerifier().verify_response(Q, WRONG_CASE, {"lit": lit([TC_PASSAGE])}, entailment_judge=_condition_judge)
+    c = claim_for(report, "39 K")
+    assert c.status == "unsupported" and "ambient pressure" in c.reason
+    assert "NUMERIC_RELATION_MISMATCH" in categories(report)
     assert c.cited_source_supported is not True
 
 
 def test_an_inconclusive_judge_does_not_overturn_matching_numbers():
-    report = TribosVerifier().verify_response(Q, WRONG_N, {"lit": lit([COHORT_UNSTATED])}, entailment_judge=_inconclusive_judge)
-    assert claim_for(report, "19.9 months").status == "supported"
+    report = TribosVerifier().verify_response(Q, WRONG_CASE, {"lit": lit([TC_PASSAGE])}, entailment_judge=_inconclusive_judge)
+    assert claim_for(report, "39 K").status == "supported"
     assert "NUMERIC_RELATION_MISMATCH" not in categories(report)
 
 
-def test_a_parent_cohort_size_given_for_a_subgroup_fails_without_a_judge():
-    report = TribosVerifier().verify_response(Q, WRONG_N, {"lit": lit([COHORT])})
-    c = claim_for(report, "19.9 months")
-    assert c.status == "unsupported" and "16" in c.reason
-    assert "NUMERIC_RELATION_MISMATCH" in categories(report)
-
-
-@pytest.mark.parametrize("judge", [None, _denominator_judge, _inconclusive_judge])
-def test_the_correct_subgroup_size_still_passes(judge):
-    report = TribosVerifier().verify_response(Q, RIGHT_N, {"lit": lit([COHORT])}, entailment_judge=judge)
-    c = claim_for(report, "19.9 months")
+@pytest.mark.parametrize("judge", [None, _condition_judge, _inconclusive_judge])
+def test_the_correct_case_still_passes(judge):
+    report = TribosVerifier().verify_response(Q, RIGHT_CASE, {"lit": lit([TC_PASSAGE])}, entailment_judge=judge)
+    c = claim_for(report, "41 K")
     assert c.status == "supported", c.reason
     assert "NUMERIC_RELATION_MISMATCH" not in categories(report)
 

@@ -38,9 +38,13 @@ export const metadata: Metadata = {
   description:
     "Tribos — Engineering and Scientific R&D Multi-Agent Intelligence System. Made by ChronoStrider Engineering.",
   icons: {
-    icon: "/icon-tight.png",
-    shortcut: "/icon-tight.png",
-    apple: "/icon-tight.png",
+    icon: [
+      { url: "/tribos/favicon.ico", sizes: "any" },
+      { url: "/tribos/icon-32.png", type: "image/png", sizes: "32x32" },
+      { url: "/tribos/icon-192.png", type: "image/png", sizes: "192x192" },
+    ],
+    shortcut: "/tribos/favicon.ico",
+    apple: "/tribos/apple-icon.png",
   },
 };
 
@@ -57,7 +61,7 @@ export default function RootLayout({
             __html: `
               (function() {
                 try {
-                  var saved = localStorage.getItem('tribos-theme');
+                  var saved = localStorage.getItem('tribos-theme') || localStorage.getItem('phronesis-theme');
                   var theme = saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
                   document.documentElement.classList.remove('light', 'dark');
                   document.documentElement.classList.add(theme);

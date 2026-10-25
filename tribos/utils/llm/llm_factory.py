@@ -20,15 +20,17 @@ logger = logging.getLogger(__name__)
 # Supported model metadata catalog
 NVIDIA_NIM_BASE_URL = "https://integrate.api.nvidia.com/v1"
 
-DEFAULT_ORCHESTRATOR_MODEL = "nvidia/nemotron-3-super-120b-a12b"
+# nemotron-3-super-120b-a12b and llama-3.1-nemotron-70b-instruct were dropped: NIM returns 404 for them, so a
+# turn that selected either one lost every model call.
+DEFAULT_ORCHESTRATOR_MODEL = "nvidia/nemotron-3.5-super-vl-120b-a12b"
 DEFAULT_SYNTHESIS_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
 
 SUPPORTED_MODELS = [
     {
-        "id": "nvidia/nemotron-3-super-120b-a12b",
-        "name": "NVIDIA Nemotron 3 120B Super",
+        "id": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+        "name": "NVIDIA Nemotron 3.5 120B Super VL",
         "provider": "nvidia",
-        "description": "120B MoE (12B active). High token velocity & low latency. Recommended default for multi-agent supervisor routing and tool-calling.",
+        "description": "120B MoE (12B active), vision-language. Low latency; recommended default for planning, tool calling and synthesis.",
         "recommended_for": "orchestrator",
         "is_default": True,
     },
@@ -36,16 +38,8 @@ SUPPORTED_MODELS = [
         "id": "nvidia/nemotron-3-ultra-550b-a55b",
         "name": "NVIDIA Nemotron 3 550B Ultra",
         "provider": "nvidia",
-        "description": "550B MoE (55B active). Frontier deep reasoning, complex biological hypothesis deduction, and cross-evidence clinical trial synthesis.",
+        "description": "550B MoE (55B active). Frontier deep reasoning for long derivations and cross-evidence synthesis; slower.",
         "recommended_for": "deep_synthesis",
-        "is_default": False,
-    },
-    {
-        "id": "nvidia/llama-3.1-nemotron-70b-instruct",
-        "name": "NVIDIA Llama-3.1 Nemotron 70B",
-        "provider": "nvidia",
-        "description": "70B dense model aligned by NVIDIA. Top performance on general biomedical instruction following and knowledge graph extraction.",
-        "recommended_for": "general",
         "is_default": False,
     },
     {
@@ -154,8 +148,8 @@ def get_llm(
     Factory function returning a configured LangChain ChatModel instance.
 
     Args:
-        model_name: Model identifier (e.g., 'nvidia/nemotron-3-super-120b-a12b', 'gpt-4o').
-                    Defaults to TRIBOS_LLM_MODEL or 'nvidia/nemotron-3-super-120b-a12b'.
+        model_name: Model identifier (e.g., 'nvidia/nemotron-3.5-super-vl-120b-a12b', 'gpt-4o').
+                    Defaults to TRIBOS_LLM_MODEL or DEFAULT_ORCHESTRATOR_MODEL.
         api_key: Optional explicit API key. If not provided, resolves from NVIDIA_API_KEY
                  or OPENAI_API_KEY based on model provider.
         temperature: Model sampling temperature (default 0.0 for deterministic tool usage).
@@ -210,10 +204,15 @@ def get_llm(
                     "(TRIBOS_LLM_FALLBACK=0 disables this substitution)", selected_model, FALLBACK_MODEL,
                 )
                 kwargs.pop("extra_body", None)  # NIM-only options (e.g. Nemotron's enable_thinking) would be rejected
+                # The same request bounds as every other client: without them the SDK waits 10 min and retries twice.
+                timeout_sec = float(kwargs.pop("timeout", None) or DEFAULT_LLM_TIMEOUT_S)
+                max_retries = int(kwargs.pop("max_retries", None) or 1)
                 client = ChatOpenAI(
                     model=FALLBACK_MODEL,
                     api_key=SecretStr(openai_key),
                     temperature=temperature,
+                    timeout=timeout_sec,
+                    max_retries=max_retries,
                     **kwargs,
                 )
                 _record_client(requested=selected_model, served=FALLBACK_MODEL, provider="openai", base_url=None,
@@ -352,6 +351,7 @@ async def astream_with_reasoning(
     on_reasoning: DeltaCallback | None = None,
     on_text: DeltaCallback | None = None,
     total_timeout: float | None = None,
+    on_finish: Callable[[str], None] | None = None,
 ) -> tuple[str, str]:
     """
     Stream a completion, forwarding the model's real reasoning and answer text as they arrive.
@@ -359,7 +359,9 @@ async def astream_with_reasoning(
     LangChain's ChatOpenAI drops `reasoning_content` from streamed deltas, so for ChatOpenAI
     instances this reads the raw OpenAI-compatible stream. Other chat models fall back to
     `astream`, then `ainvoke`. Returns (answer_text, reasoning_text). total_timeout (default
-    STREAM_TOTAL_TIMEOUT) bounds the whole stream; pass stream_timeout(run remaining seconds).
+    STREAM_TOTAL_TIMEOUT) bounds the whole stream; pass stream_timeout(run remaining seconds). on_finish receives
+    the provider's finish reason ("stop", "length", ...) when the stream reports one: "length" means the answer was
+    cut off at max_tokens.
     """
     limit = STREAM_TOTAL_TIMEOUT if total_timeout is None else max(0.0, float(total_timeout))
     text_parts: list[str] = []
@@ -401,6 +403,8 @@ async def astream_with_reasoning(
                 async for chunk in stream:
                     if not chunk.choices:
                         continue
+                    if on_finish is not None and getattr(chunk.choices[0], "finish_reason", None):
+                        on_finish(str(chunk.choices[0].finish_reason))
                     delta = chunk.choices[0].delta
                     extra = getattr(delta, "model_extra", None) or {}
                     reasoning = next((extra[f] for f in _REASONING_FIELDS if extra.get(f)), None)
@@ -416,11 +420,17 @@ async def astream_with_reasoning(
                         await route("reasoning", str(reasoning))
                     content = chunk.content if isinstance(chunk.content, str) else ""
                     await route_text(content)
+                    finish = (getattr(chunk, "response_metadata", None) or {}).get("finish_reason")
+                    if on_finish is not None and finish:
+                        on_finish(str(finish))
             else:
                 res = await llm.ainvoke(list(messages))
                 res_content = getattr(res, "content", res)
                 content_str = res_content if isinstance(res_content, str) else str(res_content)
                 await route_text(content_str)
+                finish = (getattr(res, "response_metadata", None) or {}).get("finish_reason")
+                if on_finish is not None and finish:
+                    on_finish(str(finish))
 
     except TimeoutError as exc:
         raise LLMStreamTimeoutError(f"Model stream exceeded {limit:g}s") from exc

@@ -36,7 +36,8 @@ What applies to which tool:
   are cached, keyed by their validated inputs alone, and tools that read user data (tags "upload", "user_data")
   are excluded, so a hit can only replay a public answer to identical public inputs (ORC-014). Payloads that
   report an upstream error (``upstream_failed`` / a top-level ``error`` other than NOT_FOUND) or a failed
-  per-source status (list- or mapping-shaped) are never stored (ORC-001, ORC-012).
+  per-source status (list- or mapping-shaped), a non-empty ``sources_failed`` list or ``partial: true`` are never
+  stored (ORC-001, ORC-012, LOG-6). A success whose every queried sub-source failed counts as a breaker failure.
 - **Fallbacks**: `register_fallback(tool, fallback_tool, arg_mapper)`; used only while the tool's breaker is
   open, the result carries ``metadata["fallback_from"]``. None is registered by default: e.g. a web-search
   fallback for literature would ignore a researcher who switched web search off.
@@ -399,7 +400,9 @@ def _looks_partial(data: Any) -> bool:
     mapping ``{source: status}`` (the entity resolver's shape, ORC-012)."""
     if not isinstance(data, dict):
         return False
-    if data.get("partial") is True or data.get("upstream_failed") is True:
+    if data.get("partial") is True or data.get("upstream_failed") is True or data.get("all_sources_failed") is True:
+        return True
+    if data.get("sources_failed"):  # a list of sub-sources that did not answer (Archivon)
         return True
     if data.get("error") and str(data.get("error_type") or "").upper() != "NOT_FOUND":
         return True
@@ -474,11 +477,26 @@ def _settle(
         # neutral: a half-open breaker stays half-open with its trial slot released
 
 
+def _all_sources_failed(data: Any) -> bool:
+    """A 'successful' payload whose every queried sub-source failed (``all_sources_failed`` / ``upstream_failed``, or
+    a non-empty ``source_status`` list in which no source answered): the upstream is down, not empty."""
+    if not isinstance(data, dict):
+        return False
+    if data.get("all_sources_failed") is True or data.get("upstream_failed") is True:
+        return True
+    statuses = data.get("source_status")
+    if not isinstance(statuses, list):
+        return False
+    asked = [s for s in statuses if isinstance(s, dict) and str(s.get("status") or "").lower() != "skipped"]
+    return bool(asked) and all(_bad_status(s) for s in asked)
+
+
 def _outcome(result: Any) -> str:
     if result is None:
         return "failure"
     if getattr(result, "success", False):
-        return "success"
+        # Every sub-source failing counts toward the breaker even when the executor reported success.
+        return "failure" if _all_sources_failed(getattr(result, "data", None)) else "success"
     if _is_upstream_failure(result):
         return "failure"
     return "neutral" if _etype(result) in ("VALIDATION_ERROR", "INTERNAL_ERROR") else "success"

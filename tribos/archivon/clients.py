@@ -1,4 +1,5 @@
-"""Async HTTP clients for Archivon's 6 scholarly literature sources:
+"""Async HTTP clients for Archivon's 6 scholarly literature sources (a failed search raises SourceError, so the
+engine reports each source as ok, empty, skipped or failed instead of mistaking an outage for "nothing found"):
 1. arXiv (Atom XML API)
 2. Semantic Scholar (Graph v1 & Recommendations v1)
 3. OpenAlex (Works REST API with inverted-abstract reconstruction)
@@ -35,6 +36,49 @@ ZBMATH_DOC_URL = "https://api.zbmath.org/v1/document"
 ADS_SEARCH_URL = "https://api.adsabs.harvard.edu/v1/search/query"
 
 ADS_SKIPPED_NOTE = "NASA ADS skipped (TRIBOS_ADS_API_TOKEN not set)"
+
+
+class SourceError(Exception):
+    """A literature source did not answer a search; the engine reports it per source instead of an empty result.
+
+    error_type is one of rate_limited, http_error, timeout, transport_error, parse_error, error."""
+
+    def __init__(self, source: str, error_type: str, message: str) -> None:
+        super().__init__(message)
+        self.source = source
+        self.error_type = error_type
+        self.message = message
+
+
+def _http_error(source: str, label: str, resp: httpx.Response) -> SourceError:
+    if resp.status_code == 429:
+        return SourceError(source, "rate_limited", f"{label} rate-limited (HTTP 429)")
+    return SourceError(source, "http_error", f"{label} HTTP {resp.status_code}")
+
+
+def _zbmath_no_hits(resp: httpx.Response) -> bool:
+    try:
+        payload = resp.json()
+    except ValueError:
+        return False
+    return isinstance(payload, dict) and ("result" in payload or "status" in payload)
+
+
+def _as_source_error(source: str, label: str, exc: Exception) -> SourceError:
+    """A transport, timeout or decoding failure as a SourceError. The exception class name stays in the message: the
+    reliability layer reads ConnectError / ConnectTimeout there to tell an unreachable upstream from a slow one."""
+    if isinstance(exc, SourceError):
+        return exc
+    if isinstance(exc, httpx.TimeoutException):
+        kind = "timeout"
+    elif isinstance(exc, httpx.TransportError):
+        kind = "transport_error"
+    elif isinstance(exc, (ValueError, ET.ParseError)):  # json.JSONDecodeError is a ValueError
+        kind = "parse_error"
+    else:
+        kind = "error"
+    logger.warning("%s search failed: %s: %s", label, type(exc).__name__, exc)
+    return SourceError(source, kind, f"{label} {type(exc).__name__}: {exc}"[:300])
 
 _ATOM_NS = "{http://www.w3.org/2005/Atom}"
 _ARXIV_NS = "{http://arxiv.org/schemas/atom}"
@@ -105,13 +149,15 @@ def build_arxiv_search_query(query: str, categories: list[str] | None = None) ->
     return base_q
 
 
-def parse_arxiv_atom(xml_text: str) -> list[dict[str, Any]]:
-    """Parse arXiv Atom XML response into normalized article dicts."""
+def parse_arxiv_atom(xml_text: str, strict: bool = False) -> list[dict[str, Any]]:
+    """Parse arXiv Atom XML response into normalized article dicts (strict: a malformed feed raises ET.ParseError)."""
     if not xml_text or not xml_text.strip():
         return []
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError as exc:
+        if strict:
+            raise
         logger.warning("arXiv Atom XML parse failed: %s", exc)
         return []
 
@@ -252,12 +298,10 @@ class ArchivonClients:
                 async with get_limiter("arxiv", 0.05 if self.transport else 3.0):
                     resp = await client.get(ARXIV_API_URL, params=params)
             if resp.status_code != 200:
-                logger.warning("arXiv returned HTTP %s", resp.status_code)
-                return []
-            return parse_arxiv_atom(resp.text)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("arXiv search failed: %s", exc)
-            return []
+                raise _http_error("arxiv", "arXiv", resp)
+            return parse_arxiv_atom(resp.text, strict=True)
+        except Exception as exc:  # noqa: BLE001 - every failure is reported as this source's status
+            raise _as_source_error("arxiv", "arXiv", exc) from exc
 
     # ------------------------------------------------------------------
     # 2. Semantic Scholar
@@ -328,16 +372,16 @@ class ArchivonClients:
                 async with get_limiter("semantic_scholar", 0.05 if self.transport else 1.0):
                     resp = await client.get(S2_SEARCH_URL, params=params)
             if resp.status_code == 429:
-                return [], "Semantic Scholar rate-limited (HTTP 429; set TRIBOS_S2_API_KEY for dedicated quota)"
+                raise SourceError("semantic_scholar", "rate_limited",
+                                  "Semantic Scholar rate-limited (HTTP 429; set TRIBOS_S2_API_KEY for dedicated quota)")
             if resp.status_code != 200:
-                return [], f"Semantic Scholar HTTP {resp.status_code}"
+                raise _http_error("semantic_scholar", "Semantic Scholar", resp)
             payload = resp.json()
             data = payload.get("data") if isinstance(payload, dict) else []
             out = [r for item in (data or []) if (r := self._parse_s2_paper(item)) is not None]
             return out, None
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Semantic Scholar search failed: %s", exc)
-            return [], f"Semantic Scholar error: {type(exc).__name__}"
+        except Exception as exc:  # noqa: BLE001 - every failure is reported as this source's status
+            raise _as_source_error("semantic_scholar", "Semantic Scholar", exc) from exc
 
     async def fetch_semantic_scholar_paper(self, paper_identifier: str) -> dict[str, Any] | None:
         fields = "paperId,externalIds,title,abstract,year,authors,venue,journal,citationCount,referenceCount,url,openAccessPdf"
@@ -455,14 +499,12 @@ class ArchivonClients:
                 async with get_limiter("openalex", 0.05 if self.transport else 0.2):
                     resp = await client.get(OPENALEX_WORKS_URL, params=params)
             if resp.status_code != 200:
-                logger.warning("OpenAlex returned HTTP %s", resp.status_code)
-                return []
+                raise _http_error("openalex", "OpenAlex", resp)
             payload = resp.json()
             results = payload.get("results") if isinstance(payload, dict) else []
             return [r for item in (results or []) if (r := self._parse_openalex_work(item)) is not None]
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("OpenAlex search failed: %s", exc)
-            return []
+        except Exception as exc:  # noqa: BLE001 - every failure is reported as this source's status
+            raise _as_source_error("openalex", "OpenAlex", exc) from exc
 
     async def fetch_openalex_work(self, identifier: str) -> dict[str, Any] | None:
         params: dict[str, str] = {}
@@ -557,14 +599,12 @@ class ArchivonClients:
                 async with get_limiter("crossref", 0.05 if self.transport else 0.25):
                     resp = await client.get(CROSSREF_WORKS_URL, params=params)
             if resp.status_code != 200:
-                logger.warning("Crossref returned HTTP %s", resp.status_code)
-                return []
+                raise _http_error("crossref", "Crossref", resp)
             payload = resp.json()
             items = ((payload.get("message") or {}).get("items")) if isinstance(payload, dict) else []
             return [r for item in (items or []) if (r := self._parse_crossref_item(item)) is not None]
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Crossref search failed: %s", exc)
-            return []
+        except Exception as exc:  # noqa: BLE001 - every failure is reported as this source's status
+            raise _as_source_error("crossref", "Crossref", exc) from exc
 
     async def fetch_crossref_doi(self, doi: str) -> dict[str, Any] | None:
         clean = normalize_doi(doi)
@@ -675,15 +715,15 @@ class ArchivonClients:
             async with self._client() as client:
                 async with get_limiter("zbmath", 0.05 if self.transport else 0.5):
                     resp = await client.get(ZBMATH_SEARCH_URL, params=params)
+            if resp.status_code == 404 and _zbmath_no_hits(resp):
+                return []  # zbMATH Open answers a search without hits with a 404 carrying its usual JSON envelope
             if resp.status_code != 200:
-                logger.warning("zbMATH returned HTTP %s", resp.status_code)
-                return []
+                raise _http_error("zbmath", "zbMATH", resp)
             payload = resp.json()
             items = payload.get("result") if isinstance(payload, dict) else []
             return [r for item in (items or []) if (r := self._parse_zbmath_item(item)) is not None]
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("zbMATH search failed: %s", exc)
-            return []
+        except Exception as exc:  # noqa: BLE001 - every failure is reported as this source's status
+            raise _as_source_error("zbmath", "zbMATH", exc) from exc
 
     async def fetch_zbmath_document(self, zbl_id: str) -> dict[str, Any] | None:
         clean = re.sub(r"^(?:zbl\.?|zbmath)\s*[:=#]?\s*", "", (zbl_id or "").strip(), flags=re.I)
@@ -766,14 +806,13 @@ class ArchivonClients:
                 async with get_limiter("nasa_ads", 0.05 if self.transport else 0.2):
                     resp = await client.get(ADS_SEARCH_URL, params=params)
             if resp.status_code != 200:
-                return [], f"NASA ADS HTTP {resp.status_code}"
+                raise _http_error("ads", "NASA ADS", resp)
             payload = resp.json()
             docs = ((payload.get("response") or {}).get("docs")) if isinstance(payload, dict) else []
             out = [r for d in (docs or []) if (r := self._parse_ads_doc(d)) is not None]
             return out, None
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("NASA ADS search failed: %s", exc)
-            return [], f"NASA ADS error: {type(exc).__name__}"
+        except Exception as exc:  # noqa: BLE001 - every failure is reported as this source's status
+            raise _as_source_error("ads", "NASA ADS", exc) from exc
 
 
 __all__ = [
@@ -786,6 +825,7 @@ __all__ = [
     "S2_PAPER_URL",
     "S2_RECOMMEND_URL",
     "S2_SEARCH_URL",
+    "SourceError",
     "ZBMATH_DOC_URL",
     "ZBMATH_SEARCH_URL",
     "build_arxiv_search_query",

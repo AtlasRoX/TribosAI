@@ -11,20 +11,15 @@ Writes the artifact "model_calibration" and a <model_calibration> evidence secti
 from __future__ import annotations
 
 import logging
+import math
 import re
+from dataclasses import dataclass, field
 from html import escape
 from typing import Any
 
 from .budget import BudgetExhausted
 from .guardrails import SPOTLIGHT_RULE, neutralise
-from .hypothesis import (
-    ModelInfo,
-    ModelRef,
-    _mentions,
-    fetch_model_info,
-    model_in_play,
-    simulation_block_reason,
-)
+from .hypothesis import _mentions, simulation_block_reason
 from .llm import AgentLLMUnavailable
 from .runtime import AgentPhase, register_phase
 from .state import AgentState
@@ -33,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 PHASE = "calibrate"
 TOOL = "vivarix_calibrate_parameters"
+LIST_TOOL = "vivarix_list_parameters"
 DYNAMIS_FIT_TOOL = "dynamis_fit_parameters"
 MAX_PICK = 3
 FALLBACK_K = 2
@@ -47,6 +43,119 @@ CALIBRATION_INTENT_RE = re.compile(
     re.I,
 )
 FIT_INTENT_RE = CALIBRATION_INTENT_RE
+
+
+# -----------------------------------------------------------------------------
+# Kinetic (SBML) models for vivarix_calibrate_parameters
+# -----------------------------------------------------------------------------
+
+@dataclass
+class ModelRef:
+    biomodel_id: str
+    label: str
+    sim_kwargs: dict[str, Any] = field(default_factory=dict)  # sbml_path, model_label, model_provenance
+
+
+@dataclass
+class ModelInfo:
+    species: dict[str, float | None] = field(default_factory=dict)  # name -> initial concentration
+    parameters: dict[str, dict[str, Any]] = field(default_factory=dict)  # name -> {value, short, reaction}
+    reactions: list[tuple[str, list[str], list[str]]] = field(default_factory=list)  # (name, substrates, products)
+    source: str = "none"  # list_tool | none
+
+    def short_names(self) -> dict[str, list[str]]:
+        out: dict[str, list[str]] = {}
+        for full, meta in self.parameters.items():
+            out.setdefault(str(meta.get("short") or full).lower(), []).append(full)
+        return out
+
+    def resolve(self, name: str | None) -> tuple[str, str] | None:
+        """(name, 'species'|'parameter') for a species/parameter name as written, or None."""
+        if not name:
+            return None
+        n = str(name).strip()
+        if n in self.species:
+            return n, "species"
+        if n in self.parameters:
+            return n, "parameter"
+        lower = n.lower()
+        sp = [s for s in self.species if s.lower() == lower]
+        if len(sp) == 1:
+            return sp[0], "species"
+        full = [p for p in self.parameters if p.lower() == lower]
+        if len(full) == 1:
+            return full[0], "parameter"
+        short = self.short_names().get(lower, [])
+        return (short[0], "parameter") if len(short) == 1 else None
+
+
+def _num(value: Any) -> float | None:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if math.isfinite(out) else None
+
+
+def _scheme_sides(scheme: str) -> tuple[list[str], list[str]]:
+    body = str(scheme or "").split(";", 1)[0]
+    parts = re.split(r"->|=", body, maxsplit=1)
+    if len(parts) != 2:
+        return [], []
+
+    def names(side: str) -> list[str]:
+        return [t for t in (re.sub(r"^\s*\d+(?:\.\d+)?\s*\*?\s*", "", term).strip() for term in side.split("+")) if t]
+
+    return names(parts[0]), names(parts[1])
+
+
+def kinetic_model_in_play(ctx: Any) -> ModelRef | None:
+    """The SBML model a calibration runs on: an uploaded SBML model or a typed BioModels accession."""
+    att = getattr(ctx, "model_attachment", None)
+    if att is not None and getattr(att, "model_path", None):
+        return ModelRef(
+            biomodel_id=att.id,
+            label=att.display_name or att.id,
+            sim_kwargs={"sbml_path": att.model_path, "model_label": att.display_name,
+                        "model_provenance": dict(att.public_provenance or {})},
+        )
+    bm = getattr(ctx, "biomodel_id", None)
+    return ModelRef(biomodel_id=str(bm), label=str(bm)) if bm else None
+
+
+async def fetch_model_info(state: AgentState, model: ModelRef, phase: str) -> ModelInfo:
+    """The model's species, parameters and reactions (vivarix_list_parameters); empty when it cannot be listed."""
+    info = ModelInfo()
+    if state.registry.get_entry(LIST_TOOL) is None:
+        return info
+    kwargs: dict[str, Any] = {"biomodel_id": model.biomodel_id}
+    if model.sim_kwargs.get("sbml_path"):
+        kwargs.update(sbml_path=model.sim_kwargs["sbml_path"], model_label=model.sim_kwargs.get("model_label"))
+    res = await state.call_tool(LIST_TOOL, phase=phase, purpose=f"list the parameters of {model.label}", store=False, **kwargs)
+    data = res.data if getattr(res, "success", False) and isinstance(getattr(res, "data", None), dict) else {}
+    if not data:
+        return info
+    info.source = "list_tool"
+    for s in data.get("species") or []:
+        if isinstance(s, dict) and s.get("name"):
+            info.species[str(s["name"])] = _num(s.get("initial_concentration"))
+    for g in data.get("global_parameters") or []:
+        if isinstance(g, dict) and g.get("name"):
+            info.parameters[str(g["name"])] = {"value": _num(g.get("value")), "short": str(g["name"]), "reaction": ""}
+    for p in data.get("reaction_parameters") or []:
+        if not isinstance(p, dict) or not p.get("name"):
+            continue
+        mapped = p.get("mapped_to")
+        if mapped and mapped in info.parameters:
+            info.parameters[mapped].setdefault("reactions", []).append(str(p.get("reaction") or ""))
+            continue
+        info.parameters[str(p["name"])] = {"value": _num(p.get("value")), "short": str(p.get("short_name") or p["name"]),
+                                           "reaction": str(p.get("reaction") or "")}
+    for r in data.get("reactions") or []:
+        if isinstance(r, dict) and r.get("name"):
+            subs, prods = _scheme_sides(str(r.get("scheme") or ""))
+            info.reactions.append((str(r["name"]), subs, prods))
+    return info
 
 
 def has_calibration_intent(text: str) -> bool:
@@ -93,13 +202,14 @@ class FitPhase(AgentPhase):
     async def run(self, state: AgentState) -> None:
         ctx = state.ctx
         block = simulation_block_reason(ctx)
-        model = model_in_play(ctx, state.tool_results)
+        model = kinetic_model_in_play(ctx)
         att, data_path = _table_attachment(ctx)
         reason = ""
         if block:
             reason = f"Model calibration was not run: {block}."
         elif model is None:
-            reason = "Model calibration needs a model: give a BioModels accession or upload an SBML file."
+            reason = ("Model calibration needs a kinetic model (an uploaded SBML file); fitting an ODE system's parameters "
+                      "to data is not run by this phase.")
         elif data_path is None:
             reason = "Model calibration needs an attached time-course table (CSV/TSV with a 'time' column and species columns)."
         elif state.registry.get_entry(TOOL) is None and state.registry.get_entry(DYNAMIS_FIT_TOOL) is None:

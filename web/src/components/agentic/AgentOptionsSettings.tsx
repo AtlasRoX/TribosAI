@@ -17,7 +17,7 @@ const TOGGLES: { key: keyof Omit<Settings, "budget" | "budgetEnabled" | "effort_
   { key: "require_plan_approval", label: "Ask me to approve the plan", hint: "Pause before sources and expensive tool steps run (auto-continues after 5 minutes)." },
   { key: "allow_clarification", label: "Allow clarifying questions", hint: "Ask once when the question is ambiguous instead of guessing." },
   { key: "enable_counter_evidence", label: "Search for counter-evidence", hint: "Look for passages that contradict the main claims." },
-  { key: "enable_hypotheses", label: "Generate and test hypotheses", hint: "Rank hypotheses and, with a model, run in-silico perturbations." },
+  { key: "enable_hypotheses", label: "Generate and test hypotheses", hint: "When the question asks for them (what if, hypotheses, perturbations): rank hypotheses and, with a model, test them in silico." },
   { key: "enable_code_analysis", label: "Allow code analysis on datasets", hint: "Run sandboxed Python on attached tables (needs TRIBOS_SANDBOX=on on the server)." },
 ];
 

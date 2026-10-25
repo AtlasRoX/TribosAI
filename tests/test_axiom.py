@@ -181,6 +181,18 @@ def test_axiom_latex_and_registry_integration():
         "axiom_linalg",
         "axiom_verify_identity",
         "axiom_latex",
+        "axiom_nsolve",
+        "axiom_solve_problem",
+        "axiom_sagemath",
+        "axiom_optimize",
+        "axiom_inequality",
+        "axiom_tangent",
+        "axiom_vector_calculus",
+        "axiom_transform",
+        "axiom_nintegrate",
+        "axiom_number_theory",
+        "axiom_recurrence",
+        "axiom_probability",
     }
 
     res = asyncio.run(reg.execute("axiom_simplify", {"expression": "(x^2 - y^2)/(x - y)"}))
