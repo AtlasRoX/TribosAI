@@ -973,7 +973,12 @@ class DebatePhase(AgentPhase):
         answered = {p: r for p, r in rounds[-1].items() if r is not None}
         left = self._calls_left(state)
         second_fits = self._critics_that_fit(state, len(answered), len(base) + system_chars + 4000) >= len(answered)
-        if len(answered) >= 2 and left >= len(answered) + 1 and second_fits and not state.budget.optional_exhausted():
+        # Audit I37: a second round needs an unresolved concrete issue from the first: a "revise" verdict backed by a
+        # critique that names a claim and evidence and is within the requested scope. Unanimous acceptance stops.
+        open_issue = bool(self._in_scope(state, self._valid_critiques(
+            {p: r for p, r in answered.items() if r.verdict.strip().lower() == "revise"}, valid_keys)[0]))
+        if (open_issue and len(answered) >= 2 and left >= len(answered) + 1 and second_fits
+                and not state.budget.optional_exhausted()):
             second = await asyncio.gather(*(
                 critic(p, f, self._round_two(base, p, answered)) for p, f in personas if p in answered
             ))
@@ -985,11 +990,17 @@ class DebatePhase(AgentPhase):
             final.update({p: r for p, r in rnd.items() if r is not None})
         revise = [p for p, r in final.items() if r.verdict.strip().lower() == "revise"]
         accept = [p for p, r in final.items() if r.verdict.strip().lower() != "revise"]
+        # A critic with no usable reply abstained: it neither accepted nor objected (audit I37).
+        no_reply = [p for p, _ in personas if p not in final]
         critiques, dropped = self._valid_critiques(final, valid_keys)
+        in_scope = self._in_scope(state, critiques)
+        out_of_scope = len(critiques) - len(in_scope)
+        critiques = in_scope
         majority_accept = len(accept) * 2 > len(final)
         state.bag["debate"] = {
             "critics": [p for p, _ in personas], "rounds": len(rounds), "revise": revise, "accept": accept,
-            "valid_critiques": len(critiques), "dropped_critiques": dropped,
+            "no_reply": no_reply, "valid_critiques": len(critiques), "dropped_critiques": dropped,
+            "out_of_scope_critiques": out_of_scope,
         }
         dialogue.save()
         if not final:
@@ -1006,10 +1017,14 @@ class DebatePhase(AgentPhase):
             )
             return None
         if not revise or majority_accept or not critiques:
-            why = "the critics accepted the draft" if not revise or majority_accept else "no critique named a claim and its evidence"
+            why = ("the critics accepted the draft" if not revise or majority_accept else
+                   "no in-scope critique named a claim and its evidence")
+            abstained = f"; {len(no_reply)} gave no usable reply ({', '.join(no_reply)})" if no_reply else ""
             dialogue.add("Debate moderator", "accept", None, why)
+            # Agreement among critics is review, not proof: the mathematical checks keep their own status.
             await state.step("agent_debate", "Debate: draft accepted",
-                             f"{len(accept)} of {len(final)} critics accepted; {why}.", agent="Debate moderator")
+                             f"{len(accept)} of {len(personas)} critics accepted{abstained}; {why}.",
+                             agent="Debate moderator")
             return None
         feedback = self._feedback(critiques)
         dialogue.add("Debate moderator", "revise", None, f"{len(feedback)} consensus point(s)")
@@ -1052,6 +1067,20 @@ class DebatePhase(AgentPhase):
                 severity = c.severity.strip().lower() if c.severity.strip().lower() in _SEVERITY_RANK else "medium"
                 out.append({"persona": persona, "claim": claim, "issue": issue, "evidence_key": key, "severity": severity})
         return out, dropped
+
+    @staticmethod
+    def _in_scope(state: Any, critiques: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """The critiques the requested answer can act on. Under a fixed form ("one sentence and the source URL"), a
+        request to add material (a numerical verification, more discussion) would break the user's request; only
+        critiques that a claim is wrong or overstated stay (audit I37)."""
+        from ..utils.output_contract import extract as extract_contract
+
+        if not extract_contract(state.query or "").strict_form:
+            return critiques
+        additive = re.compile(r"(?i)\b(?:add|include|expand|elaborate|discuss|mention|provide\s+(?:more|additional)|"
+                              r"more\s+detail|lacks?\s+(?:a\s+)?(?:discussion|explanation|derivation|numerical|detail)|"
+                              r"missing\s+(?:a\s+)?(?:discussion|explanation|derivation|numerical|detail))\b")
+        return [c for c in critiques if c["severity"] == "high" or not additive.search(c["issue"])]
 
     @staticmethod
     def _feedback(critiques: list[dict[str, Any]], limit: int = 6) -> list[str]:

@@ -176,6 +176,8 @@ _SETTINGS: Sequence[Setting] = (
     Setting("LLM_STREAM_TIMEOUT", "float", 120.0, "Read timeout in seconds between streamed completion chunks.", _LLM),
     Setting("LLM_STREAM_TOTAL_TIMEOUT", "float", 1800.0, "Wall-clock cap in seconds on one streamed completion.", _LLM),
     Setting("TRIBOS_LLM_FALLBACK", "bool", True, "Allow fallback to an available provider when the requested model key is unset.", _LLM),
+    Setting("TRIBOS_LLM_RETRY_ATTEMPTS", "int", 3, "Attempts per NVIDIA NIM model request on a transient provider failure (408/409/429/5xx or no connection); replaces the SDK's own retry, so attempts are not multiplied.", _LLM, min=1, max=5),
+    Setting("TRIBOS_LLM_RETRY_DEADLINE_S", "float", 20.0, "Seconds from a model request's first attempt after which no further transient-failure retry starts.", _LLM, min=0.0, max=120.0),
     # --- Agentic runtime -------------------------------------------------------------------------------------------
     Setting("TRIBOS_DEFAULT_FRAMEWORK", "str", None, "Orchestration framework used when a request names none or an unknown one (default: auto routing for API requests; the classic pipeline for direct orchestrator calls).", _AGENT, choices=FRAMEWORKS),
     Setting("TRIBOS_ROUTER_LLM", "str", "auto", "Auto routing: off scores the deterministic signals only; auto/on add the model's semantic features.", _AGENT, choices=FLAG),

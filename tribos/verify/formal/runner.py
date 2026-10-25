@@ -33,6 +33,10 @@ STATUS_TITLES = {
     "failed": "formalisation failed",
     "timeout": "formalisation failed",
     "unavailable": "formal checker unavailable",
+    # Audit I33: the written theorem does not state the question (True/False target, assumed conclusion, changed
+    # domain), or the question cannot be stated in the installed Lean environment.
+    "mismatch": "formal statement does not match the question",
+    "not_formalizable": "not formalisable without Mathlib",
 }
 MEMORY_LIMIT_MB = 4096
 MAX_CODE_CHARS = 50_000

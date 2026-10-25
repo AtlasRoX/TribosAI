@@ -263,7 +263,7 @@ def _structured_verdict(spec: ProblemSpec, checks: list[Check], data: dict[str, 
     from .definitions import check_structured
 
     params = spec.params if spec.params.get("tasks") else {"definitions": data.get("definitions") or [], "tasks": data.get("tasks") or []}
-    checks += [Check(name, passed, level, detail) for name, passed, level, detail in check_structured(params, data)]
+    checks += [Check(name, passed, level, detail) for name, passed, level, detail in check_structured(params, data, spec.text)]
     results = data.get("results") or []
     unc = [f"{r['id']}: {r.get('text')}" for r in results if r.get("status") == "unresolved"]
     unc += [f"{r['id']}: {r.get('error')}" for r in results if r.get("status") == "error"]

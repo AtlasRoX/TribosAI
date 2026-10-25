@@ -4,7 +4,7 @@ import React, { useEffect, useId, useRef, useState } from "react";
 import { onUi } from "@/lib/uiEvents";
 import { BookOpen, ChevronDown, Cpu, FlaskConical, ShieldCheck } from "lucide-react";
 import type { ExecutionArtifacts, TaskOutcome } from "@/types/chat";
-import { artifactDisclosure } from "@/lib/artifactDisclosure";
+import { artifactAttention } from "@/lib/artifactDisclosure";
 import { DerivationArtifact } from "@/components/DerivationArtifact";
 import { ArtifactRenderFallback, ErrorBoundary } from "@/components/ErrorBoundary";
 import { EvidenceSources } from "@/components/EvidenceSources";
@@ -27,8 +27,8 @@ import { CardAttentionContext, CardDisclosureContext } from "@/components/agenti
 import { FEATURE_ARTIFACTS } from "@/components/artifacts/registry";
 import styles from "./MessageArtifacts.module.css";
 
-/** Cards that hold something the reader should see (artifactDisclosure), by artifact key. */
-const AttentionContext = React.createContext<Record<string, boolean>>({});
+/** Why a card needs a look (artifactAttention), by artifact key; absent when it carries no warning. */
+const AttentionContext = React.createContext<Record<string, string>>({});
 
 function ArtifactBoundary({
   name,
@@ -44,7 +44,7 @@ function ArtifactBoundary({
   const attention = React.useContext(AttentionContext);
   return (
     <ErrorBoundary name={`Artifact "${name}"`} resetKey={data} fallback={<ArtifactRenderFallback label={name.replace(/_/g, " ")} data={data} />}>
-      <CardAttentionContext.Provider value={Boolean(attention[name])}>
+      <CardAttentionContext.Provider value={attention[name] || ""}>
         <CardDisclosureContext.Provider value={open}>{children}</CardDisclosureContext.Provider>
       </CardAttentionContext.Provider>
     </ErrorBoundary>
@@ -80,7 +80,7 @@ export function MessageArtifacts({
   if (!artifacts) return null;
   // Every card starts collapsed so the written answer is what the reader sees first; a card that holds a warning
   // (contradiction, low support, failed or unfinished work) says "needs a look" in its header instead of opening.
-  const attention = artifactDisclosure({ question, taskStatus, artifacts });
+  const attention = artifactAttention({ question, taskStatus, artifacts });
   const open: Record<string, boolean> = Object.fromEntries(Object.keys(artifacts).map((key) => [key, false]));
 
   const derivationData = artifacts.derivation ?? artifacts.axiom;

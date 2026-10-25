@@ -542,3 +542,54 @@ class CounterEvidenceRecheckPhase(AgentPhase):
 
 COUNTER_EVIDENCE_RECHECK_PHASE = CounterEvidenceRecheckPhase()
 register_phase(COUNTER_EVIDENCE_RECHECK_PHASE)
+
+
+HISTORY_NOTE = ("checked before the answer was written, against claims the final answer does not make: kept as history, "
+                "not as findings about the answer")
+
+
+def _claim_in_answer(claim: str, answer_stems: list[set[str]]) -> bool:
+    """The final answer makes this claim: one of its sentences shares most of the claim's content words."""
+    cs = stems(claim)
+    if len(cs) < 3:
+        return False
+    return any(len(cs & ss) >= max(3, 0.6 * len(cs)) for ss in answer_stems)
+
+
+def reconcile_with_answer(art: dict[str, Any], answer: str) -> None:
+    """Audit I40: bind counter-evidence rows to the final answer revision. Rows from the answer re-check, or about a
+    claim the final answer still makes, stay as findings; rows about claims the revision dropped (the draft spoke of
+    prime distributions, the final answer is a status sentence) move to art["history"], labelled, and no longer count."""
+    answer_stems = [stems(answer[s:e]) for s, e in sentence_spans(answer or "")]
+    current, history = [], []
+    for row in art.get("conflicts") or []:
+        if not isinstance(row, dict):
+            continue
+        applies = row.get("phase") == "after_draft" or _claim_in_answer(str(row.get("claim") or ""), answer_stems)
+        (current if applies else history).append({**row, "applies_to_final_answer": applies})
+    art["conflicts"] = current
+    if history:
+        art["history"] = (list(art.get("history") or []) + history)[:50]
+        art["history_note"] = HISTORY_NOTE
+
+
+class CounterEvidenceReconcilePhase(AgentPhase):
+    """After the answer is final: keep only the counter-evidence about claims it makes (before confidence, order 10,
+    which reads the contradicting rows)."""
+
+    key = "counter_evidence_reconcile"
+    stage = "finalize"
+    order = 7
+    frameworks = None
+    needs_llm = False
+
+    def applies(self, state: Any) -> bool:
+        art = state.artifacts.get("evidence_conflicts") if isinstance(state.artifacts, dict) else None
+        return bool(isinstance(art, dict) and art.get("conflicts") and (state.draft or "").strip())
+
+    async def run(self, state: Any) -> PhaseOutcome | None:
+        reconcile_with_answer(state.artifacts["evidence_conflicts"], state.draft)
+        return None
+
+
+register_phase(CounterEvidenceReconcilePhase())

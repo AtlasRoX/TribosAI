@@ -17,7 +17,17 @@ test("a perfect score over zero evaluated claims is 'not evaluated', never a pas
     status: "not_evaluated",
   });
   assert.equal(s.kind, "not_evaluated");
-  assert.match(s.text, /No claims could be checked/);
+  // Audit I42: nothing was cited, so no "cited identifiers" check is claimed.
+  assert.equal(s.text, "No source claims to check in this answer");
+});
+
+test("the quiet summary names only the checks that applied (mathematics, cited identifiers)", () => {
+  const base = { passed: true, verification_score: 1, defects: [], claims: [], coverage: { extracted: 0, evaluated: 0 }, status: "not_evaluated" };
+  const math = verificationState({ ...base, math_audit: { counts: { passed: 3, failed: 0 } } });
+  assert.equal(math.text, "No source claims to check; 3 mathematical statements checked");
+  const ids = verificationState({ ...base, verified_identifiers: ["arXiv:1706.03762"] });
+  assert.equal(ids.text, "No source claims to check; 1 cited identifier matches the tool outputs");
+  assert.equal(math.kind, "not_evaluated");
 });
 
 test("claims the checks could not decide are counted but are not findings against the answer", () => {

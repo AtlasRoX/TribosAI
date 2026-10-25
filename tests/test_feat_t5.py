@@ -119,7 +119,10 @@ def test_the_repair_loop_feeds_errors_back(lean, monkeypatch):
 
     monkeypatch.setenv("TRIBOS_FORMAL_MAX_REPAIRS", "2")
     prompts: list[str] = []
-    replies = iter([f"```lean\n{BAD}```", f"Here is the fix:\n```lean\n{GOOD}```"])
+    # The first attempt states the question faithfully but its proof does not compile (an unrelated theorem such as
+    # BAD is now rejected as a mismatch before Lean runs, audit I33).
+    broken = "theorem two_add_two : 2 + 2 = 4 := by\n  exact bad_lemma\n"
+    replies = iter([f"```lean\n{broken}```", f"Here is the fix:\n```lean\n{GOOD}```"])
 
     async def model(system: str, user: str) -> str:
         prompts.append(user)

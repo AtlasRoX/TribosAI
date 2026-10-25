@@ -362,10 +362,12 @@ export function TaskStatusNotice({ outcome }: { outcome?: TaskOutcome | null }) 
               </ul>
             </div>
           )}
-          {/* The reason usually names what completed ("Time course computed."); repeat it only when it does not. */}
-          {operations && !String(outcome.reason || "").toLowerCase().includes(operations.toLowerCase()) && (
-            <div className="task-status-op">Completed: {operations}</div>
-          )}
+          {/* What actually ran, never the requested operation's name (a partial run did not complete it, audit I43);
+              the reason usually names it already ("Time course computed."). */}
+          {opName(outcome.executed_operation) &&
+            !String(outcome.reason || "").toLowerCase().includes(opName(outcome.executed_operation).toLowerCase()) && (
+              <div className="task-status-op">Ran: {opName(outcome.executed_operation)}</div>
+            )}
           <TaskDetails outcome={outcome} />
         </div>
       </div>

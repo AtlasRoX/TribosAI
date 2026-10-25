@@ -235,7 +235,8 @@ def test_question_without_a_system_gets_no_tested_hypotheses():
     asyncio.run(hyp.HypothesisPhase().run(state))
     art = state.artifacts["hypotheses"]
     assert art["model_id"] is None and art["hypotheses"] == [] and art["experiments_run"] == 0
-    assert "no dynamical system" in art["note"] and not state.trace
+    # Audit I36: a hypothesis needs no dynamical system; only an in-silico test would, so none is demanded here.
+    assert "No hypothesis was proposed" in art["note"] and "dynamical system" not in art["note"] and not state.trace
 
 
 def test_simulation_switched_off_leaves_hypotheses_untested():

@@ -385,7 +385,13 @@ class PlanExecutePhase(AgentPhase):
             text += f" · {artifact['replans']} replan(s)"
         planner_failed = artifact.get("status") in ("planner_failed", "planner_unusable", "budget")
         if not all_nodes:
-            text = artifact.get("error") or ("no follow-up calls needed" if artifact["planner"] == "llm" else "no plan")
+            rejected = artifact.get("rejected") or []
+            if rejected and not artifact.get("error"):
+                # Audit I34: a plan whose calls were all rejected is not a plan that needed none.
+                reasons = list(dict.fromkeys(str(r.get("reason") or "") for r in rejected if isinstance(r, dict)))
+                text = f"No planned call ran: {len(rejected)} rejected ({'; '.join(reasons[:3])[:400]})"
+            else:
+                text = artifact.get("error") or ("no follow-up calls needed" if artifact["planner"] == "llm" else "no plan")
         if planner_failed:
             reason = {"planner_failed": "model call failed", "planner_unusable": "the planner reply was unusable",
                       "budget": "the agent budget ran out"}[artifact["status"]]

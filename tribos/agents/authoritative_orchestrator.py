@@ -249,8 +249,10 @@ async def stream_buffered_with_retry(llm: Any, messages: list[Any], parts: list[
         try:
             return await astream_with_reasoning(llm, messages, on_reasoning=on_reasoning, on_text=buffer, **kwargs)
         except Exception as exc:  # noqa: BLE001
-            if i + 1 >= attempts or type(exc).__name__ not in _TRANSIENT_STREAM_ERRORS:
-                raise
+            from ..utils.llm.provider_retry import already_retried
+
+            if i + 1 >= attempts or type(exc).__name__ not in _TRANSIENT_STREAM_ERRORS or already_retried(llm, exc):
+                raise  # a status error the transport already retried is not sent again here (audit I26)
             if t_end is not None and t_end - time.perf_counter() <= 2.0:
                 raise  # no time left in the run for a second attempt
             if before_retry is not None:
@@ -886,8 +888,14 @@ class AuthoritativeOrchestrator:
                 and not (r.metadata or {}).get("skipped_by_user")
             ]
 
+        # A closed computation is answered by the verified mathematics agent, not by a planned tool DAG: a framework
+        # phase that did not run is reported, but it does not make a complete computed answer partial (audit I43).
+        closed = str(getattr(getattr(ctx, "evidence_need", None), "kind", "") or "") == "closed_computation"
+
         def out(status: TaskStatus, requested: str | None, executed: str | None, reason: str, match: bool = True) -> TaskOutcome:
-            if core_phase_note and status in ("completed", "partial"):
+            if core_phase_note and status == "completed" and closed:
+                reason = f"{reason} ({core_phase_note.rstrip('.')}; not needed for this computation.)".strip()
+            elif core_phase_note and status in ("completed", "partial"):
                 status = "partial"
                 reason = core_phase_note if reason in ("", "Evidence gathered and synthesized.") else f"{core_phase_note} {reason}"
             if recovered and status in ("completed", "partial"):
@@ -953,7 +961,7 @@ class AuthoritativeOrchestrator:
                 names = list(dict.fromkeys(evidence_key_label(k) for k in failed))
                 notes.append(f"{len(failed)} of {len(others)} supporting steps failed: {'; '.join(names[:5])}.")
             if not llm_ok:
-                notes.append("The model was unavailable; the raw evidence is shown instead.")
+                notes.append("The writing model failed; the computed results are shown without a written answer.")
             if not notes:
                 return primary
             return out("partial", primary.requested_operation, primary.executed_operation,
@@ -972,15 +980,27 @@ class AuthoritativeOrchestrator:
 
         ran = list(live(tool_results).values())
         n_ok = sum(1 for r in ran if r.success)
+        # The operation is named after the request: a self-contained mathematical question is not "evidence synthesis".
+        need_kind = str(getattr(getattr(ctx, "evidence_need", None), "kind", "") or "")
+        mathematical = need_kind in ("closed_computation", "self_contained") or any(
+            str(k).startswith(("axiom", "calcula")) for k in tool_results)
+        requested = "mathematical_answer" if mathematical else "evidence_synthesis"
         # ORC-007: nothing retrieved is "failed" whether or not the model was available (no raw evidence to show).
         if ran and n_ok == 0:
-            reason = "Every evidence source failed." + ("" if llm_ok else " The model was also unavailable.")
-            return out("failed", "evidence_synthesis", None, reason, match=False)
+            what = "Every tool step failed." if mathematical else "Every evidence source failed."
+            return out("failed", requested, None, what + ("" if llm_ok else " The writing model was also unavailable."),
+                       match=False)
+        if not llm_ok and n_ok == 0:
+            # Audit I43: no tool result and no written answer is a failed run, never a partial "evidence listing".
+            return out("failed", requested, None,
+                       "No answer was produced: the writing model failed and no tool produced a result.", match=False)
         if not llm_ok:
-            return out("partial", "evidence_synthesis", "evidence_listing", "The model was unavailable; the raw evidence is shown instead.")
+            return out("partial", requested, "result_listing",
+                       "The writing model failed; the computed results are shown without a written answer.")
         if n_ok < len(ran):
-            return out("partial", "evidence_synthesis", "evidence_synthesis", f"{len(ran) - n_ok} of {len(ran)} sources failed.")
-        return out("completed", "evidence_synthesis", "evidence_synthesis", "Evidence gathered and synthesized.")
+            return out("partial", requested, requested, f"{len(ran) - n_ok} of {len(ran)} sources failed.")
+        return out("completed", requested, requested,
+                   "Computed and answered." if mathematical else "Evidence gathered and synthesized.")
 
     async def execute_inquiry(
         self,

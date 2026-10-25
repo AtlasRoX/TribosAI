@@ -648,6 +648,25 @@ def move_orchestration_args(node: PlanNode, entry: Any) -> None:
             node.adjusted.append(f"{key} applied as the step deadline ({secs:g} s)")
 
 
+# Capability words in an unregistered tool name -> the registered tool that provides that capability.
+_CAPABILITY_ALIASES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"(?i)\b(?:web|google|bing|internet|browse|browser|online|url|site)"), "websurfer_search"),
+    (re.compile(r"(?i)(?:literature|papers?|arxiv|scholar|semantic|pubmed|crossref|publications?|citations?)"),
+     "archivon_literature_search"),
+)
+
+
+def capability_alias(name: str, registry: Any, ctx: Any) -> tuple[str | None, str | None]:
+    """(registered tool, why this turn forbids it or None) for an unregistered name that asks for a known capability
+    ("web_search" -> websurfer_search); (None, None) when no registered tool provides it."""
+    words = re.sub(r"[_\-.]+", " ", str(name or ""))
+    for rx, target in _CAPABILITY_ALIASES:
+        entry = registry.get_entry(target) if registry is not None and rx.search(words) else None
+        if entry is not None:
+            return target, policy_violation(entry, ctx)
+    return None, None
+
+
 def validate_plan(
     graph: PlanGraph,
     registry: Any,
@@ -672,8 +691,18 @@ def validate_plan(
     for node in list(graph.nodes):
         entry = registry.get_entry(node.tool) if registry is not None else None
         if entry is None:
-            graph.reject(node, f"tool '{node.tool}' is not registered")
-            continue
+            # Audit I34: an invented name ("web_search") for a registered capability runs under the registered name
+            # only when this turn allows that capability; otherwise the rejection says which policy forbids it.
+            target, blocked = capability_alias(node.tool, registry, ctx)
+            if target is None:
+                graph.reject(node, f"tool '{node.tool}' is not registered (no registered tool provides it)")
+                continue
+            if blocked:
+                graph.reject(node, f"tool '{node.tool}' is not registered; the registered '{target}' is not allowed "
+                                   f"this turn: {blocked}")
+                continue
+            node.adjusted.append(f"tool '{node.tool}' → registered '{target}'")
+            node.tool, entry = target, registry.get_entry(target)
         violation = policy_violation(entry, ctx)
         if violation:
             graph.reject(node, f"policy: {violation}")

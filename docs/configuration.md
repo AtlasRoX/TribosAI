@@ -17,7 +17,7 @@ Precedence for state directories: a specific variable (`TRIBOS_MEMORY_DIR`, `TRI
 `TRIBOS_UPLOAD_ROOT`, `TRIBOS_JOBS_DIR`, `TRIBOS_TOOL_CACHE_DIR`) wins over `TRIBOS_DATA_DIR`; with
 neither set, every store keeps its historical location under the workspace.
 
-165 variables.
+167 variables.
 
 ## State directories
 
@@ -102,6 +102,8 @@ neither set, every store keeps its historical location under the workspace.
 | `TRIBOS_ALLOWED_MODELS` | list | unset | `tribos/utils/llm/llm_factory.py` | Extra comma-separated model ids callers may select besides the built-in catalog. |
 | `TRIBOS_LLM_FALLBACK` | bool | `true` | `tribos/utils/llm/llm_factory.py` | Allow fallback to an available provider when the requested model key is unset. |
 | `TRIBOS_LLM_MODEL` | str | unset | `tribos/evals/cassette.py`<br>`tribos/evals/runner.py`<br>`tribos/utils/llm/llm_factory.py` | Default model id when a request names none (the orchestrator default when unset; gpt-4o-mini for the Lumicell SCP agent). |
+| `TRIBOS_LLM_RETRY_ATTEMPTS` | int (1 to 5) | `3` | `tribos/utils/llm/provider_retry.py` | Attempts per NVIDIA NIM model request on a transient provider failure (408/409/429/5xx or no connection); replaces the SDK's own retry, so attempts are not multiplied. |
+| `TRIBOS_LLM_RETRY_DEADLINE_S` | float (0 to 120) | `20.0` | `tribos/utils/llm/provider_retry.py` | Seconds from a model request's first attempt after which no further transient-failure retry starts. |
 | `TRIBOS_SYNTHESIS_MODEL` | str | unset | `tribos/agents/orchestration/draft.py`<br>`tribos/utils/llm/llm_factory.py` | Model that writes the final answer (default: the turn's model). |
 
 ## TRIBOS_AGENT_*: Agentic runtime

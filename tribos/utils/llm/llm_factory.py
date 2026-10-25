@@ -236,14 +236,21 @@ def get_llm(
                     ctk.setdefault("enable_thinking", str(reasoning_effort).lower() != "low")
 
         timeout_sec = float(kwargs.pop("timeout", None) or DEFAULT_LLM_TIMEOUT_S)
-        max_retries = int(kwargs.pop("max_retries", None) or 1)
+        kwargs.pop("max_retries", None)
+        # Audit I26: transient NIM faults come in bursts; one bounded policy in the transport (backoff, Retry-After,
+        # deadline, request ids logged) replaces the SDK retry, which stays at 0 so attempts are not multiplied.
+        from .provider_retry import provider_http_clients
+
+        sync_http, async_http = provider_http_clients(timeout_sec)
         client = ChatOpenAI(
             model=selected_model,
             base_url=NVIDIA_NIM_BASE_URL,
             api_key=SecretStr(resolved_key),
             temperature=temperature,
             timeout=timeout_sec,
-            max_retries=max_retries,
+            max_retries=0,
+            http_client=sync_http,
+            http_async_client=async_http,
             **kwargs,
         )
         _record_client(requested=selected_model, served=selected_model, provider="nvidia_nim", base_url=NVIDIA_NIM_BASE_URL,

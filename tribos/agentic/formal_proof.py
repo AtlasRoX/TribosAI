@@ -85,12 +85,17 @@ class FormalProofPhase(AgentPhase):
                 "quote the Lean statement so the reader can check it says what the question asks, and keep the SymPy "
                 "checks as they are."
             )
+        elif art["status"] == "not_formalizable":
+            state.scope_notes.append(
+                f"No formal check was possible ({str(art.get('error') or '')[:240]}). Say that no formal check was run; "
+                "never present a Lean theorem for this question, and draw no conclusion about the claim from this."
+            )
         else:
             state.scope_notes.append(
                 f"The Lean formalisation failed ({str(art.get('error') or 'no clean compile')[:200]}); do not claim the "
-                "proof is formally verified."
+                "proof is formally verified, and a failed formalisation establishes nothing about the claim."
             )
-        state.mark_phase(PHASE_KEY, "ok" if verified else "fallback", "" if verified else "formalisation failed")
+        state.mark_phase(PHASE_KEY, "ok" if verified else "fallback", "" if verified else str(art.get("title") or "formalisation failed"))
         await state.step("agent_formal", f"Lean: {art['title']}",
                          f"{len(art.get('attempts') or [])} attempt(s)", status="done" if verified else "error",
                          agent=AGENT_NAME)

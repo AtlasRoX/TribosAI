@@ -58,6 +58,7 @@ export function EvidenceConflictsArtifact({ data }: { data: ConflictsData }) {
   const conflicts = arr<EvidenceConflict>(data.conflicts).filter((c) => c && typeof c === "object");
   const contradicting = conflicts.filter((c) => labelTone(c.label) === "bad" || (isNum(c.likert) && c.likert >= 8));
   const others = conflicts.filter((c) => !contradicting.includes(c));
+  const history = arr<EvidenceConflict>(data.history).filter((c) => c && typeof c === "object");
   const classifier = str(data.classifier);
   const cls = CLASSIFIER[classifier] || null;
   const queries = arr(data.queries);
@@ -119,6 +120,17 @@ export function EvidenceConflictsArtifact({ data }: { data: ConflictsData }) {
             </Disclosure>
           )}
         </>
+      )}
+      {history.length > 0 && (
+        // Audit I40: rows about claims the final answer no longer makes, kept as labelled history.
+        <Disclosure summary={`Earlier checks, not about the final answer (${history.length})`}>
+          {str(data.history_note) && <p className={styles.muted}>{str(data.history_note)}</p>}
+          <ul className={styles.divList}>
+            {history.slice(0, 50).map((c, i) => (
+              <Conflict key={i} c={c} />
+            ))}
+          </ul>
+        </Disclosure>
       )}
       {queries.length > 0 && (
         <Disclosure summary={`Counter-queries (${queries.length})`}>

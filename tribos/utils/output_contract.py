@@ -35,10 +35,40 @@ def _num(token: str) -> int:
 _MAX_WORDS_RE = re.compile(
     rf"(?i)\b(?:(?:in|with|using|within|keep\s+(?:it|the\s+answer)\s+(?:to|under))\s+)?(?:at\s+most|no\s+more\s+than|not\s+more\s+than|"
     rf"under|fewer\s+than|less\s+than|up\s+to|a\s+maximum\s+of|maximum(?:\s+of)?|max\.?)\s+{_N}\s+words?\b"
-    rf"|\b(?:in\s+)?{_N}\s+words?\s+or\s+(?:less|fewer)\b|\b{_N}-word\s+(?:limit|answer|maximum|response)\b")
+    rf"|\b(?:in\s+)?{_N}\s+words?\s+or\s+(?:less|fewer)\b|\b{_N}[-\s]word\s+(?:limit|cap|answer|maximum|response)\b"
+    rf"|\b(?:limited|capped|restricted)\s+to\s+{_N}\s+words?\b|\bword\s+(?:limit|cap|count\s+limit)\s+(?:of|is)\s+{_N}\b")
+_MIN_WORDS_RE = re.compile(rf"(?i)\b(?:at\s+least|no\s+(?:fewer|less)\s+than|a\s+minimum\s+of|minimum(?:\s+of)?)\s+{_N}\s+words?\b")
+# "220-250 words", "between 220 and 250 words", "220 to 250-word answer".
+_WORD_RANGE_RE = re.compile(r"(?i)\b(?:between\s+(\d{1,4})\s+and\s+(\d{1,4})|(\d{1,4})\s*(?:-|–|—|to)\s*(\d{1,4}))[-\s]words?\b")
 _EXACT_WORDS_RE = re.compile(rf"(?i)\b(?:in\s+)?exactly\s+{_N}\s+words?\b")
 _EXACT_LINES_RE = re.compile(rf"(?i)\b(?:in\s+|on\s+|as\s+|using\s+)?exactly\s+{_N}\s+(?:separate\s+|non-?empty\s+)?lines?\b"
                              rf"|\b(?:in|on|as)\s+{_N}\s+lines?\s+(?:only|exactly)\b")
+# "Give the solution set on one line": a single line ("each case on one line" is a per-item rule, see _per_item).
+_ONE_LINE_RE = re.compile(r"(?i)\b(?:on|in|as)\s+(?:a\s+)?(?:single|one)\s+line\b")
+# A limit stated without a number and removed: "there is no word limit", "ignore the length limit", multilingual forms.
+_NO_WORD_LIMIT_RE = re.compile(
+    r"(?i)\b(?:no|without(?:\s+(?:a|any))?|ignore\s+the|remove\s+the|drop\s+the|lift\s+the|forget\s+the)\s+"
+    r"(?:previous\s+|earlier\s+|prior\s+)?(?:word|length|word[-\s]count)\s+(?:limit|cap|restriction|maximum|constraint)s?\b"
+    r"|\b(?:sin|no\s+hay)\s+l[ií]mite\s+de\s+(?:\d+\s+)?palabras\b|\b(?:sans|pas\s+de)\s+limite\s+de\s+(?:\d+\s+)?mots\b"
+    r"|\b(?:keine|ohne)\s+(?:\d+[-\s]?)?(?:wort|w[öo]rter)[-\s]?(?:grenze|begrenzung|limit)\b|\b(?:senza|nessun)\s+limite\s+di\s+(?:\d+\s+)?parole\b")
+# Words that may stand between a removal cue and the limit it governs ("remove the previous 150-word limit").
+_FILLER = (r"(?:the|a|an|any|that|this|these|those|previous(?:ly)?|earlier|prior|old|original|former|above|stated|given|"
+           r"mentioned|my|your|our|strict|hard|initial|first|default|usual|instruction|instructions|requirement|request|"
+           r"constraint|rule|to|about|answer|respond|write|keep|it|of|in|with|be|stay|limited|kept)")
+_REVOKE_BEFORE_RE = re.compile(
+    r"(?i)\b(?:no|not|without|ignore|ignoring|disregard|disregarding|drop|dropping|remove|removing|forget|cancel|"
+    r"cancell?ing|lift|lifting|waive|waiving|scrap|override|overriding|replace|replacing|instead\s+of|rather\s+than|"
+    r"never\s+mind|need(?:n't|\s+not)|(?:do|does)(?:n't|\s+not)(?:\s+(?:need|have\s+to))?|no\s+need\s+to|neither|nor)\b"
+    rf"(?:\s+{_FILLER}\b){{0,6}}[\s\"'“‘(]*$")
+_REVOKE_AFTER_RE = re.compile(
+    r"(?i)^[\s\"'”’)]*(?:(?:limit|cap|rule|restriction|requirement|constraint|instruction|maximum)\s+)?"
+    r"(?:no\s+longer\s+(?:applies|holds|matters|stands|exists)|does(?:n't|\s+not)\s+(?:apply|hold|matter)|"
+    r"(?:is|was)\s+(?:now\s+)?(?:removed|lifted|cancell?ed|dropped|void|gone|withdrawn|not\s+(?:required|needed|necessary|binding))|"
+    r"has\s+been\s+(?:removed|lifted|cancell?ed|dropped|withdrawn)|(?:is|are)\s+optional)")
+_CLAUSE_BREAK_RE = re.compile(r"[.!?;:,\n]|\b(?:and|but|then|while|whereas|also)\b", re.I)
+_EXAMPLE_RE = re.compile(r"(?i)\b(?:e\.g\.|for\s+example|for\s+instance|such\s+as)")
+_QUOTED_RE = re.compile(r"\"[^\"\n]{1,400}\"|“[^”\n]{1,400}”|‘[^’\n]{1,400}’|`[^`\n]{1,400}`|(?<!\w)'[^'\n]{1,400}'(?!\w)")
+_WORD_ATTRS = ("max_words", "exact_words", "min_words")
 _MAX_LINES_RE = re.compile(rf"(?i)\b(?:in\s+|on\s+|within\s+)?(?:at\s+most|no\s+more\s+than|up\s+to)\s+{_N}\s+lines?\b")
 _SENTENCES_RE = re.compile(rf"(?i)\b(?:in\s+)?(?:exactly\s+|at\s+most\s+|no\s+more\s+than\s+)?{_N}\s+sentences?\b")
 _PLAIN_RE = re.compile(r"(?i)\bas\s+plain\s+text\b|\bin\s+plain\s+text\b|\bplain[-\s]text\s+only\b|\bno\s+markdown\b|"
@@ -64,6 +94,7 @@ class Contract:
     literal: str | None = None  # exact payload to return, LF-normalised
     pure_copy: bool = False  # the whole request is "return this text": answered by copying it, with no other task
     max_words: int | None = None
+    min_words: int | None = None
     exact_words: int | None = None
     exact_lines: int | None = None
     max_lines: int | None = None
@@ -72,23 +103,27 @@ class Contract:
     json_only: bool = False
     no_extra: bool = False
     preserve_whitespace: bool = False
+    # Limits the request mentions but does not impose: removed, negated, quoted or given as an example. Kept so the
+    # decision is visible ("150-word limit: removed by the request"), never enforced.
+    inactive: list[str] = field(default_factory=list)
     spans: list[tuple[int, int]] = field(default_factory=list, repr=False)
 
     @property
     def active(self) -> bool:
-        return any((self.literal is not None, self.max_words, self.exact_words, self.exact_lines, self.max_lines,
-                    self.sentences, self.plain_text, self.json_only, self.no_extra))
+        return any((self.literal is not None, self.max_words, self.min_words, self.exact_words, self.exact_lines,
+                    self.max_lines, self.sentences, self.plain_text, self.json_only, self.no_extra))
 
     @property
     def strict_form(self) -> bool:
         """The answer's form is fixed tightly enough that report sections, banners or appended notes break it."""
         return any((self.literal is not None, self.exact_lines, self.max_lines, self.json_only, self.no_extra,
-                    self.plain_text, self.exact_words, (self.max_words or 10**9) <= 200))
+                    self.plain_text, self.exact_words, (self.max_words or 10**9) <= 200,
+                    (self.sentences or 10**9) <= 3))  # "answer in one sentence" fixes the form as tightly as one line
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d.pop("spans", None)
-        return {k: v for k, v in d.items() if v not in (None, False)}
+        return {k: v for k, v in d.items() if v not in (None, False, [])}
 
     def describe(self) -> str:
         """The contract as instructions for a writer model."""
@@ -101,8 +136,12 @@ class Contract:
             parts.append(f"at most {self.max_lines} line(s)")
         if self.exact_words:
             parts.append(f"exactly {self.exact_words} words")
-        if self.max_words:
+        if self.min_words and self.max_words:
+            parts.append(f"between {self.min_words} and {self.max_words} words")
+        elif self.max_words:
             parts.append(f"at most {self.max_words} words")
+        elif self.min_words:
+            parts.append(f"at least {self.min_words} words")
         if self.sentences:
             parts.append(f"{self.sentences} sentence(s)")
         if self.plain_text:
@@ -159,6 +198,72 @@ def _literal_payload(text: str) -> tuple[str | None, tuple[int, int] | None, str
     return payload, (m.start(), m.end()), "\n\n".join(tail)
 
 
+def _clause_before(text: str, start: int) -> str:
+    seg = text[max(0, start - 160): start]
+    return seg[max((m.end() for m in _CLAUSE_BREAK_RE.finditer(seg)), default=0):]
+
+
+def _per_item(text: str, start: int, end: int) -> bool:
+    """'each case on one line', 'one per line': a rule for every item, not a one-line answer."""
+    return bool(re.search(r"(?i)\b(?:each|every|per)\b(?:\s+\S+){0,3}\s*$", _clause_before(text, start))
+                or re.match(r"(?i)\s*(?:each|apiece|per\s+\w+)\b", text[end:]))
+
+
+def _not_imposed(text: str, start: int, end: int, quoted: list[tuple[int, int]]) -> str | None:
+    """Why a limit mentioned at text[start:end] is not a constraint on this answer, or None when it is one."""
+    if any(a <= start and end <= b for a, b in quoted):
+        return "quoted"
+    before = text[max(0, start - 80): start]
+    example = None
+    for example in _EXAMPLE_RE.finditer(before):
+        pass
+    if example is not None and not re.search(r"[!?;\n]|(?<!e\.g)\.\s+[A-Z]", before[example.end():]):
+        return "an example"
+    if _REVOKE_BEFORE_RE.search(_clause_before(text, start)) or _REVOKE_AFTER_RE.match(text[end: end + 80]):
+        return "removed or negated by the request"
+    return None
+
+
+def _apply_limits(c: Contract, text: str) -> None:
+    """Numeric length rules in the order they are stated. A later rule replaces an earlier one of the same kind; a
+    removal ("there is no 150-word limit", "remove the previous limit") cancels the earlier rule and imposes nothing;
+    quoted or example limits ('classify "at most 50 words"') impose nothing."""
+    events: list[tuple[int, int, str, Any]] = []
+    for m in _ONE_LINE_RE.finditer(text):
+        if not _per_item(text, m.start(), m.end()):
+            events.append((m.start(), m.end(), "exact_lines", 1))
+    for rx, attr in ((_EXACT_WORDS_RE, "exact_words"), (_MAX_WORDS_RE, "max_words"), (_MIN_WORDS_RE, "min_words"),
+                     (_EXACT_LINES_RE, "exact_lines"), (_MAX_LINES_RE, "max_lines"), (_SENTENCES_RE, "sentences")):
+        for m in rx.finditer(text):
+            events.append((m.start(), m.end(), attr, _num(next(g for g in m.groups() if g))))
+    for m in _WORD_RANGE_RE.finditer(text):
+        lo, hi = sorted(int(g) for g in m.groups() if g)
+        events.append((m.start(), m.end(), "word_range", (lo, hi)))
+    for m in _NO_WORD_LIMIT_RE.finditer(text):
+        events.append((m.start(), m.end(), "no_word_limit", None))
+    quoted = [m.span() for m in _QUOTED_RE.finditer(text)]
+    for start, end, attr, value in sorted(events, key=lambda e: (e[0], -e[1])):
+        mention = re.sub(r"\s+", " ", text[start:end].strip())
+        reason = "removed by the request" if attr == "no_word_limit" else _not_imposed(text, start, end, quoted)
+        if reason == "quoted":
+            c.inactive.append(f"{mention}: quoted, not an instruction for this answer")
+            continue
+        c.spans.append((start, end))  # its numbers are about the answer's form either way, never problem data
+        if reason is not None:
+            c.inactive.append(f"{mention}: {reason}")
+            if reason != "an example":
+                for a in _WORD_ATTRS if attr in (*_WORD_ATTRS, "word_range", "no_word_limit") else (attr,):
+                    setattr(c, a, None)
+            continue
+        if attr == "word_range":
+            c.min_words, c.max_words, c.exact_words = value[0], value[1], None
+        else:
+            setattr(c, attr, value)
+    if c.min_words and c.max_words and c.min_words > c.max_words:
+        c.inactive.append(f"at least {c.min_words} words: conflicts with at most {c.max_words}; the later rule applies")
+        c.min_words = None
+
+
 def extract(question: str) -> Contract:
     """The output contract stated in a question (an empty contract when there is none)."""
     text = _normalise_newlines(question)
@@ -174,13 +279,7 @@ def extract(question: str) -> Contract:
         # Only the instructions (before the payload, plus a trailing instruction paragraph) are searched for further
         # rules, never the payload itself; the payload is blanked so spans keep their offsets.
         instructions = text[: span[1]] + " " * (len(text) - span[1] - len(tail)) + tail if tail else text[: span[1]]
-    for rx, attr in ((_EXACT_WORDS_RE, "exact_words"), (_MAX_WORDS_RE, "max_words"), (_EXACT_LINES_RE, "exact_lines"),
-                     (_MAX_LINES_RE, "max_lines"), (_SENTENCES_RE, "sentences")):
-        for m in rx.finditer(instructions):
-            token = next(g for g in m.groups() if g)
-            if getattr(c, attr) is None:
-                setattr(c, attr, _num(token))
-            c.spans.append(m.span())
+    _apply_limits(c, instructions)
     for rx, attr in ((_PLAIN_RE, "plain_text"), (_JSON_RE, "json_only"), (_NO_EXTRA_RE, "no_extra"), (_PRESERVE_RE, "preserve_whitespace")):
         for m in rx.finditer(instructions):
             setattr(c, attr, True)
@@ -231,6 +330,8 @@ def validate(answer: str, contract: Contract) -> list[str]:
     words = word_count(text)
     if contract.max_words is not None and words > contract.max_words:
         out.append(f"{words} words, at most {contract.max_words} allowed")
+    if contract.min_words is not None and words < contract.min_words:
+        out.append(f"{words} words, at least {contract.min_words} required")
     if contract.exact_words is not None and words != contract.exact_words:
         out.append(f"{words} words, exactly {contract.exact_words} required")
     if contract.json_only:

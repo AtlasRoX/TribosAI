@@ -739,7 +739,14 @@ class _Auditor:
 
     # -- parsing --------------------------------------------------------------------------------------------------------
     def term(self, toks: list[Tok]) -> _Term:
-        toks, unit = _strip_unit(toks)
+        stripped, unit = _strip_unit(toks)
+        variables = self.unknowns | {canonical_name(str(self.env.var))}
+        if unit and set(re.findall(r"[A-Za-z]+", unit)) & variables:
+            # The "unit" letter is a variable of this problem: in "4s - 3 = 0" with s the variable it is not seconds
+            # (a unit reading made it "4 s^-3" and failed a correct step, found live in T42). A real unit stays a unit.
+            unit = ""
+        else:
+            toks = stripped
         ctx = ParseContext(functions=set(self.functions), variable=str(self.env.var))
         text = _tex(toks)
         ulp = _literal_ulp(toks)
@@ -1378,7 +1385,8 @@ def _document_functions(md: str, problem_function: str) -> tuple[set[str], str]:
             names.add(base)
             if re.fullmatch(r"[A-Za-z]", m.group(3)):
                 var_counts[m.group(3)] = var_counts.get(m.group(3), 0) + 1
-        for m in re.finditer(r"\\d?dot\s*\{?\s*([A-Za-z])", body):
+        # \dot x, \ddot{x}; not \dots (an ellipsis: "s = -2, -4, \dots" made s a function and bound it).
+        for m in re.finditer(r"\\d?dot(?![A-Za-z])\s*\{?\s*([A-Za-z])", body):
             names.add(m.group(1))
     if problem_function:
         names.add(problem_function)
@@ -1386,12 +1394,33 @@ def _document_functions(md: str, problem_function: str) -> tuple[set[str], str]:
     return names, variable
 
 
-def _unknowns(md: str, problem: dict[str, Any]) -> set[str]:
-    """The problem's unknowns: from the parsed question, and any symbol the answer ranges over a set ("x \\in [a, b)"),
-    which is a variable even when the question could not be parsed."""
+_GREEK_VARS = ("alpha", "beta", "gamma", "delta", "theta", "lambda", "mu", "nu", "rho", "sigma", "tau", "phi", "psi")
+
+
+def _unknowns(md: str, problem: dict[str, Any], physical: bool = True) -> set[str]:
+    """The problem's unknowns: from the parsed question, the parameters of its definitions (P in "P(s) = ..." ranges
+    over s), and any symbol the answer ranges over a set ("x \\in [a, b)") or quantifies ("\\forall s"), which is a
+    variable even when the question could not be parsed. In pure mathematics, the symbols a variable is written in
+    ("s = \\sigma + it") are variables too: "\\sigma = 1/2" there names a line under discussion, never a value."""
     out = {str(u) for u in problem.get("unknowns") or []}
-    for _pos, body, _t in _segments(md):
+    out |= {str(d["parameter"]) for d in problem.get("definitions") or [] if d.get("parameter")}
+    bodies = [body for _pos, body, _t in _segments(md)]
+    for body in bodies:
         out.update(re.findall(r"(?<![\\A-Za-z])([A-Za-z])\s*\\in\b", body))
+        out.update(re.findall(r"\\forall\s*([A-Za-z])(?![A-Za-z])", body))
+    if not physical:
+        greek = "|".join(_GREEK_VARS)
+        # Overlapping (the right side is a lookahead), so "R_T = \{s = \sigma + it" still yields s's right side.
+        rel = re.compile(r"(?<![\\A-Za-z])([A-Za-z])\s*=\s*(?=([^=,;:]{1,40}))")
+        letters = re.compile(r"(?<![\\A-Za-z])([a-hj-z])(?![A-Za-z])")
+        pairs = [(m.group(1), re.sub(r"(?<![\\A-Za-z])i(?=[a-z])", "i ", m.group(2)))  # "it" is i * t
+                 for body in bodies for m in rel.finditer(body)]
+        # A substitution defined from an unknown ("t = \sqrt{2x+1}") is a bound helper whose identities are checked.
+        substituted = {v for v, rhs in pairs if v not in out and set(letters.findall(rhs)) & out}
+        for v, rhs in pairs:
+            if v in out:
+                out.update(u for u in letters.findall(rhs) if u not in ("d", "e") and u not in substituted)
+                out.update(re.findall(rf"\\({greek})(?![A-Za-z])", rhs))
     return out
 
 
@@ -1414,7 +1443,8 @@ def audit_answer(
     functions |= {str(d["name"]) for d in problem.get("definitions") or [] if d.get("name")}
     if problem.get("variable"):
         variable = str(problem.get("variable"))
-    auditor = _Auditor(query, record, _tool_numbers(tool_results), variable, functions, _unknowns(md, problem))
+    auditor = _Auditor(query, record, _tool_numbers(tool_results), variable, functions,
+                       _unknowns(md, problem, physical=_physical_question(query)))
 
     statements: list[_Statement] = []
     for pos, body, in_table in sorted(_segments(md) + _plain_segments(md)):

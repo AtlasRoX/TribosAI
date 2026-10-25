@@ -430,6 +430,60 @@ _ABSENCE_PATTERN = re.compile(
     r"(?:have|has|exist|exists|report|reports|describe|describes|show|shows))(?P<v7>)",
     re.IGNORECASE,
 )
+# Audit I30: what a sentence is before it is checked. Instructions and format metadata ("There is no 150-word limit",
+# "Give the derivations"), error text ("HTTP 500 / Failed to generate completions") and mathematical negation ("there
+# is no real solution") are not statements about the literature; an acceptance-status statement ("no accepted proof is
+# known", "remains open") is checked against retrieved passages that state a status, never as a literature-wide absence.
+_INSTRUCTION_START_RE = re.compile(
+    r"^\s*(?:please\s+)?(?:provide|give|return|answer|write|use|make|explain|prove|show|establish|develop|present|"
+    r"finish|check|briefly|devote|try|clearly|report|do\s+not|don't|never|add|include|state|keep|respond|reply|output|"
+    r"cite|list|summari[sz]e|describe|derive|compute|calculate|find|determine|evaluate|solve)\b", re.IGNORECASE)
+_SELF_FORM_RE = re.compile(r"\b(?:word|line|sentence|length|character)[-\s]+(?:limit|count|cap|maximum|minimum)s?\b|"
+                           r"\b(?:this|the)\s+(?:answer|response|reply|output)\s+(?:must|should|will|is\s+limited)\b",
+                           re.IGNORECASE)
+_ERROR_TEXT_RE = re.compile(r"\b[A-Z]\w*(?:Error|Exception)\b\s*:|\bHTTP\s*[1-5]\d\d\b|\bstatus(?:\s+code)?\s*[45]\d\d\b|"
+                            r"Failed\s+to\s+generate\s+completions|\bTraceback\b|\btimed\s+out\b", re.IGNORECASE)
+_MATH_OBJECT_RE = re.compile(
+    r"\b(?:real|complex|rational|integer|natural|positive|negative|prime|even|odd)?\s*(?:solutions?|roots?|zeros?|"
+    r"integers?|numbers?|primes?|counterexamples?|values?\s+of|functions?|polynomials?|bounds?|inputs?|outputs?|"
+    r"fixed\s+points?|cycles?|divisors?|factors?)\b|[=<>≤≥≠^√∑∏∫]|\$|\b[a-z]\s*\(\s*[a-z0-9]", re.IGNORECASE)
+_STATUS_CLAIM_RE = re.compile(
+    r"\b(?:remains?\s+(?:an?\s+)?(?:open|unsolved|unproven|unresolved)|(?:is|are)\s+(?:still\s+)?(?:an?\s+)?(?:open|unsolved|"
+    r"unresolved)\s+(?:problem|question|conjecture)|no\s+(?:generally\s+)?(?:accepted|known|published|complete|valid)\s+"
+    r"(?:proof|disproof|counterexample|solution)|(?:has|have)\s+(?:not|never)\s+(?:yet\s+)?been\s+(?:proved|proven|"
+    r"disproved|resolved|settled)|(?:is|are)\s+(?:not\s+yet\s+)?(?:unproved|unproven)|millennium\s+prize\s+problem)\b",
+    re.IGNORECASE)
+_STATUS_CUE_RE = re.compile(r"\b(?:unsolved|unproven|unproved|unresolved|open\s+(?:problem|question)|remains?\s+open|"
+                            r"not\s+(?:yet\s+)?been\s+(?:proved|proven|solved|resolved)|millennium\s+prize|conjecture|"
+                            r"no\s+(?:accepted|known)\s+proof)\b", re.IGNORECASE)
+
+
+def _echoes(text: str, question: str) -> bool:
+    """The sentence repeats the user's own wording (an echoed instruction or quoted prompt)."""
+    norm = lambda s: re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()  # noqa: E731
+    t = norm(text)
+    return len(t) >= 12 and t in norm(question)
+
+
+def statement_role(text: str, question: str = "") -> str | None:
+    """'instruction', 'error' or 'mathematical' for text that is no literature or source claim; None otherwise.
+    An imperative sentence is an instruction only when it repeats the question ("Use of X was reported" is prose)."""
+    from ..utils.output_contract import extract as extract_contract
+
+    t = text or ""
+    if _ERROR_TEXT_RE.search(t):
+        return "error"
+    contract = extract_contract(t)
+    if contract.spans or contract.inactive or _SELF_FORM_RE.search(t):
+        return "instruction"
+    if _INSTRUCTION_START_RE.match(t) and question and _echoes(t, question):
+        return "instruction"
+    m = _ABSENCE_PATTERN.search(t)
+    if m is not None and _MATH_OBJECT_RE.search(t[m.end(): m.end() + 80]) and not _LITERATURE_REFERENT.search(t):
+        return "mathematical"
+    return None
+
+
 _MENTION_VERBS = re.compile(r"^(?:mention\w*|discuss\w*|referenc\w*|nam\w*|includ\w*)$", re.IGNORECASE)
 _MECHANISM_OBJECT = re.compile(r"\b(?:mechanis\w*|how|why|drivers?|basis|explanation|causes?|origins?)\b", re.IGNORECASE)
 _MECHANISM_CUES = re.compile(
@@ -1792,7 +1846,7 @@ class TribosVerifier:
         # -------------------------------------------------------------
         claims: list[ClaimRecord] = []
         claim_defects, claim_support = self._audit_claims(
-            response_markdown, grounding, claims, entailment_judge, tool_events=tool_events,
+            response_markdown, grounding, claims, entailment_judge, tool_events=tool_events, question=query,
         )
         defects.extend(claim_defects)
 
@@ -2292,7 +2346,10 @@ class TribosVerifier:
     @classmethod
     def _classify_claim(cls, text: str, from_table: bool = False) -> str | None:
         """absence | empirical (a figure from a cited source, a measurement, a named source or a record id) |
-        cited (a statement attributed to a cited source) | None (nothing to check here)."""
+        cited (a statement attributed to a cited source) | status (a problem's accepted status: open, unproven) |
+        None (nothing to check here)."""
+        if _STATUS_CLAIM_RE.search(text):
+            return "status"
         if _ABSENCE_PATTERN.search(text):
             return "absence"
         cited = bool(_CITED_KEY_RE.search(text))
@@ -2642,6 +2699,54 @@ class TribosVerifier:
                 return sentence.strip(), s
         return None
 
+    def _status_verdict(self, text: str, docs: list[_Doc]) -> tuple[str, str, _Doc | None, int | None]:
+        """An accepted-status statement ("the Riemann Hypothesis remains unproven") is supported by a retrieved passage
+        about the same subject that states a status (an official page listing it as unsolved). That reports the
+        accepted status; it does not show that no proof exists. Without such a passage it is unchecked background."""
+        status_words = {"remain", "remains", "open", "unsolved", "unproven", "unproved", "unresolved", "accepted",
+                        "known", "proof", "proved", "proven", "problem", "conjecture", "question", "still", "been",
+                        "generally", "complete", "valid", "published", "disproof", "solution", "settled", "resolved"}
+        # Audit I41: a statement that cites a page ("... official page: https://www.claymath.org/...") is judged against
+        # that page when it was retrieved, never against another record that happens to share its words.
+        def addr(u: str) -> str:
+            return re.sub(r"^(?:https?://)?(?:www\.)?", "", (u or "").strip().lower()).rstrip("/.,;)")
+
+        cited_urls = {addr(u) for u in re.findall(r"https?://[^\s)\]>\"']+", text)}
+        cited_docs = [d for d in docs if d.url and addr(d.url) in cited_urls]
+        terms = {_fold(t) for t in self._salient_terms(re.sub(r"https?://\S+", " ", text).lower())
+                 if t.lower() not in status_words}
+        if not terms:
+            return "not_checked", "acceptance status: the statement names no subject to look up", None, None
+        needed = min(2, len(terms))
+        for doc in cited_docs or docs:
+            for s, e in sentence_spans(doc.text):
+                sentence = doc.text[s:e]
+                if _STATUS_CUE_RE.search(sentence) and len(terms & _tokens(sentence)) >= needed:
+                    return ("supported", "acceptance status: " + ("the cited page" if cited_docs else "a retrieved passage")
+                            + " about the same subject states it; this reports the accepted status, not that no proof "
+                            "can exist", doc, s)
+        for doc in cited_docs:
+            # The cited page is itself about the subject (an official problem page), so a status label anywhere on it
+            # ("Unsolved" as a badge, not in a sentence naming the problem) is the page stating the status.
+            cue = _STATUS_CUE_RE.search(doc.text)
+            if cue and not doc.text.startswith("results:") and len(terms & _tokens(doc.text)) >= needed:
+                return ("supported", f'acceptance status: the cited page, about this subject, labels it "{cue.group(0)}"; '
+                        "this reports the accepted status, not that no proof can exist", doc, cue.start())
+        if cited_docs:
+            # A search hit ("results: title, snippet, url") is not the page: only a page that was read can show that
+            # it does not state the status.
+            read = [d for d in cited_docs if not d.text.startswith("results:")]
+            if read:
+                return ("unsupported", "acceptance status: the cited page was read and does not state this status",
+                        read[0], None)
+            return ("not_checked", "acceptance status: only a search snippet of the cited page was retrieved; the page "
+                    "itself was not read in this run", cited_docs[0], None)
+        if docs:
+            return ("not_checked", "acceptance status: no retrieved passage states the subject's current status; "
+                    "background knowledge, not checked in this run", None, None)
+        return ("not_checked", "acceptance status: nothing was retrieved in this run; background knowledge, not checked",
+                None, None)
+
     def _absence_verdict(
         self, text: str, cited: set[str], lit_docs: list[_Doc], docs: list[_Doc]
     ) -> tuple[str, str, _Doc | None, int | None]:
@@ -2744,6 +2849,7 @@ class TribosVerifier:
         claims: list[ClaimRecord],
         judge: Callable[[str, list[dict[str, str]]], dict[str, Any] | None] | None = None,
         tool_events: list[tuple[str, str]] | None = None,
+        question: str = "",
     ) -> tuple[list[DefectItem], list[dict[str, Any]]]:
         """Classify, check and record each material claim; return (defects, claim_support)."""
         defects: list[DefectItem] = []
@@ -2762,6 +2868,8 @@ class TribosVerifier:
                 # Before the hedge filter: "could not be retrieved" reports the run, it is not a hedge.
                 self._operational_claim(claims, plain.strip(), tool_events or [])
                 continue
+            if statement_role(plain, question) is not None:
+                continue  # an instruction, error text or mathematical statement (checked by the math audit), audit I30
             text = self._assertive_text(plain)
             if text is None:
                 continue
@@ -2770,7 +2878,9 @@ class TribosVerifier:
                 continue
             cited = self._cited_keys(sentence) | self._cited_keys(text)
             pos: int | None = None
-            if kind == "absence":
+            if kind == "status":
+                status, reason, doc, pos = self._status_verdict(text, docs)
+            elif kind == "absence":
                 status, reason, doc, pos = self._absence_verdict(text, cited, lit_docs, docs)
             elif kind == "empirical":
                 status, reason, doc = self._empirical_verdict(text, cited, figure_docs, table=from_table)

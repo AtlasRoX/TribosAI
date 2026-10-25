@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Literal
+import re
+from typing import Any, Literal, get_args
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class AxiomSimplifyInput(BaseModel):
@@ -182,6 +183,7 @@ class AxiomSolveProblemInput(BaseModel):
 
 
 _Domain = Literal["unspecified", "complex", "real", "rational", "integer", "nonnegative_integer", "positive_integer"]
+_DOMAINS = frozenset(get_args(_Domain))
 
 
 class StructuredBranch(BaseModel):
@@ -195,10 +197,67 @@ class StructuredDefinition(BaseModel):
     domain: _Domain = Field(default="unspecified", description="Declared domain of the parameter")
     branches: list[StructuredBranch] = Field(..., min_length=1, max_length=8)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _repair_parameter(cls, data: Any) -> Any:
+        """A planner-written definition without "parameter" (audit I25): take it from a known alias, or from the one
+        variable its formulas use; never guess between several. The domain is never filled in or widened here."""
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        domain = data.get("domain")
+        if isinstance(domain, str) and domain not in _DOMAINS:
+            # "positive_integers", "positive integers", "Z+": the same domain spelled differently, read with the same
+            # words the question parser uses; anything it cannot read is left for validation to reject, never widened.
+            from .definitions import domain_from_words  # local: definitions imports sympy
+
+            mapped = domain_from_words(domain.replace("_", " "))
+            if mapped:
+                data["domain"] = mapped
+        # A single formula given without branches, or a branch whose formula is under another key ("formula",
+        # "expr", "rule", "value"), is the same definition written differently; its condition is kept as given.
+        if not data.get("branches"):
+            single = next((data.pop(k) for k in ("expression", "formula", "expr", "rule") if isinstance(data.get(k), str)), None)
+            if single:
+                data["branches"] = [{"expression": single, "condition": ""}]
+        if isinstance(data.get("branches"), list):
+            data["branches"] = [
+                {**b, "expression": next((b[k] for k in ("formula", "expr", "rule", "value") if isinstance(b.get(k), str)), "")}
+                if isinstance(b, dict) and not b.get("expression") else b
+                for b in data["branches"]
+            ]
+        if data.get("parameter"):
+            return data
+        for alias in ("variable", "var", "param", "argument", "arg"):
+            if isinstance(data.get(alias), str) and data[alias].strip():
+                data["parameter"] = data.pop(alias).strip()
+                return data
+        letters: set[str] = set()
+        for b in data.get("branches") or []:
+            text = str((b or {}).get("expression") or "") if isinstance(b, dict) else ""
+            letters |= {m for m in re.findall(r"(?<![A-Za-z_])([A-Za-z])(?![A-Za-z_(])", text)}
+        letters.discard(str(data.get("name") or ""))
+        if len(letters) == 1:
+            data["parameter"] = letters.pop()
+            return data
+        raise ValueError(f"definition {data.get('name')!r} gives no parameter and its formulas use "
+                         f"{', '.join(sorted(letters)) or 'no variable'}; state the parameter")
+
 
 class StructuredTask(BaseModel):
     id: str = Field(..., min_length=1, max_length=80, description="Label from the question: 'T(4)', 'Case A', 'claim'")
-    op: Literal["evaluate", "orbit", "claim", "reaches"]
+    op: Literal["evaluate", "orbit", "claim", "reaches", "zeros"]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _repair_id(cls, data: Any) -> Any:
+        """A planner-written task without "id" (seen live): its own expression or statement labels it ("q(3)"),
+        which is what the question calls it; nothing else about the task changes."""
+        if isinstance(data, dict) and not data.get("id"):
+            label = next((str(data[k]).strip() for k in ("expression", "statement", "function") if data.get(k)), "")
+            if label:
+                data = {**data, "id": label[:80] if data.get("op") != "zeros" else f"zeros of {label}"[:80]}
+        return data
     expression: str | None = Field(default=None, max_length=1000, description="evaluate / predicate claims: the expression")
     bindings: dict[str, int | float | str] | None = Field(default=None, description="evaluate: case-local values, e.g. {'n': 40}")
     factor: bool = Field(default=False, description="evaluate: also give the prime factorization")
@@ -217,6 +276,7 @@ class StructuredTask(BaseModel):
     domain: _Domain | None = None
     conditions: list[str] = Field(default_factory=list, max_length=4)
     statement: str | None = Field(default=None, max_length=1000)
+    line: str | None = Field(default=None, max_length=40, description="zeros: c of a line Re(v) = c the zeros are compared with")
 
 
 class AxiomStructuredInput(BaseModel):

@@ -149,11 +149,22 @@ _LEGACY_DOMAIN_MAP: dict[str, str] = {
     "computational": "numerical",
 }
 
+# A request to generate hypotheses or conjectures. A named one ("the Riemann Hypothesis", "Goldbach's conjecture", "the
+# null hypothesis") that is to be proved, looked up or critiqued is the subject of the question, not this request
+# (audit I35): the words alone never count, only a generating verb or adjective in front of them.
 _HYPOTHESIS = re.compile(
-    r"\b(hypothes[ie]s|hypothesi[sz]e|conjectur\w*|(?:novel|new) (?:[a-z-]+ )?(?:conjectures?|mechanisms?|models?|bounds?|formulations?|approaches?|architectures?|designs?|ansatz\w*|targets?|therap\w*|combinations?|indications?)"
+    r"\b(hypothesi[sz]e|(?:propose|generate|suggest|formulate|develop|brainstorm|come\s+up\s+with|offer|list|give|form|pose)"
+    r"\s+(?:(?:some|a|an|several|two|three|four|five|\d+|new|novel|testable|candidate|plausible|possible|alternative|"
+    r"competing|mechanistic|bold|original|your\s+own|own|more)\s+){0,3}(?:hypothes[ie]s|conjectures?)|"
+    r"(?:new|novel|testable|candidate|plausible|alternative|competing|untested)\s+(?:hypothes[ie]s|conjectures?)|"
+    r"conjecture\s+(?:a|an|that|what|whether|how)|"
+    r"(?:what|which)\s+(?:possible\s+|plausible\s+|new\s+)?(?:hypothes[ie]s|conjectures?)\s+(?:could|might|would|can|"
+    r"explain|account|are\s+there)|"
+    r"(?:novel|new) (?:[a-z-]+ )?(?:mechanisms?|models?|bounds?|formulations?|approaches?|architectures?|designs?|ansatz\w*|targets?|therap\w*|combinations?|indications?)"
     r"|candidate (?:models?|mechanisms?|designs?|materials?|bounds?|approaches?|ansatz\w*|targets?|drugs?)|repurpos\w*|propose|testable|what (?:could|might) explain|untested|scaling law)\b",
     re.I,
 )
+HYPOTHESIS_REQUEST_RE = _HYPOTHESIS  # shared with the hypothesis phase (agentic.hypothesis)
 _CONTESTED = re.compile(
     r"\b(controvers\w*|conflicting|contradict\w*|disputed|debated?|is it (?:true|really)|really (?:works?|effective|holds?|converges?)"
     r"|overstated|superior|inferior|non-?inferior|better than|worse than|head[- ]to[- ]head|which is (?:better|best|preferred|faster|more accurate|more stable)"
@@ -392,9 +403,11 @@ class SemanticFeatures(BaseModel):
             if _LEGACY_DOMAIN_MAP.get(d, d) in DOMAINS
         }
         return {
+            # "conjecture" as a kind is a question about one (proving or looking up a named conjecture); only a request
+            # to generate them counts (audit I35).
             "hypothesis": float(
                 self.hypothesis_generation
-                or self.question_kind in ("hypothesis_generation", "conjecture", "drug_repurposing")
+                or self.question_kind in ("hypothesis_generation", "drug_repurposing")
             ),
             "contested": float(self.contested),
             "high_stakes": float(self.high_stakes or self.question_kind == "safety_compliance"),
@@ -428,7 +441,9 @@ architecture. Do not answer the question.
 - sequential: later steps need the results of earlier ones (a derivation chain, a computation pipeline)
 - domains: any of {", ".join(DOMAINS)} that the answer needs
 - needs_computation: a numerical simulation, symbolic solve, parameter fit, or data analysis is requested
-- hypothesis_generation: it asks to propose new conjectures, hypotheses, mathematical formulations, or candidate designs
+- hypothesis_generation: it asks to propose new conjectures, hypotheses, mathematical formulations, or candidate designs.
+  Naming an existing one (the Riemann Hypothesis, Goldbach's conjecture, a null hypothesis) in order to prove it, check
+  its status or critique a method is not hypothesis generation
 - contested: it asks to weigh a disputed or comparative conclusion ("is method X better than Y", conflicting bounds or measurements)
 - high_stakes: safety-critical engineering (pressure vessels, structural loads, high voltage, nuclear/thermal limits, code compliance)
 - asks_recommendation: it asks what design, solver, method, or material should be chosen
@@ -700,10 +715,13 @@ def _explain(framework: str, f: dict[str, float], s: RoutingSignals, factors: li
                              "without a separate tool plan.")
         return FOCUSED, "A focused, single-part question; the direct workflow answers it in one pass and checks the claims."
     if framework == DEBATE:
-        if f["hypothesis"] >= f["contested"]:
+        if f["hypothesis"] > 0 and f["hypothesis"] >= f["contested"]:
             return "hypothesis_generation", (
                 "The question asks for new conjectures or hypotheses; independent critics challenge and rank them before the answer is final."
             )
+        if f["contested"] <= 0:
+            # Chosen on other grounds (learned outcomes, an adjudicator): the stated reason must not invent an intent.
+            return "critical_review", ("Independent critics review the draft's reasoning before the answer is final.")
         return "contested_claim", (
             "The question weighs a contested conclusion" + (" with safety-critical stakes" if f["high_stakes"] >= 0.5 else "")
             + "; independent critics cross-examine the draft against the evidence."

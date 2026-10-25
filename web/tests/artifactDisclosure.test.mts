@@ -100,3 +100,22 @@ test("routine dialogue and project memory stay collapsed", () => {
   const open = artifactDisclosure({ question: "Use project memory and show the agent dialogue", artifacts: { agent_dialogue: {}, project_memory: {} } });
   assert.deepEqual(open, { agent_dialogue: false, project_memory: false });
 });
+
+test("a card is flagged only for an actual warning, with its reason (audit I42)", () => {
+  const { artifactAttention } = ad;
+  const ok = artifactAttention({ artifacts: { math_agent: { status: "verified" }, agent_plan: { planner: "llm", nodes: [], rejected: [] } } });
+  assert.deepEqual(ok, {}); // a verified computation is open-worthy, never a warning
+  const warn = artifactAttention({
+    taskStatus: { task_status: "partial", incomplete_reasons: ["Requested format not met: 2 non-empty lines, 3 required."] },
+    artifacts: {
+      math_agent: { status: "partially_verified" },
+      agent_plan: { rejected: [{ node: "n1", reason: "tool 'web_search' is not registered" }] },
+      agent_run: {},
+      formal_proof: { status: "not_formalizable", error: "needs complex numbers" },
+    },
+  });
+  assert.equal(warn.math_agent, "The mathematics is partially verified");
+  assert.equal(warn.agent_plan, "1 planned call rejected");
+  assert.equal(warn.agent_run, "Requested format not met: 2 non-empty lines, 3 required.");
+  assert.equal(warn.formal_proof, undefined); // not formalisable is a scope statement, not a failure
+});

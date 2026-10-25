@@ -81,7 +81,9 @@ TEXT_DUPLICATE_JACCARD = 0.8
 
 _INTENT_RE = re.compile(
     # Not "predict" or "experiment": in physics and engineering those mean "compute" or "measure", not "hypothesise".
-    r"\bhypothes|\bconjectur|\bwhat (?:would|will|might) happen|\bwhat if\b|\bperturb|\bin[\s-]?silico\b|"
+    # Not a named hypothesis or conjecture either ("the status of the Riemann Hypothesis"): a request to generate
+    # them is HYPOTHESIS_REQUEST_RE (audit I35/I36).
+    r"\bwhat (?:would|will|might) happen|\bwhat if\b|\bperturb|\bin[\s-]?silico\b|"
     r"\bcandidate (?:mechanism|explanation|cause)|\bwhich (?:parameter|component|mechanism)|"
     r"\b(?:does|do|would|will|could)\s+(?:increasing|decreasing|raising|lowering|reducing|doubling|halving)\b",
     re.I,
@@ -502,7 +504,10 @@ class HypothesisPhase(AgentPhase):
         if option is True:
             return True
         # A named system alone ("simulate the Lorenz system") asks for a simulation, not for hypotheses.
-        return bool(_INTENT_RE.search(state.clean_query or state.query or ""))
+        from .router import HYPOTHESIS_REQUEST_RE  # local: the router module registers its own phase on import
+
+        question = state.clean_query or state.query or ""
+        return bool(HYPOTHESIS_REQUEST_RE.search(question) or _INTENT_RE.search(question))
 
     async def run(self, state: AgentState) -> None:
         ctx = state.ctx
@@ -536,9 +541,10 @@ class HypothesisPhase(AgentPhase):
         if llm_meta.get("research_plan"):
             artifact["research_plan"] = llm_meta["research_plan"]
         if not hypotheses:
+            # A dynamical system is needed only for an in-silico test, never for a hypothesis or conjecture itself
+            # (a conjecture about primes has no parameters to perturb), audit I36.
             artifact.update(hypotheses=[], rejected=rejected[:10], note=(
-                "No testable hypothesis could be formed: the question names no dynamical system with parameters to "
-                "perturb, and no hypothesis was proposed from the evidence." if system is None else
+                "No hypothesis was proposed from the question and the evidence." if system is None else
                 "No testable hypothesis could be formed from the question and the system's parameters."))
             state.artifacts["hypotheses"] = artifact
             await state.step("agent_hypothesis", "No hypotheses formed", artifact["note"], agent="Discovery")

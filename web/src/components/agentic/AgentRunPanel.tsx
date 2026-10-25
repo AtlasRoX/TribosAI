@@ -337,7 +337,8 @@ export function AgentRunPanel({ data, routing }: { data: AgentRunArtifact; routi
   const answered = subs.filter((q) => statusTone(q.status) === "ok").length;
 
   const meta = [
-    subs.length ? `${answered} of ${subs.length} sub-question${subs.length === 1 ? "" : "s"} answered` : "",
+    // Audit I39: the counter tracks tool-backed evidence per sub-question, not whether the final prose addresses it.
+    subs.length ? `${answered} of ${subs.length} sub-question${subs.length === 1 ? "" : "s"} backed by tool evidence` : "",
     trace.length ? `${trace.length} tool call${trace.length === 1 ? "" : "s"}${failures ? ` (${failures} failed)` : ""}` : "",
     isNum(data.draft_rounds) ? `${data.draft_rounds} draft round${data.draft_rounds === 1 ? "" : "s"}` : "",
   ]
@@ -382,7 +383,7 @@ export function AgentRunPanel({ data, routing }: { data: AgentRunArtifact; routi
           <div className={styles.sectionHead}>
             <span className={styles.sectionTitle}>Sub-questions</span>
             <span className={styles.meta}>
-              {answered} of {subs.length} answered
+              {answered} of {subs.length} backed by tool evidence
             </span>
           </div>
           <SubQuestions items={subs} />

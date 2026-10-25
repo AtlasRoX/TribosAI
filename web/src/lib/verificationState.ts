@@ -70,14 +70,18 @@ export function verificationState(report: VerificationLike | null | undefined): 
   }
   const coverage = report.coverage;
   const evaluated = coverage && typeof coverage.evaluated === "number" ? coverage.evaluated : null;
+  const scope = checkScope(report);
   if (report.passed !== false && defects.length === 0 && (report.status === "not_evaluated" || evaluated === 0)) {
-    // A defect-free score over zero evaluated claims is not a result: say that nothing could be checked.
+    // A defect-free score over zero evaluated claims is not a result: say that nothing could be checked, and name
+    // only checks that actually applied (audit I42: no "cited identifiers" on an answer that cites nothing).
     const n = coverage?.extracted || 0;
     return {
       kind: "not_evaluated",
       text: n
-        ? `No claims could be checked (${n} statement${n === 1 ? "" : "s"} found, none decidable)`
-        : "No claims could be checked; cited identifiers match the tool outputs",
+        ? `No source claims could be checked (${n} statement${n === 1 ? "" : "s"} found, none decidable)${scope ? `; ${scope}` : ""}`
+        : scope
+          ? `No source claims to check; ${scope}`
+          : "No source claims to check in this answer",
       counts,
     };
   }
@@ -97,9 +101,23 @@ export function verificationState(report: VerificationLike | null | undefined): 
     kind: "checked",
     text: claims.length
       ? `${counts.supported} of ${claims.length} claim${claims.length === 1 ? "" : "s"} checked and supported${notCheckable}`
-      : "Checked: cited identifiers match the tool outputs (no literature claims to check)",
+      : `Checked${scope ? `: ${scope}` : ""} (no source claims to check)`,
     counts,
   };
+}
+
+/** The checks that applied when no source claim was evaluated: the answer's mathematical statements and the
+ * identifiers it cited. Empty when neither applied (a copy, a plain status sentence). */
+function checkScope(report: VerificationLike): string {
+  const math = (report.math_audit as { counts?: { passed?: number } } | null | undefined)?.counts;
+  const mathPassed = Number(math?.passed || 0);
+  const ids = Array.isArray(report.verified_identifiers) ? report.verified_identifiers.length : 0;
+  return [
+    mathPassed ? `${mathPassed} mathematical statement${mathPassed === 1 ? "" : "s"} checked` : "",
+    ids ? `${ids} cited identifier${ids === 1 ? " matches" : "s match"} the tool outputs` : "",
+  ]
+    .filter(Boolean)
+    .join("; ");
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

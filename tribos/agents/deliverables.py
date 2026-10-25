@@ -48,6 +48,10 @@ _STATUS_RE = re.compile(
     r"(?:remains?|is)\s+open|unknown|unresolved|not\s+(?:been\s+)?(?:proved|proven|known|established)|yes|no)\b", re.I)
 
 
+_LINK_ITEM_RE = re.compile(r"(?i)\b(?:url|urls|link|links|web\s*page|website|hyperlink)\b")
+_URL_RE = re.compile(r"https?://[^\s)\]>\"']+")
+
+
 def _words(text: str) -> list[str]:
     return [w for w in re.findall(r"[a-z][a-z\-]{2,}", (text or "").lower()) if w not in _STOP]
 
@@ -133,6 +137,12 @@ def assess(question: str, answer: str, math_audit: dict[str, Any] | None = None)
         item, verb = req["item"], req["verb"]
         item_stems = [_stem(w) for w in _words(item)]
         if not item_stems:
+            continue
+        link = _URL_RE.search(answer or "")
+        if _LINK_ITEM_RE.search(item) and link:
+            # "include the source URL": a link in the answer delivers it, whatever words surround it (audit I39);
+            # whether the page supports the claim is the claim check's job, not this one.
+            results.append({"item": item, "status": "addressed", "where": link.group(0)[:160], "quantity": False})
             continue
         proof_item = re.search(r"(?i)\b(?:proof|justification|argument|demonstration)\b", item)
         if (re.match(r"(?i)whether\b|if\b", item) or proof_item) and _STATUS_RE.search(answer or ""):

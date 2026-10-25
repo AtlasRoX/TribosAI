@@ -86,9 +86,9 @@ export function dotClass(status: unknown): string {
 
 /** The open state the disclosure policy chose for the card(s) inside; undefined leaves each card's own default. */
 export const CardDisclosureContext = createContext<boolean | undefined>(undefined);
-/** True when the card holds something the reader should see (a contradiction, low support, a failed step): a
- * collapsed card then says so in its header instead of opening on its own. */
-export const CardAttentionContext = createContext<boolean>(false);
+/** Why the card holds something the reader should see (a contradiction, low support, a failed step), or "": a
+ * collapsed card then says so in its header instead of opening on its own, and the open card states the reason. */
+export const CardAttentionContext = createContext<string>("");
 
 export function Card({
   icon,
@@ -139,7 +139,11 @@ export function Card({
         <div className={styles.headText}>
           <div className={styles.title}>
             {title}
-            {collapsible && !open && attention ? <span className={styles.attentionChip}>needs a look</span> : null}
+            {collapsible && !open && attention ? (
+              <span className={styles.attentionChip} title={attention}>
+                needs a look
+              </span>
+            ) : null}
           </div>
           {meta ? <div className={styles.meta}>{meta}</div> : null}
         </div>
@@ -166,6 +170,7 @@ export function Card({
       </header>
       {(!collapsible || open) && (
         <div id={bodyId} className={styles.cardBody}>
+          {collapsible && attention ? <p className={styles.warnNote}>Why flagged: {attention}</p> : null}
           {children}
         </div>
       )}

@@ -43,6 +43,9 @@ _RESERVED = frozenset({
     "arctan", "exp", "log", "ln", "sqrt", "abs", "floor", "ceil", "gcd", "lcm", "max", "min", "det", "lim", "sum",
     "Eq", "Abs", "re", "im", "arg", "sign", "mod", "deg", "rad", "P", "Pr", "E", "Var",
 })
+# Probability/expectation notation that is also a common function name: a definition only when its formula uses the
+# parameter (P(s) = (s - 1/4)(s - 3/4)), never for P(A) = 0.3.
+_NOTATION_NAMES = frozenset({"P", "E"})
 
 _REL_OPS = {"<=": sp.Le, ">=": sp.Ge, "!=": sp.Ne, "<": sp.Lt, ">": sp.Gt, "=": sp.Eq}
 _UNICODE_REL = {"≤": "<=", "≥": ">=", "≠": "!=", "⩽": "<=", "⩾": ">="}
@@ -61,13 +64,28 @@ def _ascii_rel(text: str) -> str:
 
 # Domains -------------------------------------------------------------------------------------------------------------
 
+_ELLIPSIS = r"(?:\.{3}|…|\\ldots|\\dots|\\cdots)"
+# Set literals for the integer domains: {1, 2, 3, ...}, {0, 1, 2, ...}, {..., -1, 0, 1, ...}.
+# Braces or parentheses: normalisation writes "{1, 2, 3, ...}" as "(1, 2, 3, ...)".
+_SET_POSITIVE_RE = re.compile(rf"[{{(]\s*1\s*,\s*2\s*(?:,\s*3\s*)?,\s*{_ELLIPSIS}\s*[}})]")
+_SET_NONNEG_RE = re.compile(rf"[{{(]\s*0\s*,\s*1\s*(?:,\s*2\s*)?,\s*{_ELLIPSIS}\s*[}})]")
+_SET_INTEGER_RE = re.compile(rf"[{{(]\s*{_ELLIPSIS}\s*,\s*-\s*1\s*,\s*0\s*,\s*1\s*,\s*{_ELLIPSIS}\s*[}})]")
+
+
 def domain_from_words(text: str) -> str | None:
-    """The number set named in a phrase ("positive integers", "every real x", "ℤ", "R -> R")."""
+    """The number set named in a phrase ("positive integers", "positive-integer-only", "{1, 2, 3, ...}", "every real
+    x", "ℤ", "R -> R")."""
     low = text.lower()
-    if re.search(r"\bnon-?negative\s+(?:integers?|whole\s+numbers?)\b|\bwhole\s+numbers?\b|ℕ\s*[_∪]?\s*\{?0|\bn\s*0\b", low):
+    if _SET_NONNEG_RE.search(low) or re.search(
+            r"\bnon[\s-]?negative[\s-]+(?:integers?|whole[\s-]+numbers?)\b|\bwhole[\s-]+numbers?\b|ℕ\s*(?:_\{?0\}?|₀|∪\s*\{\s*0\s*\})|"
+            r"ℤ\s*(?:_\{?\s*(?:≥|>=|\\geq?)\s*0\s*\}?|≥0)|\bn\s*0\b", low):
         return "nonnegative_integer"
-    if re.search(r"\bpositive\s+integers?\b|\bnatural\s+numbers?\b|ℕ|ℤ\s*\+|ℤ_\{?>\s*0|\bz\s*\+", low):
+    if _SET_POSITIVE_RE.search(low) or re.search(
+            r"\bpositive[\s-]+integers?\b|\bnatural[\s-]+numbers?\b|ℕ|ℤ\s*(?:\+|⁺|\^\{?\+\}?)|ℤ\s*_\{?\s*(?:>|≥\s*1|>=\s*1|\\geq?\s*1)\s*0?\s*\}?|\bz\s*\+",
+            low):
         return "positive_integer"
+    if _SET_INTEGER_RE.search(low):
+        return "integer"
     if re.search(r"\bintegers?\b|ℤ", low):
         return "integer"
     if re.search(r"\brationals?\b|\brational\s+numbers?\b|ℚ", low):
@@ -167,14 +185,40 @@ def _sentence_start(text: str, pos: int) -> int:
 
 
 def _is_definition_site(text: str, start: int) -> bool:
+    """A "NAME(x) = ..." is a definition unless an action verb governs it ("Solve f(x) = 0", "Prove that f(x) = ...")
+    with no definition cue after that verb. A second branch after a comma ("h(n) = n/2 for even n, h(n) = 7n - 1
+    for odd n") and a statement after a domain sentence ("The domain of q is ... and q(n) = n^2 + 4") are definitions."""
     prefix = text[_sentence_start(text, start):start]
     cue = list(_DEF_CUE_RE.finditer(prefix))
     act = list(_ACTION_RE.finditer(prefix))
-    if act and (not cue or act[-1].start() > cue[-1].start()):
-        return False
-    if cue:
-        return True
-    return not prefix.strip(" \t-*•0123456789.)(") or bool(re.fullmatch(r"\s*(?:and|also|then)?\s*", prefix))
+    return not (act and (not cue or act[-1].start() > cue[-1].start()))
+
+
+# Where the question states the domain of a function: a typed declaration, "the domain of q is ...", or a domain phrase
+# in the sentence that defines it ("defined only for positive integers by h(n) = ...", "positive-integer-only").
+def _declared_domain(text: str, name: str) -> str | None:
+    n = re.escape(name)
+    m = re.search(rf"(?<![\w.]){n}\s*:\s*(\{{[^}}]*\}}|\([^)]*\)|[^:\n]*?)\s*(?:->|→|\\to\b)", text)
+    if m:
+        dom = _domain_from_symbol(m.group(1)) or domain_from_words(m.group(1))
+        if dom:
+            return dom
+    m = re.search(rf"\bdomain\s+of\s+{n}\s+(?:is|=|:)\s*([^.;\n]+)", text, re.I)
+    if m:
+        return domain_from_words(m.group(1))
+    return None
+
+
+def _sentence_domain(text: str, start: int) -> str | None:
+    """A number set named in the sentence that contains a definition (and in a short lead-in sentence before it)."""
+    s0 = _sentence_start(text, start)
+    end = re.search(r"(?<=[^\s.])[.?!](?=\s|$)|\n", text[start:])
+    sentence = text[s0: start + (end.start() if end else len(text) - start)]
+    prev_start = _sentence_start(text, max(0, s0 - 2))
+    lead = text[prev_start:s0] if s0 > 0 and len(text[prev_start:s0]) < 160 else ""
+    # Quantified claims ("for every real x") in the same sentence describe a claim, not the function's domain.
+    sentence = re.sub(r"(?i)\bfor\s+(?:every|all|each|any)\b[^,.;]*", " ", sentence)
+    return domain_from_words(sentence) or (domain_from_words(lead) if re.search(r"(?i)\bfunction|defined|domain\b", lead) else None)
 
 
 def parse_definitions(text: str) -> tuple[list[dict[str, Any]], list[tuple[int, int]], list[str]]:
@@ -189,10 +233,17 @@ def parse_definitions(text: str) -> tuple[list[dict[str, Any]], list[tuple[int, 
         if dom:
             declared[m.group(1)] = dom
             spans.append(m.span())
+    first_at: dict[str, int] = {}
     for m in _DEF_HEAD_RE.finditer(text):
         name, param = m.group(1), m.group(2)
-        if name in _RESERVED or name == param or not _is_definition_site(text, m.start()):
+        if name == param or not _is_definition_site(text, m.start()):
             continue
+        if name in _RESERVED:
+            # P(A) = 0.3 is a probability, E(X) an expectation; P(s) = (s - 1/4)(s - 3/4) is a function of s.
+            rest_head = re.split(r"[,;.\n]", text[m.end():], maxsplit=1)[0]
+            if name not in _NOTATION_NAMES or not re.search(rf"(?<![A-Za-z]){re.escape(param)}(?![A-Za-z])", rest_head):
+                continue
+        first_at.setdefault(name, m.start())
         rest = text[m.end():]
         end = _EXPR_END_RE.search(rest)
         expr_text = rest[: end.start() if end else len(rest)].strip()
@@ -227,15 +278,19 @@ def parse_definitions(text: str) -> tuple[list[dict[str, Any]], list[tuple[int, 
     out = []
     for name, entry in defs.items():
         branch_domains = set(entry.pop("_domains", []))
-        if name in declared:
-            entry["domain"] = declared[name]
+        # Priority: a typed declaration or "the domain of q is ..."; a domain named in a branch condition ("for even
+        # positive integers"); a domain named in the defining sentence; integers when the branches test parity.
+        sentence_dom = _sentence_domain(text, first_at.get(name, 0))
+        if name in declared or _declared_domain(text, name):
+            entry["domain"] = declared.get(name) or _declared_domain(text, name)
         elif len(branch_domains) == 1:
             entry["domain"] = branch_domains.pop()
+        elif sentence_dom:
+            entry["domain"] = sentence_dom
         elif any(b["condition"] in ("even", "odd") for b in entry["branches"]):
             entry["domain"] = "integer"
         else:
-            m = re.search(rf"\b{re.escape(name)}\b[^.]*?\b(?:on|over)\s+(?:the\s+)?([\w\s-]+?)(?:\s+by\b|[.,]|$)", text)
-            entry["domain"] = (domain_from_words(m.group(1)) if m else None) or "unspecified"
+            entry["domain"] = "unspecified"
         conds = [b["condition"] for b in entry["branches"]]
         if len(conds) > 1 and "" in conds:
             problems.append(f"{name} has several formulas without branch conditions")
@@ -498,7 +553,76 @@ def parse_quantifier(text: str, stmt_symbols: set[str]) -> tuple[str | None, str
     return var, dom, conds
 
 
+# "Prove P(1-s) = P(s)" with no "for every": a statement about a defined function, universal over the variable's
+# declared domain (the definition's own, e.g. "where s is complex").
+_CLAIM_IMPLICIT_RE = re.compile(
+    r"(?i)\b(?:prove|show|verify|demonstrate)\s+(?:that\s+)?"
+    r"(?P<stmt>[^.?!;\n,]*?[A-Za-z]\w*\s*\([^()]*\)[^.?!;\n,]*?(?:<=|>=|!=|=|<|>)[^.?!;\n,]+?)"
+    r"\s*(?=[,.;?!\n]|\s+and\s+|$)")
+
+
+def _implicit_claims(text: str, defs: list[dict[str, Any]], taken: list[tuple[int, int]], first_id: int) -> list[dict[str, Any]]:
+    tasks: list[dict[str, Any]] = []
+    for m in _CLAIM_IMPLICIT_RE.finditer(text):
+        if any(a <= m.start() < b for a, b in taken) or re.search(r"(?i)\bfor\s+(?:every|all|each|any)\b", m.group("stmt")):
+            continue
+        stmt = _ascii_rel(m.group("stmt").strip())
+        rel = re.search(r"(<=|>=|!=|<|>|=)", stmt)
+        if not rel:
+            continue
+        lhs, rhs = stmt[: rel.start()].strip(), stmt[rel.end():].strip()
+        fnames = {d["name"] for d in defs}
+        if not any(re.search(rf"(?<![\w.]){re.escape(f)}\s*\(", stmt) for f in fnames):
+            continue  # only statements about the question's own definitions
+        try:
+            symbols = {s.name for side in (lhs, rhs) for s in parse_with_definitions(side, defs).free_symbols}
+        except Exception:  # noqa: BLE001
+            continue
+        if len(symbols) != 1:
+            continue
+        var = next(iter(symbols))
+        owner = next((d for d in defs if d["parameter"] == var), None) or (defs[0] if len(defs) == 1 else None)
+        if owner is None:
+            continue
+        domain = owner.get("domain") or "unspecified"
+        n = first_id + len(tasks)
+        tasks.append({"id": "claim" if n == 0 else f"claim {n + 1}", "op": "claim", "lhs": lhs, "relation": rel.group(1),
+                      "rhs": rhs, "variable": var, "domain": domain, "conditions": [],
+                      "statement": f"{stmt} for every {var} in {domain_label(domain) if domain != 'unspecified' else 'its domain'}"})
+    return tasks
+
+
+# "find all its zeros", "determine the roots of P"; a line "Re(s) = 1/2" in the question is checked against them.
+_ZEROS_RE = re.compile(
+    r"(?i)\b(?:find|determine|compute|give|list|locate)\s+(?:all\s+(?:of\s+)?)?(?:the\s+)?(?:(?:its|their)\s+)?"
+    r"(?:real\s+|complex\s+)?(?:zeros|zeroes|roots)\b(?:\s+of\s+(?P<f>[A-Za-z]\w{0,15})(?:\s*\(\s*[a-z]\s*\))?)?")
+_LINE_RE = re.compile(r"\bRe\s*\(\s*(?P<v>[a-z])\s*\)\s*=\s*(?P<c>-?\d+(?:\s*/\s*\d+)?(?:\.\d+)?)")
+
+
+def _zeros_tasks(text: str, defs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    for m in _ZEROS_RE.finditer(text):
+        name = m.group("f")
+        defn = next((d for d in defs if d["name"] == name), None) if name else (defs[0] if len(defs) == 1 else None)
+        if defn is None or len(defn["branches"]) != 1 or defn["branches"][0].get("condition"):
+            continue
+        task = {"id": f"zeros of {defn['name']}", "op": "zeros", "function": defn["name"], "variable": defn["parameter"],
+                "domain": defn.get("domain") or "unspecified"}
+        line = _LINE_RE.search(text)
+        if line and line.group("v") == defn["parameter"]:
+            task["line"] = re.sub(r"\s+", "", line.group("c"))
+        return [task]
+    return []
+
+
 def _claim_tasks(text: str, defs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    tasks = _claim_tasks_explicit(text, defs)
+    if defs:
+        taken = [m.span() for m in _CLAIM_RE.finditer(text)]
+        tasks += _implicit_claims(text, defs, taken, len(tasks))
+    return tasks
+
+
+def _claim_tasks_explicit(text: str, defs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     tasks = []
     for m in _CLAIM_RE.finditer(text):
         stmt = _ascii_rel(m.group("stmt").strip())
@@ -588,6 +712,7 @@ def parse_structured(text: str) -> tuple[dict[str, Any] | None, list[str]]:
         tasks += _substitution_tasks(rest, defs)
     tasks += _claim_tasks(rest, defs)
     if defs:
+        tasks += _zeros_tasks(rest, defs)
         tasks += _orbit_tasks(rest, defs)
         tasks += _application_tasks(rest, defs)
     seen, unique = set(), []
@@ -1085,6 +1210,68 @@ def _run_reaches(task: dict[str, Any], defs: list[dict[str, Any]]) -> dict[str, 
             "text": f"Not settled: {evidence} This is evidence, not a proof."}
 
 
+def _zero_function(task: dict[str, Any], defs: list[dict[str, Any]]) -> tuple[dict[str, Any], sp.Symbol, sp.Expr]:
+    defn = next((d for d in defs if d["name"] == task["function"]), None)
+    if defn is None or len(defn["branches"]) != 1 or defn["branches"][0].get("condition"):
+        raise DefinitionError(f"{task['function']} is not a single-formula definition, so its zeros are not computed")
+    var = sp.Symbol(defn["parameter"])
+    expr = evaluate(parse_with_definitions(defn["branches"][0]["expression"], defs, {var.name: var}), defs)
+    return defn, var, sp.expand(expr)
+
+
+def _run_zeros(task: dict[str, Any], defs: list[dict[str, Any]]) -> dict[str, Any]:
+    """All zeros of a single-formula definition over its domain. For a polynomial the list is complete exactly when
+    the roots found, counted with multiplicity, number its degree (a nonzero polynomial of degree d has d complex
+    roots with multiplicity). With a line Re(v) = c in the question, each zero's real part is compared with c and the
+    zero set is tested for the reflection v -> 2c - v."""
+    defn, var, expr = _zero_function(task, defs)
+    domain = task.get("domain") or "unspecified"
+    written = _pretty(defn["branches"][0]["expression"])
+    steps = [f"{defn['name']}({var}) = {written}" + ("" if _pretty(sp.sstr(expr)) == written else f" = {_pretty(sp.sstr(expr))}")]
+    if expr == 0:
+        return {"status": "unresolved", "steps": steps, "text": f"{task['id']}: {defn['name']} is identically zero"}
+    if not expr.is_polynomial(var):
+        sset = sp.solveset(expr, var, domain=sp.S.Reals if domain in ("real", "rational") else sp.S.Complexes)
+        if not isinstance(sset, sp.FiniteSet):
+            return {"status": "unresolved", "steps": steps, "text": f"{task['id']}: the zero set is {sset}, not a finite list"}
+        roots, degree, complete = {z: 1 for z in sset}, None, True
+        steps.append(f"{defn['name']}({var}) = 0 has exactly the solutions {', '.join(_value_text(z) for z in sset)}")
+    else:
+        poly = sp.Poly(expr, var)
+        degree = poly.degree()
+        roots = sp.roots(poly)
+        complete = sum(roots.values()) == degree
+        factored = sp.factor(expr)
+        if factored != expr:
+            steps.append(f"{defn['name']}({var}) = {_pretty(sp.sstr(factored))}, and a product is zero exactly when a factor is")
+        steps.append(f"degree {degree}; {sum(roots.values())} root(s) counted with multiplicity"
+                     + (": all of them" if complete else f": only these were found in closed form, of {degree}"))
+    zeros = sorted(roots, key=lambda z: (float(sp.re(z)), float(sp.im(z))))
+    kept = [z for z in zeros if in_domain(z, domain) is not False]
+    res: dict[str, Any] = {"status": "computed" if complete else "unresolved", "zeros": [_value_text(z) for z in kept],
+                           "multiplicities": [int(roots[z]) for z in kept], "degree": degree, "complete": complete,
+                           "excluded": [_value_text(z) for z in zeros if z not in kept]}
+    listed = ", ".join(f"{var} = {_value_text(z)}" + (f" (multiplicity {roots[z]})" if roots[z] > 1 else "") for z in kept)
+    text = f"{task['id']}: {listed}" if kept else f"{task['id']}: none in {domain_label(domain)}"
+    if res["excluded"]:
+        steps.append(f"outside {domain_label(domain)}: {', '.join(res['excluded'])}")
+    if task.get("line") is not None and kept:
+        c = _exact_value(str(task["line"]))
+        on = [z for z in kept if sp.simplify(sp.re(z) - c) == 0]
+        for z in kept:
+            steps.append(f"Re({_value_text(z)}) = {_value_text(sp.re(z))}" + (" = " if z in on else " ≠ ") + f"{_value_text(c)}")
+        mirrored = {sp.nsimplify(sp.expand(2 * c - z)) for z in kept}
+        symmetric = mirrored == {sp.nsimplify(z) for z in kept}
+        steps.append(f"the zero set is {'closed' if symmetric else 'not closed'} under {var} ↦ {_value_text(2 * c)} − {var}"
+                     + (f" ({' ↔ '.join(_value_text(z) for z in kept)})" if symmetric and len(kept) == 2 else ""))
+        res.update(line=_value_text(c), on_line=[_value_text(z) for z in on],
+                   off_line=[_value_text(z) for z in kept if z not in on], reflection_symmetric=symmetric)
+        where = ("all lie on" if len(on) == len(kept) else "none lies on" if not on else f"{len(on)} of {len(kept)} lie on")
+        text += f"; {where} Re({var}) = {_value_text(c)}"
+    res.update(steps=steps, text=text)
+    return res
+
+
 def run_structured(definitions: list[dict[str, Any]], tasks: list[dict[str, Any]]) -> dict[str, Any]:
     """Execute every task against the definitions. A task that cannot be carried out reports its reason; it never
     falls back to a different problem."""
@@ -1113,13 +1300,16 @@ def run_structured(definitions: list[dict[str, Any]], tasks: list[dict[str, Any]
                 res.update(_run_reaches(task, definitions))
             elif task["op"] == "claim":
                 res.update(_run_claim(task, definitions))
+            elif task["op"] == "zeros":
+                res.update(_run_zeros(task, definitions))
             else:
                 raise ValueError(f"unknown task operation {task['op']!r}")
             res["status"] = res.get("status", "computed")
         except DefinitionError as exc:
             # "g(0) is undefined: 0 is not in the domain of g" answers the question that was asked.
             status = "undefined" if task["op"] == "evaluate" else "error"
-            res.update(status=status, error=str(exc), text=f"{task['id']}: {exc}")
+            msg = str(exc)
+            res.update(status=status, error=msg, text=msg if msg.startswith(str(task['id'])) else f"{task['id']}: {msg}")
         results.append(res)
     return {"results": results, "text": "\n".join(r["text"] for r in results)}
 
@@ -1225,6 +1415,36 @@ def _second_route(expr_text: str, defs: list[dict[str, Any]], bindings: dict[str
         return None
 
 
+# Independent reading of domain restrictions for the domain check: plain patterns over each sentence that mentions the
+# function, not the definition parser. A payload that lost "positive integers" fails against this reading.
+_RESTRICTIONS = (
+    ("positive_integer", re.compile(r"[{(]\s*1\s*,\s*2\b|positive[\s-]+integer|natural[\s-]+number|ℕ(?!\s*(?:_?\{?0|₀|∪))|ℤ\s*(?:\+|⁺)", re.I)),
+    ("nonnegative_integer", re.compile(r"[{(]\s*0\s*,\s*1\b|non[\s-]?negative[\s-]+integer|whole[\s-]+number|ℕ\s*(?:_?\{?0|₀|∪)", re.I)),
+    ("integer", re.compile(r"\bintegers?\b|ℤ", re.I)),
+    ("rational", re.compile(r"\brationals?\b|ℚ", re.I)),
+    ("real", re.compile(r"\breals?\b|\breal\s+numbers?\b|ℝ", re.I)),
+)
+_DOMAIN_RANK = {"positive_integer": 0, "nonnegative_integer": 1, "integer": 2, "rational": 3, "real": 4, "complex": 5,
+                "unspecified": 6}
+
+
+def stated_domains(question: str, names: set[str]) -> dict[str, str]:
+    """The narrowest domain the question states for each function, read sentence by sentence."""
+    out: dict[str, str] = {}
+    for sentence in re.split(r"(?<=[.?!;])\s+|\n+", question or ""):
+        clean = re.sub(r"(?i)\bfor\s+(?:every|all|each|any)\b[^,.;]*", " ", sentence)  # a claim's quantifier
+        for name in names:
+            n = re.escape(name)
+            if not re.search(rf"(?<![\w.]){n}\s*(?:\(\s*[A-Za-z]\s*\)\s*=|:|\s+(?:is|be)\s+(?:defined|a\s+function))|\bdomain\s+of\s+{n}\b|\b{n}\s+be\b", clean):
+                continue
+            for dom, rx in _RESTRICTIONS:
+                if rx.search(clean):
+                    if _DOMAIN_RANK[dom] < _DOMAIN_RANK.get(out.get(name, "unspecified"), 6):
+                        out[name] = dom
+                    break
+    return out
+
+
 def _denominator_vanishes(text: str, variable: str, witness: str) -> bool:
     """Does a denominator written in the text evaluate to zero at the witness? (Direct substitution, a different route
     from singular_points, which solves for the zeros.)"""
@@ -1239,8 +1459,10 @@ def _denominator_vanishes(text: str, variable: str, witness: str) -> bool:
     return False
 
 
-def check_structured(params: dict[str, Any], data: dict[str, Any]) -> list[tuple[str, bool | None, int, str]]:
-    """Four separate checks of a structured result: (name, passed, level, detail)."""
+def check_structured(params: dict[str, Any], data: dict[str, Any], question: str = "") -> list[tuple[str, bool | None, int, str]]:
+    """Four separate checks of a structured result: (name, passed, level, detail). With the question, the domain check
+    also re-reads each function's stated domain from the question itself (stated_domains), so a payload that lost a
+    restriction cannot pass by being checked against itself."""
     defs, tasks = params.get("definitions") or [], params.get("tasks") or []
     results = {r["id"]: r for r in data.get("results") or []}
     out: list[tuple[str, bool | None, int, str]] = []
@@ -1252,6 +1474,22 @@ def check_structured(params: dict[str, Any], data: dict[str, Any]) -> list[tuple
                 f"{', '.join(misread)} used as a number" if misread else f"{len(names)} definition(s) kept as functions"))
 
     domain_bad: list[str] = []
+    stated = stated_domains(question, names) if question else {}
+    for d in defs:
+        want = stated.get(d["name"])
+        used = d.get("domain") or "unspecified"
+        if want and _DOMAIN_RANK[want] < _DOMAIN_RANK.get(used, 6):
+            domain_bad.append(f"the question restricts {d['name']} to {domain_label(want)}; the computation used "
+                              f"{domain_label(used) if used != 'unspecified' else 'no restriction'}")
+    for t in tasks:
+        r = results.get(t["id"]) or {}
+        if r.get("status") == "undefined":
+            continue
+        for app in r.get("applications") or []:
+            want = stated.get(app.get("function", ""))
+            if want and not app.get("symbolic") and in_domain(_exact_value(app["argument"]), want) is False:
+                domain_bad.append(f"{app['function']}({app['argument']}) was evaluated although {app['argument']} is not in "
+                                  f"{domain_label(want)}")
     for t in tasks:
         r = results.get(t["id"]) or {}
         for app in r.get("applications") or []:
@@ -1379,6 +1617,35 @@ def check_structured(params: dict[str, Any], data: dict[str, Any]) -> list[tuple
                     if lv != rv:
                         comp_bad.append(f"{t['id']}: differs at {t['variable']} = {v}")
                         break
+    for t in tasks:
+        r = results.get(t["id"]) or {}
+        if t["op"] != "zeros" or r.get("status") == "error":
+            continue
+        # Independent of how the zeros were found: each reported zero is substituted back, and for a polynomial the
+        # leading coefficient times prod (v - z)^m must rebuild the function exactly (no zero missing or invented).
+        try:
+            _defn, var, expr = _zero_function(t, defs)
+        except DefinitionError:
+            continue
+        zeros = [_exact_value(z) for z in r.get("zeros") or []]
+        mults = r.get("multiplicities") or [1] * len(zeros)
+        for z in zeros:
+            checked += 1
+            if sp.simplify(expr.subs(var, z)) != 0:
+                comp_bad.append(f"{t['id']}: {var} = {z} is not a zero")
+        if r.get("complete") and expr.is_polynomial(var) and not r.get("excluded"):
+            checked += 1
+            poly = sp.Poly(expr, var)
+            rebuilt = poly.LC() * sp.prod([(var - z) ** int(m) for z, m in zip(zeros, mults, strict=False)])
+            if sp.expand(rebuilt - expr) != 0:
+                comp_bad.append(f"{t['id']}: the reported zeros do not rebuild {t['function']} (a zero is missing or wrong)")
+        if r.get("line") is not None:
+            c = _exact_value(str(r["line"]))
+            on = {str(_exact_value(z)) for z in r.get("on_line") or []}
+            for z in zeros:
+                checked += 1
+                if (sp.simplify(sp.re(z) - c) == 0) != (str(z) in on):
+                    comp_bad.append(f"{t['id']}: Re({z}) compared wrongly with {c}")
     out.append(("computation: every value recomputed by exact rational arithmetic", (not comp_bad) if checked else None, 2,
                 "; ".join(comp_bad)[:400] if comp_bad else f"{checked} recomputation(s) agree"))
 

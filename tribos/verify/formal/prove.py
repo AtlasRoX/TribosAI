@@ -17,6 +17,7 @@ from typing import Any
 
 from tribos.config.settings import get_bool, get_int
 
+from .correspondence import needs_library, statement_issues
 from .runner import STATUS_TITLES, check_lean, find_lean
 
 FORMALISE_SYSTEM = (
@@ -85,23 +86,39 @@ async def formalise_and_check(question: str, complete: Complete | None, *, mathl
         from tribos.config.settings import get_str
 
         mathlib = bool(str(get_str("TRIBOS_LEAN_PROJECT") or "").strip())
+    lacking = None if mathlib else needs_library(question)
+    if lacking:
+        # Audit I33: no substitute proposition over Nat/Int is written to obtain a compile; no model call is spent.
+        return {"status": "not_formalizable", "title": STATUS_TITLES["not_formalizable"], "attempts": [],
+                "lean_code": "", "statement": "", "repairs": 0, "messages": [],
+                "error": f"The statement needs {lacking}, which core Lean 4 cannot express and Mathlib is not "
+                         "installed (TRIBOS_LEAN_PROJECT). No formal statement was checked; this says nothing about "
+                         "whether the claim is true."}
     env = "Mathlib is available (import Mathlib)." if mathlib else CORE_LEAN_ENV
     max_repairs = int(get_int("TRIBOS_FORMAL_MAX_REPAIRS"))
     attempts: list[dict[str, Any]] = []
     code = lean_code(await complete(FORMALISE_SYSTEM, f"{env}\n\nStatement to prove:\n{question.strip()[:4000]}"))
     result: dict[str, Any] = {}
+    issues: list[str] = []
     for attempt in range(max_repairs + 1):
         if not mathlib:
             code = core_notation(code)
-        result = await asyncio.to_thread(check_lean, code)  # a subprocess with a timeout: off the event loop
+        issues = statement_issues(question, lean_statement(code), mathlib=mathlib)
+        if issues:
+            # The written theorem is not the question's: compiling it would prove something else.
+            result = {"status": "mismatch", "error": "The Lean statement does not encode the question: "
+                      + "; ".join(issues) + ".", "messages": []}
+        else:
+            result = await asyncio.to_thread(check_lean, code)  # a subprocess with a timeout: off the event loop
         attempts.append({"attempt": attempt, "status": result["status"], "error": result.get("error"),
                          "code": code})
         if result["status"] in ("verified", "unavailable", "timeout"):
             break
         if attempt == max_repairs:
             break
-        errors = "\n".join(f"line {m['line']}: {m['message']}" for m in result.get("messages") or []
-                           if m["severity"] == "error") or str(result.get("error") or "")
+        errors = str(result.get("error") or "") if issues else (
+            "\n".join(f"line {m['line']}: {m['message']}" for m in result.get("messages") or []
+                      if m["severity"] == "error") or str(result.get("error") or ""))
         code = lean_code(await complete(REPAIR_SYSTEM, f"{env}\n\nStatement:\n{question.strip()[:2000]}\n\n"
                                                        f"Previous code:\n```lean\n{code}\n```\n\nLean errors:\n{errors[:4000]}"))
     return {

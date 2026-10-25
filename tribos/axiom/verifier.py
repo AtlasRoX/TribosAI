@@ -256,11 +256,21 @@ def _verify_solve(spec: ProblemSpec, tool: str, args: dict[str, Any], data: dict
     elif len(originals) == 1:
         var = spec.variable or (args.get("variables") if isinstance(args.get("variables"), str) else None) or next(iter(var_names_of(admissible)), None)
         ok, detail, family = _completeness(originals[0], spec, admissible, var)
-        if ok is True:
-            checks.append(Check("solution list is complete", True, 2, detail))
-        elif ok is False and family:
+        claimed = re.sub(r"\s+", "", str(data.get("solution_set") or ""))
+        if family and claimed and claimed != re.sub(r"\s+", "", family):
+            # Audit I32: the tool's own set must be the re-derived one; a wrong set (ℝ for ℝ ∖ {1}, a missing excluded
+            # point or endpoint) is rejected, not silently replaced by the checker's answer.
+            checks.append(Check("the tool's solution set equals the set re-derived from the original equation", False, 2,
+                                f"tool reported {data.get('solution_set')}; the equation holds exactly on {family}"))
+        if family and ok is True:
+            checks.append(Check("infinite solution set re-derived independently (identity and excluded points)", True, 2, detail))
+        elif family and ok is False:
+            checks.append(Check("infinite solution set re-derived independently (identity and excluded points)", False, 2, detail))
+        elif family:
             complete = False
-            unc.append(f"the listed solutions are a finite subset; the full solution set is {family}")
+            unc.append(f"the solution set is {family}; {detail}")
+        elif ok is True:
+            checks.append(Check("solution list is complete", True, 2, detail))
         elif ok is False:
             checks.append(Check("solution list is complete", False, 2, detail))
         else:
@@ -274,13 +284,65 @@ def _verify_solve(spec: ProblemSpec, tool: str, args: dict[str, Any], data: dict
             unc.append("completeness of the system's solution list could not be established")
 
     var_names = sorted(var_names_of(admissible))
-    text = "; ".join(", ".join(f"{k} = {v}" for k, v in s.items()) for s in admissible) or "no solutions"
+    # The answer is the solution set itself (audit I31): an empty list of isolated roots next to an infinite family is
+    # that family, never "no solutions".
+    univariate = len(originals) == 1 and len(var_names) <= 1
+    var = (var_names[0] if var_names else spec.variable) or "x"
+    full_set: sp.Set | None = None
+    if (univariate and tool != "axiom_nsolve" and complete is not False) or family:
+        try:
+            if family:
+                # The infinite set again from the original equation (no parsing of printed sets).
+                sym = next(s for s in originals[0].free_symbols if getattr(s, "name", None) == var)
+                full_set = sp.solveset(originals[0], sym, domain=_domain_set(spec, var) or sp.S.Complexes)
+            else:
+                full_set = sp.FiniteSet(*[_expr(s[var]) for s in admissible if var in s])
+        except Exception:  # noqa: BLE001 - the text below still states the roots
+            full_set = None
     if family:
-        text += f" (general solution set: {family})"
+        text = f"{var} ∈ {pretty_set(full_set)}" if full_set is not None else f"{var} ∈ {family}"
+    else:
+        text = "; ".join(", ".join(f"{k} = {v}" for k, v in s.items()) for s in admissible) or "no solutions"
     answer = {"text": text, "solutions": admissible, "variables": var_names}
+    if full_set is not None:
+        answer["set_text"] = pretty_set(full_set)
     if family:
         answer["solution_set"] = family
     return _finish(checks, unc, answer, complete=complete)
+
+
+def _pretty_value(v: sp.Expr) -> str:
+    return str(sp.sstr(v)).replace("I", "i").replace("sqrt", "√").replace("**", "^").replace("-", "−").replace("*", "·")
+
+
+def pretty_set(s: sp.Set | None) -> str:
+    """Mathematical set notation: ∅, {2}, {−i, i}, ℝ ∖ {1}, ℝ, [0, 1)."""
+    if s is None:
+        return ""
+    if s is sp.S.EmptySet:
+        return "∅"
+    if s is sp.S.Reals:
+        return "ℝ"
+    if s is sp.S.Complexes:
+        return "ℂ"
+    if isinstance(s, sp.FiniteSet):
+        items = sorted(s, key=lambda v: (float(sp.re(v)), float(sp.im(v))) if v.is_number else (0.0, 0.0))
+        return "{" + ", ".join(_pretty_value(v) for v in items) + "}"
+    for universe, name in ((sp.S.Reals, "ℝ"), (sp.S.Complexes, "ℂ")):
+        try:
+            if s.is_subset(universe):
+                gaps = sp.Complement(universe, s)
+                if isinstance(gaps, sp.FiniteSet):
+                    return f"{name} ∖ {pretty_set(gaps)}"
+        except Exception:  # noqa: BLE001
+            pass
+    if isinstance(s, sp.Interval):
+        lo = "−∞" if s.start == -sp.oo else _pretty_value(s.start)
+        hi = "∞" if s.end == sp.oo else _pretty_value(s.end)
+        return f"{'(' if s.left_open else '['}{lo}, {hi}{')' if s.right_open else ']'}"
+    if isinstance(s, sp.Union):
+        return " ∪ ".join(pretty_set(a) for a in s.args)
+    return str(s)
 
 
 def var_names_of(solutions: list[dict[str, str]]) -> set[str]:
@@ -346,7 +408,30 @@ def _completeness(res: sp.Expr, spec: ProblemSpec, admissible: list[dict[str, st
         return False, f"missing {missing}", None
     if isinstance(sset, sp.ConditionSet):
         return None, "solveset returned a condition set", None
-    return False, "infinite solution set", str(sset)
+    # An infinite set is checked without solveset (audit I32): the numerator of the equation over one denominator must
+    # vanish identically, and the set must be the domain minus exactly the points where a written denominator is zero.
+    ok, detail = _infinite_set_check(res, spec, sym, domain, sset)
+    return ok, detail, str(sset)
+
+
+def _infinite_set_check(res: sp.Expr, spec: ProblemSpec, sym: sp.Symbol, domain: sp.Set, sset: sp.Set) -> tuple[bool | None, str]:
+    from .definitions import singular_points
+
+    num, den = sp.fraction(sp.together(res))
+    if sp.expand(num) != 0:
+        return None, "infinite set reported for an equation that is not an identity: no independent check applies"
+    written = spec.expression or ""
+    excluded = set(singular_points(written.replace("=", "-(", 1) + ")" if "=" in written else written, sym.name))
+    try:
+        excluded |= {r for r in sp.solveset(den, sym, domain=domain) if r.is_number} if den.has(sym) else set()
+    except Exception:  # noqa: BLE001
+        return None, "the denominator's zeros could not be determined"
+    expected = sp.Complement(domain, sp.FiniteSet(*excluded)) if excluded else domain
+    same = sp.Complement(expected, sset) is sp.S.EmptySet and sp.Complement(sset, expected) is sp.S.EmptySet
+    gaps = f" minus {{{', '.join(sp.sstr(e) for e in sorted(excluded, key=lambda v: float(sp.re(v))))}}}" if excluded else ""
+    if same:
+        return True, f"identity: the numerator over a common denominator is 0, so every point of {domain}{gaps} solves it"
+    return False, f"the equation holds on {domain}{gaps}, not on the reported set {sset}"
 
 
 def _system_completeness(originals: list[sp.Expr], admissible: list[dict[str, str]], spec: ProblemSpec) -> tuple[bool | None, str]:

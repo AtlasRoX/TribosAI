@@ -115,6 +115,16 @@ def _given_quantities(text: str) -> int:
     return sum(1 for m in _GIVEN_QUANTITY_RE.finditer(text) if is_unit_word(m.group(1).split("/")[0]))
 
 
+# "the current accepted status of", "acknowledge its accepted status", "has it been proved", "is it still open".
+_STATUS_NEED_RE = re.compile(
+    r"(?i:\b(?:current|accepted|present|official|known)\s+(?:\w+\s+)?status\b)|(?i:\bstatus\s+of\s+(?:the\s+)?)[A-Z]\w+|"
+    r"(?i:\b(?:has|have)\s+(?:it|they|this|the\s+[\w'’ -]{2,40}?)\s+(?:ever\s+|yet\s+|already\s+)?been\s+(?:proved|proven|"
+    r"disproved|solved|resolved|settled)\b)|(?i:\bis\s+(?:it|this|the\s+[\w'’ -]{2,40}?)\s+(?:still\s+)?(?:open|unsolved|"
+    r"unresolved|proved|proven|solved)\b)|(?i:\bis\s+)[A-Z][\w'’-]+(?:\s+[\w'’-]+){0,3}\s+(?i:proved|proven|solved|open)\b")
+STATUS_REASON = ("the answer is the current accepted status of a named problem, a fact about the field that a source "
+                 "must confirm")
+STATUS_MIXED_REASON = ("the request includes the current accepted status of a named problem, which a source can "
+                       "confirm; the mathematical work itself needs no outside evidence")
 FORMAT_REASON = "the request is to return given text exactly; no outside evidence applies"
 SELF_CONTAINED_REASON = ("mathematics stated in the question (a proof, derivation or calculation from its own "
                          "definitions): answered by reasoning and checked computation, no outside evidence needed; ask "
@@ -147,6 +157,14 @@ def assess_evidence_need(query: str, ctx: Any = None) -> EvidenceNeed:
     when = _match(_TIME_RE, text)
     if when:
         return EvidenceNeed("required", "current", "the answer depends on recent or dated information", when)
+    status = _match(_STATUS_NEED_RE, text)
+    if status:
+        # Audit I38: the accepted status of a named problem is a fact about the field, not about the question's own
+        # definitions. Asked alone, it needs a source; as one part of a proof or investigation, a source can confirm
+        # that part while the mathematics itself stays self-contained.
+        if _PROOF_RE.search(text) or re.search(r"(?i)\b(?:attempt|investigat\w*|derive|prove|disprove)\b", text):
+            return EvidenceNeed("optional", "current", STATUS_MIXED_REASON, status)
+        return EvidenceNeed("required", "current", STATUS_REASON, status)
     empirical = _match(_EMPIRICAL_RE, text)
     if empirical:
         return EvidenceNeed("optional", "empirical", "the answer uses measured or tabulated values", empirical)

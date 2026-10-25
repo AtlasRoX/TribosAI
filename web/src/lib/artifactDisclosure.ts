@@ -175,3 +175,83 @@ export function artifactDisclosure(input: DisclosureInput): Record<string, boole
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Attention: why a collapsed card says "needs a look" (audit I42). Unlike the disclosure policy above (what would be
+// worth opening for this question), a card is flagged only for an actual warning, and the reason is shown with it.
+
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
+}
+
+/** Why a run summary needs a look, or "" (a partial or failed task, open sub-questions, failed calls or phases). */
+export function runAttentionReason(run: Data, taskStatus?: DisclosureInput["taskStatus"]): string {
+  if (taskStatus) {
+    const reasons = list(taskStatus.incomplete_reasons).map(String).filter(Boolean);
+    if (reasons.length) return reasons[0];
+    if (taskStatus.task_status && taskStatus.task_status !== "completed") {
+      return `The task is ${String(taskStatus.task_status).replace(/_/g, " ")}`;
+    }
+    const unresolved = list(taskStatus.unresolved).length;
+    if (unresolved) return `${plural(unresolved, "part")} of the question not fully answered`;
+  }
+  if (!run || typeof run !== "object") return "";
+  if (run.budget?.exhausted) return "The agent budget ran out";
+  const open = list(run.sub_questions).filter((q) => q && q.status && !["answered", "done"].includes(String(q.status))).length;
+  if (open) return `${plural(open, "sub-question")} not answered by a tool-backed step`;
+  const failedCalls = list(run.trace).filter((t) => t && t.success === false).length;
+  if (failedCalls) return `${plural(failedCalls, "tool call")} failed`;
+  const phases = list(run.phases).filter((p) => p && /^(?:error|budget|timeout|llm_unavailable|cancelled)$/.test(String(p.status || "")));
+  if (phases.length) return `Phase ${String(phases[0].label || phases[0].key || "")} ${String(phases[0].status).replace(/_/g, " ")}`.replace(/\s+/g, " ");
+  return "";
+}
+
+/** The warning each card carries, keyed like ExecutionArtifacts; a card without a key has nothing to flag. */
+export function artifactAttention(input: DisclosureInput): Record<string, string> {
+  const arts = input.artifacts || {};
+  const out: Record<string, string> = {};
+  for (const [key, data] of Object.entries(arts)) {
+    if (data === null || data === undefined || typeof data !== "object") continue;
+    let reason = "";
+    switch (key) {
+      case "math_agent": {
+        const status = String((data as Record<string, unknown>).status || "");
+        if (["failed", "unverified", "partially_verified"].includes(status)) reason = `The mathematics is ${status.replace(/_/g, " ")}`;
+        break;
+      }
+      case "formal_proof": {
+        const status = String((data as Record<string, unknown>).status || "");
+        if (["failed", "timeout", "mismatch"].includes(status)) reason = String((data as Record<string, unknown>).error || `Lean: ${status}`).slice(0, 200);
+        break;
+      }
+      case "evidence_conflicts":
+        if (list((data as Data)?.conflicts).some((c) => c && String(c.label || "") === "contradicts")) {
+          reason = "A retrieved passage contradicts a claim";
+        } else if (conflictsNeedAttention(data as Data)) {
+          reason = "Counter-evidence was classified by a heuristic, not a model check";
+        }
+        break;
+      case "claim_confidence":
+        if (lowSupport(data as Data)) reason = "Some claims have low support in the retrieved evidence (a support score, not a truth probability)";
+        break;
+      case "agent_run":
+        reason = runAttentionReason(data as Data, input.taskStatus);
+        break;
+      case "agent_plan": {
+        const plan = data as Record<string, unknown>;
+        const rejected = list(plan.rejected).length;
+        if (rejected) reason = `${plural(rejected, "planned call")} rejected`;
+        else if (plan.planner === "none" || /fail|unusable|budget/.test(String(plan.status || ""))) reason = "The planner did not run";
+        else if (list(plan.nodes).some((n) => n && String(n.status || "") === "error")) reason = "A planned call failed";
+        break;
+      }
+      default:
+        if (failed(data as Data)) {
+          const err = (data as Record<string, unknown>).error;
+          reason = typeof err === "string" && err.trim() ? `This step failed: ${err.trim().slice(0, 160)}` : "This step failed";
+        }
+    }
+    if (reason) out[key] = reason;
+  }
+  return out;
+}

@@ -283,6 +283,11 @@ async def assemble_result(run: RunContext) -> Any:
 
             items = assess_deliverables(run.resolved_query or run.query, candidate_response,
                                         getattr(verification_report, "math_audit", None))
+            if getattr(run, "synthesis_model", "") == "verified_computation":
+                # The answer is the checked computation in the requested form ("∅", "h(1) = 6"): every requested
+                # item is delivered by it, which word overlap with the question cannot see (audit I27/I43).
+                items = [{**it, "status": "verified", "where": "the verified computation, rendered in the requested form"}
+                         for it in items]
             task_status = apply_deliverables(task_status, items)
         except Exception as exc:  # noqa: BLE001 - completeness notes are additive
             logger.warning("Deliverable assessment failed: %s", exc)

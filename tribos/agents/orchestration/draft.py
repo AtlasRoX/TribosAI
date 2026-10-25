@@ -291,13 +291,26 @@ def build_prompt(run: RunContext, feedback: list[str] | None = None, previous_dr
     )
 
 
+def _verified_render(run: RunContext) -> str | None:
+    """The answer rendered from the math agent's verified result when it alone is the requested answer."""
+    from ...axiom.render import render_verified_answer
+
+    agent_state = run.agent_state
+    art = (getattr(agent_state, "artifacts", None) or {}).get("math_agent") if agent_state is not None else None
+    try:
+        return render_verified_answer(run.clean_query or run.query, art, getattr(run, "output_contract", None))
+    except Exception as exc:  # noqa: BLE001 - the writer path remains
+        logger.debug("Verified rendering skipped: %s", exc)
+        return None
+
+
 async def write_first_draft(run: RunContext) -> None:
     """Stream the first draft from the synthesis model; on a model error, show the raw evidence instead."""
     ao = orchestrator_module()
     orch = run.orch
     agent_state, tool_results, model_name, api_key = run.agent_state, run.tool_results, run.model_name, run.api_key
     emit, send, record, on_reasoning, on_text = run.emit, run.send, run.record, run.on_reasoning, run.on_text
-    successful_sources, clean_query, scope_notes = run.successful_sources, run.clean_query, run.scope_notes
+    successful_sources, scope_notes = run.successful_sources, run.scope_notes
     vivarix_summary, lumicell_summary = run.vivarix_summary, run.lumicell_summary
     lithoscribe_summary, synapta_summary = run.lithoscribe_summary, run.synapta_summary
 
@@ -326,6 +339,21 @@ async def write_first_draft(run: RunContext) -> None:
     from ...utils.output_contract import writer_rule
 
     system_prompt += writer_rule(getattr(run, "output_contract", None))  # last, so it overrides the report template above
+
+    rendered = _verified_render(run)
+    if rendered is not None:
+        # The verified computation already is the whole requested answer in the requested form: it is the answer,
+        # with no writer call (same payload whether or not a writer is healthy; no model time spent copying values).
+        await emit("synthesis", title="Answer rendered from the verified computation",
+                   text="the checked result is the requested answer in the requested form; no writer model was needed")
+        await on_text(rendered)
+        record("set_synthesis", system_prompt_sha256=hashlib.sha256(system_prompt.encode("utf-8")).hexdigest(),
+               synthesis_prompt_sha256=hashlib.sha256(synthesis_prompt.encode("utf-8")).hexdigest(),
+               scope_notes=list(scope_notes), llm_ok=True, fallback_error=None, response_words=len(rendered.split()),
+               temperature=None, synthesis_model="verified_computation", synthesis_served_model=None)
+        run.synthesis_prompt, run.system_prompt, run.synthesis_model = synthesis_prompt, system_prompt, "verified_computation"
+        run.llm_ok, run.candidate_response, run.streamed_draft = True, rendered, rendered
+        return
 
     distinct = distinct_results(tool_results)  # an alias key ("lithoscribe", "vivarix") is not another source
     n_ok = sum(1 for r in distinct.values() if r.success)
@@ -398,7 +426,9 @@ async def write_first_draft(run: RunContext) -> None:
             except Exception as exc:  # noqa: BLE001
                 # A transient provider failure (HTTP 500, dropped connection) gets one more attempt before the answer
                 # falls back to the raw evidence; anything already shown is cleared first, so nothing is duplicated.
-                if attempt == 2 or type(exc).__name__ not in ao._TRANSIENT_STREAM_ERRORS:
+                from ...utils.llm.provider_retry import already_retried
+
+                if attempt == 2 or type(exc).__name__ not in ao._TRANSIENT_STREAM_ERRORS or already_retried(llm, exc):
                     raise
                 logger.warning("First draft failed (%s); retrying once without extended reasoning", type(exc).__name__)
                 if streamed_chars[0]:
@@ -527,19 +557,35 @@ async def write_first_draft(run: RunContext) -> None:
         ]
         body = "".join(f"#### {title_}\n{text_}\n\n" for title_, text_ in sections if (text_ or "").strip())
         contract = getattr(run, "output_contract", None)
-        if math_status == "verified" and math_answer.get("text") and contract is not None and contract.strict_form:
-            # The user fixed the answer's form and the verified computation already answers it: its checked text is
-            # the answer (the task status reports that no model wrote it), not a report about the failed writer.
+        rendered_fallback = _verified_render(run)
+        if rendered_fallback is not None:
+            # The verified result alone is the complete requested answer: the run is complete without a writer.
+            # The writer's failure stays recorded (fallback_error); the answer is attributed to the computation.
+            candidate_response, llm_ok, synthesis_model = rendered_fallback, True, "verified_computation"
+            await on_text(rendered_fallback)
+        elif math_status == "verified" and math_answer.get("text") and contract is not None and contract.strict_form:
+            # The user fixed the answer's form and the verified computation answers it: its checked text is the
+            # answer (the task status reports that no model wrote it), not a report about the failed writer.
             candidate_response = str(math_answer["text"]).strip()
-        else:
+        elif body.strip() or plugin_sections:
+            # Computed results exist: they are shown as results, never preceded by the question (audit I28).
             candidate_response = (
-                f"### Results gathered for: {clean_query}\n\n"
-                "The written answer could not be produced, so these are the tool results as computed, without "
-                "interpretation.\n\n"
+                f"The written answer could not be produced ({fallback_reason(err)}). These are the computed results, "
+                "without interpretation:\n\n"
                 f"{body}{''.join(plugin_sections)}"
                 "#### Evidence limitations\n"
                 f"No written answer: {fallback_reason(err)}. Check the results above against the question before "
                 "relying on them."
+            )
+        else:
+            # Nothing was computed: say which stages failed; the request is not presented as evidence or results.
+            failed = sorted({str(getattr(r, "tool_name", "") or k) for k, r in (tool_results or {}).items()
+                             if r is not None and not getattr(r, "success", False)})
+            candidate_response = (
+                f"No answer could be produced. The writing model failed ({fallback_reason(err)})"
+                + (f", and these tools returned no result: {', '.join(failed[:8])}" if failed else
+                   ", and no tool produced a result for this question")
+                + ". No mathematical or evidence result is available from this run; please try again."
             )
 
     # What the client has on screen: the streamed draft (or, after a model error, nothing it must replace).
@@ -557,7 +603,7 @@ async def write_first_draft(run: RunContext) -> None:
         temperature=getattr(llm, "temperature", None) if llm_ok else None,
         # PRV-002: the model asked to write the answer and the one whose client actually served it.
         synthesis_model=synthesis_model,
-        synthesis_served_model=getattr(llm, "model_name", None) if llm_ok else None,
+        synthesis_served_model=getattr(llm, "model_name", None) if llm_ok and fallback_error is None else None,
     )
     run.synthesis_prompt, run.system_prompt, run.synthesis_model = synthesis_prompt, system_prompt, synthesis_model
     run.llm_ok, run.candidate_response, run.streamed_draft = llm_ok, candidate_response, streamed_draft

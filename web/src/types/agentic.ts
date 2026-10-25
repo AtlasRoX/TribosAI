@@ -438,6 +438,9 @@ export interface EvidenceConflictsArtifact {
   claims_checked?: number;
   classifier?: "nli" | "llm" | "heuristic" | string;
   conflicts?: EvidenceConflict[];
+  /** Rows about claims the final answer no longer makes (audit I40): history, not findings about the answer. */
+  history?: EvidenceConflict[];
+  history_note?: string;
 }
 
 export interface ClaimConfidenceRow {
