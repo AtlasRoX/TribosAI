@@ -108,6 +108,9 @@ No dependencies added; intervals are local normal approximations, with singular 
 
 ## T3: Uncertainty propagation
 
+**Status: DONE (2026-10-25).** Added `tribos/physis/uncertainty.py` with first-order GUM and vectorised Monte Carlo propagation, Pint unit handling, CODATA autofill, a contribution budget, the `physis_propagate_uncertainty` tool and the `uncertainty` result card.
+No dependencies added; a compound unit is reported by its SI name ("joule") when one exists, else by its expansion. Verified: 1356 Python tests passed (15 skipped), 151 web tests passed; all gates green.
+
 **Goal.** Add `tribos/physis/uncertainty.py` with the tool `physis_propagate_uncertainty` (domain `physis`).
 
 **Inputs.**

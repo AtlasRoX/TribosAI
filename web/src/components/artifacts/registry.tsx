@@ -8,6 +8,8 @@
 // MessageArtifacts itself.
 
 import type React from "react";
+import { UncertaintyArtifact } from "./UncertaintyArtifact";
+import { FEATURE_ARTIFACT_KEYS } from "./artifactKeys";
 
 export type FeatureArtifactProps = {
   /** The value of execution_artifacts[key] for this message. */
@@ -24,4 +26,5 @@ export type FeatureArtifact = {
 
 export const FEATURE_ARTIFACTS: FeatureArtifact[] = [
   // Feature entries (one line each), e.g. { key: "pde", Component: PdeArtifact },
+  { key: "uncertainty", Component: UncertaintyArtifact },
 ];

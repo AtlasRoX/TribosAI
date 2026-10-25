@@ -72,6 +72,18 @@ class PhysisEncyclopediaInput(BaseModel):
     limit: int = Field(default=3, ge=1, le=10, description="Maximum number of encyclopedia entries to return.")
 
 
+class PhysisUncertaintyInput(BaseModel):
+    expression: str = Field(..., min_length=1, description="Mathematical or physical expression to propagate uncertainty through, e.g. 'm * v^2 / 2' or 'exp(-k*t)'.")
+    variables: dict[str, Any] = Field(..., description="Mapping of variable names to their values and uncertainties, e.g. {'m': {'value': 2.0, 'uncertainty': 0.1, 'unit': 'kg'}}.")
+    correlations: list[dict[str, Any]] | dict[str, Any] | None = Field(default=None, description="Optional correlation coefficients between pairs of variables.")
+    method: str = Field(default="both", description="Method to use: 'linear' (first-order GUM), 'monte_carlo' (sampling), or 'both'.")
+    n_samples: int = Field(default=50000, ge=1000, le=500000, description="Number of Monte Carlo samples.")
+    seed: int | None = Field(default=None, description="Random seed for reproducible Monte Carlo sampling.")
+    confidence: float = Field(default=0.95, ge=0.5, le=0.999, description="Confidence level for coverage interval.")
+    autofill_constants: bool = Field(default=True, description="Whether to automatically look up CODATA constants (e.g. c, G, h, k_B) if present in the expression.")
+
+
+
 def _flatten_canonical_ids(data: dict[str, Any]) -> dict[str, str]:
     out: dict[str, str] = {}
     cid = data.get("canonical_id")
@@ -244,8 +256,60 @@ async def execute_physis_encyclopedia(query: str, limit: int = 3) -> Any:
         )
 
 
+def execute_physis_uncertainty(
+    expression: str,
+    variables: dict[str, Any],
+    correlations: list[dict[str, Any]] | dict[str, Any] | None = None,
+    method: str = "both",
+    n_samples: int = 50000,
+    seed: int | None = None,
+    confidence: float = 0.95,
+    autofill_constants: bool = True,
+) -> Any:
+    """Propagate measurement uncertainty through an expression (GUM linear and/or Monte Carlo)."""
+    from tribos.physis.uncertainty import propagate_uncertainty
+    from tribos.tools.registry import ErrorType, ToolResult
+
+    try:
+        data = propagate_uncertainty(
+            expression=expression,
+            variables=variables,
+            correlations=correlations,
+            method=method,
+            n_samples=n_samples,
+            seed=seed,
+            confidence=confidence,
+            autofill_constants=autofill_constants,
+        )
+        return ToolResult(
+            success=True,
+            tool_name="physis_propagate_uncertainty",
+            data=data,
+            canonical_ids={},
+            metadata={
+                "method": method,
+                "unit": data.get("unit", ""),
+                "verified": True,
+            },
+        )
+    except ValueError as exc:
+        return ToolResult(
+            success=False,
+            tool_name="physis_propagate_uncertainty",
+            error=str(exc),
+            error_type=ErrorType.VALIDATION_ERROR,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return ToolResult(
+            success=False,
+            tool_name="physis_propagate_uncertainty",
+            error=f"{type(exc).__name__}: {exc}",
+            error_type=ErrorType.INTERNAL_ERROR,
+        )
+
+
 def register_tools(registry: Any) -> None:
-    """Register all 6 Physis physical/mathematical reference tools in the ToolRegistry."""
+    """Register all 7 Physis physical/mathematical reference tools in the ToolRegistry."""
     from tribos.tools.registry import AdapterType, ToolUniverseEntry
 
     registry.register(
@@ -338,20 +402,62 @@ def register_tools(registry: Any) -> None:
         executor=execute_physis_encyclopedia,
     )
 
+    registry.register(
+        ToolUniverseEntry(
+            name="physis_propagate_uncertainty",
+            description=(
+                "Propagate measurement uncertainty through a formula: first-order GUM (linear) with sensitivity "
+                "coefficients and a contribution budget, vectorised Monte Carlo with a coverage interval, optional "
+                "correlated inputs and optional CODATA constant autofill. Reports the result as value +/- U (k=2)."
+            ),
+            domain="physis",
+            adapter_type=AdapterType.LOCAL_COMPUTE,
+            input_schema=PhysisUncertaintyInput,
+            canonical_id_types=[],
+            timeout_seconds=30.0,
+            tags=["uncertainty", "error_propagation", "gum", "monte_carlo", "tolerance", "measurement", "statistics"],
+            is_async=False,
+        ),
+        executor=execute_physis_uncertainty,
+    )
+
+
+def _uncertainty_artifact(tool_results: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    """The propagated uncertainty of the last successful uncertainty run, for the browser's result card."""
+    for result in reversed(list(tool_results.values())):
+        if getattr(result, "success", False) and getattr(result, "tool_name", "") == "physis_propagate_uncertainty":
+            data = getattr(result, "data", {}) or {}
+            if data.get("nominal_value") is not None:
+                return {"uncertainty": data}
+    return {}
+
+
+def register_hooks() -> None:
+    """Register the Physis hooks (idempotent)."""
+    from tribos.extensions import hooks
+
+    hooks.register_artifact_builder("uncertainty", _uncertainty_artifact)
+
+
+register_hooks()
+
 
 __all__ = [
     "PhysisConstantsInput",
     "PhysisEncyclopediaInput",
     "PhysisMaterialsInput",
     "PhysisOeisInput",
+    "PhysisUncertaintyInput",
     "PhysisUnitsInput",
     "PhysisWolframInput",
     "execute_physis_constants",
     "execute_physis_encyclopedia",
     "execute_physis_materials",
     "execute_physis_oeis",
+    "execute_physis_uncertainty",
     "execute_physis_units",
     "execute_physis_wolfram",
     "get_physis_engine",
+    "register_hooks",
     "register_tools",
 ]

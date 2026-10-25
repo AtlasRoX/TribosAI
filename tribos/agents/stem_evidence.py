@@ -297,6 +297,31 @@ def render_physis(res: Any) -> list[str]:
     elif "result" in d and not d.get("skipped"):
         out.append(f'<physis tool="{_attr(tool)}" source="Wolfram|Alpha">')
         out.append(f"<result>{_text(d.get('result'))}</result>")
+    elif "nominal_value" in d and "standard_uncertainty" in d:
+        out.append(f'<physis tool="{_attr(tool)}" method="{_attr(d.get("method") or "both")}">')
+        out.append(
+            f'<uncertainty_result nominal_value="{_attr(num(d.get("nominal_value")))}" '
+            f'standard_uncertainty="{_attr(num(d.get("standard_uncertainty")))}" '
+            f'expanded_uncertainty="{_attr(num(d.get("expanded_uncertainty")))}" '
+            f'coverage_factor="{_attr(num(d.get("coverage_factor") or 2.0))}" '
+            f'unit="{_attr(d.get("unit") or "")}">{_text(d.get("formatted") or "", 120)}</uncertainty_result>'
+        )
+        for b in (d.get("budget") or [])[:LIST_ITEMS]:
+            if isinstance(b, dict):
+                out.append(
+                    f'<uncertainty_contribution variable="{_attr(b.get("variable"))}" '
+                    f'value="{_attr(num(b.get("value")))}" std_uncertainty="{_attr(num(b.get("std_uncertainty")))}" '
+                    f'unit="{_attr(b.get("unit") or "")}" sensitivity="{_attr(num(b.get("sensitivity")))}" '
+                    f'percentage="{_attr(num(b.get("percentage")))}"/>'
+                )
+        mc = d.get("monte_carlo")
+        if isinstance(mc, dict) and mc.get("mean") is not None:
+            out.append(
+                f'<monte_carlo mean="{_attr(num(mc.get("mean")))}" std="{_attr(num(mc.get("std")))}" '
+                f'skewness="{_attr(num(mc.get("skewness")))}" n_samples="{_attr(mc.get("n_samples") or 0)}"/>'
+            )
+        for w in (d.get("warnings") or [])[:5]:
+            out.append(f"<warning>{_text(w, 300)}</warning>")
     else:
         return []
     out.append("</physis>")
