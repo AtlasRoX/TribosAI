@@ -6,6 +6,7 @@ import { Card, Disclosure, ExtLink, Pill, Section, Stats, arr, fmt, isNum, str, 
 import { changeText, checkSteadyState, largestChange } from "@/lib/simulationMath";
 import styles from "./SimulationArtifact.module.css";
 import { TrajectoryCharts } from "./TrajectoryCharts";
+import { ExplorePanel } from "./simulation/ExplorePanel";
 
 interface SimulationArtifactProps {
   data?: Record<string, any> | null;
@@ -237,6 +238,8 @@ export function SimulationArtifact({ data, scan }: SimulationArtifactProps) {
           />
         </Section>
       ) : null}
+
+      {data?.spec && typeof data.spec === "object" && data.spec.rhs ? <ExplorePanel spec={data.spec} original={data} /> : null}
 
       {species.length > 0 && hasAnyValues && (
         <Section

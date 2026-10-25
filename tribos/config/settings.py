@@ -269,6 +269,13 @@ _SETTINGS: Sequence[Setting] = (
     Setting("TRIBOS_PDE_MAX_SNAPSHOTS", "int", 25, "Snapshots one PDE solve returns.", _SIM, min=2, max=200),
     Setting("TRIBOS_PDE_MAX_CONVERGENCE_LEVELS", "int", 3, "Nested grids of the PDE mesh-convergence study.", _SIM,
             min=2, max=4),
+    # --- Interactive simulation API (app/backend/routers/simulate.py) ---------------------------------------------
+    Setting("TRIBOS_SIMULATE_TIMEOUT_S", "float", 10.0, "Seconds one interactive simulate, bifurcation or vector-field "
+            "call may run.", _SIM, min=1.0, max=60.0),
+    Setting("TRIBOS_SIMULATE_RATE_PER_MIN", "int", 60, "Interactive simulation calls one user may make per minute.",
+            _SIM, min=1, max=10000),
+    Setting("TRIBOS_SIMULATE_MAX_CONCURRENT", "int", 2, "Interactive simulation calls one user may have running at "
+            "once.", _SIM, min=1, max=32),
     # --- Code sandbox ----------------------------------------------------------------------------------------------
     Setting("TRIBOS_SANDBOX", "bool", True, "Code-execution sandbox tool; on by default, off/0/false/no disables it.", _SBX),
     Setting("TRIBOS_SANDBOX_TIMEOUT_S", "int", 60, "Seconds one sandboxed execution may run.", _SBX, min=5, max=110),

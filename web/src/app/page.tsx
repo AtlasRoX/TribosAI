@@ -94,6 +94,7 @@ import {
   type StorageNotice,
 } from "@/services/localStorageService";
 import { JobFailedError, cancelRun, createJob, fetchConversationTitle, fetchFrameworks, getJob, normalizeAgentOptions, skipRunStep, steerRun, streamJobEvents, toAgentOptions } from "@/services/agentService";
+import { ApiContext } from "@/components/ApiContext";
 import { ApiError, apiFetch, errorMessage, errorStatus, jsonInit, readSseEvents, requestJson, type RequestOptions } from "@/services/apiClient";
 import { ArtifactRenderFallback, ErrorBoundary, MessageRenderFallback } from "@/components/ErrorBoundary";
 import { useFocusTrap } from "@/lib/useFocusTrap";
@@ -451,6 +452,7 @@ export default function TribosAssistant() {
 
   // Page calls note auth problems and keep the browser's own network error text ("Failed to fetch").
   const pageApi: RequestOptions = { onStatus: noteAuthStatus, wrapNetworkErrors: false };
+  const cardApi = { backendUrl, authHeaders, options: pageApi };
 
   /** "<what> (status N)." for an HTTP failure, "<what>: <reason>." for a network failure. */
   const describeFailure = (what: string, err: unknown): string =>
@@ -3540,11 +3542,13 @@ export default function TribosAssistant() {
                             resetKey={msg.execution_artifacts}
                             fallback={<ArtifactRenderFallback label="result cards" data={msg.execution_artifacts} />}
                           >
-                            <MessageArtifacts
-                              artifacts={msg.execution_artifacts}
-                              question={idx > 0 && messages[idx - 1].sender === "user" ? messages[idx - 1].content : undefined}
-                              taskStatus={msg.task_status}
-                            />
+                            <ApiContext.Provider value={cardApi}>
+                              <MessageArtifacts
+                                artifacts={msg.execution_artifacts}
+                                question={idx > 0 && messages[idx - 1].sender === "user" ? messages[idx - 1].content : undefined}
+                                taskStatus={msg.task_status}
+                              />
+                            </ApiContext.Provider>
                           </ErrorBoundary>
                         </>
                       ) : (

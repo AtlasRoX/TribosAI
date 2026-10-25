@@ -14,6 +14,8 @@ interface TrajectoryChartsProps {
   timeUnit?: string;
   /** Unit per series when the run states one (from the question's own values), e.g. {x: "m", v: "m/s"}. */
   units?: Record<string, string>;
+  /** A reference run drawn faintly under each series (the original run while exploring), on its own times. */
+  overlay?: { t: number[]; series: Record<string, number[]> } | null;
 }
 
 const HEIGHT = 132;
@@ -135,21 +137,24 @@ function Chart({
   unit,
   hover,
   setHover,
+  ref0,
 }: {
   name: string;
   t: number[];
   y: number[];
   timeUnit: string;
   unit?: string;
+  /** The faint reference series (its own times), included in the axis range. */
+  ref0?: { t: number[]; y: number[] } | null;
   /** The sample under the crosshair, shared by every chart of the run so x and v are read at the same time. */
   hover: number | null;
   setHover: React.Dispatch<React.SetStateAction<number | null>>;
 }) {
   const [ref, width] = useWidth();
   const svgRef = useRef<SVGSVGElement>(null);
-  const t0 = t[0];
-  const t1 = t[t.length - 1];
-  const finite = y.filter(Number.isFinite);
+  const t0 = Math.min(t[0], ref0?.t[0] ?? t[0]);
+  const t1 = Math.max(t[t.length - 1], ref0?.t[ref0.t.length - 1] ?? t[t.length - 1]);
+  const finite = (ref0 ? [...y, ...ref0.y] : y).filter(Number.isFinite);
   const yMin = Math.min(...finite);
   const yMax = Math.max(...finite);
   // An outer tick bounds the axis only when it adds at most 15% of the data range ("0.5" over 0.49, not "4" over 2.05);
@@ -177,6 +182,14 @@ function Chart({
     }
     return d;
   }, [t, y, sx, sy, plotW]);
+  const refPath = useMemo(() => {
+    if (!plotW || !ref0) return "";
+    let d = "";
+    for (const i of pathIndices(ref0.y, MAX_PATH_POINTS)) {
+      d += `${d ? "L" : "M"}${sx(ref0.t[i]).toFixed(1)},${sy(ref0.y[i]).toFixed(1)}`;
+    }
+    return d;
+  }, [ref0, sx, sy, plotW]);
 
   const onPointer = (e: React.PointerEvent<SVGRectElement>) => {
     const box = e.currentTarget.getBoundingClientRect();
@@ -239,6 +252,7 @@ function Chart({
                 {tickText(v)}
               </text>
             ))}
+            {refPath && <path d={refPath} className={styles.line} opacity={0.28} strokeDasharray="4 3" />}
             <path d={path} className={styles.line} />
             {hover !== null && (
               <g>
@@ -278,7 +292,7 @@ function Chart({
  * variables carry different units, so they never share an axis). A crosshair snaps to the nearest sample, arrow keys
  * read values from the keyboard, and the sampled values are available as a table.
  */
-export function TrajectoryCharts({ t, series, timeUnit = "s", units = {} }: TrajectoryChartsProps) {
+export function TrajectoryCharts({ t, series, timeUnit = "s", units = {}, overlay = null }: TrajectoryChartsProps) {
   const [hover, setHover] = useState<number | null>(null);
   const names = Object.keys(series).filter((k) => Array.isArray(series[k]) && series[k].length === t.length);
   if (t.length < 2 || !names.length) return null;
@@ -288,7 +302,17 @@ export function TrajectoryCharts({ t, series, timeUnit = "s", units = {} }: Traj
     <div className={styles.root}>
       <div className={styles.grid2}>
         {names.map((n) => (
-          <Chart key={n} name={n} t={t} y={series[n]} timeUnit={timeUnit} unit={units[n]} hover={hover} setHover={setHover} />
+          <Chart
+            key={n}
+            name={n}
+            t={t}
+            y={series[n]}
+            timeUnit={timeUnit}
+            unit={units[n]}
+            hover={hover}
+            setHover={setHover}
+            ref0={overlay && Array.isArray(overlay.series[n]) && overlay.series[n].length === overlay.t.length ? { t: overlay.t, y: overlay.series[n] } : null}
+          />
         ))}
       </div>
       <Disclosure summary={`Data table (${rows.length} of ${t.length} samples)`}>

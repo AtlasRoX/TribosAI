@@ -198,7 +198,8 @@ Unbound or ambiguous symbols are "not evaluated" and are never flagged.
 
 ## T6: Interactive simulation (sliders, phase portraits, bifurcation)
 
-**Started.** `tribos/dynamis/interactive.py` exists: finish it and test it.
+**Status: DONE (2026-10-25).** Added `app/backend/routers/simulate.py` (simulate, bifurcation, vector field; auth, per-user rate and concurrency limits, threaded 10 s timeout, preset fallback) over the finished `interactive.py`, and the web Explore panel (`components/simulation/*`, `simulateService.ts`, `lib/simulationExplore.ts`): debounced sliders with abort, faint original overlay and Reset, phase portrait with vector field, bifurcation tab.
+No dependencies added. A cards-level `ApiContext` passes the backend URL and auth hook to message cards; a single ODE integration cannot be interrupted, so a timed-out call keeps its user slot until it ends.
 
 **Backend: `app/backend/routers/simulate.py`.** Add the module to the router list in `main.py`. Endpoints:
 

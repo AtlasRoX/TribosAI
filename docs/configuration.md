@@ -17,7 +17,7 @@ Precedence for state directories: a specific variable (`TRIBOS_MEMORY_DIR`, `TRI
 `TRIBOS_UPLOAD_ROOT`, `TRIBOS_JOBS_DIR`, `TRIBOS_TOOL_CACHE_DIR`) wins over `TRIBOS_DATA_DIR`; with
 neither set, every store keeps its historical location under the workspace.
 
-155 variables.
+158 variables.
 
 ## State directories
 
@@ -228,6 +228,9 @@ neither set, every store keeps its historical location under the workspace.
 | `TRIBOS_PDE_MAX_GRID_2D` | int (100 to 1000000) | `6400` | `tribos/dynamis/pde/__init__.py` | Largest number of grid points in a 2D PDE solve (80 x 80). |
 | `TRIBOS_PDE_MAX_SECONDS` | float (1 to 600) | `20.0` | `tribos/dynamis/pde/__init__.py` | Wall-clock limit of one PDE solve, convergence study included. |
 | `TRIBOS_PDE_MAX_SNAPSHOTS` | int (2 to 200) | `25` | `tribos/dynamis/pde/__init__.py` | Snapshots one PDE solve returns. |
+| `TRIBOS_SIMULATE_MAX_CONCURRENT` | int (1 to 32) | `2` | `app/backend/routers/simulate.py` | Interactive simulation calls one user may have running at once. |
+| `TRIBOS_SIMULATE_RATE_PER_MIN` | int (1 to 10000) | `60` | `app/backend/routers/simulate.py` | Interactive simulation calls one user may make per minute. |
+| `TRIBOS_SIMULATE_TIMEOUT_S` | float (1 to 60) | `10.0` | `app/backend/routers/simulate.py` | Seconds one interactive simulate, bifurcation or vector-field call may run. |
 
 ## TRIBOS_SANDBOX_*: Code sandbox
 

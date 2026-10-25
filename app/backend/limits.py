@@ -43,6 +43,36 @@ class UserConcurrencyLimiter:
         return self._active.get(user_id, 0)
 
 
+class UserRateLimiter:
+    """At most `limit` requests per user in any `window_s` seconds (a sliding window); over it a caller gets 429.
+
+    Only users with requests inside the window are kept, so the table stays bounded by recently active users.
+    """
+
+    def __init__(self, limit: int, window_s: float = 60.0, max_users: int = 4096) -> None:
+        self.limit = max(1, int(limit))
+        self.window_s = float(window_s)
+        self.max_users = max(1, int(max_users))
+        self._hits: OrderedDict[str, list[float]] = OrderedDict()
+
+    def try_acquire(self, user_id: str) -> bool:
+        now = time.monotonic()
+        hits = [t for t in self._hits.get(user_id, []) if now - t < self.window_s]
+        if len(hits) >= self.limit:
+            self._hits[user_id] = hits
+            return False
+        hits.append(now)
+        self._hits[user_id] = hits
+        self._hits.move_to_end(user_id)
+        while len(self._hits) > self.max_users:
+            self._hits.popitem(last=False)
+        return True
+
+    def acquire_or_429(self, user_id: str, detail: str) -> None:
+        if not self.try_acquire(user_id):
+            raise HTTPException(status_code=429, detail=detail, headers={"Retry-After": str(int(self.window_s))})
+
+
 class RecentRequestIds:
     """Client request ids per user with an optional value (e.g. the job a request created), so a retried POST is
     recognised as the same request.
