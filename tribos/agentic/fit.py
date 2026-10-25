@@ -10,6 +10,7 @@ Writes the artifact "model_calibration" and a <model_calibration> evidence secti
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import re
@@ -197,9 +198,15 @@ class FitPhase(AgentPhase):
     def applies(self, state: AgentState) -> bool:
         if getattr(state.ctx, "scope", "research") != "research":
             return False
-        return has_calibration_intent(state.clean_query or state.query or "")
+        attached = any(getattr(a, "kind", "") in ("table", "hdf5", "mat")
+                       for a in getattr(state.ctx, "attachments", []) or [])
+        return has_calibration_intent(state.clean_query or state.query or "") or (attached and self._ode_spec(state) is not None)
 
     async def run(self, state: AgentState) -> None:
+        spec = self._ode_spec(state)
+        if spec is not None:
+            await self._run_ode(state, spec)
+            return
         ctx = state.ctx
         block = simulation_block_reason(ctx)
         model = kinetic_model_in_play(ctx)
@@ -266,6 +273,7 @@ class FitPhase(AgentPhase):
             status="running",
             agent="Vivarix",
         )
+
         res = await state.call_tool(
             TOOL,
             phase=PHASE,
@@ -308,6 +316,77 @@ class FitPhase(AgentPhase):
             summary,
             agent="Vivarix",
         )
+
+    @staticmethod
+    def _ode_spec(state: AgentState) -> dict[str, Any] | None:
+        from .hypothesis import dynamis_system
+
+        explicit = (getattr(state.ctx, "extras", {}) or {}).get("ode_spec")
+        if isinstance(explicit, dict) and explicit.get("rhs"):
+            return explicit
+        for result in reversed(list(state.tool_results.values())):
+            data = getattr(result, "data", {}) or {}
+            if getattr(result, "success", False) and isinstance(data, dict) and isinstance(data.get("spec"), dict):
+                if data["spec"].get("rhs"):
+                    return data["spec"]
+        system = dynamis_system(state.ctx, state.clean_query or state.query)
+        if system:
+            return {"rhs": system.rhs, "initial_state": system.initial_state,
+                    "parameters": system.parameters, "model_name": system.name}
+        return None
+
+    async def _run_ode(self, state: AgentState, spec: dict[str, Any]) -> None:
+        from tribos.agentic.sandbox import bound_scope, current_scope, resolve_inputs
+        from tribos.agents.stem_evidence import render_calibration
+        from tribos.dynamis.fitting import load_measurements
+        from tribos.extensions.calibration import calibration_artifact
+
+        attachments = [a for a in getattr(state.ctx, "attachments", []) or []
+                       if getattr(a, "kind", "") in ("table", "hdf5", "mat")]
+        reason = simulation_block_reason(state.ctx)
+        if not attachments:
+            reason = reason or "Attach measurements (CSV, XLSX, HDF5 or MAT) to fit this ODE."
+        if state.registry.get_entry(DYNAMIS_FIT_TOOL) is None:
+            reason = reason or "The ODE fitting tool is unavailable."
+        if state.budget.remaining_seconds() < _MIN_SECONDS_LEFT:
+            reason = reason or "The fitting time budget is exhausted."
+        if reason:
+            state.artifacts["model_calibration"] = {"status": "skipped", "reason": reason}
+            state.scope_notes.append(reason + " No fitted values are available.")
+            return
+        att = attachments[0]
+        with bound_scope(state.user_id, [a.id for a in attachments]):
+            files, errors = resolve_inputs(current_scope(), [att.id])
+            if errors or not files:
+                state.artifacts["model_calibration"] = {"status": "error", "reason": "; ".join(errors)}
+                return
+            frame = await asyncio.to_thread(load_measurements, files[0].path)
+            parameters = dict(spec.get("parameters") or {})
+            question = state.clean_query or state.query
+            named = [name for name in parameters if re.search(rf"\b{re.escape(name)}\b", question)]
+            kwargs = {k: spec[k] for k in ("rhs", "initial_state", "parameters", "model_name", "method") if k in spec}
+            mapping = {s: s for s in spec["rhs"] if s in frame}
+            for match in re.finditer(r"\bmap\s+(\w+)\s+(?:to|->)\s+(\w+)", question, re.I):
+                if match[1] in spec["rhs"] and match[2] in frame:
+                    mapping[match[1]] = match[2]
+            kwargs.update(data_path=files[0].path, param_names=named or list(parameters),
+                          column_mapping=mapping or None, initial_guess=parameters)
+            await state.step("agent_calibrate", "Fitting ODE to measurements", status="running", agent="Dynamis")
+            result = await state.call_tool(DYNAMIS_FIT_TOOL, phase=PHASE, purpose="fit ODE to attached measurements",
+                                           store=False, **kwargs)
+        key = state.add_result(state.next_key(PHASE, DYNAMIS_FIT_TOOL), result, phase=PHASE, purpose="ODE fit", render=False)
+        if not getattr(result, "success", False):
+            detail = str(getattr(result, "error", "Fitting failed"))
+            state.artifacts["model_calibration"] = {"status": "error", "reason": detail, "dataset_id": att.id}
+            state.scope_notes.append("ODE fitting failed; do not report estimated parameters.")
+            await state.step("agent_calibrate", "ODE fitting failed", detail, status="error", agent="Dynamis")
+            return
+        artifact = {**calibration_artifact(result.data), "dataset_id": att.id, "dataset": att.display_name, "result_key": key}
+        state.artifacts["model_calibration"] = artifact
+        state.evidence_sections.extend(render_calibration(result))
+        state.brief_notes.append("Report the ODE fit's estimates, local-Jacobian 95% confidence intervals and warnings. "
+                                 "A fit does not independently verify the model; do not call it a measured truth.")
+        await state.step("agent_calibrate", "ODE fit complete", str(artifact.get("status")), agent="Dynamis")
 
     # -- parameters -----------------------------------------------------------------------------------------
     async def _model_info(self, state: AgentState, model: ModelRef) -> ModelInfo:

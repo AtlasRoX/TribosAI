@@ -511,6 +511,7 @@ export interface CalibrationParameter {
   name?: string;
   initial?: number | null;
   estimate?: number | null;
+  std_error?: number | null;
   ci_low?: number | null;
   ci_high?: number | null;
   identifiability?: Identifiability;
@@ -521,7 +522,13 @@ export interface ModelCalibrationArtifact {
   dataset?: string | Record<string, any> | null;
   backend?: string;
   status?: string;
-  objective?: { chi2?: number | null; rmse?: number | null; n_points?: number | null };
+  warnings?: string[];
+  reason?: string;
+  ci_method?: string;
+  correlation_matrix?: number[][];
+  correlation_labels?: string[];
+  objective?: { chi2?: number | null; rmse?: number | null; n_points?: number | null; rss?: number; aic?: number; bic?: number };
+  metrics?: Record<string, { rss: number; rmse: number; r_squared: number }>;
   parameters?: CalibrationParameter[];
   profiles?: Record<string, { value?: number; chi2?: number }[]>;
   fit?: Record<string, { time?: number[]; observed?: (number | null)[]; simulated?: (number | null)[] }>;

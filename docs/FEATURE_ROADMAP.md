@@ -30,6 +30,9 @@ In the shared files, add small entries only. Do not restructure them.
 
 ## T1: Fit ODE models to uploaded data
 
+**Status: DONE (2026-10-25).** Extended the existing fitter with safe ODE least squares, robust multi-start/bounds/initial-state fitting, covariance diagnostics, measurement loaders, agentic execution and fit/residual/CI cards.
+No dependencies added; intervals are local normal approximations, with singular fits explicitly unavailable. Verified: 1341 Python tests passed (15 skipped), 146 web tests passed; all gates green.
+
 **Goal.** A user attaches measurements (CSV/XLSX/HDF5/MAT: a time column plus observed state columns) and asks "fit the damped oscillator to my data", or gives ODEs with unknown parameters.
 
 **What to build.**

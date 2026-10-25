@@ -247,6 +247,40 @@ def register_tools(registry: Any) -> None:
     )
 
 
+def run_ode_fit_tool(**kwargs: Any) -> Any:
+    """Only files resolved from the current run's attachments may reach the numerical fitter."""
+    from tribos.agentic.sandbox import current_scope, resolve_inputs
+    from tribos.dynamis.engine import dynamis_fit_parameters
+    from tribos.extensions.dynamis import _wrap_executor
+
+    path = kwargs.get("data_path")
+    if path:
+        scope = current_scope()
+        files, errors = resolve_inputs(scope, scope.dataset_ids if scope else [])
+        if errors or not any(os.path.normcase(os.path.realpath(f.path)) == os.path.normcase(os.path.realpath(path))
+                             for f in files):
+            return _failure("dynamis_fit_parameters", "Measurements must be attached to this run.", "DATA_PATH_REJECTED")
+    return _wrap_executor("dynamis_fit_parameters", dynamis_fit_parameters)(**kwargs)
+
+
+def calibration_artifact(data: dict[str, Any]) -> dict[str, Any]:
+    return {**data, "parameters": data.get("parameter_estimates", [])}
+
+
+def _ode_fit_artifact(tool_results: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    for result in reversed(list(tool_results.values())):
+        if getattr(result, "success", False) and getattr(result, "tool_name", "") == "dynamis_fit_parameters":
+            data = getattr(result, "data", {}) or {}
+            if data.get("parameter_estimates"):
+                return {"model_calibration": calibration_artifact(data)}
+    return {}
+
+
+from tribos.extensions.hooks import register_artifact_builder
+
+register_artifact_builder("ode_fit", _ode_fit_artifact)
+
+
 __all__ = [
     "CALIBRATE_TIMEOUT_SECONDS",
     "CALIBRATE_TOOL",

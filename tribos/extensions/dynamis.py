@@ -99,7 +99,7 @@ def register_tools(registry: Any) -> None:
         ),
         (
             "dynamis_fit_parameters",
-            "Fit nonlinear model parameters to observed (x, y) data via nonlinear least squares, returning fitted values, standard errors, RMSE, and R^2.",
+            "Fit ODE models (e.g. damped oscillator or logistic growth) to attached CSV/XLSX/HDF5/MAT measurements, or fit algebraic curves. Supports column mapping, bounds, robust loss and multi-start; reports 95% confidence intervals, correlations, identifiability warnings, residuals, RSS, RMSE, R², AIC and BIC.",
             DynamisFitParametersInput,
             dynamis_fit_parameters,
             ["numerical", "fit", "curve_fit", "least_squares", "regression", "calibration", "scipy"],
@@ -114,6 +114,8 @@ def register_tools(registry: Any) -> None:
     ]
 
     for name, desc, schema, fn, tags in specs:
+        from .calibration import run_ode_fit_tool
+
         registry.register(
             ToolUniverseEntry(
                 name=name,
@@ -123,10 +125,10 @@ def register_tools(registry: Any) -> None:
                 input_schema=schema,
                 canonical_id_types=["computation_id"],
                 timeout_seconds=60.0,
-                tags=tags,
+                tags=tags + (["user_data"] if name == "dynamis_fit_parameters" else []),
                 is_async=False,
             ),
-            executor=_wrap_executor(name, fn),
+            executor=run_ode_fit_tool if name == "dynamis_fit_parameters" else _wrap_executor(name, fn),
         )
 
 

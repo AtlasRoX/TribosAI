@@ -120,37 +120,27 @@ class DynamisOptimizeInput(BaseModel):
 
 
 class DynamisFitParametersInput(BaseModel):
-    model_expr: str = Field(
-        ...,
-        min_length=1,
-        max_length=4000,
-        description="Model expression in terms of independent_var and param_names (e.g. 'a * exp(-b * t) + c')",
-    )
-    independent_var: str = Field(
-        ...,
-        min_length=1,
-        max_length=64,
-        description="Independent variable symbol name (e.g. 'x' or 't')",
-    )
-    param_names: list[str] = Field(
-        ...,
-        min_length=1,
-        description="List of parameter names to fit (e.g. ['a', 'b', 'c'])",
-    )
-    x_data: list[float] = Field(
-        ...,
-        min_length=2,
-        description="Observed independent variable values",
-    )
-    y_data: list[float] = Field(
-        ...,
-        min_length=2,
-        description="Observed dependent variable values",
-    )
-    initial_guess: dict[str, float] | None = Field(
-        default=None,
-        description="Optional initial parameter guess dictionary (defaults to 1.0 per parameter)",
-    )
+    model_expr: str | None = Field(default=None, max_length=4000, description="Algebraic curve expression; omit for ODE fitting")
+    independent_var: str = "t"
+    param_names: list[str] | None = Field(default=None, max_length=12, description="Parameters to estimate; defaults to the preset's parameters")
+    x_data: list[float] | None = Field(default=None, max_length=5000)
+    y_data: list[float] | None = Field(default=None, max_length=5000)
+    initial_guess: dict[str, float] | None = None
+    rhs: dict[str, str] | None = Field(default=None, max_length=12)
+    initial_state: dict[str, float] | None = None
+    parameters: dict[str, float] | None = None
+    model_name: str | None = Field(default=None, description="Known ODE preset, e.g. damped_oscillator")
+    data: dict[str, list[float]] | None = Field(default=None, max_length=100)
+    data_path: str | None = Field(default=None, max_length=1024, description="Server-resolved attached measurement file; never a model-invented path")
+    time_column: str | None = None
+    column_mapping: dict[str, str] | None = Field(default=None, description="Observed state variable -> dataset column")
+    bounds: dict[str, tuple[float, float]] | None = None
+    n_starts: int = Field(default=1, ge=1, le=5)
+    loss: str = Field(default="linear", pattern="^(linear|soft_l1|huber|cauchy|arctan)$")
+    fit_initial_state: bool | list[str] = False
+    seed: int = 0
+    max_nfev: int = Field(default=200, ge=5, le=400)
+    method: str = "RK45"
 
 
 class DynamisRootFindInput(BaseModel):

@@ -77,6 +77,16 @@ def _ok(res: Any) -> bool:
 
 
 # -- Dynamis ----------------------------------------------------------------------------------------------------
+def render_calibration(res: Any) -> list[str]:
+    d = _data(res)
+    fields = {k: d[k] for k in ("parameter_estimates", "confidence_intervals", "correlation_matrix", "correlation_labels",
+                               "metrics", "objective", "warnings", "converged", "ci_method") if k in d}
+    if not fields:
+        return []
+    return [f'<model_calibration tool="{_attr(getattr(res, "tool_name", ""))}" verified="false">',
+            _json(fields), "</model_calibration>"]
+
+
 def _dynamis_time_course(tool: str, d: dict[str, Any]) -> list[str]:
     states = [str(s) for s in (d.get("state_variables") or list((d.get("trajectories") or {}).keys())
                                or list((d.get("summary") or {}).keys()))]
@@ -201,6 +211,8 @@ def _dynamis_other(tool: str, d: dict[str, Any]) -> list[str]:
 
 def render_dynamis(res: Any) -> list[str]:
     d, tool = _data(res), str(getattr(res, "tool_name", "") or "dynamis")
+    if "parameter_estimates" in d:
+        return render_calibration(res)
     if "fixed_point" in d:
         return _dynamis_equilibrium(tool, d)
     if "scan_results" in d:

@@ -360,6 +360,27 @@ def validate_table(
         )
 
     sep = "\t" if ext == ".tsv" else ","
+    # Measurement tables retain their time column and signed states; they are not expression matrices.
+    try:
+        timecourse = pd.read_csv(path, sep=sep, nrows=MAX_TABLE_ROWS + 1)
+        has_time = any(str(c).strip().lower() in ("t", "time", "elapsed", "elapsed_time", "seconds", "time_s")
+                       for c in timecourse.columns)
+        if has_time:
+            if len(timecourse) > MAX_TABLE_ROWS or len(timecourse.columns) > MAX_TABLE_COLUMNS:
+                raise ValidationFailure("matrix_too_large", "The measurement table exceeds the upload limits.")
+            if len(timecourse) < 2 or len(timecourse.columns) < 2:
+                raise ValidationFailure("table_unreadable", "A time course needs at least two rows and two columns.")
+            if not all(pd.api.types.is_numeric_dtype(timecourse[c]) for c in timecourse):
+                raise ValidationFailure("non_numeric_values", "Measurement columns must contain numeric values.")
+            if not np.isfinite(timecourse.to_numpy(dtype=float)).all():
+                raise ValidationFailure("non_finite_values", "Measurements contain missing or non-finite values.")
+            return ValidationSummary(format=ext.lstrip("."), n_rows=len(timecourse), n_columns=len(timecourse.columns),
+                                     columns=[str(c) for c in timecourse],
+                                     dtypes={str(c): str(t) for c, t in timecourse.dtypes.items()}), None
+    except ValidationFailure:
+        raise
+    except Exception as exc:
+        raise ValidationFailure("table_unreadable", "The measurement table could not be parsed.") from exc
     try:
         header = pd.read_csv(path, sep=sep, index_col=0, nrows=0, engine="c")
     except Exception as exc:

@@ -42,7 +42,7 @@ _REMOTE_ADAPTERS = {"DIRECT_REST", "DIRECT_GRAPHQL", "REMOTE_MCP"}
 # calls), calibrate against uploaded data or export are never run as a direct, LLM-free RPC, whatever registry or
 # client asks for them (SEC-6: axiom_sagemath / calcula_run_sagemath run model-written Sage code).
 UNSAFE_TOOL_RE = re.compile(
-    r"(upload|write|delete|remove|dock|generate|run_python|run_code|sage|exec|script|sandbox|calibrat|export)", re.I
+    r"(upload|write|delete|remove|dock|generate|run_python|run_code|sage|exec|script|sandbox|calibrat|fit_parameters|export)", re.I
 )
 # Registry tags that mark a tool as reading per-user data or executing code.
 UNSAFE_TOOL_TAGS = frozenset({"upload", "uploads", "user_data", "sandbox", "code_execution", "executes_code", "code",

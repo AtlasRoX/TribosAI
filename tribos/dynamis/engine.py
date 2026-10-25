@@ -126,6 +126,24 @@ def _build_ode_exprs(
     return t_sym, state_syms, exprs
 
 
+def integrate_system(
+    rhs: dict[str, str], initial_state: dict[str, float], t_span: tuple[float, float],
+    parameters: dict[str, float] | None, method: str, times: np.ndarray, *, dense_output: bool = False,
+) -> tuple[Any, list[sp.Expr], list[sp.Symbol]]:
+    """Shared safe integrator for trajectories and parameter estimation."""
+    names = list(rhs)
+    t_sym, syms, exprs = _build_ode_exprs(rhs, names, parameters)
+    function = sp.lambdify((t_sym, syms), exprs, modules="numpy")
+    solution = integrate.solve_ivp(
+        lambda t, y: np.asarray(function(t, y), dtype=float).ravel(), t_span,
+        [float(initial_state[n]) for n in names], t_eval=times, method=method,
+        rtol=1e-8, atol=1e-10, dense_output=dense_output,
+    )
+    if not solution.success or solution.y.shape[1] != len(times) or not np.isfinite(solution.y).all():
+        raise RuntimeError(f"ODE integration failed ({solution.message})")
+    return solution, exprs, syms
+
+
 def dynamis_simulate_ode(
     rhs: dict[str, str] | None = None,
     initial_state: dict[str, float] | None = None,
@@ -169,29 +187,10 @@ def dynamis_simulate_ode(
     if tf <= t0:
         raise ValueError(f"t_span end ({tf}) must be greater than start ({t0}).")
 
-    t_sym, state_syms, exprs = _build_ode_exprs(rhs, state_names, parameters)
-    f_num = sp.lambdify((t_sym, state_syms), exprs, modules="numpy")
-
-    def _ode_rhs(t_val: float, y_vec: np.ndarray) -> np.ndarray:
-        vals = f_num(t_val, y_vec)
-        return np.asarray(vals, dtype=float).ravel()
-
-    y0 = np.array([float(initial_state[n]) for n in state_names], dtype=float)
     n_pts = max(2, min(10000, int(num_points)))
     t_eval = np.linspace(t0, tf, n_pts)
-
-    sol = integrate.solve_ivp(
-        _ode_rhs,
-        (t0, tf),
-        y0,
-        method=str(method),
-        t_eval=t_eval,
-        rtol=1e-8,
-        atol=1e-10,
-        dense_output=True,
-    )
-    if not sol.success:
-        raise RuntimeError(f"ODE integration failed ({sol.message})")
+    sol, exprs, state_syms = integrate_system(rhs, initial_state, (t0, tf), parameters, str(method), t_eval,
+                                             dense_output=True)
     # The output samples are where the solution is reported, not where the solver stepped: extremes between samples
     # are found on the solver's dense (interpolating) output over a fine grid, and both are reported.
     n_dense = int(min(200_000, max(20 * n_pts, 20_001)))
@@ -549,14 +548,29 @@ def dynamis_optimize(
 
 
 def dynamis_fit_parameters(
-    model_expr: str,
-    independent_var: str,
-    param_names: list[str],
-    x_data: list[float],
-    y_data: list[float],
+    model_expr: str | None = None,
+    independent_var: str = "t",
+    param_names: list[str] | None = None,
+    x_data: list[float] | None = None,
+    y_data: list[float] | None = None,
     initial_guess: dict[str, float] | None = None,
+    *, rhs: dict[str, str] | None = None, initial_state: dict[str, float] | None = None,
+    parameters: dict[str, float] | None = None, model_name: str | None = None,
+    data: dict[str, Any] | None = None, data_path: str | None = None,
+    time_column: str | None = None, column_mapping: dict[str, str] | None = None,
+    bounds: dict[str, tuple[float, float]] | None = None, n_starts: int = 1, loss: str = "linear",
+    fit_initial_state: bool | list[str] = False, seed: int = 0, max_nfev: int = 200, method: str = "RK45",
 ) -> dict[str, Any]:
-    """Fit nonlinear model parameters to (x_data, y_data) via nonlinear least squares."""
+    """Fit a safe expression or ODE system to measurements, with covariance and identifiability diagnostics."""
+    if rhs or model_name:
+        from .fitting import fit_ode
+
+        return fit_ode(rhs=rhs, initial_state=initial_state, parameters=parameters, model_name=model_name,
+                       param_names=param_names, initial_guess=initial_guess, data=data, data_path=data_path,
+                       time_column=time_column, column_mapping=column_mapping, bounds=bounds, n_starts=n_starts,
+                       loss=loss, fit_initial_state=fit_initial_state, seed=seed, max_nfev=max_nfev, method=method)
+    if not model_expr or not param_names or x_data is None or y_data is None:
+        raise ValueError("Supply model_expr and x_data/y_data, or an ODE system and measurements.")
     if len(x_data) != len(y_data):
         raise ValueError(f"x_data length ({len(x_data)}) and y_data length ({len(y_data)}) must match.")
     if len(x_data) < len(param_names):

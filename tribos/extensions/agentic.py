@@ -25,6 +25,7 @@ AGENT_PHASE_MODULES = (
     "tribos.agentic.ode_verification",  # residual, RK4 convergence and energy balance of a solved ODE (augment)
     "tribos.agentic.hypothesis",  # 6 hypothesis -> in-silico experiment loop (augment)
     "tribos.agentic.analyst",  # 10 sandboxed code analysis of attached data (augment)
+    "tribos.agentic.fit",  # ODE fitting against attached measurements (augment)
     "tribos.agentic.counter_evidence",  # 7 contradiction search (augment)
     "tribos.agentic.nli",  # 8 NLI entailment judge for the verifier (augment)
     "tribos.agentic.gaps",  # 2 gap-driven re-retrieval (after_draft)

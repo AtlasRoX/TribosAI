@@ -4,6 +4,7 @@ import React from "react";
 import { ChartLine } from "lucide-react";
 import type { CalibrationParameter, ModelCalibrationArtifact } from "@/types/agentic";
 import { Card, Disclosure, Pill, Section, Stats, arr, fmt, isNum, str, styles } from "./ui";
+import { calibrationResiduals } from "@/lib/calibration";
 
 const CHI2_95 = 3.84; // Δχ² for a 95% interval, one degree of freedom (Raue et al. 2009)
 const W = 260;
@@ -50,6 +51,7 @@ function MiniChart({
   xLabel,
   yLabel,
   logX = false,
+  hlineLabel = `Δχ² = ${CHI2_95} (95% threshold)`,
 }: {
   title: string;
   line: Pt[];
@@ -58,6 +60,7 @@ function MiniChart({
   xLabel: string;
   yLabel: string;
   logX?: boolean;
+  hlineLabel?: string;
 }) {
   const all = [...line, ...(dots || [])].filter((p) => isNum(p.x) && isNum(p.y) && (!logX || p.x > 0));
   if (all.length < 2) return null;
@@ -91,7 +94,7 @@ function MiniChart({
         </text>
         {hline != null && (
           <line className={styles.thresholdLine} x1={M.l} x2={W - M.r} y1={sy.f(hline)} y2={sy.f(hline)}>
-            <title>{`Δχ² = ${CHI2_95} (95% threshold)`}</title>
+            <title>{hlineLabel}</title>
           </line>
         )}
         {path && <path className={styles.seriesSim} d={path} />}
@@ -119,7 +122,10 @@ function ParamTable({ params }: { params: CalibrationParameter[] }) {
               Estimate
             </th>
             <th scope="col" className={styles.num}>
-              95% CI (profile)
+              Standard error
+            </th>
+            <th scope="col" className={styles.num}>
+              95% CI
             </th>
             <th scope="col">Identifiability</th>
           </tr>
@@ -133,6 +139,9 @@ function ParamTable({ params }: { params: CalibrationParameter[] }) {
                 <td className={styles.num}>{fmt(p.initial, 4)}</td>
                 <td className={styles.num} style={{ color: "var(--text-heading)" }}>
                   {fmt(p.estimate, 4)}
+                </td>
+                <td className={styles.num}>
+                  {fmt(p.std_error, 4)}
                 </td>
                 <td className={styles.num}>
                   {isNum(p.ci_low) || isNum(p.ci_high) ? `[${isNum(p.ci_low) ? fmt(p.ci_low, 4) : "−∞"}, ${isNum(p.ci_high) ? fmt(p.ci_high, 4) : "∞"}]` : "—"}
@@ -212,6 +221,9 @@ export function CalibrationArtifact({ data }: { data: ModelCalibrationArtifact }
     isNum(obj.chi2) ? { label: "χ²", value: fmt(obj.chi2, 3) } : null,
     isNum(obj.rmse) ? { label: "RMSE", value: fmt(obj.rmse, 3) } : null,
     isNum(obj.n_points) ? { label: "Data points", value: String(obj.n_points) } : null,
+    isNum(obj.rss) ? { label: "RSS", value: fmt(obj.rss, 4) } : null,
+    isNum(obj.aic) ? { label: "AIC", value: fmt(obj.aic, 4) } : null,
+    isNum(obj.bic) ? { label: "BIC", value: fmt(obj.bic, 4) } : null,
   ].filter((x): x is { label: string; value: string } => x != null);
   const context = [data.model_id ? `Model ${data.model_id}` : "", dataset ? `data ${dataset}` : "", data.backend ? `backend ${data.backend}` : ""]
     .filter(Boolean)
@@ -231,8 +243,10 @@ export function CalibrationArtifact({ data }: { data: ModelCalibrationArtifact }
           {fitStats.length > 0 && <Stats items={fitStats} />}
         </Section>
       )}
+      {data.reason && <p role="status">{data.reason}</p>}
+      {!!data.warnings?.length && <Section title="Fit warnings"><ul>{data.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></Section>}
 
-      <Section title="Parameters" meta={verdict || undefined}>
+      <Section title="Parameters" meta={data.ci_method || verdict || undefined}>
         {params.length > 0 ? <ParamTable params={params} /> : <p className={styles.muted}>No parameters were estimated.</p>}
       </Section>
 
@@ -298,6 +312,19 @@ export function CalibrationArtifact({ data }: { data: ModelCalibrationArtifact }
           </Disclosure>
         </Section>
       )}
+      {fit.length > 0 && <Section title="Residuals (observed − fitted)"><div className={styles.charts}>
+        {fit.map(([name, series]) => <MiniChart key={name} title={name} xLabel="time" yLabel="residual"
+          line={calibrationResiduals(series)} hline={0} hlineLabel="Zero residual" />)}
+      </div></Section>}
+      {data.metrics && <Section title="Fit by observed variable"><div className={styles.tableScroll}>
+        <table className={styles.table}><thead><tr><th>Variable</th><th>RSS</th><th>RMSE</th><th>R²</th></tr></thead>
+          <tbody>{Object.entries(data.metrics).map(([name, metrics]) => <tr key={name}><th>{name}</th>
+            <td>{fmt(metrics.rss, 4)}</td><td>{fmt(metrics.rmse, 4)}</td><td>{fmt(metrics.r_squared, 4)}</td></tr>)}</tbody>
+        </table></div></Section>}
+      {data.correlation_matrix && <Disclosure summary="Parameter correlations"><div className={styles.tableScroll}>
+        <table className={styles.table}><thead><tr><th>Parameter</th>{data.correlation_labels?.map((name) => <th key={name}>{name}</th>)}</tr></thead>
+          <tbody>{data.correlation_matrix.map((row, i) => <tr key={i}><th>{data.correlation_labels?.[i]}</th>{row.map((value, j) => <td key={j}>{fmt(value, 3)}</td>)}</tr>)}</tbody>
+        </table></div></Disclosure>}
     </Card>
   );
 }
