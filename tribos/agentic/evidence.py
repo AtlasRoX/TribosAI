@@ -93,7 +93,10 @@ def render_result(key: str, result: Any, label: dict[str, str]) -> str:
                     + "</result>"
                 )
     else:
-        body.append(f"<data>{escape(_compact(data), quote=False)}</data>")
+        from ..agents.stem_evidence import render_tool_result
+
+        dedicated = render_tool_result(result)
+        body.extend(dedicated if dedicated else [f"<data>{escape(_compact(data), quote=False)}</data>"])
     return "\n".join([head, *body, "</tool_output>"])
 
 

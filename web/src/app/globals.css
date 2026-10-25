@@ -76,6 +76,14 @@
   --domain-s2: #fcd34d;   /* Lithoscribe: literature & trials */
   --biocontext-accent: #f9a8d4;
 
+  /* The heatmap ramp of a solved field: six steps of one hue, darkest (lowest) to brightest (highest). */
+  --heatmap-0: #14213d;
+  --heatmap-1: #1e3f74;
+  --heatmap-2: #2a64a8;
+  --heatmap-3: #3e8ed3;
+  --heatmap-4: #74b9ee;
+  --heatmap-5: #c4e3ff;
+
   --radius-sm: 10px;
   --radius-md: 14px;
   --radius-lg: 20px;
@@ -173,6 +181,14 @@ html.light, :root[data-theme="light"], .light, [data-theme="light"] {
   --domain-scp: #6d28d9;
   --domain-s2: #b45309;
   --biocontext-accent: #be185d;
+
+  /* The heatmap ramp on porcelain: the same hue, palest (lowest) to deepest (highest), readable on white. */
+  --heatmap-0: #eef4fd;
+  --heatmap-1: #bcd4f6;
+  --heatmap-2: #7fb0e8;
+  --heatmap-3: #3f86c9;
+  --heatmap-4: #1f5aa0;
+  --heatmap-5: #13306b;
 
   --card-shadow: 0 1px 2px rgba(20, 21, 43, 0.05), 0 18px 48px -24px rgba(20, 21, 43, 0.22);
   --bubble-shadow: 0 1px 2px rgba(20, 21, 43, 0.04), 0 10px 28px -18px rgba(20, 21, 43, 0.25);

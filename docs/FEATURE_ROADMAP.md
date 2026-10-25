@@ -64,6 +64,9 @@ No dependencies added; intervals are local normal approximations, with singular 
 
 ## T2: PDE solver
 
+**Status: DONE (2026-10-25).** Added `tribos/dynamis/pde/` (sparse operators; Crank-Nicolson/explicit/BDF heat, leapfrog wave, direct Poisson, method-of-lines advection-diffusion, Fisher-KPP and Burgers) with nested-grid convergence studies, Richardson estimates, exact discrete mass/energy checks, CFL refuse/adapt, the `dynamis_solve_pde` tool, evidence renderer and `pde` card.
+No dependencies added. Left out: 2D advection-diffusion, Fisher-KPP and Burgers (1D only, as specified), and mixed periodic/bounded 2D problems are solved without a convergence study.
+
 **Goal.** Dynamis only handles ODEs. Add `tribos/dynamis/pde/` (numpy/scipy only) and `tribos/extensions/pde.py` (tool `dynamis_solve_pde`, domain `dynamis`).
 
 **Equations, on rectangular domains:**

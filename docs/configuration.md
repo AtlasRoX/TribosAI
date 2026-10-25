@@ -17,7 +17,7 @@ Precedence for state directories: a specific variable (`TRIBOS_MEMORY_DIR`, `TRI
 `TRIBOS_UPLOAD_ROOT`, `TRIBOS_JOBS_DIR`, `TRIBOS_TOOL_CACHE_DIR`) wins over `TRIBOS_DATA_DIR`; with
 neither set, every store keeps its historical location under the workspace.
 
-150 variables.
+155 variables.
 
 ## State directories
 
@@ -218,6 +218,16 @@ neither set, every store keeps its historical location under the workspace.
 | `TRIBOS_UPLOAD_MAX_MB_HDF5` | float | `500.0` | `tribos/datasets/store.py` | Largest HDF5 (.h5/.hdf5) upload in MB. |
 | `TRIBOS_UPLOAD_MAX_MB_MAT` | float | `100.0` | `tribos/datasets/store.py` | Largest MATLAB (.mat) upload in MB. |
 | `TRIBOS_UPLOAD_MAX_TOTAL_MB` | float | `2048.0` | `tribos/datasets/store.py` | Total upload storage per user in MB. |
+
+## Simulation and single-cell analysis
+
+| Variable | Type | Default | Read at | Description |
+| --- | --- | --- | --- | --- |
+| `TRIBOS_PDE_MAX_CONVERGENCE_LEVELS` | int (2 to 4) | `3` | `tribos/dynamis/pde/__init__.py` | Nested grids of the PDE mesh-convergence study. |
+| `TRIBOS_PDE_MAX_GRID_1D` | int (100 to 1000000) | `20000` | `tribos/dynamis/pde/__init__.py` | Largest number of grid points in a 1D PDE solve. |
+| `TRIBOS_PDE_MAX_GRID_2D` | int (100 to 1000000) | `6400` | `tribos/dynamis/pde/__init__.py` | Largest number of grid points in a 2D PDE solve (80 x 80). |
+| `TRIBOS_PDE_MAX_SECONDS` | float (1 to 600) | `20.0` | `tribos/dynamis/pde/__init__.py` | Wall-clock limit of one PDE solve, convergence study included. |
+| `TRIBOS_PDE_MAX_SNAPSHOTS` | int (2 to 200) | `25` | `tribos/dynamis/pde/__init__.py` | Snapshots one PDE solve returns. |
 
 ## TRIBOS_SANDBOX_*: Code sandbox
 

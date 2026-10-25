@@ -259,6 +259,16 @@ _SETTINGS: Sequence[Setting] = (
     Setting("TRIBOS_UPLOAD_MAX_MB_MAT", "float", 100.0, "Largest MATLAB (.mat) upload in MB.", _UP),
     Setting("TRIBOS_UPLOAD_MAX_TOTAL_MB", "float", 2048.0, "Total upload storage per user in MB.", _UP),
     Setting("TRIBOS_UPLOAD_MAX_DATASETS", "int", 50, "Uploaded datasets kept per user.", _UP),
+    # --- Partial differential equations (tribos/dynamis/pde) -----------------------------------------------------
+    Setting("TRIBOS_PDE_MAX_GRID_1D", "int", 20000, "Largest number of grid points in a 1D PDE solve.", _SIM,
+            min=100, max=1000000),
+    Setting("TRIBOS_PDE_MAX_GRID_2D", "int", 6400, "Largest number of grid points in a 2D PDE solve (80 x 80).", _SIM,
+            min=100, max=1000000),
+    Setting("TRIBOS_PDE_MAX_SECONDS", "float", 20.0, "Wall-clock limit of one PDE solve, convergence study included.",
+            _SIM, min=1.0, max=600.0),
+    Setting("TRIBOS_PDE_MAX_SNAPSHOTS", "int", 25, "Snapshots one PDE solve returns.", _SIM, min=2, max=200),
+    Setting("TRIBOS_PDE_MAX_CONVERGENCE_LEVELS", "int", 3, "Nested grids of the PDE mesh-convergence study.", _SIM,
+            min=2, max=4),
     # --- Code sandbox ----------------------------------------------------------------------------------------------
     Setting("TRIBOS_SANDBOX", "bool", True, "Code-execution sandbox tool; on by default, off/0/false/no disables it.", _SBX),
     Setting("TRIBOS_SANDBOX_TIMEOUT_S", "int", 60, "Seconds one sandboxed execution may run.", _SBX, min=5, max=110),

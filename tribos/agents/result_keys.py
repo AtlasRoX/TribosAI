@@ -18,6 +18,7 @@ AXIOM = "axiom"
 DYNAMIS = "dynamis"  # time course (dynamis_simulate_ode)
 DYNAMIS_SCAN = "dynamis_scan"  # parameter scan (dynamis_parameter_scan)
 DYNAMIS_EQUILIBRIUM = "dynamis_equilibrium"  # fixed point and stability (dynamis_equilibrium)
+DYNAMIS_PDE = "dynamis_pde"  # a solved partial differential equation (dynamis_solve_pde)
 
 # Legacy key -> the canonical key whose result it repeats.
 ALIAS_KEYS: dict[str, str] = {
@@ -27,7 +28,7 @@ ALIAS_KEYS: dict[str, str] = {
 }
 
 # The STEM computation results the evidence block renders, in prompt order.
-STEM_RESULT_KEYS = (DYNAMIS, DYNAMIS_EQUILIBRIUM, DYNAMIS_SCAN, AXIOM, PHYSIS, CALCULA)
+STEM_RESULT_KEYS = (DYNAMIS, DYNAMIS_EQUILIBRIUM, DYNAMIS_SCAN, DYNAMIS_PDE, AXIOM, PHYSIS, CALCULA)
 
 
 def is_alias_duplicate(key: str, tool_results: dict[str, Any]) -> bool:
@@ -51,6 +52,7 @@ __all__ = [
     "CALCULA",
     "DYNAMIS",
     "DYNAMIS_EQUILIBRIUM",
+    "DYNAMIS_PDE",
     "DYNAMIS_SCAN",
     "PHYSIS",
     "STEM_RESULT_KEYS",

@@ -17,6 +17,7 @@ from .result_keys import (
     CALCULA,
     DYNAMIS,
     DYNAMIS_EQUILIBRIUM,
+    DYNAMIS_PDE,
     DYNAMIS_SCAN,
     PHYSIS,
     STEM_RESULT_KEYS,
@@ -217,9 +218,95 @@ def render_dynamis(res: Any) -> list[str]:
         return _dynamis_equilibrium(tool, d)
     if "scan_results" in d:
         return _dynamis_scan(tool, d)
+    if "snapshots" in d and "equation" in d and "convergence" in d:
+        return render_pde(tool, d)
     if "trajectories" in d or "summary" in d or "state_variables" in d:
         return _dynamis_time_course(tool, d)
     return _dynamis_other(tool, d)
+
+
+def render_pde(tool: str, d: dict[str, Any]) -> list[str]:
+    """One solved PDE: the problem, the scheme and its stability number, the verification, and a decimated field.
+
+    A 2D field of 80x80 values would cost thousands of tokens, so the final field is shown on a coarse sub-grid; the
+    diagnostics that say whether it can be trusted (convergence, analytic error, conservation) are shown in full.
+    """
+    dimension = int(d.get("dimension") or 1)
+    sub = lambda key: d.get(key) if isinstance(d.get(key), dict) else {}  # noqa: E731
+    stability, convergence, verification, conservation = (
+        sub("stability"), sub("convergence"), sub("verification"), sub("conservation"),
+    )
+    out = [
+        f'<dynamis_pde tool="{_attr(tool)}" equation="{_attr(d.get("equation"))}" dimension="{dimension}" '
+        f'method="{_attr(d.get("method") or "")}" steady="{str(bool(d.get("steady"))).lower()}">',
+        f"<problem>{_json({k: d.get(k) for k in ('domain', 'parameters', 'boundary', 'boundary_values', 't_span')})}</problem>",
+        f"<inputs>{_json({k: (d.get('spec') or {}).get(k) for k in ('initial_condition', 'initial_velocity', 'source')})}"
+        "</inputs>",
+        f"<grid>{_json(d.get('grid') or {})}</grid>",
+    ]
+    if stability:
+        out.append(f"<stability>{_json(stability)}</stability>")
+    for level in (convergence.get("levels") or [])[:6]:
+        if isinstance(level, dict):
+            out.append(f"<mesh_level>{_json(level)}</mesh_level>")
+    out.append(
+        f'<convergence observed_order="{_attr(num(convergence.get("order")))}" '
+        f'expected_order="{_attr(convergence.get("expected_order"))}" '
+        f'richardson_error="{_attr(num(convergence.get("richardson_error")))}" '
+        f'converged="{str(bool(convergence.get("converged"))).lower()}" '
+        f'reference="{_attr(convergence.get("reference") or "")}">{_text(convergence.get("note") or "", 400)}</convergence>'
+    )
+    if verification:
+        out.append(
+            f'<analytic_comparison exact_solution="{_attr(verification.get("exact_solution"))}" '
+            f'max_error="{_attr(num(verification.get("max_error")))}" '
+            f'relative_error="{_attr(num(verification.get("relative_error")))}" '
+            f'agrees="{str(bool(verification.get("agrees"))).lower()}"/>'
+        )
+    else:
+        out.append("<analytic_comparison>no analytic solution was given; none is claimed</analytic_comparison>")
+    if conservation:
+        out.append(
+            f'<conservation_check quantity="{_attr(conservation.get("kind"))}" initial="{_attr(num(conservation.get("initial")))}" '
+            f'final="{_attr(num(conservation.get("final")))}" relative_drift="{_attr(num(conservation.get("relative_drift")))}" '
+            f'conserved="{str(bool(conservation.get("conserved"))).lower()}">{_text(conservation.get("note") or "", 300)}'
+            "</conservation_check>"
+        )
+    xs, ys, field = d.get("x") or [], d.get("y") or [], d.get("field") or []
+    if dimension == 1 and xs and len(field) == len(xs):
+        idx = decimate(len(xs), TRAJECTORY_SAMPLES)
+        out.append(
+            f'<final_field t="{_attr(num((d.get("times") or [None])[-1]))}" columns="x, u" shown="{len(idx)}" '
+            f'of="{len(xs)}">{_json([[xs[i], field[i]] for i in idx])}</final_field>'
+        )
+    elif dimension == 2 and xs and ys and field:
+        xi, yi = decimate(len(xs), 9), decimate(len(ys), 9)
+        out.append(
+            f'<final_field t="{_attr(num((d.get("times") or [None])[-1]))}" layout="rows over x, columns over y" '
+            f'x="{_attr(_json([xs[i] for i in xi]))}" y="{_attr(_json([ys[j] for j in yi]))}">'
+            f"{_json([[field[i][j] for j in yi] for i in xi])}</final_field>"
+        )
+    if d.get("range"):
+        out.append(f"<value_range>{_json(d['range'])}</value_range>")
+    for probe in (d.get("probes") or [])[:6]:
+        if isinstance(probe, dict):
+            out.append(f"<probe>{_json(probe)}</probe>")
+    for w in (d.get("warnings") or [])[:6]:
+        out.append(f"<warning>{_text(w, 400)}</warning>")
+    out.append("</dynamis_pde>")
+    return out
+
+
+def render_tool_result(res: Any) -> list[str] | None:
+    """The dedicated evidence of a tool whose result has its own renderer, or None (then generic JSON is used).
+
+    The agentic phases key their results by phase ('agent.<phase>.<n>.<tool>'), so they look the renderer up by
+    the tool's name here instead of by the classic result key.
+    """
+    render = TOOL_RENDERERS.get(str(getattr(res, "tool_name", "") or ""))
+    if render is None or not _ok(res):
+        return None
+    return render(res) or None
 
 
 def endpoint_vs_equilibrium(sim: Any, eq: Any, tolerance: float = 0.05) -> str:
@@ -388,9 +475,16 @@ _RENDERERS = {
     DYNAMIS: render_dynamis,
     DYNAMIS_EQUILIBRIUM: render_dynamis,
     DYNAMIS_SCAN: render_dynamis,
+    DYNAMIS_PDE: render_dynamis,
     AXIOM: render_axiom,
     PHYSIS: render_physis,
     CALCULA: render_calcula,
+}
+
+
+# Tools rendered by their own renderer wherever their result appears (see render_tool_result).
+TOOL_RENDERERS = {
+    "dynamis_solve_pde": render_dynamis,
 }
 
 
@@ -418,6 +512,8 @@ __all__ = [
     "render_axiom",
     "render_calcula",
     "render_dynamis",
+    "render_pde",
     "render_physis",
+    "render_tool_result",
     "stem_evidence",
 ]
