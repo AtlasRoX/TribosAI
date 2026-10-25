@@ -19,10 +19,11 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Sequence
 from typing import Any
 
-from .guardrails import SPOTLIGHT_RULE, spotlight
+from .guardrails import SPOTLIGHT_RULE, neutralise, spotlight
 from .plan_graph import PlanGraph, policy_violation
 from .specialists import LEGACY_LITERATURE_TOOL, resolve_literature_tool
 from .specialists import LITERATURE_TOOL as LITERATURE_TOOL
@@ -125,6 +126,11 @@ def pipeline_summary(tool_results: dict[str, Any], skip_prefix: str = "agent.pla
     return out
 
 
+def _file_label(name: Any) -> str:
+    """An attached file's name for the planner prompt: plain filename characters only (it is user-supplied)."""
+    return re.sub(r"[^\w .()\-]+", "", neutralise(str(name or "")))[:80].strip() or "unnamed"
+
+
 def constraint_lines(ctx: Any, max_nodes: int) -> list[str]:
     lines = [f"plan at most {max_nodes} nodes"]
     if ctx is None:
@@ -150,6 +156,18 @@ def constraint_lines(ctx: Any, max_nodes: int) -> list[str]:
             f"the question names these papers: {', '.join(ids)}; fetch each one with archivon_paper_details "
             "identifier=<id> (an arXiv id, DOI or zbMATH id) rather than a free-text search; a failed lookup means "
             "not retrieved, not that the paper does not exist"
+        )
+    attachments = [a for a in getattr(ctx, "attachments", None) or [] if getattr(a, "id", None)]
+    if attachments:
+        # The files the researcher attached (or the project shares): a tool that reads one needs its dataset_id.
+        shown = "; ".join(
+            f"{a.id} ({getattr(a, 'kind', '') or 'dataset'}: {_file_label(getattr(a, 'display_name', ''))})"
+            for a in attachments[:5]
+        )
+        lines.append(
+            f"attached files: {shown}; pass the id as dataset_id to the tools that read them (a paper: "
+            "archivon_read_paper, or archivon_reproduce_paper to check its stated results; a table, HDF5 or MAT file: "
+            "calcula_describe_dataset or calcula_run_python)"
         )
     excluded = sorted(getattr(ctx, "excluded_modules", None) or set())
     if excluded:

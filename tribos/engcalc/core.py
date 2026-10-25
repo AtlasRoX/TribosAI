@@ -177,12 +177,54 @@ def to_si(raw: Any, unit: str, name: str, *, positive: bool = True) -> float:
     return value
 
 
+# Names a model or a person often writes for an input; each applies only where the calculator has that input.
+INPUT_ALIASES: dict[str, str] = {
+    "L": "length", "l": "length", "span": "length", "P": "point_load", "F_point": "point_load", "load_value": "point_load",
+    "w": "distributed_load", "q": "distributed_load", "udl": "distributed_load", "a": "load_position",
+    "b": "width", "h": "height", "depth": "height", "d": "diameter", "D": "diameter", "outer_diameter": "diameter",
+    "di": "inner_diameter", "d_i": "inner_diameter", "E": "elastic_modulus", "youngs_modulus": "elastic_modulus",
+    "modulus": "elastic_modulus", "I": "second_moment_of_area", "moment_of_inertia": "second_moment_of_area",
+    "c": "extreme_fibre_distance", "A": "area", "T": "torque", "M": "bending_moment", "K": "effective_length_factor",
+    "Sy": "yield_strength", "S_y": "yield_strength", "fy": "yield_strength", "Sut": "ultimate_strength",
+    "S_ut": "ultimate_strength", "Se": "endurance_limit", "S_e": "endurance_limit", "nu": "poisson_ratio",
+    "G": "shear_modulus", "t": "thickness", "wall_thickness": "thickness", "p": "pressure", "S": "allowable_stress",
+    "joint_factor": "joint_efficiency", "sigma_a": "stress_amplitude", "sigma_m": "mean_stress",
+    "alternating_stress": "stress_amplitude", "Q": "flow_rate", "V": "velocity", "rho": "density", "mu": "viscosity",
+    "epsilon": "roughness", "eps": "roughness", "U": "overall_coefficient", "configuration": "support",
+    "support_type": "support", "boundary": "support", "load_type": "load", "loading": "load",
+    "safety_factor": "required_safety_factor", "n": "required_safety_factor",
+}
+# Words for a choice that mean one of its values.
+CHOICE_ALIASES: dict[str, dict[str, str]] = {
+    "support": {"cantilevered": "cantilever", "fixed_free": "cantilever", "simply": "simply_supported",
+                "pinned_pinned": "simply_supported", "simple": "simply_supported", "simply_supported_beam": "simply_supported"},
+    "load": {"point_load": "point", "end_point_load": "point", "end_load": "point", "tip_load": "point",
+             "concentrated": "point", "concentrated_load": "point", "uniform": "udl", "uniform_load": "udl",
+             "distributed": "udl", "uniformly_distributed": "udl", "uniformly_distributed_load": "udl"},
+}
+
+
+def _canonical_inputs(calc: Calculator, inputs: dict[str, Any]) -> dict[str, Any]:
+    """The inputs keyed by the calculator's own names: an alias maps to its input when the calculator has it and the
+    input was not also given under its own name."""
+    known = {p.name for p in calc.params}
+    out: dict[str, Any] = {}
+    for key, value in inputs.items():
+        target = key if key in known else INPUT_ALIASES.get(key) or INPUT_ALIASES.get(key.lower(), key)
+        if target in known and target != key and target in inputs:
+            target = key  # the input is also given under its own name; the alias is left as an unknown input
+        out[target] = value
+    return out
+
+
 def _resolve_inputs(calc: Calculator, inputs: dict[str, Any], material: str | None) -> tuple[dict[str, Any], dict[str, float], list[dict[str, Any]], dict[str, Any] | None]:
+    inputs = _canonical_inputs(calc, inputs)
     known = {p.name for p in calc.params}
     unknown = sorted(set(inputs) - known)
     if unknown:
         raise ValueError(
-            f"Unknown input(s) {unknown} for the {calc.id} calculator; its inputs are {', '.join(sorted(known))}."
+            f"Unknown input(s) {unknown} for the {calc.id} calculator; its inputs are "
+            + ", ".join(f"{p.name} [{p.unit or '/'.join(p.choices)}]" for p in calc.params) + "."
         )
     mat_props: dict[str, Any] | None = None
     mat_id = None
@@ -207,6 +249,7 @@ def _resolve_inputs(calc: Calculator, inputs: dict[str, Any], material: str | No
             continue
         if p.is_choice:
             choice = str(raw).strip().lower().replace(" ", "_").replace("-", "_")
+            choice = CHOICE_ALIASES.get(p.name, {}).get(choice, choice)
             if choice not in p.choices:
                 raise ValueError(f"Input {p.name!r} must be one of {', '.join(p.choices)}, got {raw!r}.")
             values[p.name] = choice

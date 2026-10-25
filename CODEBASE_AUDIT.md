@@ -18,7 +18,7 @@ Every item has an ID (for example `SEC-1`) so you can track it. Severity levels:
 ## ✅ Fix status (2026-10-25)
 
 All items in §1–§4 are fixed. §5–§7 are mostly fixed; the items left open are listed below. Every fix has a regression
-test in a `tests/test_fix_*.py` file or in `web/tests/webFixes.test.mts`. Nothing has been committed yet.
+test in a `tests/test_fix_*.py` file or in `web/tests/webFixes.test.mts`. All work is committed on the `features-roadmap` branch.
 
 **Checks after the fixes:**
 - **Python tests:** 1326 passed, 15 skipped, 0 failed (was 1101 passed, 2 failed).
@@ -45,8 +45,14 @@ test in a `tests/test_fix_*.py` file or in `web/tests/webFixes.test.mts`. Nothin
 - The lexicon mapped "damped oscillator" to the undamped preset.
 - The `vivarix` fit phase imported a package that no longer exists.
 
+**Roadmap features (docs/FEATURE_ROADMAP.md), 2026-10-25:** T1-T10 are done: ODE fitting to data, the PDE solver, uncertainty
+propagation, unit checking, optional Lean proof checking, interactive simulation, paper reading and reproduction,
+notebook and export fixes, engineering calculators, and shared projects with the new sidebar. Each has tests in
+`tests/test_feat_t*.py` and `web/tests/featT*.test.mts`.
+
 **Still open:**
-- Split `web/src/app/page.tsx` (still about 4k lines; skipped to save time).
+- `web/src/app/page.tsx` is down from about 4,000 to about 3,300 lines (the sidebar and project logic moved to
+  `components/sidebar`, `components/projects` and `hooks/`); the chat stage and settings could be split further.
 - Remaining ESLint warnings: about 130 `any`, about 33 React-hooks, and 7 `<img>`.
 - SUP-2 (sandbox in a container): only the in-process hardening is done (IO guard, SymPy parser guard, `RLIMIT_NPROC`).
 - SUP-6 (generated OpenAPI types): the frontend/backend contracts were aligned by hand, not generated.
@@ -54,7 +60,6 @@ test in a `tests/test_fix_*.py` file or in `web/tests/webFixes.test.mts`. Nothin
 - Biomedical citation specs and the synapta/lumicell memory branches are kept, because stored history and tests still read them.
 - Archivon is not passed `year_from`.
 - `thinking_budget_tokens` is UI-only.
-- Fitting an ODE to data in the agentic fit phase.
 - Stale docs: `docs/developer/TESTING_LINTING.md`, `docs/cloud/*`, `SCIENTIFIC_VALIDATION_AND_ARCHITECTURE.md` and the routing examples in `evals.md`.
 - CI runs the full test matrix twice (`tests_tribos.yml` and `tests_scientific_validation.yml`).
 - Bandit B608 warnings (medium severity, likely false positives) still need `# nosec` with a reason.

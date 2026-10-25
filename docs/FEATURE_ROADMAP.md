@@ -12,11 +12,11 @@ Each task below is self-contained: a goal, where it plugs in, the files to creat
 
 In the shared files, add small entries only. Do not restructure them.
 
-**Status (2026-10-25):** all bugs from [../CODEBASE_AUDIT.md](../CODEBASE_AUDIT.md) are fixed and every test suite is green. The tasks below have **not been started**, except:
-
-- **T6:** `tribos/dynamis/interactive.py` exists (simulation, bifurcation and vector-field helpers; imports and lints clean). It is untested and has no router.
-- **T10:** `web/src/services/agentService.ts` and `web/src/types/agentic.ts` contain an unfinished project API client.
-- **Infrastructure:** `web/src/components/artifacts/registry.tsx` exists and is wired into `MessageArtifacts.tsx`. Use it.
+**Status (2026-10-25):** all ten tasks are DONE (see each section's note), committed on the `features-roadmap` branch in
+the order T8, T1, T4, T3, T2, T9, T6, T7, T5, T10 (T2 before T9 because its work was already in progress). The
+end-to-end run with the live model found and fixed three integration gaps: closed computations that need a specialised
+tool now reach the planner, the planner is told the attached files' ids, and the calculators accept the input names a
+model writes. One live gap remains: the planning model does not always plan the engineering-calculator call.
 
 **Definition of done for every task:**
 

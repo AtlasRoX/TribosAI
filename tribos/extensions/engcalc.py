@@ -7,6 +7,16 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+def _inputs_by_calculator() -> str:
+    """Each calculator's input names, for the planner (the names the calculator accepts, aliases aside)."""
+    try:
+        from tribos.engcalc import CALCULATORS
+
+        return "; ".join(f"{c.id}: {', '.join(p.name for p in c.params)}" for c in CALCULATORS.values())
+    except Exception:  # noqa: BLE001 - the description is a hint; the calculator still reports its inputs on error
+        return ""
+
+
 class PhysisEngineeringCalcInput(BaseModel):
     calculator: str = Field(
         ...,
@@ -23,7 +33,8 @@ class PhysisEngineeringCalcInput(BaseModel):
         default_factory=dict,
         description=(
             "Input values by name. A bare number is in the input's SI unit; any unit may be written as a string "
-            "('250 MPa', '12 mm', '5 kN/m') or as {value, unit, uncertainty} to propagate an uncertainty."
+            "('250 MPa', '12 mm', '5 kN/m') or as {value, unit, uncertainty} to propagate an uncertainty. Input names "
+            "per calculator: " + _inputs_by_calculator()
         ),
     )
     material: str | None = Field(

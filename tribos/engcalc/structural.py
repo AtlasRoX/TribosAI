@@ -31,6 +31,12 @@ SECTION_PARAMS: tuple[Param, ...] = (
 def section_properties(v: dict[str, Any]) -> dict[str, float | None]:
     """A, I and c of the cross-section (None where a custom section did not give it)."""
     shape = v.get("section") or "custom"
+    if shape == "custom" and v.get("second_moment_of_area") is None:
+        # No shape was named and no I given: the dimensions that were given say which shape it is.
+        if v.get("width") is not None and v.get("height") is not None:
+            shape = "rectangle"
+        elif v.get("diameter") is not None:
+            shape = "tube" if v.get("inner_diameter") is not None else "circle"
 
     def need(*names: str) -> list[float]:
         missing = [n for n in names if v.get(n) is None]

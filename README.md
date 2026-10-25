@@ -78,6 +78,21 @@ It runs as the `math_agent` phase of every agentic framework and is available to
 
 ---
 
+## Research Features
+
+- **Fit ODE models to your data** (`dynamis_fit_parameters`, agentic fit phase): attach CSV/XLSX/HDF5/MAT measurements; least squares with bounds, multi-start, robust loss and optional initial-state fitting; CIs from the covariance, correlation and identifiability warnings, AIC/BIC, fit-vs-data and residual plots.
+- **PDE solver** (`dynamis_solve_pde`): heat, wave and Poisson in 1D/2D; advection-diffusion, Fisher-KPP and Burgers in 1D; Dirichlet, Neumann and periodic edges. Every solve reports a nested-grid convergence study (observed order, Richardson error), the analytic error when an exact solution is given, exact mass/energy conservation checks, and the CFL/diffusion number (unstable explicit steps are refused or adapted).
+- **Uncertainty propagation** (`physis_propagate_uncertainty`): first-order GUM with a contribution budget, Monte Carlo with a coverage interval, Pint units and CODATA autofill; value ± U (k = 2).
+- **Engineering calculators** (`physis_engineering_calc`): beams, column buckling, pressure vessels (ASME VIII-1 UG-27), shafts, bolts, fatigue (Goodman/Gerber/Soderberg, Miner), pipe pressure drop (Colebrook), heat exchangers (LMTD, ε-NTU) and layered walls, each with its reference section, unit-checked inputs, a typical-material table, utilisation per limit state and validity limits.
+- **Unit checking on every answer**: the written answer's quantities and equations are checked for dimensional consistency and numeric agreement; contradictions go back to the writer.
+- **Formal proofs with Lean 4 (optional)**: "prove ..." questions are formalised, checked and repaired; "formally verified (Lean)" only on a clean compile without `sorry`. Without Lean installed the status is "formal checker unavailable".
+- **Interactive simulation**: simulation cards have an Explore panel (parameter sliders, initial conditions, phase portrait with a vector field, bifurcation sweeps) backed by `/api/simulate`.
+- **Uploaded papers** (`archivon_read_paper`, `archivon_reproduce_paper`): attach a PDF; its equations, ODEs, parameters and stated results are extracted with page references, and each claim is reproduced, differs, or is reported not reproducible with the missing inputs.
+- **Exports**: Markdown, Word (with native equations), PDF and a runnable Jupyter notebook that re-executes the recorded computations and asserts their values.
+- **Shared projects**: projects with owner/editor/viewer members, shared files attached to every chat, project instructions, reviewed memory (approve/reject, history) and an activity log, in a ChatGPT-style sidebar.
+
+---
+
 ## Data & Computation Sources
 
 | Domain | Integrated Sources & Solvers |

@@ -616,6 +616,8 @@ _RENDERERS = {
 # Tools rendered by their own renderer wherever their result appears (see render_tool_result).
 TOOL_RENDERERS = {
     "dynamis_solve_pde": render_dynamis,
+    "dynamis_fit_parameters": render_dynamis,
+    "physis_propagate_uncertainty": render_physis,
     "physis_engineering_calc": render_engineering_calc,
     "physis_list_calculators": render_calculator_list,
     "archivon_read_paper": render_paper,

@@ -275,9 +275,16 @@ export interface MemoryFact {
   valid_from?: string | number | null;
   invalid_at?: string | number | null;
   recorded_at?: string | number | null;
-  source?: string;
+  /** Where the fact came from: {tool, run_id, thread_id, ...} for a run, {origin, ...} for a member. */
+  source?: string | Record<string, unknown>;
   confidence?: number;
   invalid?: boolean;
+  value?: string | null;
+  verified?: boolean;
+  superseded_by?: string | null;
+  invalidation_reason?: string | null;
+  /** The member (or the run's user) who wrote the fact. */
+  written_by?: string;
   tags?: string[];
   review_status?: FactReviewStatus;
   reviewed_by?: string | null;

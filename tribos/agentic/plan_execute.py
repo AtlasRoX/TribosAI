@@ -209,6 +209,29 @@ async def request_dag_approval(state: Any, graph: PlanGraph, round_no: int) -> d
     return {"approval_id": approval_id, "status": status, "dropped": removed, "message": decision.message[:300]}
 
 
+
+# Tools that compute what the mathematics agent cannot: a numerical PDE solve with its mesh study, a cited engineering
+# calculation, a propagated uncertainty, an uploaded paper's reproduction. A question that needs one is planned even
+# when it parses as a closed computation, or the symbolic answer would stand in for the requested numerical check.
+SPECIALISED_TOOLS = frozenset({
+    "dynamis_solve_pde", "physis_engineering_calc", "physis_propagate_uncertainty", "archivon_read_paper",
+    "archivon_reproduce_paper",
+})
+
+
+def needs_specialised_tool(state: Any) -> bool:
+    """Whether tool retrieval ranks one of SPECIALISED_TOOLS among the top three for the question."""
+    registry = getattr(state, "registry", None)
+    if registry is None:
+        return False
+    try:
+        from .tool_retrieval import retrieve_tools
+
+        top = retrieve_tools(registry, state.clean_query or state.query, k=3)
+    except Exception:  # noqa: BLE001 - retrieval is a routing hint; without it the default rules apply
+        return False
+    return any(getattr(e, "name", "") in SPECIALISED_TOOLS and registry.get_entry(e.name) is not None for e in top)
+
 class PlanExecutePhase(AgentPhase):
     key = "plan_execute"
     stage = "augment"
@@ -221,10 +244,11 @@ class PlanExecutePhase(AgentPhase):
             return False
         if state.options.get("enable_plan") is False:
             return False
-        if is_closed_computation(state.ctx) and math_agent_available(state):
+        specialised = needs_specialised_tool(state)
+        if is_closed_computation(state.ctx) and math_agent_available(state) and not specialised:
             return False  # the verified mathematics agent solves and checks it; a tool plan would only repeat that
         rule = (state.bag.get("routing") or {}).get("rule")
-        if rule in DIRECT_ROUTES and (rule not in MATH_DIRECT_ROUTES or math_agent_available(state)):
+        if rule in DIRECT_ROUTES and (rule not in MATH_DIRECT_ROUTES or math_agent_available(state)) and not specialised:
             # Auto chose the direct workflow (config.DIRECT_ROUTES); the two math-problem routes rely on the
             # mathematics agent, so without it the planner still runs.
             return False
