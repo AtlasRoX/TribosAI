@@ -405,6 +405,53 @@ def render_calculator_list(res: Any) -> list[str]:
     return out
 
 
+def render_paper(res: Any) -> list[str]:
+    """An uploaded paper as read (metadata, equations, parameters) or as reproduced (one row per stated result)."""
+    d, tool = _data(res), str(getattr(res, "tool_name", "") or "archivon_read_paper")
+    paper = d.get("paper") if isinstance(d.get("paper"), dict) else d
+    out = [
+        f'<uploaded_paper tool="{_attr(tool)}" dataset_id="{_attr(paper.get("dataset_id"))}" '
+        f'title="{_attr(paper.get("title") or "")}" doi="{_attr(paper.get("doi") or "")}" '
+        f'arxiv="{_attr(paper.get("arxiv_id") or "")}" pages="{_attr(paper.get("n_pages"))}" '
+        'note="extracted from the uploaded PDF; cite claims by page, and report each reproduction status exactly">'
+    ]
+    for c in (d.get("claims") or [])[:30]:
+        if not isinstance(c, dict):
+            continue
+        if "status" in c:
+            out.append(
+                f'<reproduction name="{_attr(c.get("name"))}" status="{_attr(c.get("status"))}" '
+                f'stated="{_attr(num(c.get("stated")))} {_attr(c.get("unit") or "")}" '
+                f'computed_si="{_attr(num(c.get("computed")))}" relative_difference="{_attr(num(c.get("relative_difference")))}" '
+                f'missing="{_attr(", ".join(c.get("missing") or []))}" page="{_attr(c.get("page"))}">'
+                f"{_text(c.get('equation') or c.get('reason') or '', 300)}</reproduction>"
+            )
+        else:
+            out.append(f'<stated_result name="{_attr(c.get("name"))}" value="{_attr(num(c.get("value")))}" '
+                       f'unit="{_attr(c.get("unit") or "")}" page="{_attr(c.get("page"))}">{_text(c.get("line"), 300)}'
+                       "</stated_result>")
+    for e in [*(d.get("odes") or []), *(d.get("equations") or [])][:30]:
+        if isinstance(e, dict):
+            lhs = f"d{e['state']}/dt" if e.get("state") else e.get("lhs")
+            line = f"{lhs} = {e.get('rhs')}"
+            out.append(f'<equation number="{_attr(e.get("number") or "")}" page="{_attr(e.get("page"))}">'
+                       f"{_text(line, 300)}</equation>")
+    for p in (d.get("parameters") or [])[:40]:
+        if isinstance(p, dict):
+            out.append(f'<parameter name="{_attr(p.get("name"))}" value="{_attr(p.get("as_written") or num(p.get("value")))}" '
+                       f'page="{_attr(p.get("page"))}"/>')
+    for s in (d.get("sections") or [])[:20]:
+        if isinstance(s, dict):
+            out.append(f'<section page="{_attr(s.get("page"))}">{_text(s.get("title"), 100)}</section>')
+    for p in (d.get("text") or [])[:6]:
+        if isinstance(p, dict) and p.get("text"):
+            out.append(f'<page_text page="{_attr(p.get("page"))}">{_text(p.get("text"), 1200)}</page_text>')
+    for n in (d.get("notes") or [])[:4]:
+        out.append(f"<note>{_text(n, 300)}</note>")
+    out.append("</uploaded_paper>")
+    return out
+
+
 def render_physis(res: Any) -> list[str]:
     d, tool = _data(res), str(getattr(res, "tool_name", "") or "physis")
     out: list[str] = []
@@ -564,6 +611,8 @@ TOOL_RENDERERS = {
     "dynamis_solve_pde": render_dynamis,
     "physis_engineering_calc": render_engineering_calc,
     "physis_list_calculators": render_calculator_list,
+    "archivon_read_paper": render_paper,
+    "archivon_reproduce_paper": render_paper,
 }
 
 
@@ -592,6 +641,7 @@ __all__ = [
     "render_calcula",
     "render_dynamis",
     "render_engineering_calc",
+    "render_paper",
     "render_pde",
     "render_physis",
     "render_tool_result",

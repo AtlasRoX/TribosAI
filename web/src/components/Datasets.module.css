@@ -123,6 +123,10 @@
   color: var(--domain-t2b);
 }
 
+.kind_paper {
+  color: var(--domain-s2);
+}
+
 .kind_legacy {
   color: var(--text-faint);
 }

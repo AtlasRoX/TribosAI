@@ -17,7 +17,7 @@ Precedence for state directories: a specific variable (`TRIBOS_MEMORY_DIR`, `TRI
 `TRIBOS_UPLOAD_ROOT`, `TRIBOS_JOBS_DIR`, `TRIBOS_TOOL_CACHE_DIR`) wins over `TRIBOS_DATA_DIR`; with
 neither set, every store keeps its historical location under the workspace.
 
-158 variables.
+165 variables.
 
 ## State directories
 
@@ -217,6 +217,8 @@ neither set, every store keeps its historical location under the workspace.
 | `TRIBOS_UPLOAD_MAX_MB_H5AD` | float | `500.0` | `tribos/datasets/store.py` | Deprecated: fallback for TRIBOS_UPLOAD_MAX_MB_HDF5. |
 | `TRIBOS_UPLOAD_MAX_MB_HDF5` | float | `500.0` | `tribos/datasets/store.py` | Largest HDF5 (.h5/.hdf5) upload in MB. |
 | `TRIBOS_UPLOAD_MAX_MB_MAT` | float | `100.0` | `tribos/datasets/store.py` | Largest MATLAB (.mat) upload in MB. |
+| `TRIBOS_UPLOAD_MAX_MB_PDF` | float | `25.0` | `tribos/datasets/store.py` | Largest paper (.pdf) upload in MB. |
+| `TRIBOS_UPLOAD_MAX_PDF_PAGES` | int (1 to 5000) | `300` | `tribos/datasets/validators.py` | Most pages an uploaded paper may have. |
 | `TRIBOS_UPLOAD_MAX_TOTAL_MB` | float | `2048.0` | `tribos/datasets/store.py` | Total upload storage per user in MB. |
 
 ## Simulation and single-cell analysis
@@ -281,3 +283,13 @@ neither set, every store keeps its historical location under the workspace.
 | --- | --- | --- | --- | --- |
 | `PYTEST_CURRENT_TEST` | str | unset | `tribos/agentic/jobs.py`<br>`tribos/agentic/router_store.py`<br>`tribos/agentic/sandbox/__init__.py` (+6) | Set by pytest; `auto` switches and default stores treat its presence as a test run. Never set it yourself. |
 | `TRIBOS_LOAD_DOTENV` | bool | `true` | `app/backend/main.py` | Load the workspace `.env` when the API module is imported; tests/conftest.py sets 0 so a developer `.env` never reaches pytest. |
+
+## Unregistered
+
+| Variable | Type | Default | Read at | Description |
+| --- | --- | --- | --- | --- |
+| `TRIBOS_FORMAL` |  | unset | `tribos/verify/formal/prove.py` |  |
+| `TRIBOS_FORMAL_MAX_REPAIRS` |  | unset | `tribos/verify/formal/prove.py` |  |
+| `TRIBOS_FORMAL_TIMEOUT_S` |  | unset | `tribos/verify/formal/runner.py` |  |
+| `TRIBOS_LEAN_PATH` |  | unset | `tribos/verify/formal/runner.py` |  |
+| `TRIBOS_LEAN_PROJECT` |  | unset | `tribos/verify/formal/prove.py`<br>`tribos/verify/formal/runner.py` |  |

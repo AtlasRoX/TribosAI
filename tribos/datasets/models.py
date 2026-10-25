@@ -16,6 +16,7 @@ class DatasetKind(str, Enum):
     TABLE = "table"
     HDF5 = "hdf5"
     MAT = "mat"
+    PAPER = "paper"  # a PDF paper: read and reproduced (tribos/papers), never analysed as a table
     # A manifest written by the biomedical release (kind "h5ad" or "sbml"): listed, counted and deletable, never
     # analysed. Uploads can never create this kind (EXTENSION_KINDS has no extension for it).
     LEGACY = "legacy"
@@ -23,7 +24,7 @@ class DatasetKind(str, Enum):
 
 # Kinds of the biomedical release that are no longer accepted; their manifests are read as DatasetKind.LEGACY.
 LEGACY_KINDS = frozenset({"h5ad", "sbml"})
-UPLOAD_KINDS = (DatasetKind.TABLE, DatasetKind.HDF5, DatasetKind.MAT)
+UPLOAD_KINDS = (DatasetKind.TABLE, DatasetKind.HDF5, DatasetKind.MAT, DatasetKind.PAPER)
 
 
 class ConsentStatus(str, Enum):
@@ -129,6 +130,8 @@ class ValidationSummary(BaseModel):
     n_reaction_parameters: int | None = None
     units: dict[str, str] = Field(default_factory=dict)
     table_orientation: Literal["cells_by_genes", "genes_by_cells"] | None = None
+    n_pages: int | None = None
+    title: str | None = None
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -188,6 +191,8 @@ class DatasetRecord(BaseModel):
             return f"{v.n_obs:,} cells × {v.n_vars:,} genes"
         if v.n_rows is not None and v.n_columns is not None:
             return f"{v.n_rows:,} rows × {v.n_columns:,} columns"
+        if v.n_pages is not None:
+            return f"{v.n_pages} page{'' if v.n_pages == 1 else 's'}"
         if v.datasets:
             return f"{len(v.datasets)} dataset(s)"
         return None

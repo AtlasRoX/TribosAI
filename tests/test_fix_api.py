@@ -236,8 +236,9 @@ def test_dataset_limits_endpoint(api, monkeypatch):
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["extensions"] == {".csv": "table", ".tsv": "table", ".xlsx": "table", ".parquet": "table",
-                                  ".json": "table", ".h5": "hdf5", ".hdf5": "hdf5", ".mat": "mat"}
-    assert body["max_bytes"] == {"table": 100 * 1024 * 1024, "hdf5": 500 * 1024 * 1024, "mat": 7 * 1024 * 1024}
+                                  ".json": "table", ".h5": "hdf5", ".hdf5": "hdf5", ".mat": "mat", ".pdf": "paper"}
+    assert body["max_bytes"] == {"table": 100 * 1024 * 1024, "hdf5": 500 * 1024 * 1024, "mat": 7 * 1024 * 1024,
+                                 "paper": 25 * 1024 * 1024}
     assert client.get("/api/datasets/limits").status_code == 401
 
 

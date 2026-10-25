@@ -230,6 +230,9 @@ For all endpoints:
 
 ## T7: Read uploaded papers and reproduce them
 
+**Status: DONE (2026-10-25).** PDFs upload as dataset kind `paper` (magic bytes, size/page caps, encrypted PDFs refused); `tribos/papers/` extracts metadata, sections, equations (SymPy + LaTeX), ODEs, parameters and stated results with page and verbatim line, and reproduces claims (closed form via SymPy, ODEs via Dynamis) as reproduced / differs / not reproducible; tools `archivon_read_paper`, `archivon_reproduce_paper`, card `paper_reproduction`.
+No dependencies added. Extraction is line-based (display equations on their own line); OCR is used only when the vision OCR is installed; a stated result may serve as the input of a later equation, labelled as such.
+
 **Upload.**
 - `.pdf` becomes dataset kind `paper` in `tribos/datasets` and in `GET /api/datasets/limits`.
 - Validate the magic bytes, and enforce a page cap and a size cap (`TRIBOS_UPLOAD_MAX_MB_PDF`, default 25).

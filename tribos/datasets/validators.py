@@ -164,6 +164,38 @@ def validate_hdf5(path: Path) -> ValidationSummary:
         f.close()
 
 
+def validate_pdf(path: Path) -> ValidationSummary:
+    """Validate a paper (.pdf): the %PDF- signature, readable by pypdf, not encrypted, within the page cap."""
+    from tribos.config.settings import get_int
+
+    with open(path, "rb") as fh:
+        head = fh.read(1024)
+    if b"%PDF-" not in head:
+        raise ValidationFailure("not_pdf", "The file is not a PDF (no %PDF- header).")
+    from pypdf import PdfReader
+
+    try:
+        reader = PdfReader(str(path))
+        encrypted = reader.is_encrypted
+    except Exception as exc:
+        raise ValidationFailure("pdf_unreadable", f"The PDF could not be read ({type(exc).__name__}).") from exc
+    if encrypted:
+        raise ValidationFailure(
+            "pdf_encrypted", "The PDF is encrypted (password-protected); save an unencrypted copy and upload that."
+        )
+    try:
+        n_pages = len(reader.pages)
+        title = str((reader.metadata or {}).get("/Title") or "").strip()[:300] or None
+    except Exception as exc:
+        raise ValidationFailure("pdf_unreadable", f"The PDF could not be read ({type(exc).__name__}).") from exc
+    cap = int(get_int("TRIBOS_UPLOAD_MAX_PDF_PAGES"))
+    if n_pages > cap:
+        raise ValidationFailure("pdf_too_many_pages", f"The PDF has {n_pages} pages; at most {cap} are read.")
+    if n_pages == 0:
+        raise ValidationFailure("pdf_unreadable", "The PDF has no pages.")
+    return ValidationSummary(format="pdf", n_pages=n_pages, title=title)
+
+
 def validate_mat(path: Path) -> ValidationSummary:
     """Validate a MATLAB (.mat) file (v4/v5 via scipy.io.whosmat or v7.3 via HDF5)."""
     with open(path, "rb") as fh:

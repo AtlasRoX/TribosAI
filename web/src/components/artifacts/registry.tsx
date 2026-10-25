@@ -9,6 +9,7 @@
 
 import type React from "react";
 import { EngineeringCalcArtifact } from "./EngineeringCalcArtifact";
+import { PaperArtifact } from "./PaperArtifact";
 import { PdeArtifact } from "./PdeArtifact";
 import { UncertaintyArtifact } from "./UncertaintyArtifact";
 import { FEATURE_ARTIFACT_KEYS } from "./artifactKeys";
@@ -31,4 +32,5 @@ export const FEATURE_ARTIFACTS: FeatureArtifact[] = [
   { key: "uncertainty", Component: UncertaintyArtifact },
   { key: "pde", Component: PdeArtifact },
   { key: "engineering_calc", Component: EngineeringCalcArtifact },
+  { key: "paper_reproduction", Component: PaperArtifact },
 ];

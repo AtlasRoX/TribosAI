@@ -2,7 +2,7 @@
 
 import React, { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Archive, FileSpreadsheet, Grid3x3, Layers, LoaderCircle, X } from "lucide-react";
+import { Archive, FileSpreadsheet, FileText, Grid3x3, Layers, LoaderCircle, X } from "lucide-react";
 import styles from "./Datasets.module.css";
 import type { DatasetLimits, DatasetProvenance, DatasetRecord, DatasetSource } from "@/types/datasets";
 import {
@@ -63,6 +63,7 @@ export function KindIcon({ kind, size = 14 }: { kind: string; size?: number }) {
   if (kind === "table") return <FileSpreadsheet style={s} aria-hidden="true" />;
   if (kind === "hdf5") return <Layers style={s} aria-hidden="true" />;
   if (kind === "mat") return <Grid3x3 style={s} aria-hidden="true" />;
+  if (kind === "paper") return <FileText style={s} aria-hidden="true" />;
   // Legacy (biomedical-release) uploads and any kind this client does not know.
   return <Archive style={s} aria-hidden="true" />;
 }
@@ -71,6 +72,7 @@ const KIND_LABELS: Record<string, string> = {
   table: "Table",
   hdf5: "HDF5 file",
   mat: "MATLAB .mat file",
+  paper: "Paper (PDF)",
   legacy: "Legacy upload (no longer analysed)",
 };
 

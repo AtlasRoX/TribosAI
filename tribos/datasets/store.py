@@ -37,6 +37,7 @@ from .validators import (
     ValidationFailure,
     validate_hdf5,
     validate_mat,
+    validate_pdf,
     validate_table,
 )
 
@@ -51,6 +52,7 @@ EXTENSION_KINDS = {
     ".h5": DatasetKind.HDF5,
     ".hdf5": DatasetKind.HDF5,
     ".mat": DatasetKind.MAT,
+    ".pdf": DatasetKind.PAPER,
 }
 CHUNK_BYTES = 1 << 20
 _MB = 1024 * 1024
@@ -101,6 +103,8 @@ def kind_cap_bytes(kind: DatasetKind) -> int:
         return _env_mb("TRIBOS_UPLOAD_MAX_MB_MAT", 100)
     if kind == DatasetKind.TABLE:
         return _env_mb("TRIBOS_UPLOAD_MAX_MB_CSV", 100)
+    if kind == DatasetKind.PAPER:
+        return _env_mb("TRIBOS_UPLOAD_MAX_MB_PDF", 25)
     return 100 * _MB
 
 
@@ -274,7 +278,7 @@ class DatasetStore:
         if kind is None:
             raise DatasetStoreError(
                 415,
-                f"Unsupported file type '{ext or display_name}'. Upload table (.csv, .tsv, .xlsx, .json, .parquet), HDF5 (.h5, .hdf5), or MAT (.mat).",
+                f"Unsupported file type '{ext or display_name}'. Upload table (.csv, .tsv, .xlsx, .json, .parquet), HDF5 (.h5, .hdf5), MAT (.mat), or a paper (.pdf).",
                 "unsupported_type",
             )
         if len(await asyncio.to_thread(self.list, user_id)) >= max_datasets():
@@ -317,6 +321,8 @@ class DatasetStore:
                     summary = await asyncio.to_thread(validate_hdf5, part)
                 elif kind == DatasetKind.MAT:
                     summary = await asyncio.to_thread(validate_mat, part)
+                elif kind == DatasetKind.PAPER:
+                    summary = await asyncio.to_thread(validate_pdf, part)
                 elif kind == DatasetKind.TABLE:
                     out_h5ad = (ds_dir / _ANALYSIS) if ext in (".csv", ".tsv") else None
                     summary, derived_sha = await asyncio.to_thread(

@@ -257,6 +257,8 @@ _SETTINGS: Sequence[Setting] = (
     Setting("TRIBOS_UPLOAD_MAX_MB_CSV", "float", 100.0, "Largest table (CSV/TSV) upload in MB.", _UP),
     Setting("TRIBOS_UPLOAD_MAX_MB_HDF5", "float", 500.0, "Largest HDF5 (.h5/.hdf5) upload in MB.", _UP),
     Setting("TRIBOS_UPLOAD_MAX_MB_MAT", "float", 100.0, "Largest MATLAB (.mat) upload in MB.", _UP),
+    Setting("TRIBOS_UPLOAD_MAX_MB_PDF", "float", 25.0, "Largest paper (.pdf) upload in MB.", _UP),
+    Setting("TRIBOS_UPLOAD_MAX_PDF_PAGES", "int", 300, "Most pages an uploaded paper may have.", _UP, min=1, max=5000),
     Setting("TRIBOS_UPLOAD_MAX_TOTAL_MB", "float", 2048.0, "Total upload storage per user in MB.", _UP),
     Setting("TRIBOS_UPLOAD_MAX_DATASETS", "int", 50, "Uploaded datasets kept per user.", _UP),
     # --- Partial differential equations (tribos/dynamis/pde) -----------------------------------------------------

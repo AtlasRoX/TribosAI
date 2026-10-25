@@ -180,14 +180,14 @@ test("LOG-35: a cancelled job's error event is reported as cancelled", async () 
 
 // LOG-32 ------------------------------------------------------------------------------------------------------
 
-test("LOG-32: the upload pre-check follows the server's kinds (table, hdf5, mat), not h5ad/SBML", () => {
+test("LOG-32: the upload pre-check follows the server's kinds (table, hdf5, mat, paper), not h5ad/SBML", () => {
   const file = (name: string, size = 10) => ({ name, size }) as File;
-  for (const ok of ["a.csv", "a.TSV", "a.xlsx", "a.parquet", "a.json", "a.h5", "a.hdf5", "a.mat"]) assert.equal(precheckFile(file(ok)), null, ok);
+  for (const ok of ["a.csv", "a.TSV", "a.xlsx", "a.parquet", "a.json", "a.h5", "a.hdf5", "a.mat", "a.pdf"]) assert.equal(precheckFile(file(ok)), null, ok);
   for (const bad of ["a.h5ad", "a.xml", "a.sbml", "noext"]) assert.match(String(precheckFile(file(bad))), /Unsupported file type/, bad);
   assert.equal(kindForFile("x.h5"), "hdf5");
   assert.equal(kindForFile("x.mat"), "mat");
   assert.match(String(precheckFile(file("a.csv", 101 * 1024 * 1024))), /Table files are limited to 100 MB/);
-  assert.equal(acceptAttr(), ".csv,.tsv,.xlsx,.parquet,.json,.h5,.hdf5,.mat");
+  assert.equal(acceptAttr(), ".csv,.tsv,.xlsx,.parquet,.json,.h5,.hdf5,.mat,.pdf");
 });
 
 test("LOG-32: GET /api/datasets/limits replaces the defaults; a failure keeps them", async () => {
@@ -196,7 +196,7 @@ test("LOG-32: GET /api/datasets/limits replaces the defaults; a failure keeps th
     const limits = await fetchDatasetLimits("http://x", noAuth);
     assert.equal(calls[0].url, "http://x/api/datasets/limits");
     assert.deepEqual(limits.extensions, { ".csv": "table", ".h5": "hdf5" });
-    assert.deepEqual(limits.max_bytes, { table: 5, hdf5: 7, mat: DEFAULT_DATASET_LIMITS.max_bytes.mat });
+    assert.deepEqual(limits.max_bytes, { table: 5, hdf5: 7, mat: DEFAULT_DATASET_LIMITS.max_bytes.mat, paper: DEFAULT_DATASET_LIMITS.max_bytes.paper });
     assert.match(String(precheckFile({ name: "a.mat", size: 1 } as File, limits)), /Unsupported/);
   });
   await withFetch([() => new Response("{}", { status: 404 })], async () => {

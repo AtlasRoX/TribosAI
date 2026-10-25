@@ -93,6 +93,8 @@ TOOL_INTENTS: dict[str, str] = {
     "physis_materials": "query materials project crystal structure band gap formation energy hull stability density symmetry space group",
     "physis_wolfram": "query wolfram alpha computational knowledge engine formula evaluation special functions reference data",
     "physis_encyclopedia": "search mathematical and scientific encyclopedia definitions theorems proof sketches wikipedia reference",
+    "archivon_read_paper": "read uploaded attached paper pdf extract equations parameters results sections title doi page",
+    "archivon_reproduce_paper": "reproduce verify check uploaded paper pdf results claims recompute equations parameters ode reproducibility",
     "physis_engineering_calc": "engineering design calculation beam deflection bending stress cantilever simply supported column buckling euler johnson pressure vessel hoop stress wall thickness asme shaft torsion von mises bolt preload torque fatigue goodman miner endurance pipe pressure drop friction factor colebrook heat exchanger lmtd ntu effectiveness insulation wall conduction u-value safety factor utilisation material steel aluminium",
     "physis_list_calculators": "list engineering calculators available inputs units materials table catalog",
     "physis_propagate_uncertainty": "propagate uncertainty error propagation tolerance measurement uncertainty gum monte carlo combined standard uncertainty tolerance stack error budget contribution",
@@ -104,7 +106,7 @@ TOOL_INTENTS: dict[str, str] = {
 # Query expansion lexicon (Toolshed's query rewriting): a query word -> tool-vocabulary terms. Keys are prefixes
 # of the raw query word; values are added to the query at a lower weight.
 QUERY_EXPANSIONS: dict[str, str] = {
-    "paper": "archivon_literature_search literature arxiv publications",
+    "paper": "archivon_literature_search literature arxiv publications archivon_read_paper uploaded paper",
     "publication": "archivon_literature_search literature arxiv",
     "article": "archivon_literature_search literature",
     "preprint": "archivon_literature_search arxiv literature",
@@ -197,6 +199,8 @@ QUERY_EXPANSIONS: dict[str, str] = {
     "gum": "physis_propagate_uncertainty gum uncertainty",
     "errorbar": "physis_propagate_uncertainty uncertainty",
     "significan": "physis_propagate_uncertainty uncertainty",
+    "pdf": "archivon_read_paper archivon_reproduce_paper uploaded paper",
+    "reproduc": "archivon_reproduce_paper reproduce paper results",
     "beam": "physis_engineering_calc beam deflection bending",
     "cantilever": "physis_engineering_calc beam cantilever deflection",
     "deflect": "physis_engineering_calc beam deflection",

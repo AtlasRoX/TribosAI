@@ -22,11 +22,12 @@ export const DEFAULT_DATASET_LIMITS: DatasetLimits = {
     ".h5": "hdf5",
     ".hdf5": "hdf5",
     ".mat": "mat",
+    ".pdf": "paper",
   },
-  max_bytes: { table: 100 * MB, hdf5: 500 * MB, mat: 100 * MB },
+  max_bytes: { table: 100 * MB, hdf5: 500 * MB, mat: 100 * MB, paper: 25 * MB },
 };
 
-const UPLOAD_KINDS: readonly UploadKind[] = ["table", "hdf5", "mat"];
+const UPLOAD_KINDS: readonly UploadKind[] = ["table", "hdf5", "mat", "paper"];
 
 /** A limits body as the server sent it, with anything malformed replaced by the defaults. */
 export function normalizeDatasetLimits(body: unknown): DatasetLimits {
@@ -65,7 +66,7 @@ export function extensionList(limits: DatasetLimits = DEFAULT_DATASET_LIMITS): s
   return Object.keys(limits.extensions).join(", ");
 }
 
-export const KIND_NAMES: Record<UploadKind, string> = { table: "Table", hdf5: "HDF5", mat: "MATLAB .mat" };
+export const KIND_NAMES: Record<UploadKind, string> = { table: "Table", hdf5: "HDF5", mat: "MATLAB .mat", paper: "Paper (PDF)" };
 
 export class DatasetApiError extends ApiError {
   reasonCode?: string;
@@ -84,6 +85,10 @@ const REASON_MESSAGES: Record<string, string> = {
   hdf5_external_link: "The file contains external or virtual HDF5 links, which are not allowed.",
   mat_unreadable: "The MATLAB .mat file could not be parsed.",
   mat_empty: "The MATLAB .mat file contains no variables.",
+  not_pdf: "Not a PDF file.",
+  pdf_unreadable: "The PDF is truncated or corrupt.",
+  pdf_encrypted: "The PDF is encrypted; remove the password and upload it again.",
+  pdf_too_many_pages: "The PDF has more pages than the server reads.",
   matrix_too_large: "The table is too large to analyze.",
   table_unreadable: "The table could not be parsed.",
   non_numeric_values: "Every value in the table must be numeric.",
@@ -161,6 +166,7 @@ export function dimsOf(record: DatasetRecord): string | undefined {
   const cols = v.n_columns ?? v.n_vars;
   if (rows != null && cols != null) return `${rows.toLocaleString()} rows × ${cols.toLocaleString()} columns`;
   const n = v.datasets?.length ?? 0;
+  if (record.kind === "paper" && v.n_pages != null) return `${v.n_pages} page${v.n_pages === 1 ? "" : "s"}`;
   if (n) return `${n} ${record.kind === "mat" ? "variable" : "dataset"}${n === 1 ? "" : "s"}`;
   return undefined;
 }

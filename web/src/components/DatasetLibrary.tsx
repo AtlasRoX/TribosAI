@@ -32,7 +32,7 @@ export interface DatasetLibraryProps {
   limits?: DatasetLimits;
 }
 
-const KIND_SHORT: Record<string, string> = { table: "table", hdf5: "HDF5", mat: ".mat", legacy: "legacy" };
+const KIND_SHORT: Record<string, string> = { table: "table", hdf5: "HDF5", mat: ".mat", paper: "paper", legacy: "legacy" };
 
 /** "CSV, TSV and XLSX tables (up to 100 MB), …" from the server's limits. */
 function acceptedSummary(limits: DatasetLimits): string {
@@ -138,7 +138,7 @@ export function DatasetLibrary({
             </div>
           ) : records.length === 0 ? (
             <div className={styles.empty}>
-              No uploads yet. Attach a numeric dataset from the paperclip in the composer: {acceptedSummary(limits)}.
+              No uploads yet. Attach a numeric dataset or a paper from the paperclip in the composer: {acceptedSummary(limits)}.
             </div>
           ) : (
             <table className={styles.table}>

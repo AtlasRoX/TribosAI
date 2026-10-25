@@ -1,7 +1,7 @@
 // Dataset upload types (owned by UPLOADS, feature 8), mirroring tribos/datasets/models.py.
 
 /** Kinds an upload can have (EXTENSION_KINDS in tribos/datasets/store.py). */
-export type UploadKind = "table" | "hdf5" | "mat";
+export type UploadKind = "table" | "hdf5" | "mat" | "paper";
 
 /**
  * A stored dataset's kind. "legacy" is a biomedical-release upload (h5ad or SBML) the server still lists and
@@ -49,6 +49,8 @@ export interface DatasetLimits {
 export interface DatasetValidation {
   format: string;
   n_rows?: number | null;
+  n_pages?: number | null;
+  title?: string | null;
   n_columns?: number | null;
   columns?: string[];
   dtypes?: Record<string, string>;
