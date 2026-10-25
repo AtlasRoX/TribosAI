@@ -33,6 +33,12 @@ def render_bundle(report: ReportModel) -> bytes:
     return _render(report)
 
 
+def render_notebook(report: ReportModel) -> bytes:
+    from .notebook import render_notebook as _render
+
+    return _render(report)
+
+
 def render_latex_to_png(latex_str: str, dpi: int = 180) -> bytes:
     from .equation_renderer import render_latex_to_png as _render
 
@@ -48,5 +54,6 @@ __all__ = [
     "render_docx",
     "render_latex_to_png",
     "render_markdown",
+    "render_notebook",
     "render_pdf",
 ]

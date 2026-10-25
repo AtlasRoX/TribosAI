@@ -204,6 +204,7 @@ class ReportModel(BaseModel):
     reproducibility: list[list[str]] = Field(default_factory=list)  # pins and versions, [label, value]
     footer: str = FOOTER_TEXT
     manifest: dict[str, Any] | None = Field(default=None, exclude=True)
+    artifacts: dict[str, Any] = Field(default_factory=dict, exclude=True)
     # The run's typed result record (tribos.verify.result_record), exported as result_record.json.
     result_record: dict[str, Any] | None = Field(default=None, exclude=True)
 
@@ -1052,6 +1053,7 @@ def build_report_model(
         generated_at=datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC"),
         question=shown_question,
         answer_markdown=answer,
+        artifacts=artifacts,
         provenance=provenance,
         content_matches_run=matches,
         notices=notices,

@@ -4,13 +4,21 @@
  */
 
 const SECTION = ["section", "subsection", "subsubsection", "paragraph", "subparagraph", "subparagraph"];
+const UNICODE_MATH: Record<string, string> = {
+  "α": "alpha", "β": "beta", "γ": "gamma", "δ": "delta", "ε": "varepsilon", "ϵ": "epsilon", "ζ": "zeta",
+  "η": "eta", "θ": "theta", "ι": "iota", "κ": "kappa", "λ": "lambda", "μ": "mu", "ν": "nu", "ξ": "xi",
+  "π": "pi", "ρ": "rho", "σ": "sigma", "τ": "tau", "υ": "upsilon", "φ": "varphi", "χ": "chi", "ψ": "psi", "ω": "omega",
+  "Γ": "Gamma", "Δ": "Delta", "Θ": "Theta", "Λ": "Lambda", "Ξ": "Xi", "Π": "Pi", "Σ": "Sigma", "Υ": "Upsilon",
+  "Φ": "Phi", "Ψ": "Psi", "Ω": "Omega", "±": "pm", "×": "times", "≤": "leq", "≥": "geq", "∞": "infty",
+};
 
 function escapeText(text: string): string {
-  return text
-    .replace(/\\/g, "\\textbackslash{}")
-    .replace(/([#%&_{}])/g, "\\$1")
-    .replace(/\^/g, "\\textasciicircum{}")
-    .replace(/~/g, "\\textasciitilde{}");
+  return text.replace(/[\\#%&_{}^~]/g, (ch) => {
+    if (ch === "\\") return "\\textbackslash{}";
+    if (ch === "^") return "\\textasciicircum{}";
+    if (ch === "~") return "\\textasciitilde{}";
+    return `\\${ch}`;
+  });
 }
 
 /** Inline Markdown to LaTeX, leaving $…$ math untouched. */
@@ -34,7 +42,7 @@ function tableToLatex(rows: string[]): string {
     .filter((r, i) => !(i === 1 && /^\s*\|?\s*:?-{2,}/.test(r)))
     .map((r) => r.trim().replace(/^\||\|$/g, "").split("|").map((c) => inlineToLatex(c.trim())));
   const cols = Math.max(...cells.map((c) => c.length));
-  const body = cells.map((c, i) => c.join(" & ") + " \\\\" + (i === 0 ? " \\hline" : "")).join("\n");
+  const body = cells.map((c, i) => [...c, ...Array(cols - c.length).fill("")].join(" & ") + " \\\\" + (i === 0 ? " \\hline" : "")).join("\n");
   return `\\begin{tabular}{${"l".repeat(cols)}}\n\\hline\n${body}\n\\hline\n\\end{tabular}`;
 }
 
@@ -123,7 +131,12 @@ export function latexDocument(title: string, body: string): string {
   return [
     "\\documentclass[11pt]{article}",
     "\\usepackage[utf8]{inputenc}",
+    "\\usepackage[T1]{fontenc}",
     "\\usepackage{amsmath,amssymb,booktabs,hyperref}",
+    ...Object.entries(UNICODE_MATH).map(([ch, command]) =>
+      `\\DeclareUnicodeCharacter{${ch.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}}{\\ensuremath{\\${command}}}`),
+    "\\DeclareUnicodeCharacter{00B0}{\\ensuremath{{}^\\circ}}",
+    "\\DeclareUnicodeCharacter{2212}{\\ensuremath{-}}",
     `\\title{${escapeText(title.slice(0, 200))}}`,
     "\\date{}",
     "\\begin{document}",

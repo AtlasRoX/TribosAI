@@ -103,6 +103,6 @@ export interface RerunReport {
   notes: string[];
 }
 
-export type ExportFormat = "docx" | "pdf" | "md" | "json" | "bundle";
+export type ExportFormat = "docx" | "pdf" | "md" | "json" | "ipynb" | "bundle";
 
 export type RerunMode = "tools" | "full";

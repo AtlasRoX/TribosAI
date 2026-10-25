@@ -4,12 +4,12 @@ import React, { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Archive, Check, ChevronDown, ClipboardCopy, Download, FileCode2, FileText, FileType, Loader2, Sigma } from "lucide-react";
 
 import styles from "@/components/Export.module.css";
-import { exportMessage } from "@/services/exportService";
+import { exportEverything, exportMessage } from "@/services/exportService";
 import type { Message } from "@/types/chat";
 import type { ExportFormat } from "@/types/runs";
 import { latexDocument, markdownToLatex } from "@/lib/markdownToLatex";
-import { makeZip } from "@/lib/zip";
 import { trajectoryCsv } from "@/components/ReproductionFiles";
+import type { ZipEntry } from "@/lib/zip";
 
 export interface ExportMenuProps {
   message: Message;
@@ -23,33 +23,18 @@ type ServerKey = Exclude<ExportFormat, "bundle">;
 type ClientKey = "copy-md" | "copy-rich" | "copy-latex" | "zip";
 type ItemKey = ServerKey | ClientKey;
 
-// The reproducibility bundle stays available from the API (POST /api/export/bundle) for scripted use. The copy and
-// zip items run in the browser: nothing is uploaded.
+// Downloads use the same backend renderers; clipboard actions run locally.
 const ITEMS: { key: ItemKey; label: string; hint?: string; Icon: React.ComponentType<{ className?: string }> }[] = [
   { key: "pdf", label: "PDF", hint: ".pdf", Icon: FileType },
   { key: "docx", label: "Word document", hint: ".docx", Icon: FileText },
+  { key: "ipynb", label: "Jupyter notebook (.ipynb)", Icon: FileCode2 },
   { key: "md", label: "Markdown", hint: ".md", Icon: FileCode2 },
   { key: "zip", label: "Everything", hint: ".zip", Icon: Archive },
   { key: "copy-md", label: "Copy as Markdown", Icon: ClipboardCopy },
   { key: "copy-rich", label: "Copy for Word or Docs", Icon: ClipboardCopy },
   { key: "copy-latex", label: "Copy as LaTeX", Icon: Sigma },
 ];
-const SERVER_KEYS: ItemKey[] = ["pdf", "docx", "md"];
-
-function save(data: BlobPart, type: string, name: string) {
-  const url = URL.createObjectURL(new Blob([data], { type }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-function fileStem(question: string): string {
-  return (question || "tribos-answer").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "tribos-answer";
-}
+const SERVER_KEYS: ItemKey[] = ["pdf", "docx", "md", "ipynb"];
 
 /** The answer as rendered (KaTeX carries MathML, which Word turns into equations) for a rich-text paste. */
 function renderedHtml(messageId: string): string | null {
@@ -63,7 +48,7 @@ function renderedHtml(messageId: string): string | null {
 async function runClient(key: ClientKey, message: Message, question: string): Promise<void> {
   const md = message.content || "";
   if (key === "copy-md") return navigator.clipboard.writeText(md);
-  if (key === "copy-latex") return navigator.clipboard.writeText(markdownToLatex(md));
+  if (key === "copy-latex") return navigator.clipboard.writeText(latexDocument(question || "Tribos answer", markdownToLatex(md)));
   if (key === "copy-rich") {
     const html = renderedHtml(message.id);
     if (html && typeof ClipboardItem !== "undefined") {
@@ -74,31 +59,7 @@ async function runClient(key: ClientKey, message: Message, question: string): Pr
     }
     return navigator.clipboard.writeText(md);
   }
-  // zip: the report (Markdown and LaTeX), the question, the reproduction script, the trajectory and the run's data.
-  const arts = (message.execution_artifacts || {}) as Record<string, any>;
-  const stem = fileStem(question);
-  const files: { name: string; content: string }[] = [
-    { name: "question.txt", content: question + "\n" },
-    { name: "answer.md", content: md },
-    { name: "answer.tex", content: latexDocument(question || "Tribos answer", markdownToLatex(md)) },
-  ];
-  const script = arts.ode_verification?.script;
-  if (typeof script === "string" && script.trim()) files.push({ name: "verify_solution.py", content: script });
-  const sim = arts.dynamis ?? arts.vivarix;
-  const csv = sim ? trajectoryCsv(sim) : null;
-  if (csv) files.push({ name: "trajectory.csv", content: csv });
-  const data = {
-    question,
-    framework: message.framework_used,
-    routing: arts.framework_routing ?? null,
-    verification: message.verification_report ?? null,
-    ode_verification: arts.ode_verification ? { ...arts.ode_verification, script: undefined } : null,
-    math: arts.math_agent ?? null,
-    citations: message.citations ?? null,
-  };
-  files.push({ name: "run.json", content: JSON.stringify(data, null, 2) });
-  const zip = makeZip(files.map((f) => ({ name: `${stem}/${f.name}`, content: f.content })));
-  save(zip as BlobPart, "application/zip", `${stem}.zip`);
+  throw new Error("Unknown export action");
 }
 
 /** "Export" action: a small menu that downloads the answer as a report rendered by the backend. */
@@ -133,7 +94,20 @@ export function ExportMenu({ message, question, backendUrl, authHeaders, disable
     setBusy(key);
     setErrors((prev) => ({ ...prev, [key]: undefined }));
     try {
-      if (SERVER_KEYS.includes(key)) {
+      if (key === "zip") {
+        const extras: ZipEntry[] = [
+          { name: "question.txt", content: question },
+          { name: "answer.md", content: message.content || "" },
+          { name: "answer.tex", content: latexDocument(question || "Tribos answer", markdownToLatex(message.content || "")) },
+        ];
+        const arts = message.execution_artifacts;
+        const script = arts?.ode_verification?.script;
+        if (typeof script === "string") extras.push({ name: "verify_solution.py", content: script });
+        const sim = arts?.dynamis ?? arts?.vivarix;
+        const csv = sim ? trajectoryCsv(sim) : null;
+        if (csv) extras.push({ name: "trajectory.csv", content: csv });
+        await exportEverything({ question, message }, backendUrl, authHeaders(), extras);
+      } else if (SERVER_KEYS.includes(key)) {
         await exportMessage(key as ServerKey, { question, message }, backendUrl, authHeaders());
       } else {
         await runClient(key as ClientKey, message, question);

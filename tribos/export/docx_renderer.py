@@ -67,7 +67,8 @@ def _add_runs(par: Any, runs: list[Run], *, force_bold: bool = False) -> None:
                         h_pt = max(6.0, h_px * 72.0 / 180.0)
                         w_pt = max(6.0, min(w_px * 72.0 / 180.0, 480.0))
                         sub_run = par.add_run()
-                        sub_run.add_picture(io.BytesIO(png), width=Pt(w_pt), height=Pt(h_pt))
+                        picture = sub_run.add_picture(io.BytesIO(png), width=Pt(w_pt), height=Pt(h_pt))
+                        picture._inline.docPr.set("descr", piece)
                         continue
                     except Exception:
                         pass
@@ -171,7 +172,8 @@ def add_markdown(doc: Any, text: str, *, base_level: int = 2) -> None:
                         eq_par.paragraph_format.space_after = Pt(4)
                         eq_par.paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
                         r = eq_par.add_run()
-                        r.add_picture(io.BytesIO(png), width=Pt(w_pt), height=Pt(h_pt))
+                        picture = r.add_picture(io.BytesIO(png), width=Pt(w_pt), height=Pt(h_pt))
+                        picture._inline.docPr.set("descr", plain)
                         continue
                     except Exception:
                         pass

@@ -37,6 +37,7 @@ class ExportFormat(str, Enum):
     pdf = "pdf"
     md = "md"
     json = "json"
+    ipynb = "ipynb"
     bundle = "bundle"
 
 
@@ -45,6 +46,7 @@ _MEDIA_TYPES = {
     ExportFormat.pdf: "application/pdf",
     ExportFormat.md: "text/markdown; charset=utf-8",
     ExportFormat.json: "application/json",
+    ExportFormat.ipynb: "application/x-ipynb+json",
     ExportFormat.bundle: "application/zip",
 }
 _EXTENSIONS = {
@@ -52,6 +54,7 @@ _EXTENSIONS = {
     ExportFormat.pdf: "pdf",
     ExportFormat.md: "md",
     ExportFormat.json: "json",
+    ExportFormat.ipynb: "ipynb",
     ExportFormat.bundle: "zip",
 }
 _LIBRARIES = {ExportFormat.docx: "python-docx", ExportFormat.pdf: "fpdf2", ExportFormat.bundle: "python-docx/fpdf2"}
@@ -133,6 +136,8 @@ def _render(fmt: ExportFormat, report: Any) -> bytes:
         return exporter.render_markdown(report)
     if fmt is ExportFormat.bundle:
         return exporter.render_bundle(report)
+    if fmt is ExportFormat.ipynb:
+        return exporter.render_notebook(report)
     payload = {
         "report": report.model_dump(mode="json"),
         "manifest": client_view(report.manifest) if report.manifest else None,

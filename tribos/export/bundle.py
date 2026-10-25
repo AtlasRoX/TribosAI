@@ -81,6 +81,7 @@ def _reproduce_md(report: ReportModel, manifest: dict[str, Any] | None, notes: l
 def render_bundle(report: ReportModel) -> bytes:
     from .docx_renderer import render_docx
     from .pdf_renderer import render_pdf
+    from .notebook import render_notebook
 
     notes: list[str] = []
     files: dict[str, bytes] = {}
@@ -94,6 +95,8 @@ def render_bundle(report: ReportModel) -> bytes:
             notes.append(f"{name} could not be rendered ({type(exc).__name__}).")
     files["report.md"] = report_markdown(report, plot_path="simulation.png" if report.plot_png else None).encode("utf-8")
     files["answer.md"] = _answer_markdown(report).encode("utf-8")
+    files["report.ipynb"] = render_notebook(report)
+    files["report.json"] = report.model_dump_json(indent=2).encode("utf-8")
     manifest = report.manifest
     if manifest:
         from tribos.provenance.run_manifest import client_view

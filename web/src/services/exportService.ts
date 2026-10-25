@@ -3,12 +3,14 @@
 import type { Message } from "@/types/chat";
 import type { ExportFormat, RerunMode, RerunReport, RunManifest } from "@/types/runs";
 import { apiFetch, detailOf, jsonInit, requestJson, type RequestOptions } from "./apiClient.ts";
+import { makeZip, type ZipEntry } from "../lib/zip.ts";
 
 const EXTENSIONS: Record<ExportFormat, string> = {
   docx: "docx",
   pdf: "pdf",
   md: "md",
   json: "json",
+  ipynb: "ipynb",
   bundle: "zip",
 };
 
@@ -92,6 +94,29 @@ export async function exportMessage(
   );
   const blob = await res.blob();
   triggerDownload(blob, exportFilename(fmt, payload.question));
+}
+
+/** Fetch all report formats before downloading, so a failed renderer cannot silently omit a promised file. */
+export async function everythingArchive(
+  payload: ExportPayload,
+  backendUrl: string,
+  headers: Record<string, string>,
+  extras: ZipEntry[] = [],
+): Promise<Uint8Array> {
+  const files = await Promise.all((["pdf", "docx", "ipynb", "md", "json"] as const).map(async (fmt) => {
+    const response = await apiFetch(`${backendUrl}/api/export/${fmt}`,
+      jsonInit("POST", { question: payload.question || "", message: exportableMessage(payload.message) },
+        (extra) => ({ ...headers, ...extra })), failure(`Export ${fmt}`));
+    return { name: `report.${fmt}`, content: new Uint8Array(await response.arrayBuffer()) };
+  }));
+  return makeZip([...files, ...extras]);
+}
+
+export async function exportEverything(
+  payload: ExportPayload, backendUrl: string, headers: Record<string, string>, extras: ZipEntry[],
+): Promise<void> {
+  const archive = await everythingArchive(payload, backendUrl, headers, extras);
+  triggerDownload(new Blob([archive as BlobPart], { type: "application/zip" }), exportFilename("bundle", payload.question));
 }
 
 export function rerun(

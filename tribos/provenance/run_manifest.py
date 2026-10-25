@@ -246,7 +246,7 @@ def _digest_dynamis(data: dict[str, Any]) -> dict[str, Any]:
     """A Dynamis run: the system, the integrator and its tolerances (what a re-run needs), and the reported results."""
     out = _digest_vivarix(data)
     for key in ("model_name", "canonical_id", "state_variables", "t_span", "parameters", "fixed_point", "eigenvalues",
-                "stability", "verified"):
+                "stability", "verified", "spec"):
         if data.get(key) not in (None, {}, []):
             out[key] = data[key]
     solver = data.get("solver") if isinstance(data.get("solver"), dict) else {}

@@ -259,6 +259,8 @@ def dynamis_simulate_ode(
     )
     return {
         "model_name": model_name,
+        "spec": {"rhs": dict(rhs), "parameters": dict(parameters or {}), "initial_state": dict(initial_state),
+                 "t_span": [t0, tf], "method": str(method), "model_name": model_name},
         "state_variables": state_names,
         "t_span": [t0, tf],
         "method": method,
@@ -398,6 +400,8 @@ def dynamis_parameter_scan(
     )
     return {
         "parameter": parameter,
+        "spec": {"rhs": dict(rhs), "parameters": base_params, "initial_state": dict(initial_state),
+                 "t_span": list(t_span), "method": "RK45", "model_name": None},
         "scan_range": [p_min, p_max],
         "num_points": n_pts,
         "parameter_values": [float(v) for v in param_values],

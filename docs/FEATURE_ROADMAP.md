@@ -257,6 +257,9 @@ For all endpoints:
 
 ## T8: Jupyter notebook export, and fixes to the existing exports
 
+**Status: DONE (2026-10-25).** Added executable nbformat-4 exports, exact ODE specs, accessible DOCX equations, LaTeX escaping/Unicode fixes, and complete web archives.
+No dependencies added; unsupported or incomplete historical tool replays are explicitly unavailable. Verified: 1331 Python tests passed (15 skipped), 145 web tests passed; all gates green.
+
 **Fixes first.**
 - **Known bug:** Word export drops inline math ("The equation of motion is  with ."). Reproduce it by POSTing a message with `$...$` math to `/api/export/docx` through TestClient with `base_url="http://localhost"` and auth disabled.
 - Render math as native OMML in DOCX (convert the common LaTeX subset), or at minimum as a mathtext image with the LaTeX as alt text.
