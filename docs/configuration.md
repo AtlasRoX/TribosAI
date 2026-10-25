@@ -246,6 +246,11 @@ neither set, every store keeps its historical location under the workspace.
 
 | Variable | Type | Default | Read at | Description |
 | --- | --- | --- | --- | --- |
+| `TRIBOS_FORMAL` | bool | `true` | `tribos/verify/formal/prove.py` | Formal Lean 4 checking of 'prove ...' questions (used only when Lean is installed). |
+| `TRIBOS_FORMAL_MAX_REPAIRS` | int (0 to 10) | `2` | `tribos/verify/formal/prove.py` | Repairs of a Lean formalisation after compiler errors. |
+| `TRIBOS_FORMAL_TIMEOUT_S` | float (1 to 600) | `60.0` | `tribos/verify/formal/runner.py` | Seconds one Lean check may run. |
+| `TRIBOS_LEAN_PATH` | str | `` | `tribos/verify/formal/runner.py` | Path of the lean (or lake) executable; empty means lean on PATH. |
+| `TRIBOS_LEAN_PROJECT` | str | `` | `tribos/verify/formal/prove.py`<br>`tribos/verify/formal/runner.py` | A Lean project with Mathlib; proofs are checked with lake env lean there. |
 | `TRIBOS_MATH_AGENT` | bool | `true` | `tribos/agentic/math_agent.py` | Run the verified mathematics agent (bounded ReAct loop over the Axiom tools with an independent verifier) on mathematical questions. |
 | `TRIBOS_MATH_AGENT_MAX_REPAIRS` | int (0 to 10) | `4` | `tribos/axiom/agent.py` | Local repairs of one failed step before the agent switches strategy. |
 | `TRIBOS_MATH_AGENT_MAX_STEPS` | int (2 to 40) | `12` | `tribos/axiom/agent.py` | Tool calls one mathematics-agent run may make. |
@@ -283,13 +288,3 @@ neither set, every store keeps its historical location under the workspace.
 | --- | --- | --- | --- | --- |
 | `PYTEST_CURRENT_TEST` | str | unset | `tribos/agentic/jobs.py`<br>`tribos/agentic/router_store.py`<br>`tribos/agentic/sandbox/__init__.py` (+6) | Set by pytest; `auto` switches and default stores treat its presence as a test run. Never set it yourself. |
 | `TRIBOS_LOAD_DOTENV` | bool | `true` | `app/backend/main.py` | Load the workspace `.env` when the API module is imported; tests/conftest.py sets 0 so a developer `.env` never reaches pytest. |
-
-## Unregistered
-
-| Variable | Type | Default | Read at | Description |
-| --- | --- | --- | --- | --- |
-| `TRIBOS_FORMAL` |  | unset | `tribos/verify/formal/prove.py` |  |
-| `TRIBOS_FORMAL_MAX_REPAIRS` |  | unset | `tribos/verify/formal/prove.py` |  |
-| `TRIBOS_FORMAL_TIMEOUT_S` |  | unset | `tribos/verify/formal/runner.py` |  |
-| `TRIBOS_LEAN_PATH` |  | unset | `tribos/verify/formal/runner.py` |  |
-| `TRIBOS_LEAN_PROJECT` |  | unset | `tribos/verify/formal/prove.py`<br>`tribos/verify/formal/runner.py` |  |

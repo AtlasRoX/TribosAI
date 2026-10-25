@@ -278,6 +278,15 @@ _SETTINGS: Sequence[Setting] = (
             _SIM, min=1, max=10000),
     Setting("TRIBOS_SIMULATE_MAX_CONCURRENT", "int", 2, "Interactive simulation calls one user may have running at "
             "once.", _SIM, min=1, max=32),
+    # --- Formal proof checking with Lean 4 (tribos/verify/formal) ------------------------------------------------
+    Setting("TRIBOS_FORMAL", "bool", True, "Formal Lean 4 checking of 'prove ...' questions (used only when Lean is "
+            "installed).", _MATH),
+    Setting("TRIBOS_LEAN_PATH", "str", "", "Path of the lean (or lake) executable; empty means lean on PATH.", _MATH),
+    Setting("TRIBOS_LEAN_PROJECT", "str", "", "A Lean project with Mathlib; proofs are checked with lake env lean there.",
+            _MATH),
+    Setting("TRIBOS_FORMAL_TIMEOUT_S", "float", 60.0, "Seconds one Lean check may run.", _MATH, min=1.0, max=600.0),
+    Setting("TRIBOS_FORMAL_MAX_REPAIRS", "int", 2, "Repairs of a Lean formalisation after compiler errors.", _MATH,
+            min=0, max=10),
     # --- Code sandbox ----------------------------------------------------------------------------------------------
     Setting("TRIBOS_SANDBOX", "bool", True, "Code-execution sandbox tool; on by default, off/0/false/no disables it.", _SBX),
     Setting("TRIBOS_SANDBOX_TIMEOUT_S", "int", 60, "Seconds one sandboxed execution may run.", _SBX, min=5, max=110),

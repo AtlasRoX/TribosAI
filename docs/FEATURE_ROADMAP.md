@@ -165,6 +165,9 @@ Unbound or ambiguous symbols are "not evaluated" and are never flagged.
 
 ## T5: Formal proof checking with Lean, optional
 
+**Status: DONE (2026-10-25).** Added `tribos/verify/formal/` (Lean/lake discovery, temp-dir run with timeout and POSIX memory limit, diagnostics parsing, sorry/admit/axiom rejection, content-hash cache) and the model formalise-and-repair loop; the `formal_proof` agentic phase (after the math agent), the `axiom_formal_check` tool (executes_code, never replayed) and the `formal_proof` card. Tested with a fake Python `lean`.
+No dependencies added. Without Lean the status is "formal checker unavailable" and nothing else changes; the memory limit is not enforced on Windows; the phase runs on agentic frameworks only.
+
 **Goal.** Add `tribos/verify/formal/`, a Lean 4 runner.
 
 **Runner.**

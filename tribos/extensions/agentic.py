@@ -22,6 +22,7 @@ AGENT_PHASE_MODULES = (
     "tribos.agentic.topologies",  # 4 supervisor / swarm (augment) and debate (after_draft)
     "tribos.agentic.router",  # Auto escalation to the critic debate (after_draft, before the debate)
     "tribos.agentic.math_agent",  # verified mathematics agent: tool loop + independent verifier (augment)
+    "tribos.agentic.formal_proof",  # optional Lean 4 formalisation and check of "prove ..." questions (augment)
     "tribos.agentic.ode_verification",  # residual, RK4 convergence and energy balance of a solved ODE (augment)
     "tribos.agentic.hypothesis",  # 6 hypothesis -> in-silico experiment loop (augment)
     "tribos.agentic.analyst",  # 10 sandboxed code analysis of attached data (augment)

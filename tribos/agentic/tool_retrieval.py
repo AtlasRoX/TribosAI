@@ -93,6 +93,7 @@ TOOL_INTENTS: dict[str, str] = {
     "physis_materials": "query materials project crystal structure band gap formation energy hull stability density symmetry space group",
     "physis_wolfram": "query wolfram alpha computational knowledge engine formula evaluation special functions reference data",
     "physis_encyclopedia": "search mathematical and scientific encyclopedia definitions theorems proof sketches wikipedia reference",
+    "axiom_formal_check": "formal proof check lean theorem prover verify proof compile mathlib formalisation",
     "archivon_read_paper": "read uploaded attached paper pdf extract equations parameters results sections title doi page",
     "archivon_reproduce_paper": "reproduce verify check uploaded paper pdf results claims recompute equations parameters ode reproducibility",
     "physis_engineering_calc": "engineering design calculation beam deflection bending stress cantilever simply supported column buckling euler johnson pressure vessel hoop stress wall thickness asme shaft torsion von mises bolt preload torque fatigue goodman miner endurance pipe pressure drop friction factor colebrook heat exchanger lmtd ntu effectiveness insulation wall conduction u-value safety factor utilisation material steel aluminium",

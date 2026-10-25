@@ -10,4 +10,5 @@ export const FEATURE_ARTIFACT_KEYS: readonly string[] = [
   "pde",
   "engineering_calc",
   "paper_reproduction",
+  "formal_proof",
 ];

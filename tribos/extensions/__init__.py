@@ -27,6 +27,7 @@ EXTENSION_MODULES: tuple[str, ...] = (
     "tribos.extensions.physis",
     "tribos.extensions.engcalc",
     "tribos.extensions.papers",
+    "tribos.extensions.formal",
     "tribos.extensions.uploads",
     "tribos.extensions.export",
     "tribos.extensions.sandbox",

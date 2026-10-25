@@ -452,6 +452,13 @@ def render_paper(res: Any) -> list[str]:
     return out
 
 
+def render_formal_check(res: Any) -> list[str]:
+    """A Lean 4 check: its status, the statement Lean checked, and the first error."""
+    from tribos.agentic.formal_proof import evidence_xml
+
+    return [evidence_xml(_data(res))]
+
+
 def render_physis(res: Any) -> list[str]:
     d, tool = _data(res), str(getattr(res, "tool_name", "") or "physis")
     out: list[str] = []
@@ -613,6 +620,7 @@ TOOL_RENDERERS = {
     "physis_list_calculators": render_calculator_list,
     "archivon_read_paper": render_paper,
     "archivon_reproduce_paper": render_paper,
+    "axiom_formal_check": render_formal_check,
 }
 
 
