@@ -505,8 +505,11 @@ export class LocalStorageService {
     if (!this.isAvailable()) return;
     const key = this.k(STORAGE_KEYS.INVESTIGATIONS);
     if (this.trySetItem(key, list)) return;
-    // Make room without touching the list itself, then retry once.
-    this.handleQuotaExceeded(new Error("investigation list does not fit"), list);
+    // Make room from reconstructible caches only (never another investigation's messages), then retry once.
+    for (const other of this.olderThreads("")) {
+      this.slimStoredThread(other);
+      if (this.trySetItem(key, list)) return;
+    }
     if (!this.trySetItem(key, list)) {
       this.notify({ kind: "not_saved", message: "The investigation list could not be saved in this browser.", threadIds: [] });
     }
@@ -715,7 +718,9 @@ export class LocalStorageService {
     const key = this.msgKey(threadId);
     const full = messages.map(compactMessage);
     // The open investigation is the one the reader is looking at, so space is made elsewhere first: older
-    // investigations give up their plots, then the oldest are pruned, and only then does this one lose anything.
+    // investigations give up their reconstructible caches (plots, citation passage text), then this one does. The
+    // conversation text of an investigation is never deleted to make room (audit I20): a save that still does not fit
+    // is reported as not saved, and every earlier investigation stays as it was.
     let level: SaveResult["level"] = this.trySetItem(key, full) ? "full" : "none";
     if (level === "none") {
       const slim = slimMessages(messages);
@@ -728,15 +733,8 @@ export class LocalStorageService {
         }
       }
     }
-    const pruned: string[] = [];
-    while (level === "none") {
-      const removed = this.handleQuotaExceeded(new Error(`thread ${threadId} does not fit in browser storage`), undefined, threadId);
-      if (!removed.length) break;
-      pruned.push(...removed);
-      if (this.trySetItem(key, slimMessages(messages))) level = "slim";
-    }
     if (level === "none" && this.trySetItem(key, slimMessages(messages, true))) level = "no_plots";
-    const result: SaveResult = { saved: level !== "none", level, prunedThreadIds: pruned };
+    const result: SaveResult = { saved: level !== "none", level, prunedThreadIds: [] };
     if (level === "none") {
       this.notify({
         kind: "not_saved",
@@ -839,7 +837,7 @@ export class LocalStorageService {
         threadIds: [inv.id],
       });
     } catch {
-      // left as it was; pruning is the next step
+      // left exactly as it was: a failed rewrite never loses the stored investigation
     }
   }
 
@@ -951,37 +949,6 @@ export class LocalStorageService {
       } catch (e) {
         console.error("Failed to clear browser storage", e);
       }
-    }
-  }
-
-  /**
-   * Frees space by removing the messages of the oldest investigation other than the active one (and `keep`).
-   * The investigation record stays, marked `messagesPruned` with an explanatory preview, and listeners are told.
-   */
-  private handleQuotaExceeded(err: unknown, pendingList?: InvestigationItem[], keep?: string): string[] {
-    console.warn("TribosLocalStorage: storage full, pruning the oldest thread's messages", err);
-    try {
-      const list = pendingList ?? this.getInvestigations();
-      if (list.length <= 3) return [];
-      const activeId = this.getActiveThreadId();
-      const candidate = [...list]
-        .sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime())
-        .reverse()
-        .find((i) => i.id !== activeId && i.id !== keep && !i.messagesPruned);
-      if (!candidate) return [];
-      this.store()!.removeItem(this.msgKey(candidate.id));
-      candidate.messageCount = 0;
-      candidate.messagesPruned = true;
-      candidate.preview = "Messages removed to free browser storage";
-      if (!pendingList) this.trySetItem(this.k(STORAGE_KEYS.INVESTIGATIONS), list);
-      this.notify({
-        kind: "pruned",
-        message: `Browser storage was full: the saved messages of "${candidate.title}" were removed to make room.`,
-        threadIds: [candidate.id],
-      });
-      return [candidate.id];
-    } catch {
-      return [];
     }
   }
 }

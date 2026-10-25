@@ -9,6 +9,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from ...agentic.budget import BudgetExhausted, estimate_tokens  # noqa: F401
 from ...agentic.control import RunCancelled
+from ...utils.output_contract import writer_rule
 from ...verify.verifier import VerificationReport
 from .context import RunContext, logger, orchestrator_module
 
@@ -49,6 +50,9 @@ async def reconcile_confidence(run: RunContext) -> None:
     computed = computed_confidence_band(run)
     if computed is None or not run.candidate_response:
         return
+    contract = getattr(run, "output_contract", None)
+    if contract is not None and contract.strict_form:
+        return  # the user fixed the answer's form: no confidence line is added to or rewritten in it
     art = run.execution_artifacts.get("claim_confidence")
     if not isinstance(art, dict) and run.agent_state is not None:
         art = (getattr(run.agent_state, "artifacts", None) or {}).get("claim_confidence")
@@ -139,7 +143,7 @@ async def check_and_correct(run: RunContext) -> None:
         await emit(
             "verification",
             title=(
-                f"Found {len(verification_report.defects)} unsupported claim(s) "
+                f"Found {len(verification_report.defects)} problem(s) to fix "
                 f"(score {verification_report.verification_score:.2f})"
             ),
             text=defect_lines(verification_report),
@@ -149,7 +153,7 @@ async def check_and_correct(run: RunContext) -> None:
         )
         feedback_prompt = verification_report.to_feedback_prompt()
         correction_messages = [
-            SystemMessage(content=f"{system_prompt}\n\n{ao.CORRECTION_SYSTEM_PROMPT}"),
+            SystemMessage(content=f"{system_prompt}\n\n{ao.CORRECTION_SYSTEM_PROMPT}{writer_rule(getattr(run, 'output_contract', None))}"),
             HumanMessage(content=ao.build_correction_request(synthesis_prompt, candidate_response, feedback_prompt)),
         ]
         # Agentic runs charge the revision to the run budget (it may use the finalization reserve). When even that
@@ -394,8 +398,14 @@ async def report_result(run: RunContext) -> None:
             extra={"verification_score": verification_report.verification_score, "passed": False,
                    "status": verification_report.status, "coverage": coverage},
         )
-        # Explicitly mark synthesis as unverified with honest scientific warning banner
+        # Explicitly mark synthesis as unverified with honest scientific warning banner. When the user fixed the
+        # answer's form (exact text, line count, JSON, short word limit) the notice stays in the verification report
+        # and the UI's notice; it is never written into the answer itself.
         math_failed = [d for d in verification_report.defects if d.category == "MATH_CONSISTENCY"]
+        contract = getattr(run, "output_contract", None)
+        if contract is not None and contract.strict_form:
+            run.candidate_response = candidate_response
+            return
         if math_failed:
             warning_header = (
                 f"> ⚠️ **Verification found errors**: {len(math_failed)} mathematical statement(s) in this answer do not "

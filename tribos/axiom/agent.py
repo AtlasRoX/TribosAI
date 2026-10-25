@@ -43,6 +43,7 @@ from pydantic import BaseModel, Field, ValidationError
 from . import analysis as A
 from . import discrete as D
 from . import engine as E
+from .definitions import axiom_structured
 from .problem import ProblemSpec, parse_problem
 from .schemas import (
     AxiomCalculusInput,
@@ -57,6 +58,7 @@ from .schemas import (
     AxiomRecurrenceInput,
     AxiomSimplifyInput,
     AxiomSolveInput,
+    AxiomStructuredInput,
     AxiomTangentInput,
     AxiomTransformInput,
     AxiomVectorCalculusInput,
@@ -88,6 +90,7 @@ TOOL_SCHEMAS: dict[str, type[BaseModel]] = {
     "axiom_recurrence": AxiomRecurrenceInput,
     "axiom_probability": AxiomProbabilityInput,
     "calcula_statistics": CalculaStatisticsInput,
+    "axiom_structured": AxiomStructuredInput,
 }
 TOOL_FUNCS: dict[str, Callable[..., dict[str, Any]]] = {
     "axiom_solve": E.axiom_solve,
@@ -107,6 +110,7 @@ TOOL_FUNCS: dict[str, Callable[..., dict[str, Any]]] = {
     "axiom_recurrence": D.axiom_recurrence,
     "axiom_probability": D.axiom_probability,
     "calcula_statistics": D.calcula_statistics,
+    "axiom_structured": axiom_structured,
 }
 TOOL_CARDS: dict[str, str] = {
     "axiom_solve": "exact roots of equations/systems. {equations: str | [str], variables?: str | [str], domain?: 'complex'|'real'}",
@@ -126,6 +130,7 @@ TOOL_CARDS: dict[str, str] = {
     "axiom_recurrence": "closed form of a recurrence. {recurrence: 'a(n) = a(n-1) + a(n-2)', initial: {'a(0)': 0, 'a(1)': 1}}",
     "axiom_probability": "distribution queries. {distribution: 'normal'|'binomial'|'poisson'|'exponential'|'uniform'|'geometric'|'bernoulli', parameters: [..], query: 'probability'|'mean'|'variance'|'std'|'pdf'|'cdf'|'quantile', lower?, upper?, lower_inclusive?, upper_inclusive?, value?}",
     "calcula_statistics": "statistics of inline data. {operation: 'describe'|'ttest_1samp'|'ttest_ind'|'ttest_rel'|'linregress'|'pearson'|'confidence_interval', data: [float], data2?: [float], mu0?: float, confidence?: float}",
+    "axiom_structured": "questions that define their own functions, independent cases or a universal claim; a defined name is a function, never a factor. {definitions: [{name: 'T', parameter: 'n', domain: 'positive_integer'|'real'|..., branches: [{expression: 'n/2', condition: 'even'|'odd'|'otherwise'|'t < 0'|''}]}], tasks: [{id: 'T(4)', op: 'evaluate', expression: 'T(4)', bindings?: {n: 40}, factor?: bool} | {id, op: 'orbit', function: 'T', start: 1, mode: 'cycle'} | {id, op: 'claim', expression + predicate: 'prime'|'divisible'|..., or lhs + relation + rhs, variable: 'n', domain: 'nonnegative_integer'}]}",
 }
 
 

@@ -952,6 +952,16 @@ def escalation_triggers(state: Any) -> list[str]:
     signals = routing.get("signals") or {}
     if features.get("high_stakes", 0) >= 0.5 or signals.get("high_stakes"):
         triggers.append("a safety-critical question (structural, pressure, high-voltage or code compliance)")
+    # A self-contained calculation, proof or copy (no outside evidence applies) is settled by its checks: neither an
+    # uncertain route choice nor sub-questions "lacking evidence" is a concrete unresolved issue critics could fix
+    # (audit I05). Contradicting passages, safety-critical content and a fallen-back core step still escalate.
+    from ..agents.evidence_need import is_self_contained
+
+    if is_self_contained(getattr(state, "ctx", None)):
+        core = state.core_phase_status() if hasattr(state, "core_phase_status") else None
+        if isinstance(core, dict) and core.get("status") == "fallback":
+            triggers.append(f"the {core.get('label') or 'core'} step fell back to a fixed plan")
+        return triggers
     confidence = routing.get("confidence")
     if isinstance(confidence, (int, float)) and confidence < UNCERTAIN_BELOW:
         triggers.append(f"an uncertain route (top choice {round(confidence * 100)}%)")

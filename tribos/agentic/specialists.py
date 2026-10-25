@@ -267,6 +267,11 @@ def tool_allowed(ctx: Any, entry: Any) -> tuple[bool, str]:
     if excluded:
         return False, excluded
     key = tool_source_key(entry)
+    from ..agents.evidence_need import external_retrieval_block
+
+    blocked = external_retrieval_block(ctx, entry)
+    if blocked:
+        return False, blocked
     if key == "websurfer" and not getattr(ctx, "enable_web_search", True):
         return False, "web search is switched off"
     need = getattr(ctx, "evidence_need", None)

@@ -29,12 +29,25 @@ test("a budget-stopped run is a partial answer, never 'completed', even when its
 test("claim counts name checked claims and explain a different finding count instead of contradicting it", () => {
   const c = { supported: 22, contradicted: 0, unsupported: 8, not_checked: 0 };
   const { summary, note } = claimSummary(c, 30, 9);
-  assert.equal(summary, "8 of 30 checked claims lack support in the retrieved evidence");
+  assert.equal(summary, "8 of 30 claims lack support in the retrieved evidence");
   assert.match(note, /9 findings/);
   assert.match(note, /counted separately from claims/);
   assert.equal(claimSummary(c, 30, 8).note, "");
-  assert.equal(claimSummary({ supported: 29, contradicted: 0, unsupported: 1, not_checked: 0 }, 30).summary, "1 of 30 checked claims lacks support in the retrieved evidence");
-  assert.equal(claimSummary({ supported: 3, contradicted: 0, unsupported: 0, not_checked: 0 }, 3).summary, "All 3 checked claims supported by the evidence");
+  assert.equal(claimSummary({ supported: 29, contradicted: 0, unsupported: 1, not_checked: 0 }, 30).summary, "1 of 30 claims lacks support in the retrieved evidence");
+  assert.equal(claimSummary({ supported: 3, contradicted: 0, unsupported: 0, not_checked: 0 }, 3).summary, "All 3 claims checked and supported by the evidence");
+});
+
+test("undecided claims are never summarised as supported (audit I13: 'All 2 checked claims supported' over 2 undecided)", () => {
+  const counts = { supported: 0, contradicted: 0, unsupported: 0, not_checked: 0, inconclusive: 2 };
+  assert.equal(claimSummary(counts, 2, 1).summary, "2 of 2 claims could not be decided by the checks");
+  const mixed = { supported: 1, contradicted: 1, unsupported: 0, not_checked: 0, inconclusive: 1 };
+  assert.equal(claimSummary(mixed, 3).summary, "3 claims: 1 contradicted, 1 undecided");
+  // The state of a report whose claims were all undecided and which failed on a completion finding is "problems",
+  // and its counts carry the undecided claims, so the notice's summary above is what the reader sees.
+  const state = vs.verificationState({ passed: false, defects: [{ category: "COMPLETION" }],
+    claims: [{ status: "inconclusive" }, { status: "inconclusive" }], coverage: { evaluated: 0, extracted: 2 } } as never);
+  assert.equal(state.kind, "problems");
+  assert.equal(state.counts.inconclusive, 2);
 });
 
 test("a heartbeat says 'still working' with time since real progress; silence past the threshold says so", () => {

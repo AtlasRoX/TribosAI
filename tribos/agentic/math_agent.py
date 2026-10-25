@@ -55,7 +55,8 @@ def _evidence_xml(art: dict[str, Any]) -> str:
 
     ver = art.get("verification") or {}
     problem = art.get("problem") or {}
-    conf = art.get("confidence") or {}
+    # The benchmark rate is measured on verified answers only: it is never attached to an answer that is not verified.
+    conf = (art.get("confidence") or {}) if art.get("status") == "verified" else {}
     conf_attr = (
         f'benchmark_precision="{conf["p_correct"]}" calibration_n="{conf["n"]}" '
         'precision_scope="this final answer expression only, not the written explanation" '
@@ -81,6 +82,14 @@ def _evidence_xml(art: dict[str, Any]) -> str:
             out.append(f'<math_check level="{c.get("level")}" result="{passed}">{esc(c.get("name"), 200)}'
                        f'{": " + esc(c.get("detail"), 400) if c.get("detail") else ""}</math_check>')
         out.append("</math_checks>")
+    # The derivation of a structured answer, generated from the exact computation (which branch applies and why,
+    # the substitution, each term, the factorization, the counterexample): every line is already checked.
+    derivation = [f"[{r.get('id')}] {s}" for r in answer.get("results") or [] if isinstance(r, dict)
+                  for s in r.get("steps") or []]
+    if derivation:
+        out.append("<math_derivation note=\"checked steps, generated from the exact computation; use them as the "
+                   "worked solution, in this order, without changing a value\">" + esc("\n".join(derivation[:60]), 6000)
+                   + "</math_derivation>")
     for u in (art.get("uncertainty") or [])[:6]:
         out.append(f"<math_uncertainty>{esc(u, 600)}</math_uncertainty>")
     steps = art.get("steps") or []
@@ -153,11 +162,25 @@ class MathAgentPhase(AgentPhase):
         if run.status in ("verified", "partially_verified"):
             state.evidence_sections.append(_evidence_xml(art))
         answer = str(run.answer.get("text") or "")
-        if run.status == "verified":
+        from ..utils.output_contract import extract as extract_contract
+
+        if run.status == "verified" and extract_contract(state.query).strict_form:
+            # The user fixed the answer's form (lines, words, plain text): the checked values go into that form; the
+            # checks are shown by the interface, not written as report sections.
+            state.brief_notes.append(
+                "The verified mathematics agent solved the question (see <math_agent>). State its values exactly, in "
+                "the user's requested format and nothing more; within a word limit, compress the checked steps in "
+                "<math_derivation> (e.g. 'T(1) = 3*1 + 1 = 4') rather than dropping the reasoning; never re-derive a "
+                "number in the text.")
+        elif run.status == "verified":
             passed = [c.name for c in run.verdict.checks if c.passed and c.level >= 1] if run.verdict else []
             state.brief_notes.append(
                 "The verified mathematics agent solved the question (see <math_agent>). Give its answer exactly as the "
-                "Result, derive it step by step, and in the Verification section name the independent checks that "
+                "Result, derive it step by step"
+                + (" using the checked steps in <math_derivation> in order (each line states which definition or branch "
+                   "applies and why, then the exact arithmetic), so every step of the worked solution is one the "
+                   "checker confirmed" if any((r or {}).get("steps") for r in run.answer.get("results") or []) else "")
+                + ", and in the Verification section name the independent checks that "
                 f"passed ({'; '.join(passed)[:300]})."
                 + (f" The agent's verified answers were correct in {art['confidence']['p_correct']:.0%} of held-out "
                    f"benchmark problems (n={art['confidence']['n']}); if you mention it, say it applies to the agent's "

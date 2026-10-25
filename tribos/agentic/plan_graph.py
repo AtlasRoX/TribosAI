@@ -498,6 +498,11 @@ def policy_violation(entry: Any, ctx: Any) -> str | None:
     if executes_code(entry, tool_entry) and (getattr(ctx, "extras", None) or {}).get("code_analysis_forbidden"):
         return "the researcher asked for no code execution"
     source = tool_source(entry)
+    from ..agents.evidence_need import external_retrieval_block
+
+    blocked = external_retrieval_block(ctx, tool_entry if tool_entry is not None else entry)
+    if blocked:
+        return blocked
     need = getattr(ctx, "evidence_need", None)
     if source in RETRIEVAL_SOURCES and need is not None and getattr(need, "skip_retrieval", False):
         return str(getattr(need, "reason", "") or "no outside evidence is needed for this question")

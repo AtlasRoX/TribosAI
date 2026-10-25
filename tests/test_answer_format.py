@@ -124,7 +124,7 @@ async def test_orchestrator_sends_date_and_evidence_levels(offline_orchestrator,
             return R()
 
     monkeypatch.setattr(orch_module, "get_llm", lambda *a, **k: FakeLLM())
-    await orch.execute_inquiry("Find KRAS papers only.", thread_id="t-format", enable_web_search=False)
+    await orch.execute_inquiry("Find KRAS papers only.", thread_id="t-format", enable_web_search=True)
     _system, human = captured["messages"]
     assert f"<retrieval_date>{time.strftime('%Y-%m-%d')}</retrieval_date>" in human.content
     assert 'evidence_level="peer-reviewed journal/conference"' in human.content

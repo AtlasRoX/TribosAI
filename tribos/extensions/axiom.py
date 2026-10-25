@@ -19,6 +19,7 @@ from tribos.axiom.discrete import (
     axiom_recurrence,
     calcula_statistics,
 )
+from tribos.axiom.definitions import axiom_structured
 from tribos.axiom.engine import (
     axiom_calculus,
     axiom_dsolve,
@@ -46,6 +47,7 @@ from tribos.axiom.schemas import (
     AxiomSimplifyInput,
     AxiomSolveInput,
     AxiomSolveProblemInput,
+    AxiomStructuredInput,
     AxiomTangentInput,
     AxiomTransformInput,
     AxiomVectorCalculusInput,
@@ -272,6 +274,13 @@ def register_tools(registry: Any) -> None:
             AxiomRecurrenceInput,
             axiom_recurrence,
             ["recurrence", "rsolve", "sequence", "fibonacci", "difference_equation", "closed_form"],
+        ),
+        (
+            "axiom_structured",
+            "Questions that define their own functions (branches such as n/2 for even n, declared domains), evaluate an expression in independent cases with case-local values, iterate a function to a cycle, or state a universal claim; a defined name is applied, never multiplied. Interpretation, domain, computation and coverage are checked separately.",
+            AxiomStructuredInput,
+            axiom_structured,
+            ["function", "definition", "piecewise", "cases", "counterexample", "claim", "orbit", "cycle", "domain"],
         ),
         (
             "axiom_probability",

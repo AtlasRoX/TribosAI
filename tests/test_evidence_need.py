@@ -47,16 +47,34 @@ def test_self_contained_calculations_need_no_outside_evidence(question):
         ("What was the record wind speed measured in 2024?", "required", "current"),  # dated beats measured
         ("Find the current through a 5 ohm resistor and the measured voltage drop", "optional", "empirical"),
         ("What is the yield strength of 6061-T6 aluminium?", "optional", "empirical"),
-        # Not provably self-contained: retrieval runs as before.
+        # Not provably self-contained (physical quantities with units, a real substance): retrieval runs as before.
         ("Derive the terminal velocity of a steel ball (radius r = 10 mm, density rho = 7850 kg/m^3) in water", "optional", "open"),
-        ("Explain how a transistor works", "optional", "open"),
-        ("Evaluate pi^2/6 numerically to 10 digits", "optional", "open"),  # "10" is not part of the expression
+        ("What mechanisms make bacterial biofilms tolerant to antibiotics?", "optional", "open"),
     ],
 )
 def test_questions_that_can_depend_on_outside_evidence_keep_retrieval(question, level, kind):
     need = assess_evidence_need(question)
     assert (need.level, need.kind) == (level, kind), need
     assert not need.skip_retrieval
+
+
+@pytest.mark.parametrize(
+    ("question", "kind"),
+    [
+        # Audit I04: retrieval follows an identified information need, not the availability of search.
+        ("Explain how a transistor works", "established_knowledge"),
+        ("Evaluate pi^2/6 numerically to 10 digits", "self_contained"),  # "10" is a precision, not an input
+        ("Show that the sum of two odd integers is even.", "self_contained"),
+        ("Prove or disprove that this process eventually reaches 1 for every positive integer.", "self_contained"),
+        ("A tank holds 120 L and drains at 4 L/min. How long until it is empty? Answer in at most 20 words.", "self_contained"),
+        ("Return exactly the following two lines as plain text. Preserve the newline and add nothing else:\n\nALPHA\nBETA", "format"),
+        ("Evaluate n^2 + n + 41 in two independent cases:\n\nCase A: n = 40.\nCase B: n = 41.", "closed_computation"),
+    ],
+)
+def test_self_contained_requests_retrieve_nothing(question, kind):
+    need = assess_evidence_need(question)
+    assert need.kind == kind, need
+    assert need.skip_retrieval
 
 
 def test_a_named_material_or_constant_is_never_closed():
@@ -80,15 +98,21 @@ def test_routing_skips_literature_and_web_for_a_calculation_and_says_why():
     assert ctx.decisions["axiom"].run is True
 
 
+OPEN_QUESTION = "What mechanisms make bacterial biofilms tolerant to antibiotics?"
+
+
 def test_routing_keeps_literature_and_web_for_an_open_question():
-    ctx = _ctx("Explain how a transistor works")
+    ctx = _ctx(OPEN_QUESTION)
     assert ctx.decisions["archivon"].run is True
     assert ctx.decisions["websurfer"].run is True
-    assert _ctx("Explain how a transistor works", web=False).decisions["websurfer"].run is False
+    # Search off covers every external retrieval, the scholarly literature as well as the web (audit T08).
+    off = _ctx(OPEN_QUESTION, web=False)
+    assert off.decisions["websurfer"].run is False and off.decisions["archivon"].run is False
+    assert "Search is off" in off.decisions["archivon"].reason
 
 
 def test_agentic_phases_cannot_call_retrieval_tools_for_a_calculation():
-    closed, open_ = _ctx(ORIGINAL), _ctx("Explain how a transistor works")
+    closed, open_ = _ctx(ORIGINAL), _ctx(OPEN_QUESTION)
     for name in ("archivon_literature_search", "websurfer_search", "lithoscribe_literature_synthesis"):
         entry = SimpleNamespace(name=name, domain="")
         allowed, reason = tool_allowed(closed, entry)

@@ -110,6 +110,8 @@ export interface ClaimCountsLike {
   contradicted: number;
   unsupported: number;
   not_checked: number;
+  /** Claims the checks could not decide (no applicable check, undecidable relation): not supported, not failed. */
+  inconclusive?: number;
 }
 
 /**
@@ -122,10 +124,12 @@ export function claimSummary(counts: ClaimCountsLike, total: number, defectCount
     counts.contradicted ? { n: counts.contradicted, short: "contradicted", long: "contradicted by the sources" } : null,
     counts.unsupported ? { n: counts.unsupported, short: "unsupported", long: "lack support in the retrieved evidence" } : null,
     counts.not_checked ? { n: counts.not_checked, short: "not checked", long: "could not be checked" } : null,
+    counts.inconclusive ? { n: counts.inconclusive, short: "undecided", long: "could not be decided by the checks" } : null,
   ].filter((k): k is { n: number; short: string; long: string } => k !== null);
-  const of = `${total} checked claim${total === 1 ? "" : "s"}`;
+  const of = `${total} claim${total === 1 ? "" : "s"}`;
   let summary: string;
-  if (kinds.length === 0) summary = `All ${of} supported by the evidence`;
+  // "All supported" only when every claim was decided and supported: an undecided claim is not a supported one.
+  if (kinds.length === 0) summary = `All ${of} checked and supported by the evidence`;
   else if (kinds.length === 1) {
     const k = kinds[0];
     const verb = k.n === 1 ? k.long.replace(/^lack/, "lacks") : k.long;
@@ -176,4 +180,12 @@ export function taskHeadline(outcome: TaskOutcomeLike | null | undefined): TaskH
   const partial = raw === "partial" || (raw === "completed" && (reasons.length > 0 || unresolved.length > 0));
   const status = partial ? "partial" : raw;
   return { status, partial, title: partial ? "Partial answer" : "", reasons, unresolved };
+}
+
+const BANNER_RE = /^\s*> ⚠️ \*\*(?:Scientific Verification Notice|Verification found errors)\*\*[\s\S]*?(?:\n\s*\n|$)/;
+
+/** The API keeps an honest text banner at the top of unverified answers; the UI shows its notice instead, and copy
+ * and export leave the banner out (it is not part of the answer). */
+export function stripVerificationBanner(content: string): string {
+  return content.replace(BANNER_RE, "");
 }

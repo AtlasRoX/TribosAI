@@ -58,7 +58,7 @@ export function MathAgentArtifact({ data }: { data?: MathData | null }) {
   return (
     <Card
       icon={<Sigma style={{ width: 16, height: 16, color: "#a78bfa" }} />}
-      title="Verified mathematics (Axiom agent)"
+      title={data.status === "verified" ? "Verified mathematics (Axiom agent)" : "Mathematics agent (Axiom)"}
       meta={[
         kind && kind !== "unknown" ? KIND_LABEL[kind] ?? kind.replace(/_/g, " ") : null,
         `${calls} tool call${calls === 1 ? "" : "s"}`,
@@ -76,7 +76,7 @@ export function MathAgentArtifact({ data }: { data?: MathData | null }) {
           <Pill tone={status.tone} title="Status from the independent verifier, not from the model">
             {status.label}
           </Pill>
-          {conf ? (
+          {conf && data.status === "verified" ? ( /* a benchmark rate of verified answers says nothing about an unverified one */
             <Pill
               tone="faint"
               title={

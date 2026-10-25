@@ -8,6 +8,7 @@ from typing import Any
 
 from .. import query_planner
 from ..query_context import TaskOutcome
+from ...export.report_model import strip_verification_banner
 from ..result_keys import distinct_results
 from .context import RunContext, logger, orchestrator_module
 
@@ -51,6 +52,24 @@ def _verification_counts(report: Any) -> dict[str, Any]:
     return out
 
 
+async def enforce_output_contract(run: RunContext) -> None:
+    """After the last revision: apply the content-preserving repairs of the user's requested form (LF newlines, an
+    unwrapped JSON fence, the exact literal) and record what still violates it. The record reaches the task status, so
+    a broken format is reported, never hidden."""
+    contract = getattr(run, "output_contract", None)
+    if contract is None or not contract.active or not run.candidate_response:
+        return
+    from ...utils import output_contract
+
+    fixed = output_contract.conform(run.candidate_response, contract)
+    if fixed != run.candidate_response:
+        run.candidate_response = fixed
+        await run.send({"type": "content_reset", "reason": "output_contract"})
+        await run.send({"type": "content_delta", "delta": fixed})
+    run.execution_artifacts["output_contract"] = {**contract.to_dict(),
+                                                 "violations": output_contract.validate(fixed, contract)}
+
+
 async def consolidate_memory(run: RunContext) -> None:
     """Write the turn's findings and its active subject to session memory (unless the run is not persisted)."""
     orch = run.orch
@@ -74,7 +93,9 @@ async def consolidate_memory(run: RunContext) -> None:
             consolidation = await orch.memory.consolidate_turn(
                 thread_id=thread_id,
                 query=query,
-                response=candidate_response,
+                # The stored excerpt is the answer itself: the verification banner is report metadata (kept in
+                # `verification` and `is_turn_verified`), not a finding to recall as content.
+                response=strip_verification_banner(candidate_response),
                 tool_results={k: v.data for k, v in distinct_results(tool_results).items() if v.success},
                 failure_lesson=verification_report.failure_lesson,
                 is_turn_verified=turn_fully_supported(verification_report),
@@ -265,6 +286,12 @@ async def assemble_result(run: RunContext) -> Any:
             task_status = apply_deliverables(task_status, items)
         except Exception as exc:  # noqa: BLE001 - completeness notes are additive
             logger.warning("Deliverable assessment failed: %s", exc)
+    violations = ((execution_artifacts or {}).get("output_contract") or {}).get("violations") or []
+    if violations:
+        task_status["incomplete_reasons"] = [*task_status.get("incomplete_reasons", []),
+                                             f"Requested format not met: {'; '.join(violations)}."]
+        if task_status.get("task_status") == "completed":
+            task_status["task_status"] = "partial"
     merge_pipeline_phases(run)
     record("note_step", "task_status", {}, task_status)
     await close_open_steps()

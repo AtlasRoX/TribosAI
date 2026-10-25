@@ -380,7 +380,7 @@ def test_evidence_decorators_are_applied_and_escaped(isolated):
 @pytest.mark.asyncio
 async def test_result_fields_default(monkeypatch, tmp_path):
     orch, _ = make_offline_orchestrator(monkeypatch, tmp_path)
-    res = await orch.execute_inquiry("Find KRAS papers only.", thread_id="t-fields", enable_web_search=False)
+    res = await orch.execute_inquiry("Find KRAS papers only.", thread_id="t-fields", enable_web_search=True)
     # The offline fallback answer cites only identifiers present in the fake tool outputs.
     assert isinstance(res.citations, dict)
     assert set(res.citations.get("entries", {})) <= {"KEGG:hsa04010", "ENSG:ENSG00000133703", "PMID:123456"}

@@ -64,6 +64,15 @@ _STOPWORDS = frozenset({
     "the", "and", "for", "with", "that", "this", "from", "into", "what", "which", "how", "why", "when", "where",
     "are", "was", "were", "have", "has", "had", "can", "could", "should", "would", "about", "over", "under",
     "between", "find", "papers", "paper", "articles", "article", "literature", "search", "using", "show",
+    # Instruction and generic mathematical words: shared by unrelated works ("two independent cases" matches court
+    # cases, "proof" and "integer" match any number-theory paper), so they never count as subject terms.
+    "answer", "answers", "words", "word", "lines", "line", "exactly", "following", "return", "give", "given", "write",
+    "state", "explain", "describe", "compute", "calculate", "evaluate", "determine", "prove", "proof", "disprove",
+    "rigorous", "justification", "show", "every", "each", "all", "any", "some", "case", "cases", "independent", "local",
+    "keep", "value", "values", "number", "numbers", "integer", "integers", "positive", "negative", "real", "function",
+    "functions", "result", "results", "problem", "question", "example", "examples", "most", "least", "only", "also",
+    "then", "than", "does", "not", "your", "you", "please", "brief", "briefly", "short", "plain", "text", "format",
+    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "first", "second", "third",
 })
 
 
@@ -500,6 +509,7 @@ class ArchivonEngine:
 
         terms = _query_terms(topical_q, keywords)
         graded_articles: list[dict[str, Any]] = []
+        graded_by_rec: dict[int, dict[str, Any]] = {}
         excluded_articles: list[dict[str, Any]] = []
         included_records: list[tuple[float, dict[str, Any], Any, Any]] = []
 
@@ -539,21 +549,26 @@ class ArchivonEngine:
                 excluded_articles.append(graded_obj.model_dump())
                 continue
 
-            graded_articles.append(graded_obj.model_dump())
+            graded_by_rec[id(rec)] = graded_obj.model_dump()
             score = score_article_passage(rec, terms, grade_weight=grade.weight, query_text=topical_q)
             included_records.append((score, rec, grade, integrity))
 
         included_records.sort(key=lambda item: item[0], reverse=True)
-        # A relevance floor: works matching too few of the query's terms are left out (requested identifiers stay); at
-        # least three works remain when any were found, so a sparse topic still returns its best matches.
+        # A relevance floor: works matching too few of the query's subject terms are left out (requested identifiers
+        # stay). No minimum is filled with below-floor works: an irrelevant paper is noise, not evidence, so a topic
+        # with no relevant work returns none and says so.
+        # A query with no subject term left (only instruction or generic words) gives no basis for relevance: only
+        # explicitly requested identifiers are kept.
         kept = [r for r in included_records
-                if r[1].get("_pinned_keep") or term_coverage(r[1], terms) >= RELEVANCE_FLOOR]
+                if r[1].get("_pinned_keep") or (terms and term_coverage(r[1], terms) >= RELEVANCE_FLOOR)]
+        if not terms and included_records:
+            limitations.append("the search text had no subject terms to judge relevance by")
         below_floor = len(included_records) - len(kept)
-        if len(kept) < 3:
-            kept = included_records[: max(3, len(kept))]
-            below_floor = len(included_records) - len(kept)
         if below_floor:
-            limitations.append(f"{below_floor} retrieved work(s) matched too few of the query terms and were left out")
+            limitations.append(f"{below_floor} retrieved work(s) matched too few of the question's subject terms and "
+                               "were left out")
+        if included_records and not kept:
+            limitations.append("no retrieved work was relevant to the question's subject")
         # Works about another variant of the model (quantum, fractional, nonlinear, ...) than the query states are left
         # out when at least three works on the stated model remain; they are named in the limitations, not hidden.
         on_model = [r for r in kept if r[1].get("_pinned_keep") or not model_variant_penalty(r[1], topical_q)[1]]
@@ -564,6 +579,9 @@ class ArchivonEngine:
             )
             kept = on_model
         top_records = kept[: max(1, max_articles)]
+        # The graded list is what the answer may use (the article count the interface shows), not every record the
+        # sources returned.
+        graded_articles = [graded_by_rec[id(r[1])] for r in top_records if id(r[1]) in graded_by_rec]
 
         ranked_passages: list[dict[str, Any]] = []
         articles_out: list[dict[str, Any]] = []

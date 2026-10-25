@@ -45,7 +45,7 @@ MAX_PLOT_BYTES = 8 * 1024 * 1024
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 # Python port of BANNER_RE in web/src/components/VerificationNotice.tsx (JS '$' without /m is end of input).
-BANNER_RE = re.compile(r"^\s*> ⚠️ \*\*Scientific Verification Notice\*\*[\s\S]*?(?:\n\s*\n|\Z)")
+BANNER_RE = re.compile(r"^\s*> ⚠️ \*\*(?:Scientific Verification Notice|Verification found errors)\*\*[\s\S]*?(?:\n\s*\n|\Z)")
 
 
 class ExportMessage(BaseModel):

@@ -169,6 +169,26 @@ def _cache_dir() -> Path | None:
 _DEADLINE: contextvars.ContextVar[float | None] = contextvars.ContextVar("tribos_tool_deadline", default=None)
 
 
+# Why external retrieval is not allowed in the current run (None = allowed). Set for a whole inquiry when the user
+# switched Search off, so no networked tool (scholarly APIs, web search, encyclopedia and database lookups) runs from
+# any workflow: planned, follow-up, specialist or fallback calls alike.
+_RETRIEVAL_BLOCK: contextvars.ContextVar[str | None] = contextvars.ContextVar("tribos_retrieval_block", default=None)
+
+
+@contextlib.contextmanager
+def external_retrieval_blocked(reason: str | None) -> Iterator[None]:
+    """Within this block every networked tool call is refused with `reason` (None leaves retrieval allowed)."""
+    token = _RETRIEVAL_BLOCK.set(reason)
+    try:
+        yield
+    finally:
+        _RETRIEVAL_BLOCK.reset(token)
+
+
+def retrieval_block_reason() -> str | None:
+    return _RETRIEVAL_BLOCK.get()
+
+
 @contextlib.contextmanager
 def run_deadline(seconds: float | None) -> Iterator[None]:
     """Within this block no retry is attempted that could end after `seconds` from now (None = no deadline)."""
@@ -772,10 +792,19 @@ async def execute_with_policies(
     trace is the registry's per-call trace dict; when call() never runs (cache hit, fail-fast) it is filled here
     so the run recorder still sees the entry and validated inputs.
     """
-    if not policies_enabled():
-        return await call()
     get_entry = getattr(registry, "get_entry", None)
     entry = get_entry(tool_name) if callable(get_entry) else None
+    blocked = _RETRIEVAL_BLOCK.get()
+    if blocked and entry is not None and _adapter(entry) in _NETWORKED:
+        # Search is off: refused before the cache too, so no earlier result is presented as this turn's research.
+        from .registry import ErrorType, ToolResult
+
+        _fill_trace(call, kwargs, entry, None, trace)
+        return ToolResult(success=False, tool_name=tool_name, error=f"Not run: {blocked}",
+                          error_type=ErrorType.VALIDATION_ERROR,
+                          metadata={"skipped_by_policy": "search_off", "failure_class": "policy"})
+    if not policies_enabled():
+        return await call()
     if entry is None:
         return _label(await call(), networked=False)  # NOT_FOUND: wrong_name
     adapter = _adapter(entry)

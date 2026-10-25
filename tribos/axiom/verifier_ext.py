@@ -34,6 +34,7 @@ EXT_TOOLS: dict[str, str] = {
     "vector_calculus": "axiom_vector_calculus",
     "probability": "axiom_probability",
     "statistics": "calcula_statistics",
+    "structured": "axiom_structured",
 }
 TOOL_KIND = {tool: kind for kind, tool in EXT_TOOLS.items()}
 _EXPR_KEYS = frozenset({"expression", "inequality", "recurrence"})
@@ -61,6 +62,8 @@ def expected_call(spec: ProblemSpec) -> tuple[str, dict[str, Any]] | None:
         args = dict(p)
     elif k == "statistics":
         args = {key: p[key] for key in ("operation", "data", "data2", "mu0", "confidence") if key in p}
+    elif k == "structured":
+        args = {"definitions": p.get("definitions") or [], "tasks": p["tasks"]}
     else:
         return None
     return EXT_TOOLS[k], {key: v for key, v in args.items() if v is not None}
@@ -124,6 +127,10 @@ def alignment(spec: ProblemSpec, tool: str, args: dict[str, Any]) -> Check:
     want_tool, want = exp
     if tool != want_tool:
         return Check("tool call matches the problem", False, 1, f"{tool} used, {want_tool} needed")
+    if spec.kind == "structured":
+        from .definitions import _clean
+
+        want, args = _clean(want), _clean(args)
     defaults = {"lower_open": False, "upper_open": False, "lower_inclusive": True, "upper_inclusive": True, "mu0": 0.0, "confidence": 0.95}
     bad = []
     for key, value in want.items():
@@ -250,6 +257,21 @@ def _ext_check(spec: ProblemSpec, tool: str, data: dict[str, Any]) -> tuple[Chec
     raise ValueError(f"no extended verifier for {k}")
 
 
+def _structured_verdict(spec: ProblemSpec, checks: list[Check], data: dict[str, Any]) -> Verdict:
+    """Interpretation, domain, computation and coverage are separate checks. An unresolved claim (no counterexample in
+    the bounded search, no proof) keeps the answer incomplete: evidence is never reported as a proof."""
+    from .definitions import check_structured
+
+    params = spec.params if spec.params.get("tasks") else {"definitions": data.get("definitions") or [], "tasks": data.get("tasks") or []}
+    checks += [Check(name, passed, level, detail) for name, passed, level, detail in check_structured(params, data)]
+    results = data.get("results") or []
+    unc = [f"{r['id']}: {r.get('text')}" for r in results if r.get("status") == "unresolved"]
+    unc += [f"{r['id']}: {r.get('error')}" for r in results if r.get("status") == "error"]
+    complete = not unc
+    answer = {"text": str(data.get("text") or ""), "results": results}
+    return _finish(checks, unc, answer, complete=complete)
+
+
 def verify_extended(spec: ProblemSpec, tool: str, args: dict[str, Any], data: dict[str, Any], *, check_alignment: bool = True) -> Verdict:
     """check_alignment=False when spec was rebuilt from the call itself (unparsed question): comparing a call with
     itself proves nothing, so no level-1 pass is recorded and the answer can be at most partially verified."""
@@ -258,6 +280,10 @@ def verify_extended(spec: ProblemSpec, tool: str, args: dict[str, Any], data: di
         checks.append(alignment(spec, tool, args))
     if any(c.passed is False for c in checks):
         return _finish(checks, [], {"text": str(data.get("text") or data.get("result") or "")[:300]})
+    if spec.kind == "structured":
+        if not check_alignment:  # a model-written call on an unparsed question: check it against its own arguments
+            spec.params = {"definitions": args.get("definitions") or [], "tasks": args.get("tasks") or []}
+        return _structured_verdict(spec, checks, data)
     check, answer, unc = _ext_check(spec, tool, data)
     checks.append(check)
     return _finish(checks, unc, answer)

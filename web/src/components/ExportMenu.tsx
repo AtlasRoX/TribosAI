@@ -9,6 +9,7 @@ import type { Message } from "@/types/chat";
 import type { ExportFormat } from "@/types/runs";
 import { latexDocument, markdownToLatex } from "@/lib/markdownToLatex";
 import { trajectoryCsv } from "@/components/ReproductionFiles";
+import { stripVerificationBanner } from "@/components/VerificationNotice";
 import type { ZipEntry } from "@/lib/zip";
 
 export interface ExportMenuProps {
@@ -46,7 +47,7 @@ function renderedHtml(messageId: string): string | null {
 }
 
 async function runClient(key: ClientKey, message: Message, question: string): Promise<void> {
-  const md = message.content || "";
+  const md = stripVerificationBanner(message.content || ""); // the notice is shown by the UI, not part of the answer
   if (key === "copy-md") return navigator.clipboard.writeText(md);
   if (key === "copy-latex") return navigator.clipboard.writeText(latexDocument(question || "Tribos answer", markdownToLatex(md)));
   if (key === "copy-rich") {
@@ -97,8 +98,8 @@ export function ExportMenu({ message, question, backendUrl, authHeaders, disable
       if (key === "zip") {
         const extras: ZipEntry[] = [
           { name: "question.txt", content: question },
-          { name: "answer.md", content: message.content || "" },
-          { name: "answer.tex", content: latexDocument(question || "Tribos answer", markdownToLatex(message.content || "")) },
+          { name: "answer.md", content: stripVerificationBanner(message.content || "") },
+          { name: "answer.tex", content: latexDocument(question || "Tribos answer", markdownToLatex(stripVerificationBanner(message.content || ""))) },
         ];
         const arts = message.execution_artifacts;
         const script = arts?.ode_verification?.script;

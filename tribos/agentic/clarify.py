@@ -129,6 +129,27 @@ def names_dynamical_system(ctx: Any, query: str) -> bool:
     return bool(_ODE_TEXT_RE.search(query or ""))
 
 
+def missing_initial_conditions(query: str) -> list[str]:
+    """The initial conditions a written ODE needs for a numerical run but the question does not give ("x(0)",
+    "x'(0)" for a second-order equation with none stated). [] when no ODE is written or all are given."""
+    from ..axiom.problem import parse_problem
+
+    try:
+        spec = parse_problem(query or "")
+    except Exception:  # noqa: BLE001 - an unreadable equation is not a reason to ask
+        return []
+    if spec.kind != "ode" or not spec.func:
+        return []
+    name = spec.func.split("(")[0]
+    text = f"{spec.expression or ''} {query or ''}"
+    primes = [len(m.group(1)) for m in re.finditer(rf"(?<![A-Za-z]){re.escape(name)}('+)", text)]
+    leibniz = [int(m.group(1)) for m in re.finditer(rf"d\^?\{{?(\d)\}}?\s*{re.escape(name)}", text)]
+    order = max(1, min(max([int(spec.order or 1), *primes, *leibniz]), 4))
+    needed = [f"{name}{chr(39) * k}(0)" for k in range(order)]
+    given = {k.replace(" ", "") for k in (spec.ics or {})}
+    return [n for n in needed if n not in given] if len(given) < order else []
+
+
 def detect_signals(ctx: Any, query: str) -> list[dict[str, Any]]:
     """Ambiguity signals for one question: [{"signal", "strength": high|borderline, "question", "options", "reason"}]."""
     out: list[dict[str, Any]] = []
@@ -184,6 +205,22 @@ def detect_signals(ctx: Any, query: str) -> list[dict[str, Any]]:
                     "Give the time span to integrate over (for example 0 to 10 s)",
                 ],
                 "reason": "A simulation was requested but no equations or named system were given.",
+            }
+        )
+
+    missing = missing_initial_conditions(query) if getattr(ctx, "is_simulation_intent", False) and not has_model else []
+    if missing:
+        # The equation is written but a numerical integration also needs where it starts: the one missing input.
+        out.append(
+            {
+                "signal": "simulation_missing_initial_conditions",
+                "strength": "high",
+                "question": f"The equation is given, but not its initial conditions. What are {' and '.join(missing)}?",
+                "options": [
+                    f"Give the values, for example {', '.join(f'{m} = 1' if i == 0 else f'{m} = 0' for i, m in enumerate(missing))}",
+                    "Solve it symbolically instead, with the initial conditions left as constants",
+                ],
+                "reason": f"A simulation needs {' and '.join(missing)}; the question does not give {'it' if len(missing) == 1 else 'them'}.",
             }
         )
 

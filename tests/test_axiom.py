@@ -183,6 +183,7 @@ def test_axiom_latex_and_registry_integration():
         "axiom_latex",
         "axiom_nsolve",
         "axiom_solve_problem",
+        "axiom_structured",
         "axiom_sagemath",
         "axiom_optimize",
         "axiom_inequality",

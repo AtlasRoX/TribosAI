@@ -182,7 +182,7 @@ def _raise(**_kw):
     ],
 )
 async def test_planner_degrades_gracefully(factory, planner):
-    ctx = await _ctx(NO_ENTITY_Q, llm_factory=factory)
+    ctx = await _ctx(NO_ENTITY_Q, llm_factory=factory, enable_web_search=True)  # Search on: literature may run
     assert ctx.planner == planner
     assert not ctx.should_run("synapta") and ctx.decisions["archivon"].run is True
     if planner == "llm":
@@ -271,7 +271,7 @@ async def test_planner_scope_verdict_never_overrides_concrete_entities(monkeypat
     assert (await _ctx("blorp zing", llm_factory=lambda **_kw: _ScopePlanner("unclear"))).scope == "unclear"
     assert (await _ctx("blorp zing", llm_factory=lambda **_kw: _ScopePlanner("maybe"))).scope == "research"
     monkeypatch.setenv("TRIBOS_PLANNER", "always")
-    ctx = await _ctx("Find Navier-Stokes equations papers only.", llm_factory=lambda **_kw: _ScopePlanner("conversational"))
+    ctx = await _ctx("Find Navier-Stokes equations papers only.", llm_factory=lambda **_kw: _ScopePlanner("conversational"), enable_web_search=True)
     assert ctx.planner == "llm" and ctx.scope == "research" and ctx.decisions["archivon"].run
 
 
@@ -297,10 +297,10 @@ async def test_unclear_message_searches_nothing_and_says_so(monkeypatch, tmp_pat
 async def test_vague_follow_up_in_a_thread_with_history_is_still_researched(monkeypatch, tmp_path):
     orch, calls = make_offline_orchestrator(monkeypatch, tmp_path)
     monkeypatch.setattr(orch_module, "get_llm", lambda *a, **k: _ScopePlanner("unclear"))
-    await orch.execute_inquiry("Find Navier-Stokes equations papers only.", thread_id="t-follow", enable_web_search=False)
+    await orch.execute_inquiry("Find Navier-Stokes equations papers only.", thread_id="t-follow", enable_web_search=True)
     n_before = len(called(calls, "archivon_literature_search")) + len(called(calls, "lithoscribe_literature_synthesis"))
 
-    follow = await orch.execute_inquiry("why is that?", thread_id="t-follow", enable_web_search=False)
+    follow = await orch.execute_inquiry("why is that?", thread_id="t-follow", enable_web_search=True)
     assert follow.query_context["scope"] == "research"
     assert len(called(calls, "archivon_literature_search")) + len(called(calls, "lithoscribe_literature_synthesis")) == n_before + 1
 

@@ -34,6 +34,22 @@ _THEOREM_RE = re.compile(r"^\s*(?:theorem|lemma|example)\b.*?(?=:=)", re.S | re.
 PROVE_RE = re.compile(r"\b(prove|show that|demonstrate that|give a proof|proof that)\b", re.I)
 
 
+# What core Lean 4 (no Mathlib) offers, so a formalisation is written for the checker that will run it.
+CORE_LEAN_ENV = (
+    "Mathlib is NOT available: use core Lean 4 only. No import lines. Write Nat and Int (not the Mathlib notation "
+    "for them); there is no Real or Rat. Usable tactics: rfl, decide, simp, simp_arith, omega, exact, intro, intros, "
+    "apply, refine, constructor, cases, rcases, obtain, induction, show, calc, have, by_cases, contradiction, "
+    "exists, unfold. Not available: ring, linarith, nlinarith, norm_num, field_simp, positivity, Mathlib lemmas such "
+    "as Nat.odd_iff or Even/Odd predicates (state parity as n % 2 = 1). omega decides linear arithmetic over Nat and "
+    "Int, including % and / by numerals."
+)
+
+
+def core_notation(code: str) -> str:
+    """Mathlib's notation for the integer types replaced by the core names it abbreviates (no change in meaning)."""
+    return re.sub(r"\bimport\s+Mathlib\S*\s*\n", "", code).replace("ℕ", "Nat").replace("ℤ", "Int")
+
+
 def formal_enabled() -> bool:
     return bool(get_bool("TRIBOS_FORMAL"))
 
@@ -69,12 +85,14 @@ async def formalise_and_check(question: str, complete: Complete | None, *, mathl
         from tribos.config.settings import get_str
 
         mathlib = bool(str(get_str("TRIBOS_LEAN_PROJECT") or "").strip())
-    env = "Mathlib is available (import Mathlib)." if mathlib else "Mathlib is NOT available: use core Lean 4 only."
+    env = "Mathlib is available (import Mathlib)." if mathlib else CORE_LEAN_ENV
     max_repairs = int(get_int("TRIBOS_FORMAL_MAX_REPAIRS"))
     attempts: list[dict[str, Any]] = []
     code = lean_code(await complete(FORMALISE_SYSTEM, f"{env}\n\nStatement to prove:\n{question.strip()[:4000]}"))
     result: dict[str, Any] = {}
     for attempt in range(max_repairs + 1):
+        if not mathlib:
+            code = core_notation(code)
         result = await asyncio.to_thread(check_lean, code)  # a subprocess with a timeout: off the event loop
         attempts.append({"attempt": attempt, "status": result["status"], "error": result.get("error"),
                          "code": code})

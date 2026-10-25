@@ -140,7 +140,9 @@ async def run_evidence(run: RunContext) -> None:
 
     # 1.4 Physis Task (Physical Constants / Units / Reference Data): a lookup needs named constants or materials; with
     # neither, searching the reference tables with the whole question only returns noise (unit checks run via the plan).
-    if ctx.should_run("physis") and (getattr(ctx, "constants", None) or getattr(ctx, "materials", None)):
+    # The materials lookup is an online database (Search off skips it); the constants tables are local.
+    if ctx.should_run("physis") and (getattr(ctx, "constants", None)
+                                     or (getattr(ctx, "materials", None) and getattr(ctx, "enable_web_search", True))):
         async def run_physis() -> ToolResult:
             steps.append({"agent": "Physis", "role": "assistant", "action": "Physical Reference & Constants Lookup"})
             if getattr(ctx, "constants", None):

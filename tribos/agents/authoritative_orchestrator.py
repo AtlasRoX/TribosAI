@@ -276,12 +276,26 @@ _QUERY_TYPE_TERMS = {
 }
 
 
+def literature_subject(clean_query: str) -> str:
+    """The question without what only says how to answer: output-format instructions ("answer in at most 40 words",
+    "exactly two lines"), output-instruction sentences, and case assignments ("Case A: n = 40"). Searching those words
+    finds papers that share them ("independent cases" -> court cases), not papers on the subject."""
+    from ..agentic.decompose import strip_output_instructions
+    from ..utils.output_contract import mask_instructions
+
+    text, _removed = strip_output_instructions(mask_instructions(clean_query or ""))
+    text = re.sub(r"(?i)\b(?:case\s+)?[A-Z0-9]{1,3}\s*[:)]\s*[A-Za-z]\w*\s*=\s*[-+]?\d[\d./]*\.?", " ", text)
+    text = re.sub(r"(?i)\b(?:keep\s+each\s+\w+\s+local[^.]*|give\s+a\s+rigorous\s+[^.]*)\.?", " ", text)
+    return re.sub(r"\s+", " ", text).strip() or (clean_query or "").strip()
+
+
 def literature_query(ctx: Any, clean_query: str, plan: Any = None) -> str:
-    """The literature search text. A short question is searched as written; a long one (a whole worked problem with
-    its given values and instructions) is searched by its subject terms, since keyword search over a paragraph of
-    instructions returns off-topic papers."""
-    if len(clean_query) <= LONG_QUERY_CHARS:
-        return clean_query
+    """The literature search text. A short question is searched by its subject as written; a long one (a whole
+    worked problem with its given values and instructions) by its subject terms, since keyword search over a paragraph
+    of instructions returns off-topic papers."""
+    subject = literature_subject(clean_query)
+    if len(subject) <= LONG_QUERY_CHARS:
+        return subject
     terms = list(ctx.focus_terms()[:3]) if hasattr(ctx, "focus_terms") else []
     kind = str(getattr(plan, "question_type", None) or getattr(getattr(ctx, "search_plan", None), "question_type", "") or "")
     hint = _QUERY_TYPE_TERMS.get(kind)
@@ -289,7 +303,7 @@ def literature_query(ctx: Any, clean_query: str, plan: Any = None) -> str:
         terms.append(hint)
     if terms:
         return " ".join(dict.fromkeys(terms))
-    first_sentence = re.split(r"(?<=[.?!])\s+", clean_query, maxsplit=1)[0]
+    first_sentence = re.split(r"(?<=[.?!])\s+", subject, maxsplit=1)[0]
     return first_sentence[:LONG_QUERY_CHARS]
 
 
@@ -1184,7 +1198,14 @@ class AuthoritativeOrchestrator:
         )
         run.pending["thoughts"] = run.thoughts
         run.show_reasoning = _show_reasoning()
+        # Search off is enforced for the whole inquiry at the tool layer: no networked tool runs from any workflow.
+        from ..tools.reliability import external_retrieval_blocked
 
+        blocked = None if enable_web_search else "Search is off for this turn (no literature, web or online database retrieval)"
+        with external_retrieval_blocked(blocked):
+            return await self._run_stages(run)
+
+    async def _run_stages(self, run: RunContext) -> AuthoritativeOrchestrationResult:
         # Stage 0: greeting, query context and memory, agentic pre-evidence phases, source routing.
         result = await plan_stage.start(run)
         if result is None:
@@ -1212,6 +1233,7 @@ class AuthoritativeOrchestrator:
         run.timed_sync("citations", lambda: verify_stage.build_citations(run))
         await agent_rounds.finalize_phases(run)
         await verify_stage.report_result(run)
+        await finalize_stage.enforce_output_contract(run)
 
         # Stage 6: memory consolidation and the result.
         await run.timed("memory", finalize_stage.consolidate_memory(run))

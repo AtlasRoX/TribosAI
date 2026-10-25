@@ -423,7 +423,7 @@ class FakeStreamingLLM:
 async def test_orchestrator_result_and_stream_carry_citations(monkeypatch, tmp_path):
     orch, _ = make_offline_orchestrator(monkeypatch, tmp_path)
     monkeypatch.setattr(orch_module, "get_llm", lambda *a, **k: FakeStreamingLLM())
-    res = await orch.execute_inquiry("Find KRAS papers only.", thread_id="t-cite", enable_web_search=False)
+    res = await orch.execute_inquiry("Find KRAS papers only.", thread_id="t-cite", enable_web_search=True)
     entry = res.citations["entries"]["PMID:123456"]
     assert entry["passages"][0]["text"] == "KRAS signaling in pancreatic cancer."
     assert entry["url"] == "https://pubmed.ncbi.nlm.nih.gov/123456/"
@@ -454,6 +454,6 @@ async def test_citation_builder_failure_still_returns_an_answer(monkeypatch, tmp
         raise RuntimeError("builder failed")
 
     monkeypatch.setattr(orch_module, "build_citation_map", boom)
-    res = await orch.execute_inquiry("Find KRAS papers only.", thread_id="t-cite-err", enable_web_search=False)
+    res = await orch.execute_inquiry("Find KRAS papers only.", thread_id="t-cite-err", enable_web_search=True)
     assert res.citations == {}
     assert "PMID: 123456" in res.response

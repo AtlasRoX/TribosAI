@@ -45,6 +45,40 @@ async def start(run: RunContext) -> Any | None:
                 requested_operation="conversation", executed_operation="conversation", reason="Greeting answered."
             ).model_dump(),
         )
+
+    # -------------------------------------------------------------
+    # STAGE 0.15: OUTPUT CONTRACT; A PURE LITERAL-COPY REQUEST IS ANSWERED BY COPYING
+    # -------------------------------------------------------------
+    from ...utils import output_contract
+
+    run.output_contract = contract = output_contract.extract(run.query)
+    if contract.pure_copy and contract.literal is not None:
+        # "Return exactly the following lines ...": the answer is the payload, LF-normalised. No query planning,
+        # retrieval, solver, critique or factual grounding applies, so none runs, whatever the Search setting.
+        resp = contract.literal
+        violations = output_contract.validate(resp, contract)
+        await run.emit("plan", "Returned the requested text exactly",
+                       "Literal copy: no sources searched, no tools, no claims to check",
+                       extra={"thread_id": run.thread_id, "output_contract": contract.to_dict()})
+        duration = round(time.perf_counter() - run.start_time, 2)
+        return ao.AuthoritativeOrchestrationResult(
+            thread_id=run.thread_id,
+            response=resp,
+            thoughts=run.thoughts,
+            steps=run.steps,
+            selected_agents=[],
+            duration_seconds=duration,
+            model_used=run.model_name,
+            framework_used="literal-direct",
+            verification_report={"passed": not violations, "verification_score": 1.0 if not violations else 0.0,
+                                 "defects": [], "status": "not_applicable", "claims": []},
+            execution_artifacts={"output_contract": {**contract.to_dict(), "violations": violations}},
+            run_manifest=await run.finalize_manifest(resp, duration, framework="literal-direct"),
+            task_status=TaskOutcome(
+                requested_operation="literal_copy", executed_operation="literal_copy",
+                reason="The requested text was returned exactly; no research or claim checks apply.",
+            ).model_dump(),
+        )
     return None
 
 

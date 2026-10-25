@@ -262,6 +262,57 @@ def _simulation_ban(query: str) -> str | None:
     return None
 
 
+# A word or phrase that puts what follows it out of scope: "without running simulations", "rather than a simulation".
+_NEGATION_SCOPE_RE = re.compile(
+    r"\b(?:without|rather\s+than|instead\s+of|not\s+by|other\s+than|apart\s+from|no|not|nor|neither|never)\s+"
+    r"(?:[\w\-]+\s+){0,2}$",
+    re.I,
+)
+# A negated or evaluative predicate after the mention: "running simulations does not establish ...".
+_NEGATED_PREDICATE_RE = re.compile(
+    r"\b(?:does|do|did|will|would|can|could|should|may|might|must|is|are|was|were)\s*(?:not\b|n't\b)"
+    r"|\b(?:cannot|never|fails?\s+to|(?:is|are)\s+(?:insufficient|inadequate|irrelevant|unreliable))\b",
+    re.I,
+)
+# A directive: an imperative at the start of the clause, or an explicit request.
+_DIRECTIVE_RE = re.compile(
+    r"^\W*(?:(?:please|also|then|now|first|next|finally|and|so)\W+)*"
+    r"(?:simulate|run|integrate|solve|compute|calculate|determine|find|plot|perform|carry|execute|model|predict|"
+    r"show|scan|sweep|use|do|make|give|provide|generate|create|estimate|evaluate|analy[sz]e|study|explore|"
+    r"investigate|try|start|repeat|rerun|re-run)\b"
+    r"|\b(?:please|can\s+you|could\s+you|would\s+you|will\s+you|i\s+(?:want|need|would\s+like|'d\s+like)|"
+    r"we\s+(?:want|need)|help\s+me|let'?s|let\s+us)\b",
+    re.I,
+)
+_CONDITIONAL_OPENER_RE = re.compile(r"\b(?:if|even\s+if|although|though|whether|unless|suppose|imagine)\b", re.I)
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?;])\s+|\n+")
+
+
+def _requests_simulation(text: str) -> bool:
+    """Whether the text asks for a simulation, as opposed to mentioning one.
+
+    Each mention of a simulation term is read in its sentence. It is not a request when it sits in the scope of a
+    negation ("without running simulations"), in quotation marks, inside a conditional clause ("if you simulate it,
+    ..."), or in the subject of a negated predicate without a directive ("running simulations does not establish the
+    claim"). Everything else, including declarative requests and fragments ("a 50 s simulation of the Lorenz
+    system"), still counts, so a real request is never lost to this reading.
+    """
+    for sentence in _SENTENCE_SPLIT_RE.split(text or ""):
+        for m in _SIMULATION_INTENT_RE.finditer(sentence):
+            prefix, suffix = sentence[: m.start()], sentence[m.end():]
+            if _NEGATION_SCOPE_RE.search(prefix):
+                continue
+            if prefix.count('"') % 2 == 1 or prefix.count("“") > prefix.count("”"):
+                continue
+            clause = re.split(r"[,;:]", prefix)[-1]
+            if _CONDITIONAL_OPENER_RE.search(clause):
+                continue
+            if _NEGATED_PREDICATE_RE.search(suffix) and not _DIRECTIVE_RE.search(prefix + m.group(0)):
+                continue
+            return True
+    return False
+
+
 def detect_simulation_constraints(query: str) -> SimulationConstraints:
     """Scoped simulation instructions. Only a ban on running (or a papers-only restriction) forbids simulation;
     "do not substitute/invent/replace ..." forbids replacing results, and a conditional rejection requires
@@ -272,7 +323,7 @@ def detect_simulation_constraints(query: str) -> SimulationConstraints:
     for rx in (*_ONLY_RES, *_BAN_RES):
         unbanned = rx.sub(" ", unbanned)
     return SimulationConstraints(
-        simulation_requested=bool(_SIMULATION_INTENT_RE.search(unbanned) or extract_biomodel_id(query)),
+        simulation_requested=bool(_requests_simulation(unbanned) or extract_biomodel_id(query)),
         simulation_forbidden=forbidden,
         replacement_forbidden=bool(_REPLACEMENT_RE.search(query)),
         reject_if_parameter_missing=bool(_VALIDATE_PARAM_RE.search(query)),
@@ -1307,11 +1358,13 @@ def decide_builtin_sources(ctx: QueryContext) -> None:
     if need is not None and need.skip_retrieval:
         ctx.decisions["archivon"] = SourceDecision(run=False, reason=need.reason)
         ctx.decisions["websurfer"] = SourceDecision(run=False, reason=need.reason)
+    elif not ctx.enable_web_search:
+        # Search off covers every external retrieval: the scholarly literature APIs as well as web search.
+        ctx.decisions["archivon"] = SourceDecision(run=False, reason="Search is off: no literature search")
+        ctx.decisions["websurfer"] = SourceDecision(run=False, reason="Search is off: no web search")
     else:
-        ctx.decisions["archivon"] = SourceDecision(run=True, reason="")
-        ctx.decisions["websurfer"] = SourceDecision(
-            run=ctx.enable_web_search, reason="" if ctx.enable_web_search else "web search off"
-        )
+        ctx.decisions["archivon"] = SourceDecision(run=True, reason=need.reason if need is not None else "")
+        ctx.decisions["websurfer"] = SourceDecision(run=True, reason="")
     wants_axiom = bool(
         {"derive", "solve", "prove"} & set(ctx.intents)
         or (need is not None and need.kind == "closed_computation")
@@ -1328,9 +1381,14 @@ def decide_builtin_sources(ctx: QueryContext) -> None:
         or ctx.constants
         or ctx.dataset_attachment is not None
     )
-    ctx.decisions["calcula"] = SourceDecision(
-        run=wants_calcula, reason="numerical computation requested" if wants_calcula else "no numerical computation requested"
-    )
+    if wants_calcula:
+        calcula_reason = "numerical computation requested"
+    elif need is not None and need.kind in ("closed_computation", "self_contained"):
+        # The computation is requested; it runs in the verified mathematics agent (Axiom), which checks it exactly.
+        calcula_reason = "exact computation runs in the verified mathematics agent (Axiom)"
+    else:
+        calcula_reason = "no numerical data analysis requested"
+    ctx.decisions["calcula"] = SourceDecision(run=wants_calcula, reason=calcula_reason)
     wants_physis = bool(
         {"design"} & set(ctx.intents)
         or ctx.materials
@@ -1853,7 +1911,10 @@ async def _build_query_context(
     ctx.scope = _decide_scope(ctx, clean_query, cands, planner_scope)
     ctx.evidence_need = assess_evidence_need(clean_query, ctx)
     decide_builtin_sources(ctx)
-    ctx.search_plan = build_search_plan(ctx, clean_query)
+    # Format instructions ("answer in at most 40 words", "exactly two lines") are masked: never search concepts.
+    from ..utils.output_contract import mask_instructions
+
+    ctx.search_plan = build_search_plan(ctx, mask_instructions(clean_query))
     if plan is not None:
         ctx.search_plan = merge_llm_plan(ctx.search_plan, plan.get("search"), clean_query)
     return ctx

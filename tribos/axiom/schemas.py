@@ -181,6 +181,51 @@ class AxiomSolveProblemInput(BaseModel):
     )
 
 
+_Domain = Literal["unspecified", "complex", "real", "rational", "integer", "nonnegative_integer", "positive_integer"]
+
+
+class StructuredBranch(BaseModel):
+    expression: str = Field(..., min_length=1, max_length=500, description="Formula in the parameter, e.g. 'n/2'")
+    condition: str = Field(default="", max_length=120, description="'', 'otherwise', 'even', 'odd' or a relation such as 't < 0'")
+
+
+class StructuredDefinition(BaseModel):
+    name: str = Field(..., pattern=r"^[A-Za-z][A-Za-z0-9_]{0,15}$", description="Function name, e.g. 'T'")
+    parameter: str = Field(..., pattern=r"^[A-Za-z]$", description="Parameter, e.g. 'n'")
+    domain: _Domain = Field(default="unspecified", description="Declared domain of the parameter")
+    branches: list[StructuredBranch] = Field(..., min_length=1, max_length=8)
+
+
+class StructuredTask(BaseModel):
+    id: str = Field(..., min_length=1, max_length=80, description="Label from the question: 'T(4)', 'Case A', 'claim'")
+    op: Literal["evaluate", "orbit", "claim"]
+    expression: str | None = Field(default=None, max_length=1000, description="evaluate / predicate claims: the expression")
+    bindings: dict[str, int | float | str] | None = Field(default=None, description="evaluate: case-local values, e.g. {'n': 40}")
+    factor: bool = Field(default=False, description="evaluate: also give the prime factorization")
+    function: str | None = Field(default=None, max_length=16, description="orbit: the function to iterate")
+    start: int | str | None = Field(default=None, description="orbit: start value")
+    mode: Literal["cycle", "steps", "until_repeat"] | None = None
+    steps: int | None = Field(default=None, ge=1, le=1000)
+    lhs: str | None = Field(default=None, max_length=1000)
+    relation: Literal["=", "<", "<=", ">", ">=", "!="] | None = None
+    rhs: str | None = Field(default=None, max_length=1000)
+    predicate: Literal["prime", "composite", "even", "odd", "positive", "negative", "nonnegative", "nonzero", "integer",
+                       "perfect_square", "divisible"] | None = None
+    divisor: str | None = Field(default=None, max_length=100)
+    variable: str | None = Field(default=None, pattern=r"^[A-Za-z]$")
+    domain: _Domain | None = None
+    conditions: list[str] = Field(default_factory=list, max_length=4)
+    statement: str | None = Field(default=None, max_length=1000)
+
+
+class AxiomStructuredInput(BaseModel):
+    """Function definitions with branches and domains, and tasks on them (values, orbits, case-local evaluation,
+    universal claims)."""
+
+    definitions: list[StructuredDefinition] = Field(default_factory=list, max_length=8)
+    tasks: list[StructuredTask] = Field(..., min_length=1, max_length=24)
+
+
 class AxiomSageMathInput(BaseModel):
     code: str = Field(..., min_length=1, max_length=60000, description="SageMath / Python mathematical computation or derivation code")
     timeout_s: int = Field(default=60, ge=5, le=180, description="Execution timeout cutoff in seconds")
@@ -206,5 +251,8 @@ __all__ = [
     "AxiomSimplifyInput",
     "AxiomSolveInput",
     "AxiomSolveProblemInput",
+    "AxiomStructuredInput",
     "AxiomVerifyIdentityInput",
+    "StructuredDefinition",
+    "StructuredTask",
 ]

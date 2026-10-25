@@ -13,12 +13,7 @@ interface VerificationNoticeProps {
   report?: VerificationReport | null;
 }
 
-const BANNER_RE = /^\s*> ⚠️ \*\*(?:Scientific Verification Notice|Verification found errors)\*\*[\s\S]*?(?:\n\s*\n|$)/;
-
-/** The API keeps an honest text banner at the top of unverified answers; the UI shows this notice instead. */
-export function stripVerificationBanner(content: string): string {
-  return content.replace(BANNER_RE, "");
-}
+export { stripVerificationBanner } from "@/lib/verificationState";
 
 const CLAIM_LABEL: Record<ClaimStatus, string> = {
   supported: "supported",

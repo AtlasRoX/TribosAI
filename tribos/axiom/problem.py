@@ -21,15 +21,17 @@ from typing import Any, Literal
 import sympy as sp
 from sympy.core.function import AppliedUndef
 
+from ..utils import output_contract
+from .definitions import misread_functions, substitute_definitions
 from .engine import safe_parse_equation, safe_parse_expr
 
 TaskKind = Literal[
     "solve", "simplify", "differentiate", "integrate", "limit", "series", "sum", "ode", "linalg", "identity",
     "evaluate", "optimize", "inequality", "tangent", "number_theory", "recurrence", "transform", "vector_calculus",
-    "probability", "statistics", "unknown",
+    "probability", "statistics", "structured", "unknown",
 ]
 # Kinds whose inputs live in ProblemSpec.params rather than in a single expression.
-PARAM_KINDS = frozenset({"number_theory", "probability", "statistics", "vector_calculus", "recurrence", "transform", "optimize", "tangent"})
+PARAM_KINDS = frozenset({"number_theory", "probability", "statistics", "vector_calculus", "recurrence", "transform", "optimize", "tangent", "structured"})
 
 LINALG_OPS = ("eigen", "det", "inv", "rref", "svd", "nullspace", "charpoly", "solve")
 
@@ -1027,8 +1029,23 @@ def _parse_statistics(text: str, low: str, spec: ProblemSpec) -> bool:
     return True
 
 
+def _parse_structured(text: str, low: str, spec: ProblemSpec) -> bool:
+    """Questions that define their own functions, evaluate independent cases or state a universal claim
+    (definitions.py). Tried first: the generic parsers would read "T(n) = n/2" as an equation in T and n."""
+    from .definitions import parse_structured
+
+    params, problems = parse_structured(text)
+    spec.ambiguities.extend(problems)
+    if params is None:
+        return False
+    spec.kind, spec.params = "structured", params
+    spec.expression = "; ".join(t["id"] for t in params["tasks"])
+    spec.handled.update({"prime", "factor"})
+    return True
+
+
 _PARSERS = (
-    _parse_linalg, _parse_recurrence, _parse_probability, _parse_statistics, _parse_number_theory, _parse_transform,
+    _parse_structured, _parse_linalg, _parse_recurrence, _parse_probability, _parse_statistics, _parse_number_theory, _parse_transform,
     _parse_vector_calculus, _parse_optimize, _parse_tangent, _parse_ode, _parse_limit, _parse_series, _parse_integral,
     _parse_derivative, _parse_sum, _parse_inequality, _parse_identity, _parse_simplify, _parse_solve, _parse_evaluate,
 )
@@ -1062,8 +1079,8 @@ _ERROR_REPORT_RE = re.compile(
 
 def _fidelity(spec: ProblemSpec, norm: str, low: str) -> list[str]:
     """Tokens of the question that the parsed problem does not account for (see ProblemSpec.unaccounted)."""
-    norm = _TIME_SPAN_RE.sub(" ", norm)
-    low = _ERROR_REPORT_RE.sub(" ", low)
+    norm = _TIME_SPAN_RE.sub(" ", output_contract.mask_instructions(norm))
+    low = _ERROR_REPORT_RE.sub(" ", output_contract.mask_instructions(low))
     parts = [spec.expression or "", *spec.equations, spec.lower or "", spec.upper or "", spec.point or "", spec.func or "",
              str(spec.order), str(spec.order - 1)]
     parts += [f"{k} {v}" for k, v in spec.ics.items()]
@@ -1093,11 +1110,29 @@ def parse_problem(text: str) -> ProblemSpec:
         return spec
     low = norm.lower()
     _domain_and_assumptions(low, spec)
+    original, notes = norm, []
     for parser in _PARSERS:
         trial = ProblemSpec(text=spec.text, domain=spec.domain, assumptions=dict(spec.assumptions))
         try:
+            if parser is not _parse_structured and not notes and parser is _PARSERS[1]:
+                # Not a structured task: single-formula definitions are substituted ("the derivative of f(x)" with
+                # f(x) = x^2 + 1 becomes "the derivative of (x**2 + 1)") so the generic parsers see the actual task.
+                sub = substitute_definitions(original)
+                if sub is not None:
+                    norm, notes = sub
+                    low = norm.lower()
             if parser(norm, low, trial):
                 trial.unaccounted = _fidelity(trial, norm, low)
+                trial.ambiguities.extend(notes)
+                misread = [] if trial.kind == "structured" else misread_functions(original, [trial.expression or "", *trial.equations])
+                if misread:
+                    # The question defines these names as functions; a parse that multiplies by them answers a
+                    # different problem. Reject it rather than solve the wrong thing.
+                    spec.unaccounted = [f"function {name}" for name in misread]
+                    spec.ambiguities.append(
+                        f"the question defines {', '.join(misread)} as function(s); no supported parse keeps the function "
+                        f"application, so the {trial.kind} reading was rejected")
+                    return spec
                 return trial
         except Exception:  # noqa: BLE001 - one parser's failure must not hide the others
             continue

@@ -99,7 +99,7 @@ async def test_orchestrator_streams_reasoning_answer_and_real_steps(offline_orch
     async def cb(ev):
         events.append(ev)
 
-    res = await orch.execute_inquiry("Find KRAS papers only.", thread_id="t-stream", enable_web_search=False, event_callback=cb)
+    res = await orch.execute_inquiry("Find KRAS papers only.", thread_id="t-stream", enable_web_search=True, event_callback=cb)
 
     reasoning = "".join(e["delta"] for e in events if e["type"] == "reasoning_delta")
     answer = "".join(e["delta"] for e in events if e["type"] == "content_delta")

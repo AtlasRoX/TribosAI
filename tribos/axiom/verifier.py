@@ -52,6 +52,7 @@ ANSWER_TOOLS: dict[str, tuple[str, ...]] = {
     "vector_calculus": ("axiom_vector_calculus",),
     "probability": ("axiom_probability",),
     "statistics": ("calcula_statistics",),
+    "structured": ("axiom_structured",),
 }
 CALCULUS_OP = {"differentiate": "diff", "integrate": "integrate", "limit": "limit", "series": "series", "sum": "sum"}
 
@@ -722,6 +723,17 @@ def verify(spec: ProblemSpec, tool: str, args: dict[str, Any], data: dict[str, A
             ["the verifier could not check this result"], {"text": str(data.get("result") or data)[:500]},
         )
     v.checks.insert(0, Check("tool executed", True, 0))
+    misread = _misread(spec, args) if kind != "structured" else []
+    if misread:
+        # The question defines these names as functions; a call that multiplies by them (T(n) read as T*n) or leaves
+        # them undefined computes a different problem. That is an interpretation failure, not a disproof: the
+        # candidate is set aside (refuted candidates are never answers) and the reason says which it is.
+        v.status = "refuted"
+        v.checks.append(Check("interpretation: defined functions are applied, never multiplied", False, 1,
+                              f"the question defines {', '.join(misread)} as function(s); this call does not apply them"))
+        v.uncertainty.insert(0, "interpretation failed: the computation answers a different problem than the question; "
+                                "this says nothing about whether the question's own claim is true")
+        return v
     if spec.unaccounted and v.status in ("verified", "partially_verified"):
         # The answer was checked against the parsed problem, but the parse ignores part of the question.
         v.status = "unverified"
@@ -729,6 +741,20 @@ def verify(spec: ProblemSpec, tool: str, args: dict[str, Any], data: dict[str, A
         v.uncertainty.insert(0, f"the parsed problem does not use {', '.join(map(repr, spec.unaccounted))} from the question; "
                                 "the result may answer a different problem")
     return v
+
+
+def _misread(spec: ProblemSpec, args: dict[str, Any]) -> list[str]:
+    from .definitions import misread_functions
+    from .problem import normalize_math_text
+
+    exprs = [spec.expression or "", *spec.equations]
+    for key in ("equations", "equation", "expression", "lhs", "rhs", "inequality"):
+        value = args.get(key)
+        exprs += [str(x) for x in value] if isinstance(value, list) else [str(value)] if value else []
+    try:
+        return misread_functions(normalize_math_text(spec.text), exprs)
+    except Exception:  # noqa: BLE001 - the guard never blocks a result on its own failure
+        return []
 
 
 def alignment_failed(verdict: Verdict) -> bool:

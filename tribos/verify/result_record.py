@@ -99,9 +99,12 @@ class ResultRecord:
         self.revision = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()[:16]
 
 
-def given_values(text: str) -> dict[str, dict[str, Any]]:
-    """Values a question states as "name = number unit"; function values such as x(0) = 0.1 are excluded."""
+def given_values(text: str, scoped: set[str] | frozenset[str] = frozenset()) -> dict[str, dict[str, Any]]:
+    """Values a question states as "name = number unit"; function values such as x(0) = 0.1 are excluded. A name the
+    question assigns different values ("Case A: n = 40. Case B: n = 41.") or names case-local (`scoped`) is not a
+    parameter of the whole problem: each value belongs to its own case, so none is kept here."""
     out: dict[str, dict[str, Any]] = {}
+    seen: dict[str, set[float]] = {}
     for m in _GIVEN_RE.finditer(text or ""):
         raw = m.group("name")
         unit = (m.group("unit") or "").strip()
@@ -111,8 +114,11 @@ def given_values(text: str) -> dict[str, dict[str, Any]]:
             value = float(m.group("value").replace("−", "-"))
         except ValueError:
             continue
-        out.setdefault(canonical_name(raw), {"name": raw, "value": value, "unit": unit})
-    return out
+        c = canonical_name(raw)
+        seen.setdefault(c, set()).add(value)
+        out.setdefault(c, {"name": raw, "value": value, "unit": unit})
+    scoped_c = {canonical_name(s) for s in scoped}
+    return {c: v for c, v in out.items() if len(seen[c]) == 1 and c not in scoped_c}
 
 
 def _formula_symbol(formula: str) -> str:
@@ -162,9 +168,21 @@ def build_result_record(query: str, tool_results: dict[str, Any]) -> ResultRecor
             # The unknowns of a solve / inequality / extremum task take many values in one answer (roots, endpoints,
             # critical points): "x = 0" there is a case being examined, never a definition of x.
             rec.problem["unknowns"] = [str(v) for v in (getattr(spec, "variables", None) or [getattr(spec, "variable", None)]) if v]
+        if getattr(spec, "kind", "") == "structured":
+            # Definitions and case-local bindings (structured questions, axiom/definitions.py): the answer checker
+            # evaluates defined functions through their branches and gives each case its own bindings.
+            tasks = spec.params.get("tasks") or []
+            rec.problem["definitions"] = spec.params.get("definitions") or []
+            rec.problem["cases"] = [{"id": t["id"], "bindings": t["bindings"]} for t in tasks if t.get("bindings")]
+            # Names bound in two or more cases are case-local; a single substitution ("evaluate n^2 + 1 for n = 3")
+            # stays a parameter of the problem. A claim's variable is case-local too: "n = 40 gives 1681" and
+            # "n = 41 gives 1763" are two tested values.
+            bound = [k for t in tasks for k in (t.get("bindings") or {})]
+            rec.problem["case_scoped"] = sorted({k for k in bound if bound.count(k) > 1}
+                                                | {t["variable"] for t in tasks if t.get("op") == "claim" and t.get("variable")})
     except Exception:  # noqa: BLE001 - an unparsed question still gets a record of its tool outputs
         rec.problem = {"text": (query or "")[:4000], "kind": "unknown"}
-    rec.parameters = given_values(query or "")
+    rec.parameters = given_values(query or "", set(rec.problem.get("case_scoped") or ()))
     func_name = re.sub(r"\(.*$", "", str(rec.problem.get("function") or ""))
     var = str(rec.problem.get("variable") or "t")
 

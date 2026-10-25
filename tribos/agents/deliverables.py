@@ -42,6 +42,12 @@ _ACTIVITY = {"simulate": "numerical simulation", "compare": "comparison", "plot"
 _SPLIT_RE = re.compile(r",\s*(?:and\s+|or\s+)?|\s+and\s+(?=(?:the\s+)?[a-z\-]+(?:\s+[a-z\-]+){0,3}\s*(?:,|$))", re.I)
 
 
+# A verdict on a yes/no or status question.
+_STATUS_RE = re.compile(
+    r"\b(?:true|false|holds?|fails?|proved|proven|unproven|disproved|disproof|counterexamples?|open\s+(?:problem|question|conjecture)|"
+    r"(?:remains?|is)\s+open|unknown|unresolved|not\s+(?:been\s+)?(?:proved|proven|known|established)|yes|no)\b", re.I)
+
+
 def _words(text: str) -> list[str]:
     return [w for w in re.findall(r"[a-z][a-z\-]{2,}", (text or "").lower()) if w not in _STOP]
 
@@ -80,6 +86,8 @@ def requested_items(question: str, limit: int = 24) -> list[dict[str, str]]:
             words = _words(p)
             if not words or len(words) > 7 or "=" in p or re.search(r"\d", p) or _SUBJECT_WORDS & set(words):
                 continue
+            if re.match(r"(?i)(?:or|and|nor)\b", p):
+                continue  # "prove or disprove that ...": the second verb of one request, not a deliverable
             items.append((" ".join(p.split()), verb))
             found = True
         if not found and verb in _ACTIVITY:
@@ -119,10 +127,20 @@ def assess(question: str, answer: str, math_audit: dict[str, Any] | None = None)
     passages = [(p, {_stem(w) for w in _words(p)}) for p in _passages(answer)]
     claims = list((math_audit or {}).get("claims") or [])
     results: list[dict[str, Any]] = []
-    for req in requested_items(question):
+    from ..utils.output_contract import mask_instructions
+
+    for req in requested_items(mask_instructions(question)):
         item, verb = req["item"], req["verb"]
         item_stems = [_stem(w) for w in _words(item)]
         if not item_stems:
+            continue
+        proof_item = re.search(r"(?i)\b(?:proof|justification|argument|demonstration)\b", item)
+        if (re.match(r"(?i)whether\b|if\b", item) or proof_item) and _STATUS_RE.search(answer or ""):
+            # A requested proof of a statement the answer shows false is delivered by the disproof (audit I14/T05).
+            # "Determine whether the claim is proved": a verdict (proved, false, open, a counterexample) answers it,
+            # whatever words the item itself uses (audit I14: a valid disproof was reported "not addressed").
+            results.append({"item": item, "status": "addressed", "where": _STATUS_RE.search(answer).group(0),
+                            "quantity": verb in _QUANTITY_VERBS})
             continue
         present = sum(1 for s in item_stems if _has(stems_all, s)) / len(item_stems)
         if present < 0.5:

@@ -1852,7 +1852,15 @@ class TribosVerifier:
         # -------------------------------------------------------------
         # If all tools failed or were empty, the response must not present findings as if they were checked
         non_empty_tools = [res for res in tool_results.values() if res and res.success and res.data]
-        if not non_empty_tools:
+        # Which completion checks apply depends on the task (audit I14): a self-contained calculation, proof or copy
+        # needs no outside evidence, so "no tool returned evidence" is not a defect there; and an answer whose form the
+        # user fixed (two lines, 40 words, plain text) cannot repeat the question's words, so word overlap says nothing.
+        from ..utils.output_contract import extract as extract_contract
+
+        need = getattr(query_context, "evidence_need", None) if query_context is not None else None
+        self_contained = bool(need is not None and getattr(need, "skip_retrieval", False))
+        strict_form = extract_contract(query or "").strict_form
+        if not non_empty_tools and not self_contained:
             # Response must state that evidence is unavailable
             if "unavailable" not in resp_lower and "insufficient" not in resp_lower and "no data" not in resp_lower:
                 defects.append(
@@ -1866,13 +1874,16 @@ class TribosVerifier:
 
         # The question's subject: its content words and its numbers (for mathematics the numbers are the subject).
         # Words that only say how to answer ("show every step, verify the final answer") are not the subject.
+        from ..utils.output_contract import mask_instructions
+
+        subject_query = mask_instructions(query or "")
         query_words = [
-            w.lower() for w in re.split(r"\W+", query or "") if len(w) > 3 and w.lower() not in _ANSWER_INSTRUCTION_WORDS
+            w.lower() for w in re.split(r"\W+", subject_query) if len(w) > 3 and w.lower() not in _ANSWER_INSTRUCTION_WORDS
         ]
-        query_numbers = set(re.findall(r"\d+(?:\.\d+)?", query or ""))
+        query_numbers = set(re.findall(r"\d+(?:\.\d+)?", subject_query))
         matched = sum(1 for w in query_words if w in resp_lower) + sum(1 for n in query_numbers if n in resp_lower)
         subject_size = len(query_words) + len(query_numbers)
-        if subject_size and matched / subject_size < 0.25:
+        if subject_size and matched / subject_size < 0.25 and not self_contained and not strict_form:
             defects.append(
                 DefectItem(
                     category="COMPLETION",

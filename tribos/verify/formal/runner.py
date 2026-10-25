@@ -114,7 +114,9 @@ def check_lean(code: str, timeout_s: float | None = None) -> dict[str, Any]:
         try:
             # A fixed argv of the configured checker, no shell.
             proc = subprocess.run(  # nosec B603
+                # Lean writes UTF-8; the platform default (cp1252 on Windows) would garble "ℕ" in its messages.
                 [*command["argv"], path], cwd=command["cwd"] or work, capture_output=True, text=True,
+                encoding="utf-8", errors="replace",
                 timeout=timeout, preexec_fn=_limit_memory if os.name == "posix" else None,  # noqa: PLW1509
             )
         except subprocess.TimeoutExpired:

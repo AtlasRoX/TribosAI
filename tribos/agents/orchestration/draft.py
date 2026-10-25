@@ -217,7 +217,15 @@ def prepare_context(run: RunContext) -> None:
             "list it as a limitation."
         )
     if not ctx.enable_web_search:
-        scope_notes.append("Live web search was disabled for this turn.")
+        need = getattr(ctx, "evidence_need", None)
+        if need is not None and need.level == "required":
+            # A question that asks for sources while Search is off is answered without them, and says so.
+            scope_notes.append(
+                "Search was switched off for this turn, so no literature or web source was consulted although the "
+                "question asks for sources: say so in one sentence, answer from established knowledge only, and do "
+                "not cite or name specific papers, preprints or web pages.")
+        else:
+            scope_notes.append("Search was switched off for this turn: no literature or web source was consulted.")
     # What the gather stages did not run (no Calcula code, no identifiable system, no symbolic solution).
     scope_notes.extend(n for n in dict.fromkeys(run.gather_notes) if n)
     # Pre-synthesis check: the artifact must match the request, or the answer must say it does not.
@@ -309,6 +317,9 @@ async def write_first_draft(run: RunContext) -> None:
     delib_text = deliberation_prompts.get(depth, "")
     if delib_text:
         system_prompt = f"{system_prompt}\n{delib_text}"
+    from ...utils.output_contract import writer_rule
+
+    system_prompt += writer_rule(getattr(run, "output_contract", None))  # last, so it overrides the report template above
 
     distinct = distinct_results(tool_results)  # an alias key ("lithoscribe", "vivarix") is not another source
     n_ok = sum(1 for r in distinct.values() if r.success)
@@ -497,9 +508,11 @@ async def write_first_draft(run: RunContext) -> None:
         math_art = (getattr(agent_state, "artifacts", None) or {}).get("math_agent") if agent_state is not None else None
         math_answer = (math_art or {}).get("answer") or {}
         ode_art = (getattr(agent_state, "artifacts", None) or {}).get("ode_verification") if agent_state is not None else None
+        math_status = str((math_art or {}).get("status") or "")
+        computed = (f"$${math_answer['latex']}$$" if math_answer.get("latex")
+                    else str(math_answer.get("text") or "").strip())
         sections = [
-            ("Computed result (Axiom)", f"$${math_answer['latex']}$$\n\nStatus: {(math_art or {}).get('status', '').replace('_', ' ')}"
-             if math_answer.get("latex") else ""),
+            ("Computed result (Axiom)", f"{computed}\n\nStatus: {math_status.replace('_', ' ')}" if computed else ""),
             ("Numerical verification", verification_fallback_markdown(ode_art)),
             ("Computed results (Dynamis, Axiom, Physis, Calcula)", vivarix_summary),
             ("Literature passages (Archivon)", lithoscribe_summary),
@@ -507,15 +520,21 @@ async def write_first_draft(run: RunContext) -> None:
             ("Single-cell analysis", lumicell_summary),
         ]
         body = "".join(f"#### {title_}\n{text_}\n\n" for title_, text_ in sections if (text_ or "").strip())
-        candidate_response = (
-            f"### Results gathered for: {clean_query}\n\n"
-            "The written answer could not be produced, so these are the tool results as computed, without "
-            "interpretation.\n\n"
-            f"{body}{''.join(plugin_sections)}"
-            "#### Evidence limitations\n"
-            f"No written answer: {fallback_reason(err)}. Check the results above against the question before relying "
-            "on them."
-        )
+        contract = getattr(run, "output_contract", None)
+        if math_status == "verified" and math_answer.get("text") and contract is not None and contract.strict_form:
+            # The user fixed the answer's form and the verified computation already answers it: its checked text is
+            # the answer (the task status reports that no model wrote it), not a report about the failed writer.
+            candidate_response = str(math_answer["text"]).strip()
+        else:
+            candidate_response = (
+                f"### Results gathered for: {clean_query}\n\n"
+                "The written answer could not be produced, so these are the tool results as computed, without "
+                "interpretation.\n\n"
+                f"{body}{''.join(plugin_sections)}"
+                "#### Evidence limitations\n"
+                f"No written answer: {fallback_reason(err)}. Check the results above against the question before "
+                "relying on them."
+            )
 
     # What the client has on screen: the streamed draft (or, after a model error, nothing it must replace).
     raw_draft = candidate_response

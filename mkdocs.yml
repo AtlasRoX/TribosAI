@@ -98,4 +98,5 @@ nav:
   - Architecture Plans:
       - Transformation Plan: plans/tribos-transformation.md
       - Migration Brief: plans/tribos-migration-brief.md
+  - Audit Repair Report: AUDIT_REPAIR_REPORT.md
   - Contributing: CONTRIBUTING.md

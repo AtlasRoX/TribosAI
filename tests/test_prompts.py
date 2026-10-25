@@ -125,7 +125,7 @@ async def test_orchestrator_sends_structured_prompt(offline_orchestrator, monkey
             return R()
 
     monkeypatch.setattr(orch_module, "get_llm", lambda *a, **k: FakeLLM())
-    await orch.execute_inquiry("Find KRAS papers only.", thread_id="t-prompt", enable_web_search=False)
+    await orch.execute_inquiry("Find KRAS papers only.", thread_id="t-prompt", enable_web_search=True)
     system, human = captured["messages"]
     # draft.py appends the effort level's deliberation instruction (medium by default) to the system prompt.
     assert system.content.startswith(get_synthesis_system_prompt())

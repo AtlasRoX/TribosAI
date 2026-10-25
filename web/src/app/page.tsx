@@ -100,7 +100,7 @@ import { generateDynamicTitle } from "@/lib/dynamicTitle";
 import { normalizeLegacyAgentName, normalizeThoughtAgents } from "@/lib/legacyNames";
 import { DEFAULT_MODEL_ID, migrateSavedModel } from "@/lib/modelMigration";
 import { finalizeThoughts, mergeThought } from "@/components/agentic/thoughts";
-import { resolveAnswer } from "@/lib/assistantAnswer";
+import { renderableAnswer, resolveAnswer } from "@/lib/assistantAnswer";
 import { entitySummary, memoryBadgeCount, memoryStatTiles, memoryTypeLabel, verificationStatusLabel } from "@/lib/memoryVault";
 import { Message, ThoughtStep, FrameworkOption } from "@/types/chat";
 import type { MessageAttachment } from "@/types/datasets";
@@ -2742,7 +2742,7 @@ export default function TribosAssistant() {
                             <ErrorBoundary name={`Answer ${msg.id}`} resetKey={msg.content} fallback={<MessageRenderFallback content={msg.content} />}>
                             {justStreamedIdRef.current === msg.id ? (
                               <SmoothMarkdown
-                                content={stripVerificationBanner(msg.content)}
+                                content={renderableAnswer(stripVerificationBanner(msg.content), msg.execution_artifacts)}
                                 streaming={false}
                                 citations={msg.citations}
                                 initialText={
@@ -2758,7 +2758,7 @@ export default function TribosAssistant() {
                               <>
                                 <AnswerToc content={msg.content} messageId={msg.id} />
                                 <MarkdownRenderer
-                                  content={stripVerificationBanner(msg.content)}
+                                  content={renderableAnswer(stripVerificationBanner(msg.content), msg.execution_artifacts)}
                                   citations={msg.citations}
                                   linkedValues={linkedValuesFrom(msg.execution_artifacts)}
                                   sectionActions={msg.agent !== "System"}
@@ -2810,7 +2810,7 @@ export default function TribosAssistant() {
                         <button
                           type="button"
                           className="msg-action-btn"
-                          onClick={() => handleCopyMessage(msg.id, msg.content)}
+                          onClick={() => handleCopyMessage(msg.id, stripVerificationBanner(msg.content))}
                           aria-label="Copy answer"
                         >
                           {copiedMessageId === msg.id ? (

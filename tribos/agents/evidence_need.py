@@ -84,20 +84,63 @@ def _match(pattern: re.Pattern[str], text: str) -> str:
     return m.group(0) if m else ""
 
 
-def _domain_entities(ctx: Any) -> list[str]:
+def _domain_entities(ctx: Any) -> list[tuple[str, str]]:
+    """(kind, label) of the resolved domain entities."""
     if ctx is None:
         return []
-    found: list[str] = []
+    found: list[tuple[str, str]] = []
     for attr in _DOMAIN_ENTITY_ATTRS:
         for ent in getattr(ctx, attr, None) or []:
-            found.append(str(getattr(ent, "label", None) or getattr(ent, "mention", None) or ent))
+            found.append((attr, str(getattr(ent, "label", None) or getattr(ent, "mention", None) or ent)))
     return found
+
+
+# A statement to prove about mathematical objects ("show that the sum of two odd integers is even").
+_PROOF_RE = re.compile(r"\b(?:prove|show|verify|demonstrate|establish|disprove)\s+(?:or\s+disprove\s+)?that\b", re.I)
+_MATH_OBJECT_RE = re.compile(
+    r"\b(?:integers?|primes?|polynomials?|functions?|matri(?:x|ces)|vectors?|sets?|groups?|rings?|graphs?|sequences?|"
+    r"series|triangles?|circles?|divisible|odd|even|rational|irrational|real\s+numbers?|complex\s+numbers?|derivatives?|"
+    r"integrals?|inequalit(?:y|ies)|equations?|roots?|digits?|numbers?)\b", re.I)
+# A quantity the question gives: a number with a unit ("120 L", "4 L/min", "3.2 kg").
+_GIVEN_QUANTITY_RE = re.compile(r"(?<![\w.])\d+(?:\.\d+)?\s*([A-Za-zµΩ°][A-Za-z/^0-9·*]{0,10})")
+_ASKS_VALUE_RE = re.compile(
+    r"\b(?:how\s+(?:long|much|many|far|fast|big|high|large|often)|calculate|compute|find|determine|work\s+out|"
+    r"what\s+(?:is|are|was|will\s+be)\s+the\s+(?:value|total|time|speed|rate|area|volume|mass|cost|force|energy|power|"
+    r"pressure|current|voltage|resistance|distance|probability|percentage))\b", re.I)
+
+
+def _given_quantities(text: str) -> int:
+    from ..verify.latex_math import is_unit_word
+
+    return sum(1 for m in _GIVEN_QUANTITY_RE.finditer(text) if is_unit_word(m.group(1).split("/")[0]))
+
+
+FORMAT_REASON = "the request is to return given text exactly; no outside evidence applies"
+SELF_CONTAINED_REASON = ("mathematics stated in the question (a proof, derivation or calculation from its own "
+                         "definitions): answered by reasoning and checked computation, no outside evidence needed; ask "
+                         "for sources to search the literature")
+MODEL_REASON = ("a model stated in the question, to be simulated or solved: the computation answers it, no outside "
+                "evidence needed; ask for sources to search the literature")
+GIVEN_DATA_REASON = "a calculation from the values the question gives: no outside evidence needed"
+ESTABLISHED_REASON = ("a conceptual question about established knowledge: no search needed; ask for sources or recent "
+                      "work to search the literature")
+# Written mathematics: an equation, a power, a function application, LaTeX or math symbols.
+_MATH_NOTATION_RE = re.compile(r"[=^∫∑√≤≥≠]|\\(?:frac|int|sum|sqrt)|\b[A-Za-z]\s*\(\s*[A-Za-z0-9]\s*\)|\d\s*[a-z]\b")
 
 
 def assess_evidence_need(query: str, ctx: Any = None) -> EvidenceNeed:
     """The evidence need of one question (see the module docstring). `ctx` (a QueryContext) adds its resolved
-    domain entities; without it only the text decides."""
-    text = str(query or "")
+    domain entities; without it only the text decides.
+
+    Retrieval follows an identified information need, not the availability of search (adaptive retrieval: outside
+    sources help with specific, long-tail or current facts and can mislead on what is established). Format
+    instructions ("answer in at most 40 words") never decide the need."""
+    from ..utils.output_contract import extract, mask_instructions
+
+    contract = extract(str(query or ""))
+    if contract.pure_copy:
+        return EvidenceNeed("none", "format", FORMAT_REASON, "literal copy")
+    text = mask_instructions(str(query or ""))
     lit = _match(_LITERATURE_RE, text)
     if lit:
         return EvidenceNeed("required", "literature", "the question asks for published sources", lit)
@@ -109,7 +152,12 @@ def assess_evidence_need(query: str, ctx: Any = None) -> EvidenceNeed:
         return EvidenceNeed("optional", "empirical", "the answer uses measured or tabulated values", empirical)
     entities = _domain_entities(ctx)
     if entities:
-        return EvidenceNeed("optional", "empirical", "the question names real materials, systems or constants", entities[0])
+        models_only = all(kind == "systems" for kind, _ in entities)
+        if models_only and (getattr(ctx, "is_simulation_intent", False) or _MATH_NOTATION_RE.search(text)):
+            # A model the question states and asks to simulate or solve ("the damped oscillator x'' + 0.5x' + 4x = 0"):
+            # the computation answers it; papers about oscillators in general are not evidence for this run.
+            return EvidenceNeed("none", "self_contained", MODEL_REASON, entities[0][1])
+        return EvidenceNeed("optional", "empirical", "the question names real materials, systems or constants", entities[0][1])
     from ..axiom.problem import parse_problem  # local: sympy is heavy and only needed here
 
     try:
@@ -118,7 +166,25 @@ def assess_evidence_need(query: str, ctx: Any = None) -> EvidenceNeed:
         spec = None
     if spec is not None and spec.parsed and not spec.unaccounted:
         return EvidenceNeed("none", "closed_computation", CLOSED_REASON, f"{spec.kind}: {spec.expression or ''}".strip())
-    return EvidenceNeed("optional", "open", "not provably self-contained", "")
+    from ..axiom.problem import has_math_intent
+    from .search_plan import classify_question
+
+    qtype = classify_question(text)
+    if _ASKS_VALUE_RE.search(text) and _given_quantities(text) >= 2:
+        # A calculation from values the question supplies ("a 120 L tank drains at 4 L/min; how long ...").
+        return EvidenceNeed("none", "self_contained", GIVEN_DATA_REASON, "given quantities")
+    proof = bool(_PROOF_RE.search(text) and _MATH_OBJECT_RE.search(text))
+    # A derivation over physical quantities with units ("a steel ball ... in water") may need reference values the
+    # question does not give, so only unit-free mathematics counts as self-contained here.
+    unit_free = _given_quantities(text) == 0
+    if proof or qtype == "proof" or (unit_free and (qtype == "derivation" or (has_math_intent(text) and _MATH_NOTATION_RE.search(text)))):
+        # A proof, derivation or calculation about objects the question itself defines (no named real-world system,
+        # material or dataset, no request for sources): papers matching its generic words ("case", "integer",
+        # "function") are noise, never evidence.
+        return EvidenceNeed("none", "self_contained", SELF_CONTAINED_REASON, qtype)
+    if qtype == "conceptual":
+        return EvidenceNeed("none", "established_knowledge", ESTABLISHED_REASON, qtype)
+    return EvidenceNeed("optional", "open", "the answer may depend on published findings", qtype)
 
 
 # A request whose answer is a number the run computes ("simulate", "report the maximum absolute error", "step-size
@@ -138,9 +204,45 @@ def is_computation_request(text: str) -> bool:
     return bool(_COMPUTATION_REQUEST_RE.search(text or "")) and not _SOURCE_REQUEST_RE.search(text or "")
 
 
+_NETWORKED_ADAPTERS = frozenset({"DIRECT_REST", "DIRECT_GRAPHQL", "REMOTE_MCP"})
+
+
+def is_external_retrieval(entry: Any) -> bool:
+    """A tool that fetches from a service outside Tribos (scholarly APIs, web search, encyclopedia and online database
+    lookups): its registry adapter is networked. A bare name is looked up in the registry."""
+    if isinstance(entry, str):
+        try:
+            from ..tools.registry import get_tool_registry
+
+            entry = get_tool_registry().get_entry(entry) or entry
+        except Exception:  # noqa: BLE001
+            return False
+    adapter = getattr(entry, "adapter_type", None)
+    return str(getattr(adapter, "value", adapter) or "") in _NETWORKED_ADAPTERS
+
+
+def external_retrieval_block(ctx: Any, entry: Any) -> str | None:
+    """Why a networked tool may not run this turn, or None: Search is off (every external retrieval, literature
+    included), or the question needs no outside evidence (a self-contained calculation, proof or copy)."""
+    if ctx is None or not is_external_retrieval(entry):
+        return None
+    if not getattr(ctx, "enable_web_search", True):
+        return "Search is off for this turn"
+    need = getattr(ctx, "evidence_need", None)
+    if need is not None and need.skip_retrieval:
+        return str(need.reason or "no outside evidence is needed for this question")
+    return None
+
+
 def is_closed_computation(ctx: Any) -> bool:
     need = getattr(ctx, "evidence_need", None)
     return bool(need is not None and need.kind == "closed_computation")
+
+
+def is_self_contained(ctx: Any) -> bool:
+    """No outside evidence applies: a closed computation, mathematics from the question's own definitions, a copy."""
+    need = getattr(ctx, "evidence_need", None)
+    return bool(need is not None and need.kind in ("closed_computation", "self_contained", "format"))
 
 
 # The answer shape for a self-contained calculation (added to the synthesis request): the general format rules

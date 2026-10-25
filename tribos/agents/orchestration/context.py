@@ -101,6 +101,7 @@ class RunContext:
     agent_rt: Any = None  # AgenticRuntime (agentic frameworks only)
     agent_state: Any = None  # AgentState (agentic frameworks only)
     routing: dict[str, Any] | None = None  # Auto runs: the router's decision (execution_artifacts.framework_routing)
+    output_contract: Any = None  # tribos.utils.output_contract.Contract: the answer's requested form
     evaluated_sources: list[Any] = field(default_factory=list)
     active_sources: list[Any] = field(default_factory=list)
     title_ctx: dict[str, Any] = field(default_factory=dict)

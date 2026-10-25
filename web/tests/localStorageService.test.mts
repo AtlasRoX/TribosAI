@@ -97,3 +97,29 @@ test("when storage is full, older investigations lose their plots before the ope
   assert.equal(oldSaved.storage_slimmed, "plots");
   assert.ok(notices.includes("slimmed"));
 });
+
+test("a full browser never deletes another investigation's conversation to make room (audit I20)", () => {
+  // Room for a few investigations; then a new one far larger than what slimming can free.
+  const { svc, localStorage } = setup(120_000);
+  const ids: string[] = [];
+  for (const id of ["a", "b", "c", "d"]) {
+    ids.push(svc.createNewThread(id).id);
+    svc.saveMessages(svc.getActiveThreadId(), answer(id));
+  }
+  const textBefore = ids.map((id) => (svc.getMessages(id) as any[]).map((m) => m.content).join("|"));
+  const notices: string[] = [];
+  svc.subscribe((n) => notices.push(n.kind));
+  const big = svc.createNewThread("big").id;
+  const huge = [{ id: "q", sender: "user", content: "x".repeat(200_000), timestamp: "2026-10-24T00:00:00Z" }];
+  const result = svc.saveMessages(big, huge as any);
+
+  assert.equal(result.saved, false);
+  assert.equal(result.level, "none");
+  assert.deepEqual(result.prunedThreadIds, []);
+  assert.ok(!notices.includes("pruned"));
+  assert.ok(notices.includes("not_saved"));
+  // Every earlier conversation's text is still stored, and no record claims its messages were removed.
+  assert.deepEqual(ids.map((id) => (svc.getMessages(id) as any[]).map((m) => m.content).join("|")), textBefore);
+  assert.ok(svc.getInvestigations().every((i) => !i.messagesPruned));
+  assert.ok(localStorage.map.size > 0);
+});

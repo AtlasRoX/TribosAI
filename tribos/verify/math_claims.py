@@ -408,6 +408,34 @@ def _segments(md: str) -> list[tuple[int, str, bool]]:
     return out
 
 
+_PLAIN_ATOM = (r"(?:[A-Za-z]\w{0,2}\s*\([^()\n=$]{1,30}\)|\d+(?:\.\d+)?|(?<![A-Za-z])[A-Za-z](?![A-Za-z(])"
+               r"|\((?:[^()\n=$]|\([^()\n=$]*\)){1,60}\))")
+_PLAIN_EXPR = rf"[-−]?\s*{_PLAIN_ATOM}(?:\s*(?:\*\*|[-+*/^×·−])\s*{_PLAIN_ATOM})*"
+_PLAIN_RUN_RE = re.compile(rf"(?<![\w$\\^.]){_PLAIN_EXPR}(?:\s*(?:=|≈)\s*{_PLAIN_EXPR})+(?![\w(])")
+
+
+def _plain_segments(md: str) -> list[tuple[int, str, bool]]:
+    """(position, latex, False) for relations written as plain text outside math delimiters, code and tables:
+    "A: 1681 = 41 * 41", "T(4) = 2", "f(x) - x^2 = (x^2 + 1) - x^2 = 1". Only runs made of numbers, one-letter
+    symbols, short function applications and operators count, so prose is never read as mathematics."""
+    masked = _CODE_RE.sub(lambda m: " " * len(m.group(0)), md)
+    masked = _SEG_RE.sub(lambda m: " " * len(m.group(0)), masked)
+    masked = re.sub(r"(?m)^\s*\|.*$", lambda m: " " * len(m.group(0)), masked)
+    out: list[tuple[int, str, bool]] = []
+    for m in _PLAIN_RUN_RE.finditer(masked):
+        body = m.group(0).strip()
+        if not re.search(r"\d|[A-Za-z]\w{0,2}\s*\(", body):
+            continue
+        # Only computations count: an operator or a function application after the first "=" ("1681 = 41 * 41",
+        # "T(4) = 2"). A bare "N = 102" in prose is a label or a count, never a binding the checker should hold.
+        sides = re.split(r"=|≈", body)
+        if not any(re.search(r"[-+*/^×·−]|[A-Za-z]\w{0,2}\s*\(", s.strip().lstrip("-−")) for s in sides):
+            continue
+        latex = body.replace("×", r" \cdot ").replace("·", r" \cdot ").replace("−", "-").replace("**", "^").replace("≈", r" \approx ")
+        out.append((m.start(), latex, False))
+    return out
+
+
 def _table_rows(md: str) -> list[tuple[int, list[str], list[str], str]]:
     """(position, header cells, row cells, heading) for markdown table data rows."""
     rows: list[tuple[int, list[str], list[str], str]] = []
@@ -476,6 +504,29 @@ class _Env:
         self.func_rel: dict[str, float] = {}
         self.func_dec: dict[str, list[str]] = {}
         self.bound_heading: dict[str, str] = {}  # symbol -> heading of the statement that bound it
+        # Functions the question itself defines (axiom/definitions.py: branches, conditions, domains). They are applied
+        # through their own definition, never re-bound by a restatement in the answer and never read as a product.
+        self.defined: dict[str, dict[str, Any]] = {}
+        self.order: list[str] = []  # symbols in the order they were bound (case scopes are cut from this list)
+
+    def apply_defined(self, e: Any) -> sp.Expr:
+        from ..axiom.definitions import DefinitionError, apply_definition
+        from ..axiom.engine import safe_parse_expr
+
+        defn = self.defined[canonical_name(type(e).__name__)]
+        if len(e.args) != 1:
+            raise Unsupported(f"{defn['name']} takes one argument")
+        arg = e.args[0]
+        if arg.free_symbols:
+            branches = defn["branches"]
+            if len(branches) == 1 and branches[0]["condition"] in ("", "otherwise"):
+                p = sp.Symbol(defn["parameter"])
+                return safe_parse_expr(branches[0]["expression"], local_dict={p.name: p}).xreplace({p: arg})
+            return e  # which branch applies depends on the argument: stays unresolved
+        try:
+            return apply_definition(defn, arg)[0]
+        except DefinitionError as exc:
+            raise Unsupported(str(exc)) from exc
 
     def precision_of(self, *exprs: sp.Expr | None) -> tuple[float, float]:
         """(absolute, relative) uncertainty inherited from rounded values the expressions refer to, directly or through
@@ -501,6 +552,13 @@ class _Env:
                 if c in self.funcs:
                     stack.append(self.funcs[c][1])
         return abs_u, rel_u
+
+    def resolve_values(self, expr: sp.Expr) -> sp.Expr:
+        """Bound symbols substituted (no function application), so a defined function sees a numeric argument."""
+        subs = {s: self.values.get(canonical_name(s.name), self.params.get(canonical_name(s.name)))
+                for s in expr.free_symbols if s != self.var}
+        subs = {k: v for k, v in subs.items() if v is not None}
+        return expr.xreplace(subs) if subs else expr
 
     def bound(self, name: str) -> bool:
         c = canonical_name(name)
@@ -534,6 +592,14 @@ class _Env:
             return dbody.xreplace({p: e.args[0]})
 
         out = expr.replace(is_bound_app, apply) if funcs else expr
+        if self.defined:
+            def is_defined_app(e: Any) -> bool:
+                return isinstance(e, AppliedUndef) and canonical_name(type(e).__name__) in self.defined \
+                    and canonical_name(type(e).__name__) not in funcs
+
+            # Values first, innermost applications first: T(T(1)) needs T(1).
+            out = self.resolve_values(out) if out.atoms(AppliedUndef) else out
+            out = out.replace(is_defined_app, self.apply_defined)
         subs: dict[sp.Symbol, sp.Expr] = {}
         for s in out.free_symbols:
             if s == self.var:
@@ -644,6 +710,16 @@ class _Auditor:
                 except (TypeError, ValueError, KeyError):
                     continue
         self.env = _Env(variable, params, functions)
+        problem = (record.problem if record is not None else None) or {}
+        self.env.defined = {canonical_name(d["name"]): d for d in problem.get("definitions") or [] if d.get("name")}
+        # Names bound per case ("Case A: n = 40", "Case B: n = 41", a disproof's tested n): a second value opens a new
+        # case scope instead of contradicting the first.
+        self.case_scoped = {canonical_name(n) for n in problem.get("case_scoped") or ()}
+        # The question's labelled cases ({"Case A": {"n": "40"}}): a statement under a case label is evaluated with
+        # that case's bindings even when the answer does not restate them.
+        self.cases: dict[str, dict[str, str]] = {str(c["id"]): dict(c.get("bindings") or {})
+                                                 for c in problem.get("cases") or [] if c.get("id")}
+        self.current_case: str | None = None
         # The problem's unknowns (solve / inequality / extremum): "x = 0" names a case examined, never binds x.
         self.unknowns = {canonical_name(u) for u in unknowns or ()}
         self.functions = functions
@@ -890,6 +966,10 @@ class _Auditor:
             # carry the claim.
             terms, rels = terms[1:], rels[1:]
         head = self._definable(terms[0])
+        if head and head[0] == "function" and canonical_name(head[1]) in self.env.defined:
+            head = None  # "T(n) = n/2" restates a branch of the question's definition: checked, never re-bound
+        if head and head[0] == "symbol" and canonical_name(head[1]) in self.case_scoped and self._is_bound(head):
+            self._open_case_scope(head[1])
         kind = "table_row" if st.kind == "table_row" else ("derivative" if head and head[0] == "derivative" else "relation")
         claim = self._new_claim(st, kind)
         defined: tuple[str, str, tuple[sp.Symbol, ...]] | None = None
@@ -928,6 +1008,34 @@ class _Auditor:
             return
         self._settle(claim)
         self.claims.append(claim)
+
+    def enter_case(self, case_id: str) -> None:
+        """Statements from here on belong to `case_id`: its bindings replace the previous case's."""
+        if case_id == self.current_case or case_id not in self.cases:
+            return
+        self.current_case = case_id
+        for name, value in self.cases[case_id].items():
+            self._open_case_scope(name)
+            c = canonical_name(name)
+            try:
+                self.env.values[c] = sp.Rational(str(value))
+            except (TypeError, ValueError):
+                continue
+            self.env.order.append(c)
+
+    def _open_case_scope(self, name: str) -> None:
+        """A case-local name is stated again: the previous case ends. Its binding and everything bound after it (values
+        computed inside that case) are dropped, so the new case starts from the question's own givens."""
+        c = canonical_name(name)
+        if c in self.env.order:
+            cut = self.env.order.index(c)
+            for later in self.env.order[cut:]:
+                self.env.values.pop(later, None)
+                self.env.ulps.pop(later, None)
+                self.env.bound_heading.pop(later, None)
+            del self.env.order[cut:]
+        self.env.values.pop(c, None)
+        self.env.params.pop(c, None)
 
     @staticmethod
     def _numeric_only(a: _Term, b: _Term) -> bool:
@@ -975,6 +1083,9 @@ class _Auditor:
             except Unsupported:
                 return
             self.env.values[c] = expr
+            if c in self.env.order:
+                self.env.order.remove(c)
+            self.env.order.append(c)
             self.env.bound_heading[c] = _heading_of(claim)
             ulp = value.ulp
             long_decimals = [d for d in value.decimals if "." in d and len(d.split(".")[1]) >= 3]
@@ -1257,12 +1368,13 @@ def audit_answer(
     problem = record.problem or {}
     func = re.sub(r"\(.*$", "", str(problem.get("function") or ""))
     functions, variable = _document_functions(md, func)
+    functions |= {str(d["name"]) for d in problem.get("definitions") or [] if d.get("name")}
     if problem.get("variable"):
         variable = str(problem.get("variable"))
     auditor = _Auditor(query, record, _tool_numbers(tool_results), variable, functions, _unknowns(md, problem))
 
     statements: list[_Statement] = []
-    for pos, body, in_table in _segments(md):
+    for pos, body, in_table in sorted(_segments(md) + _plain_segments(md)):
         if in_table:
             continue
         prefix = _prefix(md, pos)
@@ -1284,8 +1396,12 @@ def audit_answer(
             logger.debug("Table row skipped (%s): %s", exc, " | ".join(cells)[:120])
 
     statements.sort(key=lambda s: s.position)
+    case_marks = _case_marks(md, auditor.cases)
     for st in statements[:MAX_STATEMENTS]:
         try:
+            case = next((cid for pos, cid in reversed(case_marks) if pos <= st.position), None)
+            if case is not None:
+                auditor.enter_case(case)
             auditor.statement(st)
         except Exception as exc:  # noqa: BLE001 - one unreadable statement never stops the audit
             logger.debug("Math statement skipped (%s): %s", exc, st.text[:120])
@@ -1310,6 +1426,19 @@ def audit_answer(
             kind="units", status=FAILED, detail=issue["reason"], source_text=issue["statement"]))
     return MathAudit(claims=auditor.claims, definitions=auditor.definitions, record_revision=record.revision,
                      variable=variable, units=units)
+
+
+def _case_marks(md: str, cases: dict[str, dict[str, str]]) -> list[tuple[int, str]]:
+    """(position, case id) wherever the answer names one of the question's cases: "Case A", "A:" or "(a)" at the start
+    of a line, in order."""
+    marks: list[tuple[int, str]] = []
+    for cid in cases:
+        label = re.sub(r"(?i)^case\s+|[()]", "", cid).strip()
+        if not label:
+            continue
+        pat = rf"\bcase\s+\(?{re.escape(label)}\)?(?![\w])|^[ \t>*-]*\(?{re.escape(label)}\)?\s*[:.)](?!\d)"
+        marks += [(m.start(), cid) for m in re.finditer(pat, md, re.I | re.M)]
+    return sorted(marks)
 
 
 def _table_statement(pos: int, cells: list[str], heading: str, statements: list[_Statement],

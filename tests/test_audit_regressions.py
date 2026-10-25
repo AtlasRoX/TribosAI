@@ -57,7 +57,7 @@ def _called(calls, tool_name):
 )
 async def test_literature_only_requests_skip_simulation(offline_orchestrator, query):
     orch, calls = offline_orchestrator
-    res = await orch.execute_inquiry(query, thread_id="t-lit", enable_web_search=False)
+    res = await orch.execute_inquiry(query, thread_id="t-lit", enable_web_search=True)  # literature needs Search on
     assert not _called(calls, "vivarix_simulate_time_course") and not _called(calls, "dynamis_simulate_ode") and not _called(calls, "dynamis_simulate_ode")
     assert "Vivarix" not in res.selected_agents and "Dynamis" not in res.selected_agents
     assert _called(calls, "lithoscribe_literature_synthesis") or _called(calls, "archivon_literature_search")
