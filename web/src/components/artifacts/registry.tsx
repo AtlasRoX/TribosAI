@@ -8,6 +8,7 @@
 // MessageArtifacts itself.
 
 import type React from "react";
+import { EngineeringCalcArtifact } from "./EngineeringCalcArtifact";
 import { PdeArtifact } from "./PdeArtifact";
 import { UncertaintyArtifact } from "./UncertaintyArtifact";
 import { FEATURE_ARTIFACT_KEYS } from "./artifactKeys";
@@ -29,4 +30,5 @@ export const FEATURE_ARTIFACTS: FeatureArtifact[] = [
   // Feature entries (one line each), e.g. { key: "pde", Component: PdeArtifact },
   { key: "uncertainty", Component: UncertaintyArtifact },
   { key: "pde", Component: PdeArtifact },
+  { key: "engineering_calc", Component: EngineeringCalcArtifact },
 ];

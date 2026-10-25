@@ -304,6 +304,9 @@ No dependencies added; unsupported or incomplete historical tool replays are exp
 
 ## T9: Engineering calculators backed by standards and material data
 
+**Status: DONE (2026-10-25).** Added `tribos/engcalc/` (beam, column buckling, pressure vessel/UG-27, shaft, bolt, fatigue with Goodman/Gerber/Soderberg/Miner, pipe pressure drop, heat exchanger LMTD/NTU, layered wall) with Pint inputs, an 11-material table, utilisation per limit state, validity checks, GUM uncertainty, the `physis_engineering_calc`/`physis_list_calculators` tools and the `engineering_calc` card.
+No dependencies added. Uncertainty uses first-order GUM by central differences (formatted like T3) rather than T3's symbolic path, so piecewise formulas work; ASME allowables are not tabulated (S must be given).
+
 **Goal.** Add `tribos/engcalc/` with tools `physis_engineering_calc {calculator, inputs, material?}` and `physis_list_calculators` (domain `physis`).
 
 **Each calculator has:**

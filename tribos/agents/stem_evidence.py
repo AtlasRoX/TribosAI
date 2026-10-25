@@ -332,9 +332,86 @@ def endpoint_vs_equilibrium(sim: Any, eq: Any, tolerance: float = 0.05) -> str:
 
 
 # -- Physis -----------------------------------------------------------------------------------------------------
+def render_engineering_calc(res: Any) -> list[str]:
+    """One engineering calculation: the reference, the inputs as used, the results, the checks and the warnings."""
+    d, tool = _data(res), str(getattr(res, "tool_name", "") or "physis_engineering_calc")
+    ref = d.get("reference") or {}
+    util = d.get("utilisation") or {}
+    out = [
+        f'<engineering_calc tool="{_attr(tool)}" calculator="{_attr(d.get("calculator"))}" '
+        f'reference="{_attr(ref.get("source") or "")}" section="{_attr(ref.get("section") or "")}">'
+    ]
+    if d.get("material"):
+        m = d["material"]
+        out.append(f'<material id="{_attr(m.get("id"))}" source="{_attr(m.get("source"))}">{_text(m.get("note"), 300)}</material>')
+    for i in (d.get("inputs") or [])[:30]:
+        if isinstance(i, dict):
+            value = i.get("value")
+            shown = _json(value) if isinstance(value, list) else num(value)
+            out.append(
+                f'<input name="{_attr(i.get("name"))}" value="{_attr(shown)}" unit="{_attr(i.get("unit") or "")}" '
+                f'source="{_attr(i.get("source") or "")}"/>'
+            )
+    for r in (d.get("results") or [])[:30]:
+        if isinstance(r, dict):
+            shown = (f' display="{_attr(num(r.get("display_value")))} {_attr(r.get("display_unit"))}"'
+                     if r.get("display_unit") else "")
+            unc = r.get("uncertainty") if isinstance(r.get("uncertainty"), dict) else None
+            out.append(
+                f'<result name="{_attr(r.get("name"))}" label="{_attr(r.get("label"))}" value="{_attr(num(r.get("value")))}" '
+                f'unit="{_attr(r.get("unit"))}"{shown}'
+                + (f' with_uncertainty="{_attr(unc.get("formatted"))}"' if unc else "") + "/>"
+            )
+    for c in (d.get("checks") or [])[:10]:
+        if isinstance(c, dict):
+            out.append(f'<check name="{_attr(c.get("name"))}" ok="{str(bool(c.get("ok"))).lower()}" '
+                       f'utilisation="{_attr(num(c.get("utilisation")))}">{_text(c.get("detail"), 300)}</check>')
+    if util:
+        out.append(f'<utilisation governing="{_attr(util.get("governing"))}" value="{_attr(num(util.get("value")))}" '
+                   f'all_checks_ok="{str(bool(util.get("ok"))).lower()}"/>')
+    for v in (d.get("validity") or [])[:10]:
+        if isinstance(v, dict):
+            out.append(f'<validity name="{_attr(v.get("name"))}" ok="{str(bool(v.get("ok"))).lower()}">'
+                       f"{_text(v.get('detail'), 300)}</validity>")
+    for f in (d.get("formulas") or [])[:12]:
+        out.append(f"<formula>{_text(f, 200)}</formula>")
+    for a in (d.get("assumptions") or [])[:6]:
+        out.append(f"<assumption>{_text(a, 200)}</assumption>")
+    for w in (d.get("warnings") or [])[:8]:
+        out.append(f"<warning>{_text(w, 400)}</warning>")
+    for n in (d.get("notes") or [])[:6]:
+        out.append(f"<note>{_text(n, 400)}</note>")
+    out.append("</engineering_calc>")
+    return out
+
+
+def render_calculator_list(res: Any) -> list[str]:
+    """The calculator catalog: each calculator's inputs (name, unit, required) and reference, and the materials."""
+    d = _data(res)
+    out = ['<engineering_calculators note="call physis_engineering_calc with one of these">']
+    for c in d.get("calculators") or []:
+        if not isinstance(c, dict):
+            continue
+        inputs = "; ".join(
+            f"{i.get('name')} [{i.get('unit') or 'choice'}]{'*' if i.get('required') else ''}"
+            + (f" in {'/'.join(i['choices'])}" if i.get("choices") else "")
+            for i in c.get("inputs") or [] if isinstance(i, dict)
+        )
+        out.append(f'<calculator id="{_attr(c.get("id"))}" title="{_attr(c.get("title"))}" '
+                   f'reference="{_attr((c.get("reference") or {}).get("source"))}">{_text(inputs, 900)}</calculator>')
+    mats = ", ".join(str(m.get("id")) for m in d.get("materials") or [] if isinstance(m, dict))
+    out.append(f"<materials note=\"{_attr(d.get('materials_note') or '')}\">{_text(mats)}</materials>")
+    out.append("</engineering_calculators>")
+    return out
+
+
 def render_physis(res: Any) -> list[str]:
     d, tool = _data(res), str(getattr(res, "tool_name", "") or "physis")
     out: list[str] = []
+    if "calculator" in d and "results" in d:
+        return render_engineering_calc(res)
+    if "calculators" in d:
+        return render_calculator_list(res)
     if "constants" in d:
         out.append(f'<physis tool="{_attr(tool)}" query="{_attr(d.get("query") or "")}" matches="{_attr(d.get("count", len(d["constants"])))}">')
         for c in (d.get("constants") or [])[:LIST_ITEMS]:
@@ -485,6 +562,8 @@ _RENDERERS = {
 # Tools rendered by their own renderer wherever their result appears (see render_tool_result).
 TOOL_RENDERERS = {
     "dynamis_solve_pde": render_dynamis,
+    "physis_engineering_calc": render_engineering_calc,
+    "physis_list_calculators": render_calculator_list,
 }
 
 
@@ -512,6 +591,7 @@ __all__ = [
     "render_axiom",
     "render_calcula",
     "render_dynamis",
+    "render_engineering_calc",
     "render_pde",
     "render_physis",
     "render_tool_result",

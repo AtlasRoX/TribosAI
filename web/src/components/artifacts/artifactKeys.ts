@@ -8,4 +8,5 @@
 export const FEATURE_ARTIFACT_KEYS: readonly string[] = [
   "uncertainty",
   "pde",
+  "engineering_calc",
 ];
