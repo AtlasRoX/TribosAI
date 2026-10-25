@@ -7,19 +7,15 @@ import {
   Clock,
   Copy,
   Cpu,
-  Edit2,
   GitBranch,
   Hourglass,
   Globe,
   Info,
   Loader2,
-  MessageSquareText,
   MessagesSquare,
   Network,
   Workflow,
-  MoreHorizontal,
   PanelLeft,
-  PanelLeftClose,
   RefreshCw,
   Search,
   Navigation,
@@ -30,11 +26,8 @@ import {
   SquarePen,
   Sun,
   Moon,
-  Trash2,
   X,
   ImagePlus,
-  Pin,
-  PinOff,
   SkipForward,
 } from "lucide-react";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
@@ -84,7 +77,12 @@ import { AgentOptionsSettings } from "@/components/agentic/AgentOptionsSettings"
 import { JobsPanel, jobTitle } from "@/components/agentic/JobsPanel";
 import { jobQuestion } from "@/lib/jobs";
 import { ApprovalCard, ClarificationChips, SteeringNotes, type SteerNote } from "@/components/agentic/LiveRunControls";
-import { ProjectSelector } from "@/components/agentic/ProjectSelector";
+import { ProjectDialog } from "@/components/projects/ProjectDialog";
+import { ProjectView } from "@/components/projects/ProjectView";
+import { Sidebar } from "@/components/sidebar/Sidebar";
+import { useProjects } from "@/hooks/useProjects";
+import { useSidebarState } from "@/hooks/useSidebarState";
+import { useThreads } from "@/hooks/useThreads";
 import {
   DEFAULT_HISTORY_PREFS,
   localStorageService,
@@ -106,7 +104,7 @@ import { resolveAnswer } from "@/lib/assistantAnswer";
 import { entitySummary, memoryBadgeCount, memoryStatTiles, memoryTypeLabel, verificationStatusLabel } from "@/lib/memoryVault";
 import { Message, ThoughtStep, FrameworkOption } from "@/types/chat";
 import type { MessageAttachment } from "@/types/datasets";
-import type { AgentOptionsSettings as AgentOptionsState, FrameworkInfo, JobSummary, PendingApproval } from "@/types/agentic";
+import type { AgentOptionsSettings as AgentOptionsState, FrameworkInfo, JobSummary, PendingApproval, Project } from "@/types/agentic";
 import type {
   BackendHealth,
   ChatResult,
@@ -256,9 +254,8 @@ export default function TribosAssistant() {
   const frameworkChosenRef = useRef(false);
   const [frameworkCatalog, setFrameworkCatalog] = useState<FrameworkInfo[] | null>(null);
   const [isFrameworkGuideOpen, setIsFrameworkGuideOpen] = useState(false);
-  // Agentic settings (sent as agent_options), research project (project_id) and background submission.
+  // Agentic settings (sent as agent_options) and background submission.
   const [agentOptions, setAgentOptions] = useState<AgentOptionsState>(() => normalizeAgentOptions(null));
-  const [projectId, setProjectId] = useState<string | null>(null);
   const [runInBackground, setRunInBackground] = useState(false);
   const [jobsRefreshKey, setJobsRefreshKey] = useState(0);
 
@@ -283,9 +280,6 @@ export default function TribosAssistant() {
         if (model !== savedSettings.selectedModel) localStorageService.saveSettings({ ...savedSettings, selectedModel: model });
       }
       setAgentOptions(normalizeAgentOptions(savedSettings.agentOptions));
-      if (typeof savedSettings.projectId === "string" && /^prj_[A-Za-z0-9]{6,40}$/.test(savedSettings.projectId)) {
-        setProjectId(savedSettings.projectId);
-      }
     } catch {
       // ignore
     }
@@ -295,26 +289,6 @@ export default function TribosAssistant() {
     setAgentOptions(next);
     localStorageService.saveSettings({ agentOptions: next });
   };
-
-  const updateProjectId = (next: string | null) => {
-    setProjectId(next);
-    localStorageService.saveSettings({ projectId: next || undefined });
-  };
-
-  // The thread whose options menu is open; a click outside it closes it.
-  const [openMenuThreadId, setOpenMenuThreadId] = useState<string | null>(null);
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      const target = event.target as HTMLElement;
-      if (!target.closest?.(".investigation-menu-container")) {
-        setOpenMenuThreadId(null);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, []);
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [threadId, setThreadId] = useState("session_default");
@@ -590,24 +564,21 @@ export default function TribosAssistant() {
     isQuotaHealthy: boolean;
   }>({ usedKb: 0, threadCount: 0, messageCount: 0, isQuotaHealthy: true });
 
-  const [investigations, setInvestigations] = useState<InvestigationItem[]>([]);
+  const { investigations, setInvestigations, rename: renameThread, togglePin, moveToProject, exportThread } = useThreads();
   const [activeThreadId, setActiveThreadId] = useState<string>("session_default");
   // The thread on screen, readable from a stream callback that started under another thread.
   const activeThreadIdRef = useRef<string>("session_default");
   // The thread whose question is running; its live panel shows only while that thread is on screen.
   const [streamingThreadId, setStreamingThreadId] = useState<string | null>(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-
-  // Collapse the sidebar to its icon rail on narrow screens so the conversation keeps the space.
-  useEffect(() => {
-    const query = window.matchMedia("(max-width: 900px)");
-    const sync = () => {
-      if (query.matches) setIsSidebarOpen(false);
-    };
-    sync();
-    query.addEventListener("change", sync);
-    return () => query.removeEventListener("change", sync);
-  }, []);
+  const sidebar = useSidebarState();
+  const projectsApi = useProjects(backendUrl, authHeaders);
+  // The project page on screen (instead of the conversation), and the create/edit dialog.
+  const [projectViewId, setProjectViewId] = useState<string | null>(null);
+  const [projectDialog, setProjectDialog] = useState<{ project: Project | null } | null>(null);
+  const projectView = projectsApi.projects.find((p) => p.id === projectViewId) ?? null;
+  // A chat in a project sends that project's id with every question.
+  const activeProjectId = investigations.find((i) => i.id === activeThreadId)?.projectId ?? null;
+  const activeProject = projectsApi.projects.find((p) => p.id === activeProjectId) ?? null;
 
   // Close modals when pressing Escape key
   useEffect(() => {
@@ -624,28 +595,6 @@ export default function TribosAssistant() {
   // Modal dialogs keep Tab inside them and return focus to the opener when they close.
   const settingsDialogRef = useFocusTrap<HTMLDivElement>(showSettings);
   const memoryDialogRef = useFocusTrap<HTMLDivElement>(showMemoryVault);
-  const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
-  const [editTitleInput, setEditTitleInput] = useState<string>("");
-  const [hoveredThreadId, setHoveredThreadId] = useState<string | null>(null);
-  const [isHoveredExpand, setIsHoveredExpand] = useState<boolean>(false);
-
-  // Grouping helper based on real investigation timestamps
-  const getInvestigationDateGroup = (dateIso?: string): string => {
-    if (!dateIso) return "Today";
-    try {
-      const d = new Date(dateIso);
-      const now = new Date();
-      const diffMs = now.getTime() - d.getTime();
-      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-      if (diffDays <= 0) return "Today";
-      if (diffDays === 1) return "Yesterday";
-      if (diffDays <= 7) return "Previous 7 days";
-      return "Older";
-    } catch {
-      return "Today";
-    }
-  };
-
   const refreshLocalStorageStats = () => {
     setLocalStorageStats(localStorageService.getStorageUsage());
   };
@@ -679,26 +628,6 @@ export default function TribosAssistant() {
         handleResetSession();
       }
     }
-  };
-
-  const handleStartRename = (inv: InvestigationItem) => {
-    setEditingThreadId(inv.id);
-    setEditTitleInput(inv.title);
-    setOpenMenuThreadId(null);
-  };
-
-  const handleSaveRename = (id: string) => {
-    const trimmed = editTitleInput.trim();
-    if (trimmed) {
-      localStorageService.renameInvestigation(id, trimmed);
-      setInvestigations(localStorageService.getInvestigations());
-      refreshLocalStorageStats();
-    }
-    setEditingThreadId(null);
-  };
-
-  const handleCancelRename = () => {
-    setEditingThreadId(null);
   };
 
   /** Applies a history-storage preference and reloads the (possibly moved or pruned) history. */
@@ -1039,7 +968,7 @@ export default function TribosAssistant() {
       ? crypto.randomUUID()
       : `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 
-  /** The request body for a chat or job; the research project is only sent for agentic frameworks. */
+  /** The request body for a chat or job; a chat in a project sends its project_id (instructions, files, memory). */
   const buildRequestPayload = (text: string, sendThreadId: string, sendModel: string): Record<string, unknown> => {
     const body: Record<string, unknown> = {
       message: text,
@@ -1058,7 +987,7 @@ export default function TribosAssistant() {
       agent_options:
         selectedFramework === ORCHESTRATION_FRAMEWORK ? { effort_level: agentOptions.effort_level || "medium" } : toAgentOptions(agentOptions),
     };
-    if (selectedFramework !== ORCHESTRATION_FRAMEWORK && projectId) body.project_id = projectId;
+    if (activeProjectId) body.project_id = activeProjectId;
     return body;
   };
 
@@ -1415,12 +1344,14 @@ export default function TribosAssistant() {
     }
   };
 
-  const handleResetSession = () => {
+  const handleResetSession = (projectForChat?: string | null) => {
     const newInv = localStorageService.createNewThread(
       "New Investigation",
       selectedFramework,
-      selectedModel
+      selectedModel,
+      typeof projectForChat === "string" ? projectForChat : null
     );
+    setProjectViewId(null);
     setInvestigations(localStorageService.getInvestigations());
     activeThreadIdRef.current = newInv.id;
     setActiveThreadId(newInv.id);
@@ -1736,732 +1667,35 @@ export default function TribosAssistant() {
         transition: "background-color 0.25s ease, color 0.25s ease",
       }}
     >
-      {/* Left Sidebar: Collapsible Modern Architecture (260px expanded, 60px collapsed icon-rail) */}
-      <aside
-        style={{
-          width: isSidebarOpen ? "260px" : "60px",
-          minWidth: isSidebarOpen ? "260px" : "60px",
-          borderRight: "1px solid var(--border-subtle)",
-          backgroundColor: "var(--bg-sidebar)",
-          display: "flex",
-          flexDirection: "column",
-          height: "100vh",
-          overflow: "hidden",
-          transition: "width 0.26s cubic-bezier(0.2, 0, 0, 1), background-color 0.25s ease",
-          flexShrink: 0,
-          zIndex: 40,
+      <Sidebar
+        expanded={sidebar.expanded}
+        narrow={sidebar.narrow}
+        onToggle={sidebar.toggle}
+        onCloseDrawer={sidebar.closeDrawer}
+        threads={investigations}
+        activeThreadId={projectViewId ? "" : activeThreadId}
+        streamingThreadId={streamingThreadId}
+        projects={projectsApi.projects}
+        projectsAvailable={!projectsApi.unavailable}
+        activeProjectId={projectViewId}
+        onNewChat={() => handleResetSession()}
+        onSearch={() => setPaletteOpen(true)}
+        onNewProject={() => setProjectDialog({ project: null })}
+        onOpenProject={(id) => setProjectViewId(id)}
+        onNewChatInProject={(id) => handleResetSession(id)}
+        onOpenSettings={() => setShowSettings(true)}
+        onOpenMemory={() => setShowMemoryVault(true)}
+        onToggleTheme={toggleTheme}
+        onSelect={(inv) => {
+          setProjectViewId(null);
+          handleSelectInvestigation(inv);
         }}
-      >
-        {/* 1. Sidebar Top Header */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: isSidebarOpen ? "space-between" : "center",
-            padding: isSidebarOpen ? "10px 12px 6px 14px" : "10px 0 6px 0",
-            height: "48px",
-            minHeight: "48px",
-            flexShrink: 0,
-            overflow: "hidden",
-            boxSizing: "border-box",
-            transition: "padding 0.2s ease",
-          }}
-        >
-          {isSidebarOpen ? (
-            <>
-              {/* Tribos Brand */}
-              <div style={{ display: "flex", alignItems: "center", height: "26px", overflow: "hidden" }}>
-                <img
-                  src="/tribos/logo-wordmark.png"
-                  alt="Tribos"
-                  className="tribos-tight-logo"
-                  style={{ height: "22px", width: "auto", display: "inline-block" }}
-                />
-              </div>
-
-              {/* Close Sidebar Icon Button */}
-              <button
-                type="button"
-                onClick={() => setIsSidebarOpen(false)}
-                style={{
-                  width: "32px",
-                  height: "32px",
-                  borderRadius: "8px",
-                  backgroundColor: "transparent",
-                  border: "none",
-                  color: "var(--text-muted)",
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  transition: "all 0.15s ease",
-                  padding: 0,
-                  flexShrink: 0,
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.color = "var(--text-heading)";
-                  e.currentTarget.style.backgroundColor = "var(--bg-surface-hover)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.color = "var(--text-muted)";
-                  e.currentTarget.style.backgroundColor = "transparent";
-                }}
-                title="Collapse sidebar"
-              >
-                <PanelLeftClose style={{ width: 18, height: 18 }} />
-              </button>
-            </>
-          ) : (
-            /* Collapsed Header: Brand Icon by default -> PanelLeft on hover */
-            <button
-              type="button"
-              onClick={() => setIsSidebarOpen(true)}
-              style={{
-                width: "36px",
-                height: "36px",
-                borderRadius: "8px",
-                backgroundColor: isHoveredExpand ? "var(--bg-surface-hover)" : "transparent",
-                border: "none",
-                color: isHoveredExpand ? "var(--text-heading)" : "var(--text-muted)",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                transition: "all 0.15s ease",
-                padding: 0,
-              }}
-              onMouseEnter={() => setIsHoveredExpand(true)}
-              onMouseLeave={() => setIsHoveredExpand(false)}
-              title="Expand sidebar"
-            >
-              {isHoveredExpand ? (
-                <PanelLeft
-                  style={{
-                    width: 20,
-                    height: 20,
-                    color: "var(--text-heading)",
-                  }}
-                />
-              ) : (
-                <img
-                  src="/tribos/icon.png"
-                  alt="Tribos"
-                  className="tribos-icon"
-                  style={{
-                    width: "22px",
-                    height: "22px",
-                    objectFit: "contain",
-                    display: "block",
-                  }}
-                />
-              )}
-            </button>
-          )}
-        </div>
-
-        {/* 2. New Investigation Button */}
-        <div
-          style={{
-            padding: isSidebarOpen ? "4px 10px 8px 10px" : "4px 0 8px 0",
-            display: "flex",
-            justifyContent: "center",
-            flexShrink: 0,
-            transition: "padding 0.2s ease",
-          }}
-        >
-          {isSidebarOpen ? (
-            <button
-              type="button"
-              onClick={handleResetSession}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                width: "100%",
-                padding: "8px 10px",
-                borderRadius: "8px",
-                backgroundColor: "transparent",
-                border: "1px solid var(--border-subtle)",
-                color: "var(--text-main)",
-                fontSize: "13px",
-                fontWeight: 500,
-                cursor: "pointer",
-                transition: "all 0.15s ease",
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = "var(--bg-surface-hover)";
-                e.currentTarget.style.borderColor = "var(--border-highlight)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = "transparent";
-                e.currentTarget.style.borderColor = "var(--border-subtle)";
-              }}
-            >
-              <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <SquarePen style={{ width: 14, height: 14, color: "var(--text-muted)", flexShrink: 0 }} />
-                New investigation
-              </span>
-              <span
-                style={{
-                  fontSize: "11px",
-                  color: "var(--text-faint)",
-                  fontFamily: "var(--font-mono, monospace)",
-                  padding: "1.5px 5px",
-                  borderRadius: "4px",
-                  backgroundColor: "var(--bg-surface-hover)",
-                  border: "1px solid var(--border-subtle)",
-                  flexShrink: 0,
-                }}
-              >
-                ⌘N
-              </span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={handleResetSession}
-              title="New investigation (⌘N)"
-              style={{
-                width: "36px",
-                height: "36px",
-                borderRadius: "8px",
-                backgroundColor: "transparent",
-                border: "1px solid var(--border-subtle)",
-                color: "var(--text-main)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                cursor: "pointer",
-                transition: "all 0.15s ease",
-                padding: 0,
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = "var(--bg-surface-hover)";
-                e.currentTarget.style.borderColor = "var(--border-highlight)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = "transparent";
-                e.currentTarget.style.borderColor = "var(--border-subtle)";
-              }}
-            >
-              <SquarePen style={{ width: 16, height: 16, color: "var(--text-main)" }} />
-            </button>
-          )}
-        </div>
-
-        {/* 3. History List (Expanded Grouped List vs Collapsed Icons) */}
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            flex: 1,
-            overflowY: "auto",
-            overflowX: "hidden",
-            padding: isSidebarOpen ? "0 8px 10px 8px" : "0 6px 10px 6px",
-            transition: "padding 0.2s ease",
-          }}
-        >
-          {isSidebarOpen ? (
-            /* Expanded Grouped List */
-            ["Pinned", "Today", "Yesterday", "Previous 7 days", "Older"].map((groupName) => {
-              const groupItems = investigations.filter((inv) =>
-                groupName === "Pinned"
-                  ? inv.pinned
-                  : !inv.pinned && getInvestigationDateGroup(inv.updatedAt || inv.createdAt) === groupName
-              );
-              if (groupItems.length === 0) return null;
-
-              return (
-                <div key={groupName} style={{ marginBottom: "12px" }}>
-                  <div
-                    style={{
-                      fontSize: "11px",
-                      fontWeight: 600,
-                      color: "var(--text-faint)",
-                      padding: "8px 8px 4px 8px",
-                      letterSpacing: "0.02em",
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                    }}
-                  >
-                    {groupName}
-                  </div>
-
-                  <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                    {groupItems.map((inv) => {
-                      const isActive = activeThreadId === inv.id;
-                      const isEditing = editingThreadId === inv.id;
-                      const isHovered = hoveredThreadId === inv.id;
-
-                      if (isEditing) {
-                        return (
-                          <div
-                            key={inv.id}
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "6px",
-                              height: "36px",
-                              padding: "0 8px",
-                              borderRadius: "8px",
-                              backgroundColor: "var(--bg-surface-hover)",
-                              border: "1px solid var(--domain-t2kg)",
-                            }}
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <input
-                              type="text"
-                              value={editTitleInput}
-                              onChange={(e) => setEditTitleInput(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") handleSaveRename(inv.id);
-                                if (e.key === "Escape") handleCancelRename();
-                              }}
-                              autoFocus
-                              style={{
-                                flex: 1,
-                                minWidth: 0,
-                                background: "transparent",
-                                border: "none",
-                                outline: "none",
-                                color: "var(--text-main)",
-                                fontSize: "13px",
-                                fontWeight: 500,
-                              }}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => handleSaveRename(inv.id)}
-                              title="Save title"
-                              style={{
-                                background: "transparent",
-                                border: "none",
-                                color: "var(--domain-t2b)",
-                                cursor: "pointer",
-                                padding: "2px",
-                                display: "flex",
-                                alignItems: "center",
-                              }}
-                            >
-                              <Check style={{ width: 14, height: 14 }} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={handleCancelRename}
-                              title="Cancel"
-                              style={{
-                                background: "transparent",
-                                border: "none",
-                                color: "var(--text-faint)",
-                                cursor: "pointer",
-                                padding: "2px",
-                                display: "flex",
-                                alignItems: "center",
-                              }}
-                            >
-                              <X style={{ width: 14, height: 14 }} />
-                            </button>
-                          </div>
-                        );
-                      }
-
-                      return (
-                        <div
-                          key={inv.id}
-                          onMouseEnter={() => setHoveredThreadId(inv.id)}
-                          onMouseLeave={() => setHoveredThreadId(null)}
-                          style={{
-                            position: "relative",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            height: "36px",
-                            padding: "0 8px 0 10px",
-                            borderRadius: "8px",
-                            backgroundColor: isActive
-                              ? "var(--bg-surface-active)"
-                              : isHovered
-                              ? "var(--bg-surface-hover)"
-                              : "transparent",
-                            color: isActive ? "var(--text-heading)" : "var(--text-muted)",
-                            cursor: "pointer",
-                            fontSize: "13px",
-                            fontWeight: isActive ? 500 : 400,
-                            transition: "all 0.15s ease",
-                            overflow: "hidden",
-                          }}
-                        >
-                          <button
-                            type="button"
-                            className="thread-row-button"
-                            onClick={() => handleSelectInvestigation(inv)}
-                            onFocus={() => setHoveredThreadId(inv.id)}
-                            aria-current={isActive ? "page" : undefined}
-                            title={inv.title}
-                          >
-                            <span
-                              style={{
-                                flex: 1,
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap",
-                                fontSize: "13px",
-                                lineHeight: "20px",
-                                paddingRight:
-                                  isHovered || isActive || openMenuThreadId === inv.id ? "26px" : "0px",
-                                transition: "padding-right 0.12s ease",
-                              }}
-                            >
-                              {inv.pinned && (
-                                <Pin
-                                  style={{ width: 11, height: 11, marginRight: 5, verticalAlign: "-1px", opacity: 0.7 }}
-                                  aria-label="Pinned"
-                                />
-                              )}
-                              {inv.title}
-                              {streamingThreadId === inv.id ? " · running" : ""}
-                            </span>
-                          </button>
-
-                          {(isHovered || isActive || openMenuThreadId === inv.id) && (
-                            <div
-                              className="investigation-menu-container"
-                              style={{
-                                position: "absolute",
-                                right: "6px",
-                                top: "50%",
-                                transform: "translateY(-50%)",
-                                display: "flex",
-                                alignItems: "center",
-                              }}
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setOpenMenuThreadId((prev) => (prev === inv.id ? null : inv.id))
-                                }
-                                style={{
-                                  background: "transparent",
-                                  border: "none",
-                                  color: "var(--text-muted)",
-                                  cursor: "pointer",
-                                  padding: "4px",
-                                  borderRadius: "6px",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  transition: "all 0.15s ease",
-                                }}
-                                onMouseEnter={(e) => {
-                                  e.currentTarget.style.color = "var(--text-heading)";
-                                  e.currentTarget.style.backgroundColor = "var(--bg-surface-hover)";
-                                }}
-                                onMouseLeave={(e) => {
-                                  e.currentTarget.style.color = "var(--text-muted)";
-                                  e.currentTarget.style.backgroundColor = "transparent";
-                                }}
-                                title="Options"
-                                aria-label={`Options for ${inv.title}`}
-                                aria-haspopup="menu"
-                                aria-expanded={openMenuThreadId === inv.id}
-                              >
-                                <MoreHorizontal style={{ width: 14, height: 14 }} />
-                              </button>
-
-                              {openMenuThreadId === inv.id && (
-                                <div
-                                  style={{
-                                    position: "absolute",
-                                    top: "calc(100% + 4px)",
-                                    right: 0,
-                                    width: "124px",
-                                    backgroundColor: "var(--bg-surface)",
-                                    border: "1px solid var(--border-subtle)",
-                                    borderRadius: "8px",
-                                    boxShadow: "var(--card-shadow)",
-                                    padding: "4px",
-                                    zIndex: 120,
-                                    display: "flex",
-                                    flexDirection: "column",
-                                    gap: "2px",
-                                  }}
-                                >
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      localStorageService.setPinned(inv.id, !inv.pinned);
-                                      setInvestigations(localStorageService.getInvestigations());
-                                      setOpenMenuThreadId(null);
-                                    }}
-                                    style={{
-                                      display: "flex",
-                                      alignItems: "center",
-                                      gap: "8px",
-                                      padding: "6px 8px",
-                                      borderRadius: "6px",
-                                      background: "none",
-                                      border: "none",
-                                      color: "var(--text-main)",
-                                      fontSize: "12px",
-                                      cursor: "pointer",
-                                      textAlign: "left",
-                                      width: "100%",
-                                      transition: "background 0.15s",
-                                    }}
-                                    onMouseEnter={(e) => {
-                                      e.currentTarget.style.backgroundColor = "var(--bg-surface-hover)";
-                                    }}
-                                    onMouseLeave={(e) => {
-                                      e.currentTarget.style.backgroundColor = "transparent";
-                                    }}
-                                  >
-                                    {inv.pinned ? (
-                                      <PinOff style={{ width: 12, height: 12, color: "var(--domain-t2kg)" }} />
-                                    ) : (
-                                      <Pin style={{ width: 12, height: 12, color: "var(--domain-t2kg)" }} />
-                                    )}
-                                    {inv.pinned ? "Unpin" : "Pin"}
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => handleStartRename(inv)}
-                                    style={{
-                                      display: "flex",
-                                      alignItems: "center",
-                                      gap: "8px",
-                                      padding: "6px 8px",
-                                      borderRadius: "6px",
-                                      background: "none",
-                                      border: "none",
-                                      color: "var(--text-main)",
-                                      fontSize: "12px",
-                                      cursor: "pointer",
-                                      textAlign: "left",
-                                      width: "100%",
-                                      transition: "background 0.15s",
-                                    }}
-                                    onMouseEnter={(e) => {
-                                      e.currentTarget.style.backgroundColor =
-                                        "var(--bg-surface-hover)";
-                                    }}
-                                    onMouseLeave={(e) => {
-                                      e.currentTarget.style.backgroundColor = "transparent";
-                                    }}
-                                  >
-                                    <Edit2 style={{ width: 12, height: 12, color: "var(--domain-t2kg)" }} />
-                                    Rename
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      handleDeleteInvestigation(inv.id);
-                                      setOpenMenuThreadId(null);
-                                    }}
-                                    style={{
-                                      display: "flex",
-                                      alignItems: "center",
-                                      gap: "8px",
-                                      padding: "6px 8px",
-                                      borderRadius: "6px",
-                                      background: "none",
-                                      border: "none",
-                                      color: "#ef4444",
-                                      fontSize: "12px",
-                                      cursor: "pointer",
-                                      textAlign: "left",
-                                      width: "100%",
-                                      transition: "background 0.15s",
-                                    }}
-                                    onMouseEnter={(e) => {
-                                      e.currentTarget.style.backgroundColor =
-                                        "rgba(239, 68, 68, 0.12)";
-                                    }}
-                                    onMouseLeave={(e) => {
-                                      e.currentTarget.style.backgroundColor = "transparent";
-                                    }}
-                                  >
-                                    <Trash2 style={{ width: 12, height: 12 }} />
-                                    Delete
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })
-          ) : (
-            /* Collapsed List with Icons */
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "4px", width: "100%" }}>
-              {investigations.map((inv) => {
-                const isActive = activeThreadId === inv.id;
-                const isHovered = hoveredThreadId === inv.id;
-                return (
-                  <button
-                    key={inv.id}
-                    type="button"
-                    onClick={() => handleSelectInvestigation(inv)}
-                    onMouseEnter={() => setHoveredThreadId(inv.id)}
-                    onMouseLeave={() => setHoveredThreadId(null)}
-                    title={inv.title}
-                    style={{
-                      position: "relative",
-                      width: "36px",
-                      height: "36px",
-                      borderRadius: "8px",
-                      backgroundColor: isActive
-                        ? "var(--bg-surface-active)"
-                        : isHovered
-                        ? "var(--bg-surface-hover)"
-                        : "transparent",
-                      border: isActive
-                        ? "1px solid var(--border-subtle)"
-                        : "1px solid transparent",
-                      color: isActive ? "var(--text-heading)" : "var(--text-muted)",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      transition: "all 0.15s ease",
-                      padding: 0,
-                    }}
-                  >
-                    <MessageSquareText style={{ width: 16, height: 16 }} />
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* 4. Sidebar Bottom Footer (ChatGPT-style User / Settings Bar) */}
-        <div
-          style={{
-            padding: isSidebarOpen ? "8px 10px" : "8px 0",
-            borderTop: "1px solid var(--border-subtle)",
-            marginTop: "auto",
-            display: "flex",
-            justifyContent: "center",
-            flexShrink: 0,
-            transition: "padding 0.2s ease",
-          }}
-        >
-          {isSidebarOpen ? (
-            <button
-              type="button"
-              onClick={() => setShowSettings(!showSettings)}
-              aria-expanded={showSettings}
-              aria-label="Tribos R&D settings"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "10px",
-                padding: "7px 10px",
-                borderRadius: "8px",
-                cursor: "pointer",
-                transition: "all 0.15s ease",
-                width: "100%",
-                boxSizing: "border-box",
-                background: "transparent",
-                border: "none",
-                color: "inherit",
-                font: "inherit",
-                textAlign: "left",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = "var(--bg-surface-hover)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = "transparent";
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0, flex: 1 }}>
-                <div
-                  style={{
-                    width: "28px",
-                    height: "28px",
-                    borderRadius: "50%",
-                    background: "var(--accent-gradient)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: "var(--accent-ink)",
-                    fontSize: "11px",
-                    fontWeight: 700,
-                    flexShrink: 0,
-                    boxShadow: "0 1px 3px rgba(0, 0, 0, 0.1)",
-                  }}
-                >
-                  TR
-                </div>
-                <span
-                  style={{
-                    fontSize: "13.5px",
-                    fontWeight: 500,
-                    color: "var(--text-main)",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  Tribos R&D
-                </span>
-              </div>
-              <Settings
-                style={{
-                  width: 16,
-                  height: 16,
-                  color: "var(--text-muted)",
-                  flexShrink: 0,
-                  opacity: 0.8,
-                }}
-                aria-hidden="true"
-              />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setShowSettings(!showSettings)}
-              title="Tribos R&D (Settings)"
-              style={{
-                width: "32px",
-                height: "32px",
-                borderRadius: "50%",
-                background: "var(--accent-gradient)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "var(--accent-ink)",
-                fontSize: "11px",
-                fontWeight: 700,
-                cursor: "pointer",
-                border: "none",
-                padding: 0,
-                boxShadow: "0 1px 4px rgba(0, 0, 0, 0.12)",
-                transition: "transform 0.15s ease",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.transform = "scale(1.08)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.transform = "scale(1)";
-              }}
-            >
-              TR
-            </button>
-          )}
-        </div>
-      </aside>
+        onRename={renameThread}
+        onTogglePin={togglePin}
+        onMove={moveToProject}
+        onExport={exportThread}
+        onDelete={handleDeleteInvestigation}
+      />
 
       {/* Main Workspace Stage (Full 100vh) */}
       <main
@@ -2491,6 +1725,18 @@ export default function TribosAssistant() {
         >
           {/* Left: Active Investigation Title (Clean & Subtle) */}
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            {sidebar.narrow && (
+              <button type="button" onClick={sidebar.toggle} aria-label="Open sidebar" title="Open sidebar"
+                style={{ width: 32, height: 32, border: "none", background: "transparent", color: "var(--text-muted)", cursor: "pointer" }}>
+                <PanelLeft style={{ width: 18, height: 18 }} />
+              </button>
+            )}
+            {activeProject && !projectViewId && (
+              <button type="button" onClick={() => setProjectViewId(activeProject.id)} title="Open the project"
+                style={{ border: "none", background: "transparent", color: "var(--text-faint)", cursor: "pointer", fontSize: "13px" }}>
+                {activeProject.icon || "📁"} {activeProject.name} /
+              </button>
+            )}
             <span
               style={{
                 fontSize: "13.5px",
@@ -2541,9 +1787,9 @@ export default function TribosAssistant() {
             </button>
 
             {/* New Investigation Button (when sidebar is closed, quick access) */}
-            {!isSidebarOpen && (
+            {!sidebar.expanded && (
               <button
-                onClick={handleResetSession}
+                onClick={() => handleResetSession()}
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -2572,7 +1818,6 @@ export default function TribosAssistant() {
               </button>
             )}
 
-            <ProjectSelector backendUrl={backendUrl} authHeaders={authHeaders} projectId={projectId} onChange={(id) => updateProjectId(id)} />
             <JobsPanel
               backendUrl={backendUrl}
               authHeaders={authHeaders}
@@ -3993,6 +3238,47 @@ export default function TribosAssistant() {
             )}
           </div>
         </main>
+        {projectView && (
+          <div style={{ position: "fixed", inset: 0, left: sidebar.narrow ? 0 : sidebar.expanded ? 260 : 60, top: 0,
+            background: "var(--bg-main)", zIndex: 35, overflowY: "auto", display: "flex" }}>
+            <ProjectView
+              project={projectView}
+              backendUrl={backendUrl}
+              auth={projectsApi.auth}
+              threads={investigations}
+              onOpenChat={(inv) => {
+                setProjectViewId(null);
+                handleSelectInvestigation(inv);
+              }}
+              onNewChat={() => handleResetSession(projectView.id)}
+              onEdit={() => setProjectDialog({ project: projectView })}
+              onUpdate={(patch) => projectsApi.update(projectView.id, patch)}
+              onDelete={async (keepChats) => {
+                await projectsApi.remove(projectView.id);
+                localStorageService.removeProject(projectView.id, keepChats);
+                setInvestigations(localStorageService.getInvestigations());
+                setProjectViewId(null);
+              }}
+              onLeft={() => {
+                void projectsApi.refresh();
+                setProjectViewId(null);
+              }}
+              onClose={() => setProjectViewId(null)}
+            />
+          </div>
+        )}
+        {projectDialog && (
+          <ProjectDialog
+            project={projectDialog.project}
+            onClose={() => setProjectDialog(null)}
+            onSave={async (input) => {
+              if (projectDialog.project) return projectsApi.update(projectDialog.project.id, input);
+              const created = await projectsApi.create(input);
+              setProjectViewId(created.id);
+              return created;
+            }}
+          />
+        )}
         <CommandPalette
           open={paletteOpen}
           onClose={() => setPaletteOpen(false)}
@@ -4000,6 +3286,8 @@ export default function TribosAssistant() {
           investigations={investigations}
           search={(q) => localStorageService.searchHistory(q)}
           onOpenThread={openThreadFromPalette}
+          projects={projectsApi.projects}
+          onOpenProject={(id) => setProjectViewId(id)}
         />
         <FirstRunTour />
         {imageDragActive && (

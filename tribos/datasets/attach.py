@@ -24,8 +24,14 @@ def _requested_ids(dataset_ids: Sequence[str], query: str) -> list[str]:
     return list(dict.fromkeys(ids))[:MAX_ATTACHMENTS]
 
 
-async def resolve_attachments(user_id: str, dataset_ids: Sequence[str], query: str) -> AttachmentResolution:
-    """Resolve the caller's dataset ids; unknown and foreign ids get the same 'not found' error."""
+async def resolve_attachments(
+    user_id: str, dataset_ids: Sequence[str], query: str, owners: dict[str, str] | None = None
+) -> AttachmentResolution:
+    """Resolve the caller's dataset ids; unknown and foreign ids get the same 'not found' error.
+
+    `owners` names the owner of a project file another member shared (the caller's access was checked through project
+    membership); every other id must be the caller's own.
+    """
     ids = _requested_ids(dataset_ids, query)
     if not ids:
         return AttachmentResolution()
@@ -34,7 +40,14 @@ async def resolve_attachments(user_id: str, dataset_ids: Sequence[str], query: s
     store = existing_dataset_store()
     if store is None:
         return AttachmentResolution(errors=[f"Attached dataset {i[:40]} not found" for i in ids])
-    resolved, errors = await asyncio.to_thread(store.resolve_for_user, user_id, ids)
+    resolved, errors = [], []
+    by_owner: dict[str, list[str]] = {}
+    for ds_id in ids:
+        by_owner.setdefault((owners or {}).get(ds_id, user_id), []).append(ds_id)
+    for owner, owned in by_owner.items():
+        found, missing = await asyncio.to_thread(store.resolve_for_user, owner, owned)
+        resolved.extend(found)
+        errors.extend(missing)
     refs: list[DatasetRef] = []
     for att in resolved:
         record = att.record

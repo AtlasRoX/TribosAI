@@ -19,6 +19,7 @@
 import type { Message } from "../types/chat";
 import type { AgentOptionsSettings } from "../types/agentic";
 import { normalizeLegacyAgentName } from "../lib/legacyNames.ts";
+import { afterProjectDeleted, migrateThreads, moveThread } from "../lib/sidebarData.ts";
 
 export interface InvestigationItem {
   id: string;
@@ -35,6 +36,8 @@ export interface InvestigationItem {
   messagesPruned?: boolean;
   /** Pinned by the user: listed above the others. */
   pinned?: boolean;
+  /** The research project (prj_...) the chat belongs to; its questions are sent with this project_id. */
+  projectId?: string;
 }
 
 /** One match of a history search: the conversation, the message and a snippet around the match. */
@@ -481,8 +484,9 @@ export class LocalStorageService {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
         // Filter out legacy dummy threads that have 0 messages
-        const valid = parsed.filter(
-          (inv) => !LEGACY_DUMMY_IDS.has(inv.id) || (inv.messageCount && inv.messageCount > 0)
+        // Threads stored before projects existed load unchanged (no projectId: outside every project).
+        const valid = migrateThreads(
+          parsed.filter((inv) => !LEGACY_DUMMY_IDS.has(inv.id) || (inv.messageCount && inv.messageCount > 0))
         );
         return valid.sort(
           (a, b) =>
@@ -553,6 +557,25 @@ export class LocalStorageService {
     this.saveInvestigationsList(list);
   }
 
+  /** Moves a conversation into a project, or out of every project with null. */
+  public setThreadProject(id: string, projectId: string | null): void {
+    this.saveInvestigationsList(moveThread(this.getInvestigations(), id, projectId));
+  }
+
+  /** After a project is deleted: its chats move out of it (keepChats) or are deleted with it. */
+  public removeProject(projectId: string, keepChats: boolean): void {
+    const { kept, deletedIds } = afterProjectDeleted(this.getInvestigations(), projectId, keepChats);
+    this.saveInvestigationsList(kept);
+    for (const id of deletedIds) {
+      try {
+        this.store()!.removeItem(this.msgKey(id));
+        this.store()!.removeItem(this.draftKey(id));
+      } catch {
+        // ignore
+      }
+    }
+  }
+
   /** The unsent text of a conversation's composer ("" when none). */
   public getDraft(threadId: string): string {
     if (!this.isAvailable() || !threadId) return "";
@@ -613,7 +636,8 @@ export class LocalStorageService {
   public createNewThread(
     title: string = "New Investigation",
     framework?: string,
-    model?: string
+    model?: string,
+    projectId?: string | null
   ): InvestigationItem {
     const now = new Date().toISOString();
     const newId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -626,6 +650,7 @@ export class LocalStorageService {
       model,
       messageCount: 0,
       preview: "New investigation session",
+      ...(projectId ? { projectId } : {}),
     };
 
     const list = this.getInvestigations();

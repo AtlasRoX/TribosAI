@@ -1041,17 +1041,37 @@ class AuthoritativeOrchestrator:
         control: RunControl | None = None
         if agent_config.is_agentic(resolved_framework):
             control = run_control or create_control(user_id, interactive)
+        # A run in a project the user is a member of gets the project's files (other members' files read-only, by
+        # membership) and its instructions; a non-member gets neither.
+        project_instructions, dataset_owners = "", {}
+        if project_id:
+            try:
+                from ..utils.memory.project_store import get_project_store
+
+                project_ctx = await asyncio.to_thread(get_project_store().run_context, project_id, user_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Project context unavailable: %s", exc)
+                project_ctx = None
+            if project_ctx:
+                project_instructions = project_ctx["instructions"]
+                ids = list(dataset_ids or [])
+                for ds_id, owner in project_ctx["files"]:
+                    if ds_id not in ids:
+                        ids.append(ds_id)
+                    if owner != user_id:
+                        dataset_owners[ds_id] = owner
+                dataset_ids = ids
         scope_cm: Any = contextlib.nullcontext()
         if control is not None and dataset_ids:
             try:
                 from ..agentic.sandbox import bound_scope
 
-                scope_cm = bound_scope(user_id, list(dataset_ids))
+                scope_cm = bound_scope(user_id, list(dataset_ids), owners=dataset_owners)
             except Exception as exc:  # noqa: BLE001
                 logger.debug("Sandbox scope unavailable: %s", exc)
         try:
             with scope_cm:
-                return await self._execute_inquiry(
+                result = await self._execute_inquiry(
                     rec,
                     start_time,
                 pending=pending,
@@ -1069,7 +1089,18 @@ class AuthoritativeOrchestrator:
                 project_id=project_id,
                 agent_options=dict(agent_options or {}),
                 control=control,
+                project_instructions=project_instructions,
+                dataset_owners=dataset_owners,
             )
+            if project_id:
+                try:
+                    from ..utils.memory.project_store import get_project_store
+
+                    await asyncio.to_thread(get_project_store().log_event, project_id, user_id, "run.completed", "thread",
+                                            thread_id, query[:200])
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("Project activity not recorded: %s", exc)
+            return result
         except RunCancelled as exc:
             duration = round(time.perf_counter() - start_time, 2)
             resp = f"The run was cancelled ({exc}). Nothing further was searched or written."
@@ -1126,6 +1157,8 @@ class AuthoritativeOrchestrator:
         project_id: str | None = None,
         agent_options: dict[str, Any] | None = None,
         control: RunControl | None = None,
+        project_instructions: str = "",
+        dataset_owners: dict[str, str] | None = None,
     ) -> AuthoritativeOrchestrationResult:
         run = RunContext(
             orch=self,
@@ -1146,6 +1179,8 @@ class AuthoritativeOrchestrator:
             project_id=project_id,
             agent_options=agent_options,
             control=control,
+            project_instructions=project_instructions,
+            dataset_owners=dict(dataset_owners or {}),
         )
         run.pending["thoughts"] = run.thoughts
         run.show_reasoning = _show_reasoning()

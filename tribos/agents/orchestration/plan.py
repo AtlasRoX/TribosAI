@@ -70,7 +70,9 @@ async def read_question(run: RunContext) -> Any | None:
 
     await emit("plan", "Reading the question", status="running")
     try:
-        resolution = await ao.resolve_attachments(user_id, list(run.dataset_ids or []), clean_query)
+        resolution = await ao.resolve_attachments(
+            user_id, list(run.dataset_ids or []), clean_query, owners=run.dataset_owners
+        )
         attachments, attachment_errors = list(resolution.attachments), list(resolution.errors)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Attachment resolution failed: %s", exc)
@@ -104,6 +106,16 @@ async def read_question(run: RunContext) -> Any | None:
         memory_pkg = MemoryContextPackage(thread_id=thread_id)
         historical_identifiers = {}
     memory_summary = memory_pkg.to_system_prompt_injection()
+    if run.project_instructions.strip():
+        # The project's instructions are user-authored guidance: delimited and spotlighted like any untrusted text, so
+        # they shape the answer's focus and format but never override the system rules.
+        from tribos.agentic.guardrails import spotlight
+
+        memory_summary = (
+            f"{memory_summary}\n\n<project_instructions note=\"guidance the project's members wrote for every answer in "
+            "this project; follow it where it does not conflict with the rules above\">\n"
+            f"{spotlight(run.project_instructions, 'project instructions', 8000)}\n</project_instructions>"
+        ).strip()
     run.memory_pkg, run.historical_identifiers, run.memory_summary = memory_pkg, historical_identifiers, memory_summary
 
     # -------------------------------------------------------------

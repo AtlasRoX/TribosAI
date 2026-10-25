@@ -351,6 +351,9 @@ No dependencies added. Uncertainty uses first-order GUM by central differences (
 
 ## T10: Shared projects with review, and the ChatGPT-style sidebar
 
+**Status: DONE (2026-10-25).** Backend: members with owner/editor/viewer roles (403 vs a non-revealing 404), shared files, fact review (run facts pending, hand-added approved, rejected invalidated and never recalled), version history, a capped activity log, in-place migration of old databases, and runs that get the project's spotlighted instructions and its files (other members' read-only through membership). Web: `components/sidebar/*` (rail, search, projects, recency groups, row menu, profile menu, mobile drawer, persisted collapse), `components/projects/*` (six tabs, read-only for viewers, missing endpoints hidden, create/edit dialog) and `hooks/useThreads|useProjects|useSidebarState`; page.tsx shrank from 4,023 to about 3,320 lines.
+No dependencies added. Fact review state lives in a side table (`fact_reviews`) so the facts table keeps its columns; members are added by user id (there is no user directory); chats stay in the browser, so a project's chats are those on this device.
+
 ### Backend contract
 
 All endpoints are under `/api/projects`, require auth and use JSON.

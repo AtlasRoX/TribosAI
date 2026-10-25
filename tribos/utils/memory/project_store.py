@@ -64,6 +64,21 @@ class ProjectStoreError(ValueError):
     pass
 
 
+class ProjectAccessError(ProjectStoreError):
+    """The caller may not do this: 404 when they are not a member (the project's existence is never revealed), 403
+    when their role is too low."""
+
+    def __init__(self, status: int, detail: str) -> None:
+        super().__init__(detail)
+        self.status = status
+
+
+ROLES = ("owner", "editor", "viewer")
+REVIEW_STATUSES = ("pending", "approved", "rejected")
+ACTIVITY_CAP = 1000  # events kept per project (the oldest are dropped)
+MAX_INSTRUCTIONS = 8000
+
+
 def new_project_id() -> str:
     return "prj_" + "".join(secrets.choice(_ALNUM) for _ in range(16))
 
@@ -115,6 +130,15 @@ class FactInput:
 
 
 class ProjectStore:
+    """Projects shared by their members, and each project's fact graph, in one SQLite file.
+
+    A project has one owner and any number of editors and viewers. Every read needs membership (a non-member gets
+    "not found"); writing facts, files, instructions or settings needs owner or editor; members and deletion are the
+    owner's. Facts belong to the project: `user_id` on a fact records who wrote it. Each fact's review status
+    (pending, approved, rejected) is in `fact_reviews`: facts written by runs start pending, facts added by hand
+    start approved, and a rejected fact is invalidated. Every change goes to the project's activity log.
+    """
+
     def __init__(self, storage_dir: str | None = None) -> None:
         self.storage_dir = storage_dir or default_projects_dir()
         os.makedirs(self.storage_dir, exist_ok=True)
@@ -174,6 +198,46 @@ class ProjectStore:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_fact_project ON facts(project_id, user_id, invalid_at)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_fact_key ON facts(project_id, subject_norm, relation)")
             self._ensure_unique_current_facts(conn)
+            self._migrate_sharing(conn)
+
+    @staticmethod
+    def _migrate_sharing(conn: sqlite3.Connection) -> None:
+        """Upgrade a single-owner database in place: project settings columns, members (the owner becomes one),
+        files, the activity log, and fact reviews (verified facts approved, all others pending)."""
+        columns = {r["name"] for r in conn.execute("PRAGMA table_info(projects)").fetchall()}
+        for name in ("instructions", "icon", "color"):
+            if name not in columns:
+                conn.execute(f"ALTER TABLE projects ADD COLUMN {name} TEXT NOT NULL DEFAULT ''")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS members (project_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL, "
+            "added_at REAL NOT NULL, added_by TEXT NOT NULL, PRIMARY KEY (project_id, user_id))"
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_member_user ON members(user_id)")
+        conn.execute(
+            "INSERT OR IGNORE INTO members (project_id, user_id, role, added_at, added_by) "
+            "SELECT id, user_id, 'owner', created_at, user_id FROM projects"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS project_files (project_id TEXT NOT NULL, dataset_id TEXT NOT NULL, "
+            "owner_id TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT '', size_bytes INTEGER, "
+            "added_at REAL NOT NULL, added_by TEXT NOT NULL, PRIMARY KEY (project_id, dataset_id))"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS activity (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, "
+            "at REAL NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, target_type TEXT NOT NULL DEFAULT '', "
+            "target_id TEXT NOT NULL DEFAULT '', summary TEXT NOT NULL DEFAULT '')"
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_activity_project ON activity(project_id, id)")
+        # Review state lives beside the facts table (its columns are fixed): verified facts of an older database
+        # count as approved, every other fact is pending until a member reviews it.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS fact_reviews (fact_id TEXT PRIMARY KEY, review_status TEXT NOT NULL, "
+            "reviewed_by TEXT, reviewed_at REAL, review_note TEXT)"
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO fact_reviews (fact_id, review_status) "
+            "SELECT id, CASE WHEN verified = 1 THEN 'approved' ELSE 'pending' END FROM facts"
+        )
 
     @staticmethod
     def _ensure_unique_current_facts(conn: sqlite3.Connection) -> None:
@@ -203,21 +267,92 @@ class ProjectStore:
             "object_norm) WHERE invalid_at IS NULL"
         )
 
-    # Projects ------------------------------------------------------------------------------------------------
+    # Access ----------------------------------------------------------------------------------------------------
     @staticmethod
-    def _project_dict(row: sqlite3.Row, counts: tuple[int, int] | None = None) -> dict[str, Any]:
-        out = {
-            "id": row["id"],
+    def _role(conn: sqlite3.Connection, project_id: str, user_id: str) -> str | None:
+        if not PROJECT_ID_RE.match(project_id or "") or not user_id:
+            return None
+        row = conn.execute("SELECT role FROM members WHERE project_id = ? AND user_id = ?", (project_id, user_id)).fetchone()
+        return row["role"] if row is not None else None
+
+    def role(self, project_id: str | None, user_id: str | None) -> str | None:
+        """The caller's role in the project ("owner", "editor", "viewer"), or None for a non-member."""
+        if not project_id or not user_id:
+            return None
+        with self._connect() as conn:
+            return self._role(conn, project_id, user_id)
+
+    def _require(self, conn: sqlite3.Connection, project_id: str, user_id: str, *roles: str) -> str:
+        """The caller's role, which must be one of `roles` (any member when none are given)."""
+        _require_user(user_id)
+        role = self._role(conn, project_id, user_id)
+        if role is None:
+            raise ProjectAccessError(404, "Project not found")
+        if roles and role not in roles:
+            raise ProjectAccessError(403, f"This needs the {' or '.join(roles)} role; you are a {role}.")
+        return role
+
+    def owns(self, project_id: str | None, user_id: str | None) -> bool:
+        """Whether the user may write to the project (its owner or an editor)."""
+        return self.role(project_id, user_id) in ("owner", "editor")
+
+    def is_member(self, project_id: str | None, user_id: str | None) -> bool:
+        return self.role(project_id, user_id) is not None
+
+    @staticmethod
+    def _log(conn: sqlite3.Connection, project_id: str, actor: str, action: str, target_type: str = "",
+             target_id: str = "", summary: str = "") -> None:
+        conn.execute(
+            "INSERT INTO activity (project_id, at, actor, action, target_type, target_id, summary) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (project_id, time.time(), actor, action, target_type, target_id, summary[:300]),
+        )
+        conn.execute(
+            "DELETE FROM activity WHERE project_id = ? AND id NOT IN "
+            "(SELECT id FROM activity WHERE project_id = ? ORDER BY id DESC LIMIT ?)",
+            (project_id, project_id, ACTIVITY_CAP),
+        )
+
+    def log_event(self, project_id: str, actor: str, action: str, target_type: str = "", target_id: str = "",
+                  summary: str = "") -> None:
+        """Record an event that happened outside the store (a run that completed in the project)."""
+        with self._connect() as conn:
+            if self._role(conn, project_id, actor) is not None:
+                self._log(conn, project_id, actor, action, target_type, target_id, summary)
+
+    # Projects ------------------------------------------------------------------------------------------------
+    def _project_dict(self, conn: sqlite3.Connection, row: sqlite3.Row, role: str) -> dict[str, Any]:
+        pid = row["id"]
+        facts = conn.execute(
+            "SELECT SUM(CASE WHEN f.invalid_at IS NULL THEN 1 ELSE 0 END) AS v, "
+            "SUM(CASE WHEN f.invalid_at IS NULL THEN 0 ELSE 1 END) AS i, "
+            "SUM(CASE WHEN f.invalid_at IS NULL AND r.review_status = 'pending' THEN 1 ELSE 0 END) AS p "
+            "FROM facts f LEFT JOIN fact_reviews r ON r.fact_id = f.id WHERE f.project_id = ?",
+            (pid,),
+        ).fetchone()
+        members = conn.execute("SELECT COUNT(*) AS n FROM members WHERE project_id = ?", (pid,)).fetchone()["n"]
+        files = conn.execute("SELECT COUNT(*) AS n FROM project_files WHERE project_id = ?", (pid,)).fetchone()["n"]
+        valid, invalid = int(facts["v"] or 0), int(facts["i"] or 0)
+        return {
+            "id": pid,
             "name": row["name"],
             "description": row["description"],
+            "instructions": row["instructions"],
+            "icon": row["icon"],
+            "color": row["color"],
+            "owner_id": row["user_id"],
+            "role": role,
+            "member_count": int(members),
+            "fact_count": valid,
+            "invalid_fact_count": invalid,
+            "pending_review_count": int(facts["p"] or 0),
+            "file_count": int(files),
             "created_at": _iso(row["created_at"]),
             "updated_at": _iso(row["updated_at"]),
+            "facts": {"valid": valid, "invalidated": invalid},  # the earlier response shape, kept for old clients
         }
-        if counts is not None:
-            out["facts"] = {"valid": counts[0], "invalidated": counts[1]}
-        return out
 
-    def create_project(self, user_id: str, name: str, description: str = "") -> dict[str, Any]:
+    def create_project(self, user_id: str, name: str, description: str = "", instructions: str = "", icon: str = "",
+                       color: str = "") -> dict[str, Any]:
         user_id = _require_user(user_id)
         name = str(name or "").strip()[:200]
         if not name:
@@ -226,72 +361,198 @@ class ProjectStore:
         pid = new_project_id()
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO projects (id, user_id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (pid, user_id, name, str(description or "")[:2000], now, now),
+                "INSERT INTO projects (id, user_id, name, description, created_at, updated_at, instructions, icon, color) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (pid, user_id, name, str(description or "")[:2000], now, now, str(instructions or "")[:MAX_INSTRUCTIONS],
+                 str(icon or "")[:16], str(color or "")[:32]),
             )
+            conn.execute("INSERT INTO members (project_id, user_id, role, added_at, added_by) VALUES (?, ?, 'owner', ?, ?)",
+                         (pid, user_id, now, user_id))
+            self._log(conn, pid, user_id, "project.created", "project", pid, name)
         return self.get_project(pid, user_id) or {}
-
-    def _counts(self, conn: sqlite3.Connection, project_id: str, user_id: str) -> tuple[int, int]:
-        row = conn.execute(
-            "SELECT SUM(CASE WHEN invalid_at IS NULL THEN 1 ELSE 0 END) AS v, SUM(CASE WHEN invalid_at IS NULL THEN 0 ELSE 1 END) AS i "
-            "FROM facts WHERE project_id = ? AND user_id = ?",
-            (project_id, user_id),
-        ).fetchone()
-        return int(row["v"] or 0), int(row["i"] or 0)
 
     def get_project(self, project_id: str, user_id: str) -> dict[str, Any] | None:
         user_id = _require_user(user_id)
-        if not PROJECT_ID_RE.match(project_id or ""):
-            return None
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM projects WHERE id = ? AND user_id = ?", (project_id, user_id)).fetchone()
-            if row is None:
+            role = self._role(conn, project_id, user_id)
+            if role is None:
                 return None
-            return self._project_dict(row, self._counts(conn, project_id, user_id))
-
-    def owns(self, project_id: str | None, user_id: str | None) -> bool:
-        if not project_id or not user_id or not PROJECT_ID_RE.match(project_id):
-            return False
-        with self._connect() as conn:
-            return conn.execute("SELECT 1 FROM projects WHERE id = ? AND user_id = ?", (project_id, user_id)).fetchone() is not None
+            row = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+            return self._project_dict(conn, row, role) if row is not None else None
 
     def list_projects(self, user_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        """Every project the user is a member of (owned and shared), most recently updated first."""
         user_id = _require_user(user_id)
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM projects WHERE user_id = ? ORDER BY updated_at DESC LIMIT ?", (user_id, max(1, min(500, limit)))
+                "SELECT p.*, m.role AS member_role FROM projects p JOIN members m ON m.project_id = p.id "
+                "WHERE m.user_id = ? ORDER BY p.updated_at DESC LIMIT ?",
+                (user_id, max(1, min(500, limit))),
             ).fetchall()
-            return [self._project_dict(r, self._counts(conn, r["id"], user_id)) for r in rows]
+            return [self._project_dict(conn, r, r["member_role"]) for r in rows]
 
-    def update_project(self, project_id: str, user_id: str, name: str | None = None, description: str | None = None) -> dict[str, Any] | None:
-        if not self.owns(project_id, user_id):
-            return None
-        sets, args = ["updated_at = ?"], [time.time()]
+    def update_project(self, project_id: str, user_id: str, name: str | None = None, description: str | None = None,
+                       instructions: str | None = None, icon: str | None = None,
+                       color: str | None = None) -> dict[str, Any] | None:
+        """Change the project's settings (owner or editor). None for a non-member."""
+        changes: dict[str, str] = {}
         if name is not None:
             name = str(name).strip()[:200]
             if not name:
                 raise ProjectStoreError("A project needs a name")
-            sets.append("name = ?")
-            args.append(name)
-        if description is not None:
-            sets.append("description = ?")
-            args.append(str(description)[:2000])
+            changes["name"] = name
+        for key, value, cap in (("description", description, 2000), ("instructions", instructions, MAX_INSTRUCTIONS),
+                                ("icon", icon, 16), ("color", color, 32)):
+            if value is not None:
+                changes[key] = str(value)[:cap]
         with self._connect() as conn:
-            conn.execute(f"UPDATE projects SET {', '.join(sets)} WHERE id = ? AND user_id = ?", (*args, project_id, user_id))
+            if self._role(conn, project_id, user_id) is None:
+                return None
+            self._require(conn, project_id, user_id, "owner", "editor")
+            sets = ", ".join(["updated_at = ?", *(f"{k} = ?" for k in changes)])
+            conn.execute(f"UPDATE projects SET {sets} WHERE id = ?", (time.time(), *changes.values(), project_id))
+            if changes:
+                self._log(conn, project_id, user_id, "project.updated", "project", project_id, ", ".join(sorted(changes)))
         return self.get_project(project_id, user_id)
 
     def delete_project(self, project_id: str, user_id: str) -> bool:
-        if not self.owns(project_id, user_id):
-            return False
+        """Delete the project and everything in it (owner only). False for a non-member."""
         with self._connect() as conn:
-            conn.execute("DELETE FROM facts WHERE project_id = ? AND user_id = ?", (project_id, user_id))
-            conn.execute("DELETE FROM projects WHERE id = ? AND user_id = ?", (project_id, user_id))
+            if self._role(conn, project_id, user_id) is None:
+                return False
+            self._require(conn, project_id, user_id, "owner")
+            conn.execute("DELETE FROM fact_reviews WHERE fact_id IN (SELECT id FROM facts WHERE project_id = ?)",
+                         (project_id,))
+            for table, column in (("facts", "project_id"), ("members", "project_id"), ("project_files", "project_id"),
+                                  ("activity", "project_id"), ("projects", "id")):
+                conn.execute(f"DELETE FROM {table} WHERE {column} = ?", (project_id,))
         return True
 
     def touch_project(self, conn: sqlite3.Connection, project_id: str, user_id: str) -> None:
-        conn.execute("UPDATE projects SET updated_at = ? WHERE id = ? AND user_id = ?", (time.time(), project_id, user_id))
+        conn.execute("UPDATE projects SET updated_at = ? WHERE id = ?", (time.time(), project_id))
+
+    # Members -------------------------------------------------------------------------------------------------
+    def list_members(self, project_id: str, user_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            self._require(conn, project_id, user_id)
+            rows = conn.execute(
+                "SELECT * FROM members WHERE project_id = ? ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'editor' THEN 1 "
+                "ELSE 2 END, added_at", (project_id,),
+            ).fetchall()
+        return [{"user_id": r["user_id"], "role": r["role"], "added_at": _iso(r["added_at"]), "added_by": r["added_by"]}
+                for r in rows]
+
+    def add_member(self, project_id: str, user_id: str, member_id: str, role: str) -> dict[str, Any]:
+        member_id = str(member_id or "").strip()
+        if role not in ("editor", "viewer"):
+            raise ProjectStoreError("A member is an editor or a viewer (a project has one owner).")
+        if not re.match(r"^[A-Za-z0-9_.@-]{1,128}$", member_id):
+            raise ProjectStoreError("Not a valid user id.")
+        with self._connect() as conn:
+            self._require(conn, project_id, user_id, "owner")
+            if self._role(conn, project_id, member_id) is not None:
+                raise ProjectStoreError(f"{member_id} is already a member.")
+            now = time.time()
+            conn.execute("INSERT INTO members (project_id, user_id, role, added_at, added_by) VALUES (?, ?, ?, ?, ?)",
+                         (project_id, member_id, role, now, user_id))
+            self._log(conn, project_id, user_id, "member.added", "member", member_id, role)
+        return {"user_id": member_id, "role": role, "added_at": _iso(now), "added_by": user_id}
+
+    def set_member_role(self, project_id: str, user_id: str, member_id: str, role: str) -> dict[str, Any]:
+        if role not in ("editor", "viewer"):
+            raise ProjectStoreError("A member is an editor or a viewer (a project has one owner).")
+        with self._connect() as conn:
+            self._require(conn, project_id, user_id, "owner")
+            current = self._role(conn, project_id, member_id)
+            if current is None:
+                raise ProjectAccessError(404, "Member not found")
+            if current == "owner":
+                raise ProjectStoreError("The owner's role cannot be changed.")
+            conn.execute("UPDATE members SET role = ? WHERE project_id = ? AND user_id = ?", (role, project_id, member_id))
+            self._log(conn, project_id, user_id, "member.role_changed", "member", member_id, f"{current} -> {role}")
+        return next(m for m in self.list_members(project_id, user_id) if m["user_id"] == member_id)
+
+    def remove_member(self, project_id: str, user_id: str, member_id: str) -> bool:
+        """Remove a member: the owner may remove anyone but themself; any member may leave."""
+        with self._connect() as conn:
+            role = self._require(conn, project_id, user_id)
+            if member_id != user_id and role != "owner":
+                raise ProjectAccessError(403, "Only the owner can remove other members.")
+            target = self._role(conn, project_id, member_id)
+            if target is None:
+                raise ProjectAccessError(404, "Member not found")
+            if target == "owner":
+                raise ProjectStoreError("The owner cannot leave or be removed; delete the project instead.")
+            conn.execute("DELETE FROM members WHERE project_id = ? AND user_id = ?", (project_id, member_id))
+            self._log(conn, project_id, user_id, "member.removed", "member", member_id,
+                      "left" if member_id == user_id else "removed")
+        return True
+
+    # Files ---------------------------------------------------------------------------------------------------
+    def list_files(self, project_id: str, user_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            self._require(conn, project_id, user_id)
+            rows = conn.execute("SELECT * FROM project_files WHERE project_id = ? ORDER BY added_at",
+                                (project_id,)).fetchall()
+        return [{"dataset_id": r["dataset_id"], "name": r["name"], "kind": r["kind"], "size_bytes": r["size_bytes"],
+                 "added_at": _iso(r["added_at"]), "added_by": r["added_by"]} for r in rows]
+
+    def add_file(self, project_id: str, user_id: str, dataset_id: str, name: str = "", kind: str = "",
+                 size_bytes: int | None = None) -> dict[str, Any]:
+        """Share one of the caller's datasets with the project (the API checks that the caller owns it)."""
+        with self._connect() as conn:
+            self._require(conn, project_id, user_id, "owner", "editor")
+            now = time.time()
+            conn.execute(
+                "INSERT OR REPLACE INTO project_files (project_id, dataset_id, owner_id, name, kind, size_bytes, "
+                "added_at, added_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (project_id, dataset_id, user_id, str(name)[:200], str(kind)[:32], size_bytes, now, user_id),
+            )
+            self._log(conn, project_id, user_id, "file.added", "file", dataset_id, str(name)[:200])
+            self.touch_project(conn, project_id, user_id)
+        return {"dataset_id": dataset_id, "name": name, "kind": kind, "size_bytes": size_bytes, "added_at": _iso(now),
+                "added_by": user_id}
+
+    def remove_file(self, project_id: str, user_id: str, dataset_id: str) -> bool:
+        with self._connect() as conn:
+            self._require(conn, project_id, user_id, "owner", "editor")
+            gone = conn.execute("DELETE FROM project_files WHERE project_id = ? AND dataset_id = ?",
+                                (project_id, dataset_id)).rowcount
+            if gone:
+                self._log(conn, project_id, user_id, "file.removed", "file", dataset_id)
+        return bool(gone)
+
+    def run_context(self, project_id: str | None, user_id: str) -> dict[str, Any] | None:
+        """What a run in the project gets: its name, instructions, and its files with their owners (only files whose
+        owner is still a member). None when the user is not a member."""
+        if not project_id:
+            return None
+        with self._connect() as conn:
+            if self._role(conn, project_id, user_id) is None:
+                return None
+            row = conn.execute("SELECT name, instructions FROM projects WHERE id = ?", (project_id,)).fetchone()
+            files = conn.execute(
+                "SELECT f.dataset_id, f.owner_id FROM project_files f JOIN members m ON m.project_id = f.project_id "
+                "AND m.user_id = f.owner_id WHERE f.project_id = ? ORDER BY f.added_at", (project_id,),
+            ).fetchall()
+        return {"name": row["name"], "instructions": row["instructions"] or "",
+                "files": [(r["dataset_id"], r["owner_id"]) for r in files]}
+
+    # Activity ------------------------------------------------------------------------------------------------
+    def list_activity(self, project_id: str, user_id: str, limit: int = 50) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            self._require(conn, project_id, user_id)
+            rows = conn.execute("SELECT * FROM activity WHERE project_id = ? ORDER BY id DESC LIMIT ?",
+                                (project_id, max(1, min(500, limit)))).fetchall()
+        return [{"id": r["id"], "at": _iso(r["at"]), "actor": r["actor"], "action": r["action"],
+                 "target_type": r["target_type"], "target_id": r["target_id"], "summary": r["summary"]} for r in rows]
 
     # Facts ---------------------------------------------------------------------------------------------------
+    _FACT_SELECT = (
+        "SELECT f.*, r.review_status, r.reviewed_by, r.reviewed_at, r.review_note FROM facts f "
+        "LEFT JOIN fact_reviews r ON r.fact_id = f.id"
+    )
+
     @staticmethod
     def _fact_dict(row: sqlite3.Row) -> dict[str, Any]:
         try:
@@ -302,6 +563,7 @@ class ProjectStore:
             tags = json.loads(row["tags_json"] or "[]")
         except ValueError:
             tags = []
+        keys = set(row.keys())
         return {
             "id": row["id"],
             "project_id": row["project_id"],
@@ -318,30 +580,39 @@ class ProjectStore:
             "tags": tags,
             "superseded_by": row["superseded_by"],
             "invalidation_reason": row["invalidation_reason"],
+            "written_by": row["user_id"],
+            "review_status": (row["review_status"] if "review_status" in keys else None) or "pending",
+            "reviewed_by": row["reviewed_by"] if "reviewed_by" in keys else None,
+            "reviewed_at": _iso(row["reviewed_at"]) if "reviewed_at" in keys else None,
+            "review_note": row["review_note"] if "review_note" in keys else None,
         }
 
     def get_fact(self, project_id: str, fact_id: str, user_id: str) -> dict[str, Any] | None:
-        if not FACT_ID_RE.match(fact_id or "") or not self.owns(project_id, user_id):
+        if not FACT_ID_RE.match(fact_id or "") or not self.is_member(project_id, user_id):
             return None
         with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM facts WHERE id = ? AND project_id = ? AND user_id = ?", (fact_id, project_id, user_id)
-            ).fetchone()
+            row = conn.execute(f"{self._FACT_SELECT} WHERE f.id = ? AND f.project_id = ?", (fact_id, project_id)).fetchone()
         return self._fact_dict(row) if row is not None else None
 
-    def list_facts(self, project_id: str, user_id: str, include_invalid: bool = False, limit: int = 200) -> list[dict[str, Any]]:
-        if not self.owns(project_id, user_id):
+    def list_facts(self, project_id: str, user_id: str, include_invalid: bool = False, limit: int = 200,
+                   review_status: str | None = None) -> list[dict[str, Any]]:
+        if not self.is_member(project_id, user_id):
             return []
-        where = "" if include_invalid else " AND invalid_at IS NULL"
+        where = "" if include_invalid or review_status == "rejected" else " AND f.invalid_at IS NULL"
+        args: list[Any] = [project_id]
+        if review_status:
+            where += " AND COALESCE(r.review_status, 'pending') = ?"
+            args.append(review_status)
         with self._connect() as conn:
             rows = conn.execute(
-                f"SELECT * FROM facts WHERE project_id = ? AND user_id = ?{where} ORDER BY recorded_at DESC LIMIT ?",
-                (project_id, user_id, max(1, min(2000, limit))),
+                f"{self._FACT_SELECT} WHERE f.project_id = ?{where} ORDER BY f.recorded_at DESC LIMIT ?",
+                (*args, max(1, min(2000, limit))),
             ).fetchall()
         return [self._fact_dict(r) for r in rows]
 
     def _insert(
-        self, conn: sqlite3.Connection, project_id: str, user_id: str, f: FactInput, now: float, fid: str | None = None
+        self, conn: sqlite3.Connection, project_id: str, user_id: str, f: FactInput, now: float, fid: str | None = None,
+        review_status: str = "pending",
     ) -> str:
         fid = fid or new_fact_id()
         tags = list(f.tags or [])
@@ -357,6 +628,11 @@ class ProjectStore:
                 json.dumps(tags),
             ),
         )
+        approved = review_status == "approved"
+        conn.execute(
+            "INSERT OR REPLACE INTO fact_reviews (fact_id, review_status, reviewed_by, reviewed_at) VALUES (?, ?, ?, ?)",
+            (fid, review_status, user_id if approved else None, now if approved else None),
+        )
         return fid
 
     @staticmethod
@@ -366,16 +642,18 @@ class ProjectStore:
             (now, superseded_by, reason[:300], fact_id),
         )
 
-    def upsert_facts(self, project_id: str, user_id: str, facts: Sequence[FactInput]) -> dict[str, Any]:
+    def upsert_facts(self, project_id: str, user_id: str, facts: Sequence[FactInput],
+                     review_status: str = "pending") -> dict[str, Any]:
         """Mem0-style deterministic update of the fact graph with one batch of extracted facts.
 
-        Per fact, against the currently valid facts with the same subject and relation:
+        Per fact, against the currently valid facts of the project with the same subject and relation:
         - same object (and the same value, for valued relations): NOOP, or UPDATE when the new fact is verified
           and the stored one is not, or the new confidence is higher;
         - a single-valued relation with a different object, or a valued relation with a different value:
           INVALIDATE the old fact (Zep: invalid_at + superseded_by, never deleted), then ADD the new one;
         - otherwise ADD.
-        Facts of one batch never invalidate each other (a drug with two mechanisms is two facts).
+        Facts of one batch never invalidate each other (a drug with two mechanisms is two facts). New facts start
+        with `review_status`: pending for the facts a run extracted, until a member approves or rejects them.
         """
         if not self.owns(project_id, user_id):
             raise ProjectStoreError("Project not found")
@@ -394,8 +672,8 @@ class ProjectStore:
             for f in cleaned:
                 s_norm, o_norm = norm(f.subject), norm(f.object)
                 existing = conn.execute(
-                    "SELECT * FROM facts WHERE project_id = ? AND user_id = ? AND subject_norm = ? AND relation = ? AND invalid_at IS NULL",
-                    (project_id, user_id, s_norm, f.relation),
+                    "SELECT * FROM facts WHERE project_id = ? AND subject_norm = ? AND relation = ? AND invalid_at IS NULL",
+                    (project_id, s_norm, f.relation),
                 ).fetchall()
                 same = [r for r in existing if r["object_norm"] == o_norm]
                 if f.relation in VALUED_RELATIONS and same and f.value is not None:
@@ -405,7 +683,7 @@ class ProjectStore:
                         new_id = new_fact_id()
                         for r in differing:
                             self._invalidate(conn, r["id"], now, new_id, f"value changed from {r['value']} to {f.value}")
-                        self._insert(conn, project_id, user_id, f, now, fid=new_id)
+                        self._insert(conn, project_id, user_id, f, now, fid=new_id, review_status=review_status)
                         ops.append({"op": "INVALIDATE", "fact_id": new_id, "invalidated": [r["id"] for r in differing]})
                         ops.append({"op": "ADD", "fact_id": new_id})
                         written += 1
@@ -434,7 +712,7 @@ class ProjectStore:
                 if f.relation in SINGLE_VALUED_RELATIONS:
                     in_batch = batch_keys.get((s_norm, f.relation), set())
                     contradicted = [r for r in existing if r["object_norm"] not in in_batch and float(r["recorded_at"]) < now]
-                new_id = self._insert(conn, project_id, user_id, f, now)
+                new_id = self._insert(conn, project_id, user_id, f, now, review_status=review_status)
                 for r in contradicted:
                     self._invalidate(conn, r["id"], now, new_id, f"contradicted by a newer {f.relation}: {f.object[:120]}")
                 if contradicted:
@@ -444,13 +722,80 @@ class ProjectStore:
                 written += 1
             if cleaned:
                 self.touch_project(conn, project_id, user_id)
+            if written or invalidated:
+                self._log(conn, project_id, user_id, "fact.added", "fact", "",
+                          f"{written} fact(s) written, {invalidated} superseded")
         return {"written": written, "invalidated": invalidated, "ops": ops}
 
-    def invalidate_fact(self, project_id: str, fact_id: str, user_id: str, reason: str = "invalidated by the researcher") -> dict[str, Any] | None:
+    def add_fact(self, project_id: str, user_id: str, subject: str, relation: str, object: str,  # noqa: A002
+                 confidence: float = 0.9, note: str = "") -> dict[str, Any]:
+        """A fact a member adds by hand: it starts approved (writing it is the review)."""
+        f = FactInput(subject=subject, relation=relation, object=object, confidence=confidence, verified=False,
+                      source={"origin": "added by a member"}).clean()
+        if not (f.subject and f.relation and f.object):
+            raise ProjectStoreError("A fact needs a subject, a relation and an object.")
+        with self._connect() as conn:
+            self._require(conn, project_id, user_id, "owner", "editor")
+            conn.execute("BEGIN IMMEDIATE")
+            dup = conn.execute(
+                "SELECT id FROM facts WHERE project_id = ? AND subject_norm = ? AND relation = ? AND object_norm = ? "
+                "AND invalid_at IS NULL", (project_id, norm(f.subject), f.relation, norm(f.object)),
+            ).fetchone()
+            if dup is not None:
+                raise ProjectStoreError("The project already has this fact.")
+            fid = self._insert(conn, project_id, user_id, f, time.time(), review_status="approved")
+            if note:
+                conn.execute("UPDATE fact_reviews SET review_note = ? WHERE fact_id = ?", (note[:300], fid))
+            self._log(conn, project_id, user_id, "fact.added", "fact", fid, f"{f.subject} {f.relation} {f.object}")
+            self.touch_project(conn, project_id, user_id)
+        return self.get_fact(project_id, fid, user_id) or {}
+
+    def review_fact(self, project_id: str, fact_id: str, user_id: str, decision: str,
+                    note: str = "") -> dict[str, Any] | None:
+        """Approve or reject a fact (owner or editor). Rejecting invalidates it, so recall never uses it."""
+        if decision not in ("approve", "reject"):
+            raise ProjectStoreError("The decision is approve or reject.")
+        with self._connect() as conn:
+            self._require(conn, project_id, user_id, "owner", "editor")
+            row = conn.execute("SELECT id, invalid_at FROM facts WHERE id = ? AND project_id = ?",
+                               (fact_id, project_id)).fetchone()
+            if row is None:
+                return None
+            now = time.time()
+            status = "approved" if decision == "approve" else "rejected"
+            if status == "approved" and row["invalid_at"] is not None:
+                raise ProjectStoreError("An invalidated fact cannot be approved.")
+            conn.execute(
+                "INSERT OR REPLACE INTO fact_reviews (fact_id, review_status, reviewed_by, reviewed_at, review_note) "
+                "VALUES (?, ?, ?, ?, ?)", (fact_id, status, user_id, now, note[:300] or None),
+            )
+            if status == "rejected":
+                self._invalidate(conn, fact_id, now, None, f"rejected in review{': ' + note[:200] if note else ''}")
+            self._log(conn, project_id, user_id, f"fact.{status}", "fact", fact_id, note[:300])
+        return self.get_fact(project_id, fact_id, user_id)
+
+    def fact_history(self, project_id: str, fact_id: str, user_id: str) -> list[dict[str, Any]]:
+        """Every version of a fact (edits and supersessions, linked by superseded_by), oldest first."""
+        if self.get_fact(project_id, fact_id, user_id) is None:
+            raise ProjectAccessError(404, "Fact not found")
+        with self._connect() as conn:
+            rows = {r["id"]: r for r in conn.execute(f"{self._FACT_SELECT} WHERE f.project_id = ?", (project_id,)).fetchall()}
+        previous = {r["superseded_by"]: fid for fid, r in rows.items() if r["superseded_by"]}
+        chain = [fact_id]
+        while chain[0] in previous and previous[chain[0]] not in chain:
+            chain.insert(0, previous[chain[0]])
+        while rows[chain[-1]]["superseded_by"] in rows and rows[chain[-1]]["superseded_by"] not in chain:
+            chain.append(rows[chain[-1]]["superseded_by"])
+        return [self._fact_dict(rows[i]) for i in chain]
+
+    def invalidate_fact(self, project_id: str, fact_id: str, user_id: str,
+                        reason: str = "invalidated by the researcher") -> dict[str, Any] | None:
         if self.get_fact(project_id, fact_id, user_id) is None:
             return None
         with self._connect() as conn:
+            self._require(conn, project_id, user_id, "owner", "editor")
             self._invalidate(conn, fact_id, time.time(), None, reason)
+            self._log(conn, project_id, user_id, "fact.invalidated", "fact", fact_id, reason)
         return self.get_fact(project_id, fact_id, user_id)
 
     def edit_fact(
@@ -469,6 +814,8 @@ class ProjectStore:
         old = self.get_fact(project_id, fact_id, user_id)
         if old is None:
             return None
+        with self._connect() as conn:
+            self._require(conn, project_id, user_id, "owner", "editor")
         if old["invalid_at"] is not None:
             raise ProjectStoreError("An invalidated fact cannot be edited")
         now = time.time()
@@ -487,7 +834,8 @@ class ProjectStore:
                 conn.execute("BEGIN IMMEDIATE")
                 new_id = new_fact_id()
                 self._invalidate(conn, fact_id, now, new_id, "edited by the researcher")
-                self._insert(conn, project_id, user_id, f, now, fid=new_id)
+                self._insert(conn, project_id, user_id, f, now, fid=new_id, review_status="approved")
+                self._log(conn, project_id, user_id, "fact.edited", "fact", new_id, f"new version of {fact_id}")
                 self.touch_project(conn, project_id, user_id)
             return self.get_fact(project_id, new_id, user_id)
         sets: list[str] = []
@@ -507,7 +855,10 @@ class ProjectStore:
             args.append(json.dumps(list(dict.fromkeys(new_tags))[:10]))
         if sets:
             with self._connect() as conn:
-                conn.execute(f"UPDATE facts SET {', '.join(sets)} WHERE id = ? AND user_id = ?", (*args, fact_id, user_id))
+                conn.execute(f"UPDATE facts SET {', '.join(sets)} WHERE id = ? AND project_id = ?",
+                             (*args, fact_id, project_id))
+                self._log(conn, project_id, user_id, "fact.edited", "fact", fact_id,
+                          ", ".join(s.split(" ")[0] for s in sets))
                 self.touch_project(conn, project_id, user_id)
         return self.get_fact(project_id, fact_id, user_id)
 
@@ -515,7 +866,10 @@ class ProjectStore:
         if self.get_fact(project_id, fact_id, user_id) is None:
             return False
         with self._connect() as conn:
-            conn.execute("DELETE FROM facts WHERE id = ? AND project_id = ? AND user_id = ?", (fact_id, project_id, user_id))
+            self._require(conn, project_id, user_id, "owner", "editor")
+            conn.execute("DELETE FROM facts WHERE id = ? AND project_id = ?", (fact_id, project_id))
+            conn.execute("DELETE FROM fact_reviews WHERE fact_id = ?", (fact_id,))
+            self._log(conn, project_id, user_id, "fact.deleted", "fact", fact_id)
         return True
 
     # Retrieval -----------------------------------------------------------------------------------------------
@@ -528,12 +882,13 @@ class ProjectStore:
         k: int = DEFAULT_RECALL_K,
         touch: bool = True,
     ) -> list[dict[str, Any]]:
-        """Top-k valid facts by Personalized PageRank relevance combined with recency and importance."""
-        if not self.owns(project_id, user_id):
+        """Top-k valid, non-rejected facts by Personalized PageRank relevance combined with recency and importance."""
+        if not self.is_member(project_id, user_id):
             return []
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM facts WHERE project_id = ? AND user_id = ? AND invalid_at IS NULL", (project_id, user_id)
+                f"{self._FACT_SELECT} WHERE f.project_id = ? AND f.invalid_at IS NULL "
+                "AND COALESCE(r.review_status, 'pending') != 'rejected'", (project_id,),
             ).fetchall()
         if not rows:
             return []
@@ -685,7 +1040,11 @@ __all__ = [
     "PROJECT_ID_RE",
     "SINGLE_VALUED_RELATIONS",
     "VALUED_RELATIONS",
+    "ACTIVITY_CAP",
+    "REVIEW_STATUSES",
+    "ROLES",
     "FactInput",
+    "ProjectAccessError",
     "ProjectStore",
     "ProjectStoreError",
     "get_project_store",

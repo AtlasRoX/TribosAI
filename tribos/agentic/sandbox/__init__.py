@@ -57,15 +57,24 @@ def sandbox_memory_mb() -> int:
 class SandboxScope:
     user_id: str
     dataset_ids: frozenset[str] = field(default_factory=frozenset)
+    # dataset id -> owner, for project files other members shared (readable through project membership)
+    owners: dict[str, str] = field(default_factory=dict)
+
+    def owner_of(self, dataset_id: str) -> str:
+        return self.owners.get(dataset_id, self.user_id)
 
 
 _SCOPE: contextvars.ContextVar[SandboxScope | None] = contextvars.ContextVar("tribos_sandbox_scope", default=None)
 
 
 @contextlib.contextmanager
-def bound_scope(user_id: str, dataset_ids: Iterable[str]) -> Iterator[SandboxScope]:
+def bound_scope(
+    user_id: str, dataset_ids: Iterable[str], owners: dict[str, str] | None = None
+) -> Iterator[SandboxScope]:
     """Bind the datasets one run may analyse for the duration of the block (copied into worker threads)."""
-    scope = SandboxScope(user_id=str(user_id), dataset_ids=frozenset(i for i in dataset_ids if DATASET_ID_RE.match(str(i))))
+    ids = frozenset(i for i in dataset_ids if DATASET_ID_RE.match(str(i)))
+    scope = SandboxScope(user_id=str(user_id), dataset_ids=ids,
+                         owners={k: str(v) for k, v in (owners or {}).items() if k in ids})
     token = _SCOPE.set(scope)
     try:
         yield scope
@@ -119,7 +128,11 @@ def resolve_inputs(scope: SandboxScope | None, dataset_ids: Iterable[str]) -> tu
     store = existing_dataset_store()
     if store is None:
         return [], errors + [f"dataset {i} not found" for i in allowed]
-    resolved, store_errors = store.resolve_for_user(scope.user_id, allowed)
+    resolved, store_errors = [], []
+    for owner in dict.fromkeys(scope.owner_of(i) for i in allowed):
+        found, missing = store.resolve_for_user(owner, [i for i in allowed if scope.owner_of(i) == owner])
+        resolved.extend(found)
+        store_errors.extend(missing)
     errors.extend(store_errors)
     root = str(default_upload_root())
     out: list[ResolvedInput] = []

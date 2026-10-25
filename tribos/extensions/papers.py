@@ -36,7 +36,7 @@ def _paper_path(tool: str, dataset_id: str) -> tuple[str | None, dict[str, Any] 
     store = existing_dataset_store()
     if store is None:
         return fail(f"Paper {dataset_id} not found.")
-    resolved, errors = store.resolve_for_user(scope.user_id, [dataset_id])
+    resolved, errors = store.resolve_for_user(scope.owner_of(dataset_id), [dataset_id])
     if errors or not resolved:
         return fail("; ".join(errors) or f"Paper {dataset_id} not found.")
     att = resolved[0]

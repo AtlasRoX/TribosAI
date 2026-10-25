@@ -75,6 +75,9 @@ class RunContext:
     project_id: str | None = None
     agent_options: dict[str, Any] | None = None
     control: RunControl | None = None
+    # The project's instructions (user-authored guidance) and the owners of project files shared by other members.
+    project_instructions: str = ""
+    dataset_owners: dict[str, str] = field(default_factory=dict)
 
     # Accumulated over the run.
     thoughts: list[dict[str, Any]] = field(default_factory=list)
