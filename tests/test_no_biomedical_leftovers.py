@@ -60,3 +60,35 @@ def test_prompts_have_no_literal_backslash_newlines():
     """A raw string ending a line with a backslash sends '\\' + newline to the model (BRK-5)."""
     for module, name, text in _prompt_strings():
         assert "\\\n" not in text, f"{module}.{name} contains a literal backslash-newline"
+
+
+_BIOMEDICAL_EVIDENCE_TAGS = ("<synapta", "<kegg_pathway", "<vivarix", "<copasi_steady_state", "<lumicell",
+                             "<biodiscovery_ranking", "<endpoint_vs_steady_state")
+
+
+def test_evidence_block_drops_legacy_biomedical_results():
+    """Synapta, BioModels/COPASI Vivarix, Lumicell and the discovery ranking never reach the model (SUP-11)."""
+    from tribos.agents.prompts import build_evidence_block
+    from tribos.tools.registry import ToolResult
+
+    legacy = {
+        "synapta": {"search_hits": [{"id": "ENSG00000133703", "name": "KRAS"}],
+                    "pathways": [{"id": "hsa04010", "description": "MAPK"}]},
+        "vivarix": {"model_id": "BIOMD0000000010", "initial_concentrations": {"A": 1.0},
+                    "final_concentrations": {"A": 0.5}},
+        "vivarix_steady_state": {"steady_state_status": "found", "steady_state_concentrations": {"A": 0.4}},
+        "lumicell": {"dataset_name": "atlas", "top_markers_by_cluster": {"0": [{"gene": "CD3E"}]}},
+    }
+    results = {k: ToolResult(success=True, tool_name=k, data=v) for k, v in legacy.items()}
+    block = build_evidence_block(results, "### target ranking\n| KRAS | 0.9 |")
+    assert block == "<evidence>\n</evidence>"
+    assert not [t for t in _BIOMEDICAL_EVIDENCE_TAGS if t in block]
+
+
+def test_prompts_module_has_no_biomedical_evidence_tags():
+    import inspect
+
+    from tribos.agents import prompts
+
+    source = inspect.getsource(prompts)
+    assert not [t for t in _BIOMEDICAL_EVIDENCE_TAGS if t in source]

@@ -188,7 +188,7 @@ async def test_evidence_source_runs_end_to_end(isolated, monkeypatch, tmp_path):
                                    "Balance depth with clarity: state the governing equations and assumptions, show the key steps, "
                                    "and note the validity regime and main caveats.")
     assert f'<trial nct_id="{NCT}">' in human.content
-    assert human.content.index("<fake_registry>") < human.content.index("<biodiscovery_ranking>")
+    assert "<fake_registry>" in human.content and "<biodiscovery_ranking>" not in human.content
     assert "TEST-SCOPE-NOTE: registry searched" in human.content
 
     assert res.execution_artifacts["fake_trials"] == {"n": 1, "extra": True}
@@ -363,15 +363,11 @@ def test_evidence_decorators_are_applied_and_escaped(isolated):
     tr = _golden_inputs()
     hooks.register_evidence_decorator("literature_document_attrs", "g", lambda p: {"study_type": 'a"b'})
     hooks.register_evidence_decorator("literature_tail", "t", lambda lit: "<excluded_literature count=\"0\"/>")
-    hooks.register_evidence_decorator("lumicell_tail", "l", lambda lum: "<dataset_provenance/>")
-    hooks.register_evidence_decorator("vivarix_attrs", "v", lambda viv: {"model_source": "user_upload"})
     hooks.register_evidence_decorator("query_entities", "q", lambda ctx: "<query_entities/>")
     block = build_evidence_block(tr, "r", query_context=object())
     assert block.startswith("<evidence>\n<query_entities/>")
     assert 'study_type="a&quot;b"' in block
     assert block.index("<excluded_literature") < block.index("</literature>")
-    assert block.index("<dataset_provenance/>") < block.index("</lumicell>")
-    assert 'model_source="user_upload">' in block
     no_passages = {"lithoscribe": ToolResult(success=True, tool_name="l", data={"ranked_passages": []})}
     assert "<literature" in build_evidence_block(no_passages, "r")
 

@@ -211,31 +211,6 @@ def _json(value: Any) -> str:
     return escape(json.dumps(value, default=str), quote=False)
 
 
-def _endpoint_vs_steady_state(final: dict[str, Any], steady: dict[str, Any], tolerance: float = 0.05) -> str:
-    """State whether the time course actually reached the computed steady state, so it is not assumed."""
-    diffs = []
-    for sp, end in final.items():
-        target = steady.get(sp)
-        if isinstance(end, (int, float)) and isinstance(target, (int, float)):
-            scale = max(abs(target), abs(end), 1e-9)
-            diffs.append((abs(end - target) / scale, sp))
-    if not diffs:
-        return ""
-    worst, worst_sp = max(diffs)
-    if worst <= tolerance:
-        return (
-            f"<endpoint_vs_steady_state>The time course reached the steady state: every species is within "
-            f"{tolerance:.0%} of it at the end of the simulation.</endpoint_vs_steady_state>"
-        )
-    far = sum(1 for d, _ in diffs if d > tolerance)
-    return (
-        f"<endpoint_vs_steady_state>The time course has not reached this steady state by the end of the "
-        f"simulation: {far} species differ from it by more than {tolerance:.0%} (largest: {escape(str(worst_sp))}, "
-        f"{worst:.0%}). Do not say the trajectory converges to it; the steady state may be unstable, belong to "
-        "another branch, or need a longer simulation to reach.</endpoint_vs_steady_state>"
-    )
-
-
 # The answer's evidence-level scale, in words: peer-reviewed journal/conference > preprint > textbook/reference work
 # > technical report/standard > web/other. Each literature document carries its level (from the Archivon grade, see
 # tribos/archivon/grading.py) so the model copies it instead of inferring, and upgrading, a document's standing.
@@ -450,8 +425,9 @@ def build_evidence_block(
 ) -> str:
     """Render successful tool outputs as XML-tagged evidence and failed ones as <tool_status> entries.
 
-    extra_sections are XML sections written by agentic phases, placed after the registered sources. Every value
-    from a tool or the Discovery report is XML-escaped (ORC-010).
+    extra_sections are XML sections written by agentic phases, placed after the registered sources. Every tool value
+    is XML-escaped (ORC-010). discovery_markdown is accepted for existing callers but no longer rendered: it was the
+    biomedical target ranking, and Tribos is STEM only (SUP-11).
     """
     parts: list[str] = ["<evidence>"]
     if query_context is not None:
@@ -459,77 +435,16 @@ def build_evidence_block(
 
     def ok(name: str) -> dict[str, Any] | None:
         res = tool_results.get(name)
-        if res is not None and getattr(res, "success", False) and isinstance(getattr(res, "data", None), dict):
-            return res.data
-        return None
+        if res is None or not getattr(res, "success", False):
+            return None
+        data = getattr(res, "data", None)
+        return data if isinstance(data, dict) else None
 
-    syn = ok("synapta")
-    if syn is not None:
-        parts.append('<synapta source="OpenTargets GraphQL + KEGG REST">')
-        hit = (syn.get("search_hits") or [{}])[0] if syn.get("search_hits") else {}
-        if hit:
-            parts.append(f"<target ensembl_id=\"{_attr(hit.get('id', ''))}\">{escape(str(hit.get('name') or hit.get('approvedSymbol') or ''))}</target>")
-        for a in (syn.get("associations") or [])[:5]:
-            parts.append(
-                f"<association disease=\"{_attr(a.get('disease_name'))}\" "
-                f"overall_score=\"{_attr(a.get('overall_association_score'))}\"/>"
-            )
-        for p in (syn.get("pathways") or [])[:8]:
-            parts.append(f"<kegg_pathway id=\"{_attr(p.get('id'))}\">{escape(str(p.get('description', '')))}</kegg_pathway>")
-        parts.append("</synapta>")
-
-    # A legacy Vivarix (BioModels/COPASI) result only: the "vivarix" alias of a Dynamis run is rendered as <dynamis>.
+    # The "vivarix" alias of a Dynamis run is rendered as <dynamis>. Legacy biomedical results (Synapta, BioModels/
+    # COPASI Vivarix runs carrying concentrations, Lumicell) are not rendered: Tribos is STEM only (SUP-11).
     viv = None if is_alias_duplicate("vivarix", tool_results) else ok("vivarix")
     if viv is not None and not ("final_concentrations" in viv or "initial_concentrations" in viv):
         parts.extend(render_dynamis(tool_results["vivarix"]))
-        viv = None
-    if viv is not None:
-        units = viv.get("units") or {}
-        diag = viv.get("diagnostics") or {}
-        parts.append(
-            f"<vivarix model_id=\"{_attr(viv.get('model_id'))}\" model_name=\"{_attr(viv.get('model_name'))}\" "
-            f"simulation_type=\"{_attr(viv.get('simulation_type', 'TIME_COURSE'))}\" solver=\"{_attr(viv.get('solver_method'))}\" "
-            f"duration=\"{_attr(viv.get('duration'))}\" time_unit=\"{_attr(units.get('time', 's'))}\" "
-            f"concentration_unit=\"{_attr(units.get('quantity', 'unknown'))}\" "
-            f"endpoint_drift_status=\"{_attr(diag.get('convergence_status', 'UNKNOWN'))}\""
-            f"{_decorator_attrs('vivarix_attrs', viv)}>"
-        )
-        parts.append(f"<initial_concentrations>{_json(viv.get('initial_concentrations', {}))}</initial_concentrations>")
-        parts.append(
-            f"<final_time_course_concentrations at_time=\"{_attr(viv.get('duration'))}\">"
-            f"{_json(viv.get('final_concentrations', {}))}</final_time_course_concentrations>"
-        )
-        ss = ok("vivarix_steady_state")
-        if ss is not None:
-            parts.append(
-                f"<copasi_steady_state status=\"{_attr(ss.get('steady_state_status'))}\">"
-                f"{_json(ss.get('steady_state_concentrations', {}))}</copasi_steady_state>"
-            )
-            comparison = _endpoint_vs_steady_state(viv.get("final_concentrations") or {}, ss.get("steady_state_concentrations") or {})
-            if comparison:
-                parts.append(comparison)
-        else:
-            parts.append("<copasi_steady_state>not computed; final values are time-course endpoints</copasi_steady_state>")
-        parts.append("</vivarix>")
-
-    lum = ok("lumicell")
-    if lum is not None:
-        parts.append(
-            f"<lumicell dataset=\"{_attr(lum.get('dataset_name') or lum.get('dataset_path'))}\" "
-            f"cells_after_qc=\"{_attr(lum.get('n_cells_post_qc'))}\" clusters=\"{_attr(lum.get('n_clusters'))}\" "
-            f"method=\"Leiden clustering; Wilcoxon rank-sum markers with Benjamini-Hochberg adjusted p-values\">"
-        )
-        for cl, markers in (lum.get("top_markers_by_cluster") or {}).items():
-            rows = [
-                f"{m.get('gene')} (log2FC={m.get('log_fold_change')}, p_adj={m.get('p_adj')})"
-                for m in (markers or [])[:5]
-                if isinstance(m, dict)
-            ]
-            parts.append(f"<cluster id=\"{_attr(cl)}\" cells=\"{_attr((lum.get('cluster_cell_counts') or {}).get(cl, ''))}\">{escape('; '.join(rows))}</cluster>")
-        if lum.get("target_expression_summary"):
-            parts.append(f"<target_expression>{_json(lum['target_expression_summary'])}</target_expression>")
-        parts.extend(_decorator_xml("lumicell_tail", lum))
-        parts.append("</lumicell>")
 
     # Dynamis, Physis, Calcula and Axiom results (LOG-1).
     parts.extend(stem_evidence(tool_results))
@@ -583,10 +498,6 @@ def build_evidence_block(
     parts.extend(_plugin_evidence(tool_results))
     parts.extend(s for s in (extra_sections or []) if s)
 
-    # The report embeds the researcher's question and upstream names (OpenTargets diseases): escaped like every
-    # other value, so no text in it can close the evidence tags (ORC-010).
-    if (discovery_markdown or "").strip():
-        parts.append(f"<biodiscovery_ranking>\n{escape(discovery_markdown, quote=False)}\n</biodiscovery_ranking>")
     parts.append("</evidence>")
     return "\n".join(parts)
 

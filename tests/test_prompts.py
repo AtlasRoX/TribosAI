@@ -52,8 +52,7 @@ def test_evidence_block_carries_identifiers_units_and_longer_passages():
     assert 'pmid="33721583"' in block
     assert "37.1%" in block
     assert "TAIL_MARKER" not in block and "[...]" in block  # truncated, but far beyond the old 200 chars
-    assert 'concentration_unit="nmol"' in block
-    assert "not computed; final values are time-course endpoints" in block
+    assert "<vivarix" not in block and "concentration_unit" not in block  # legacy BioModels runs are dropped (SUP-11)
     assert "<lumicell" not in block  # failed tools are reported as status, not evidence
 
 
