@@ -183,8 +183,15 @@ def _finish(checks: list[Check], uncertainty: list[str], answer: dict[str, Any],
 def _verify_solve(spec: ProblemSpec, tool: str, args: dict[str, Any], data: dict[str, Any]) -> Verdict:
     checks: list[Check] = []
     unc: list[str] = []
+    from .correspondence import check_task_correspondence
+
+    corr_ok, corr_detail, _ = check_task_correspondence(spec, tool, args, data)
+    checks.append(Check("correspondence to original task", corr_ok, 1, corr_detail))
+    if not corr_ok:
+        unc.append(f"correspondence failed: {corr_detail}")
+
     problem_eqs = spec.equations or ([spec.expression] if spec.expression else [])
-    tool_eqs = args.get("equations") if tool == "axiom_solve" else args.get("equation")
+    tool_eqs = args.get("equations") or args.get("equation")
     tool_eqs = [tool_eqs] if isinstance(tool_eqs, str) else list(tool_eqs or [])
     originals = [_residual(e, spec) for e in problem_eqs] if problem_eqs else [_residual(e, spec) for e in tool_eqs]
 
@@ -460,6 +467,17 @@ def _verify_expression_tool(spec: ProblemSpec, args: dict[str, Any], arg_key: st
         return Check("expression matches the problem", None, 1, "no expression argument"), original
     try:
         same = _equivalent(_expr(tool_text, spec), original)
+        if not same and spec.text:
+            from .definitions import parse_definitions, parse_with_definitions, evaluate
+
+            defs, _, _ = parse_definitions(spec.text)
+            if defs:
+                try:
+                    orig_eval = evaluate(parse_with_definitions(str(spec.expression), defs), defs)
+                    tool_eval = evaluate(parse_with_definitions(str(tool_text), defs), defs)
+                    same = bool(_equivalent(tool_eval, orig_eval) or sp.simplify(tool_eval - orig_eval) == 0)
+                except Exception:
+                    pass
     except ValueError:
         same = False
     return Check("expression matches the problem", same, 1, "" if same else f"tool used {tool_text!r}, problem has {spec.expression!r}"), original
@@ -722,11 +740,46 @@ def _verify_linalg(spec: ProblemSpec, args: dict[str, Any], data: dict[str, Any]
 def _verify_identity(spec: ProblemSpec, args: dict[str, Any], data: dict[str, Any]) -> Verdict:
     checks: list[Check] = []
     unc: list[str] = []
-    if spec.expression:
+    from .correspondence import check_task_correspondence
+
+    corr_ok, corr_detail, _ = check_task_correspondence(spec, "axiom_verify_identity", args, data)
+    checks.append(Check("correspondence to original task", corr_ok, 1, corr_detail))
+    if not corr_ok:
+        unc.append(f"correspondence failed: {corr_detail}")
+        return _finish(checks, unc, {"text": str(data.get("result") or data)[:500]})
+
+    lhs_t: str | None = None
+    rhs_t: str | None = None
+    if spec.expression and "=" in str(spec.expression):
         lhs_t, rhs_t = (p.strip() for p in spec.expression.replace("==", "=").split("=", 1))
+    elif spec.kind == "structured" and spec.params and "tasks" in spec.params:
+        claim_task = next(
+            (t for t in spec.params.get("tasks", []) if t.get("op") == "claim" and t.get("relation") == "="),
+            None,
+        )
+        if claim_task and claim_task.get("lhs") is not None and claim_task.get("rhs") is not None:
+            lhs_t, rhs_t = str(claim_task.get("lhs")), str(claim_task.get("rhs"))
+
+    defs = None
+    if spec.text:
+        from .definitions import parse_definitions
+        defs, _, _ = parse_definitions(spec.text)
+
+    if lhs_t is not None and rhs_t is not None:
         try:
-            same = _equivalent(_expr(args.get("lhs")) - _expr(args.get("rhs")), _expr(lhs_t) - _expr(rhs_t))
-            same = bool(same) or _proportional(_expr(args.get("lhs")) - _expr(args.get("rhs")), _expr(lhs_t) - _expr(rhs_t))
+            tool_diff = _expr(args.get("lhs")) - _expr(args.get("rhs"))
+            orig_diff = _expr(lhs_t) - _expr(rhs_t)
+            same = _equivalent(tool_diff, orig_diff)
+            same = bool(same) or _proportional(tool_diff, orig_diff)
+            if not same and defs:
+                from .definitions import parse_with_definitions, evaluate
+
+                try:
+                    orig_eval = evaluate(parse_with_definitions(f"({lhs_t}) - ({rhs_t})", defs), defs)
+                    tool_eval = evaluate(parse_with_definitions(f"({args.get('lhs')}) - ({args.get('rhs')})", defs), defs)
+                    same = bool(_equivalent(tool_eval, orig_eval) or sp.simplify(tool_eval - orig_eval) == 0)
+                except Exception:
+                    pass
         except ValueError:
             same = False
         checks.append(Check("identity matches the problem", same, 1))
@@ -737,6 +790,20 @@ def _verify_identity(spec: ProblemSpec, args: dict[str, Any], data: dict[str, An
     if claimed:
         diff = _expr(lhs_t, spec) - _expr(rhs_t, spec)
         exact = E._is_symbolic_zero(diff)
+        if not exact:
+            tool_diff = _expr(args.get("lhs")) - _expr(args.get("rhs"))
+            exact = E._is_symbolic_zero(tool_diff)
+            if not exact and defs:
+                from .definitions import parse_with_definitions, evaluate
+
+                try:
+                    diff_eval = evaluate(parse_with_definitions(f"({args.get('lhs')}) - ({args.get('rhs')})", defs), defs)
+                    exact = E._is_symbolic_zero(diff_eval)
+                    if not exact:
+                        orig_eval = evaluate(parse_with_definitions(f"({lhs_t}) - ({rhs_t})", defs), defs)
+                        exact = E._is_symbolic_zero(orig_eval)
+                except Exception:
+                    pass
         if exact:
             checks.append(Check("lhs - rhs simplifies to 0", True, 2, "symbolic proof"))
         else:
@@ -808,7 +875,9 @@ def verify(spec: ProblemSpec, tool: str, args: dict[str, Any], data: dict[str, A
             return Verdict("unverified", 0, [Check("tool executed", True, 0)], ["no verifier for this tool"], {"text": str(data)[:500]})
         spec = ProblemSpec(text=spec.text, kind=kind, domain=spec.domain, assumptions=spec.assumptions)  # type: ignore[arg-type]
     try:
-        if kind in X.EXT_TOOLS:
+        if tool == "axiom_verify_identity" and (kind in ("identity", "structured") or (spec.params and any(t.get("op") == "claim" for t in spec.params.get("tasks", [])))):
+            v = _verify_identity(spec, args, data)
+        elif kind in X.EXT_TOOLS:
             v = X.verify_extended(spec, tool, args, data, check_alignment=not from_args)
         elif tool == "axiom_nintegrate":
             v = X.verify_nintegrate(spec, args, data)
@@ -833,6 +902,11 @@ def verify(spec: ProblemSpec, tool: str, args: dict[str, Any], data: dict[str, A
             ["the verifier could not check this result"], {"text": str(data.get("result") or data)[:500]},
         )
     v.checks.insert(0, Check("tool executed", True, 0))
+    from .correspondence import check_task_correspondence
+
+    corr_ok, corr_detail, _ = check_task_correspondence(spec, tool, args, data)
+    if not any(c.name == "correspondence to original task" for c in v.checks):
+        v.checks.append(Check("correspondence to original task", corr_ok, 1, corr_detail))
     misread = _misread(spec, args) if kind != "structured" else []
     if misread:
         # The question defines these names as functions; a call that multiplies by them (T(n) read as T*n) or leaves
@@ -843,6 +917,10 @@ def verify(spec: ProblemSpec, tool: str, args: dict[str, Any], data: dict[str, A
                               f"the question defines {', '.join(misread)} as function(s); this call does not apply them"))
         v.uncertainty.insert(0, "interpretation failed: the computation answers a different problem than the question; "
                                 "this says nothing about whether the question's own claim is true")
+        return v
+    if not corr_ok:
+        v.status = "refuted"
+        v.uncertainty.insert(0, f"correspondence failed: {corr_detail}")
         return v
     if spec.unaccounted and v.status in ("verified", "partially_verified"):
         # The answer was checked against the parsed problem, but the parse ignores part of the question.
@@ -857,10 +935,11 @@ def _misread(spec: ProblemSpec, args: dict[str, Any]) -> list[str]:
     from .definitions import misread_functions
     from .problem import normalize_math_text
 
-    exprs = [spec.expression or "", *spec.equations]
+    tool_exprs: list[str] = []
     for key in ("equations", "equation", "expression", "lhs", "rhs", "inequality"):
         value = args.get(key)
-        exprs += [str(x) for x in value] if isinstance(value, list) else [str(value)] if value else []
+        tool_exprs += [str(x) for x in value] if isinstance(value, list) else [str(value)] if value else []
+    exprs = tool_exprs if tool_exprs else ([spec.expression or "", *spec.equations])
     try:
         return misread_functions(normalize_math_text(spec.text), exprs)
     except Exception:  # noqa: BLE001 - the guard never blocks a result on its own failure

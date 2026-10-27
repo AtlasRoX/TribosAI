@@ -1948,6 +1948,37 @@ class TribosVerifier:
             )
 
         # -------------------------------------------------------------
+        # 4a. TASK CORRESPONDENCE CHECK (F04)
+        # -------------------------------------------------------------
+        from ..axiom.correspondence import check_task_correspondence
+        from ..axiom.problem import parse_problem
+
+        q_spec = parse_problem(query or "")
+        mismatched_tools: list[str] = []
+        for t_name, t_res in (tool_results or {}).items():
+            if not t_res or not getattr(t_res, "success", False):
+                continue
+            t_data = getattr(t_res, "data", None)
+            if isinstance(t_data, dict):
+                corr_ok, corr_detail, _ = check_task_correspondence(q_spec, t_name, getattr(t_res, "metadata", {}) or t_data, t_data)
+                if not corr_ok:
+                    mismatched_tools.append(f"{t_name}: {corr_detail}")
+
+        if mismatched_tools:
+            if "no solution" in resp_lower or "empty set" in resp_lower or "unsolvable" in resp_lower:
+                defects.append(
+                    DefectItem(
+                        category="COMPLETION",
+                        severity=DefectSeverity.CRITICAL,
+                        description=(
+                            f"Response asserts the result of a mistranslated computation ({'; '.join(mismatched_tools)}). "
+                            "Solving an inconsistent simultaneous system does not validate an independent evaluation request."
+                        ),
+                        suggested_correction="Answer the user's actual requested task instead of the mismatched computation.",
+                    )
+                )
+
+        # -------------------------------------------------------------
         # 4b. REGISTERED FEATURE CHECKS (ODE parameters, evidence grades, dataset consent, ...)
         # -------------------------------------------------------------
         checks = get_verification_checks()

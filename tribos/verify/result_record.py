@@ -213,6 +213,18 @@ def build_result_record(query: str, tool_results: dict[str, Any]) -> ResultRecor
         if not isinstance(data, dict):
             continue
         tool = str(getattr(res, "tool_name", "") or "")
+        from ..axiom.correspondence import check_task_correspondence
+        from ..axiom.problem import parse_problem
+
+        q_spec = parse_problem(query or "")
+        corr_ok, corr_detail, _ = check_task_correspondence(q_spec, tool, getattr(res, "metadata", {}) or data, data)
+        if not corr_ok:
+            rec.provenance.append({
+                "key": str(key), "tool": tool, "success": False,
+                "status": "irrelevant", "reason": corr_detail,
+            })
+            continue
+
         rec.provenance.append({"key": str(key), "tool": tool, "success": True})
         if tool == "axiom_solve_problem" or str(key).endswith("math_agent.result"):
             expr = _answer_expression(data, func_name, var, str(key))

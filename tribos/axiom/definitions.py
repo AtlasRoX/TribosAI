@@ -666,7 +666,7 @@ def _application_tasks(text: str, defs: list[dict[str, Any]]) -> list[dict[str, 
     names = "|".join(re.escape(d["name"]) for d in defs)
     tasks: list[dict[str, Any]] = []
     m_eval_at = re.search(
-        r"(?i)\b(?:evaluate|compute|calculate|check)\s+(?:at|for)\s+(?:[a-z]\s*=\s*)?((?:\d+(?:\s*,\s*|\s+and\s+)?)+)",
+        r"(?i)\b(?:evaluate|compute|calculate|check)\s+(?:(?:at|for)\s+)?(?:[a-z]\s*=\s*)?((?:\d+(?:\s*,\s*|\s+and\s+)?)+)",
         text,
     )
     if m_eval_at and defs:
@@ -1915,6 +1915,11 @@ def check_structured(params: dict[str, Any], data: dict[str, Any], question: str
     defs, tasks = params.get("definitions") or [], params.get("tasks") or []
     results = {r["id"]: r for r in data.get("results") or []}
     out: list[tuple[str, bool | None, int, str]] = []
+
+    from .correspondence import is_tautology_claim
+    tautologies = [str(t.get("id") or t) for t in tasks if isinstance(t, dict) and is_tautology_claim(t)]
+    out.append(("validity: no trivial tautological claims", not tautologies, 1,
+                f"trivial tautology task(s) detected: {', '.join(tautologies)}" if tautologies else "all tasks are non-tautological"))
 
     names = {d["name"] for d in defs}
     misread = sorted({n for t in tasks for key in ("expression", "lhs", "rhs") if t.get(key)

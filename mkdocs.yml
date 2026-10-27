@@ -71,6 +71,7 @@ nav:
   - Overview: index.md
   - Architecture & Reasoning:
       - Scientific Architecture: SCIENTIFIC_VALIDATION_AND_ARCHITECTURE.md
+      - Engineering Harness Gap Analysis: AGENTIC_ENGINEERING_HARNESS_GAP_ANALYSIS.md
       - Agentic System Architecture: agentic/README.md
       - Auto-Routing: agentic/auto-routing.md
       - Reasoning Loop & References: agentic/references-agent-loop.md
