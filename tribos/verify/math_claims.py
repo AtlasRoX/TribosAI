@@ -100,7 +100,7 @@ class MathClaim:
     claim_id: str
     text: str
     context: str
-    kind: str  # relation | derivative | table_row | condition | grounding | definition
+    kind: str  # relation | derivative | table_row | condition | grounding | definition | heading | refuted | example | instruction
     status: str
     links: list[Link] = field(default_factory=list)
     detail: str = ""
@@ -108,11 +108,16 @@ class MathClaim:
     position: int = 0
     source_text: str = ""  # the answer text the statement was read from (segment or table row)
     lead: str = ""  # the prose just before it ("... steady-state amplitude"), which names the quantity
+    domain: str = ""
+    assumptions: list[str] = field(default_factory=list)
+    quantifiers: list[str] = field(default_factory=list)
+    case_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "claim_id": self.claim_id, "text": self.text, "context": self.context, "kind": self.kind,
             "status": self.status, "detail": self.detail, "defines": self.defines, "source_text": self.source_text[:400],
+            "domain": self.domain, "assumptions": self.assumptions, "quantifiers": self.quantifiers, "case_id": self.case_id,
             "links": [{"left": lk.left, "right": lk.right, "relation": lk.relation, "status": lk.status,
                        "detail": lk.detail, "source": lk.source} for lk in self.links],
         }
@@ -151,10 +156,14 @@ class _Statement:
     text: str
     context: str
     position: int
-    kind: str = "relation"  # relation | table_row
+    kind: str = "relation"  # relation | table_row | heading | refuted | example | instruction
     source: str = ""
     lead: str = ""
     around: str = ""  # the words just before and after the math ("for odd $n$", "(even $n$)")
+    domain: str = ""
+    assumptions: list[str] = field(default_factory=list)
+    quantifiers: list[str] = field(default_factory=list)
+    case_id: str = ""
 
 
 def _heading_before(md: str, pos: int) -> str:
@@ -162,6 +171,89 @@ def _heading_before(md: str, pos: int) -> str:
     for m in _HEADING_RE.finditer(md, 0, pos):
         last = (m.group(1) or m.group(2) or "").strip()
     return last[:120]
+
+
+def _is_in_heading(md: str, pos: int) -> bool:
+    line_start = md.rfind("\n", 0, pos) + 1
+    line_end = md.find("\n", pos)
+    line = md[line_start:line_end] if line_end != -1 else md[line_start:]
+    return bool(re.match(r"^\s{0,3}#{1,6}\s+", line))
+
+
+_REFUTED_CUE_RE = re.compile(
+    r"(?i)\b(?:refut(?:e|es|ed|ing|ation)|disprov(?:e|es|ed|ing)|false\s+claim|false\s+assertion|contradict(?:s|ed|ing|ion)\b.*that|suppose\s+for\s+contradiction|counterexample\s+to\b|hypothesi[sz]\s+that|fallacy|incorrect(?:ly)?\s+asserts?|claim(?:ed)?\s+falsely)\b"
+)
+_INSTRUCTION_CUE_RE = re.compile(
+    r"(?im)^\s*(?:task|instructions?|goal|objective)\s*:\s*"
+)
+
+
+def _extract_quantifiers(tokens: list[Tok]) -> tuple[list[Tok], list[str], list[str], str]:
+    if not tokens:
+        return tokens, [], [], ""
+    quantifiers: list[str] = []
+    assumptions: list[str] = []
+    domain = ""
+
+    # Leading \forall or \exists
+    if tokens[0].kind == "cmd" and tokens[0].value in ("forall", "exists"):
+        sep_idx = None
+        depth = 0
+        for i, tok in enumerate(tokens):
+            if tok.kind == "sym" and tok.value in ("(", "[", "{"):
+                depth += 1
+            elif tok.kind == "sym" and tok.value in (")", "]", "}"):
+                depth -= 1
+            elif depth == 0 and i > 0:
+                if tok.kind == "sym" and tok.value in (",", ":"):
+                    sep_idx = i
+                    break
+                if tok.kind == "cmd" and tok.value in ("quad", "qquad"):
+                    sep_idx = i
+                    break
+        if sep_idx is not None:
+            q_toks = tokens[:sep_idx]
+            rem_toks = tokens[sep_idx + 1:]
+            q_text = _tex(q_toks)
+            quantifiers.append(q_text)
+            tex_str = q_text
+            if "\\mathbb{N}" in tex_str or "\\mathbb{Z}" in tex_str or "integer" in tex_str:
+                domain = "integer"
+            elif "\\mathbb{R}" in tex_str or "real" in tex_str:
+                domain = "real"
+            elif "\\mathbb{C}" in tex_str or "complex" in tex_str:
+                domain = "complex"
+            m_ineq = re.search(r"([A-Za-z]\s*(?:>|<|\\ge|\\geq|\\le|\\leq|\\in)\s*[^,]+)", tex_str)
+            if m_ineq:
+                assumptions.append(m_ineq.group(1).strip())
+            return rem_toks, quantifiers, assumptions, domain
+
+    # Trailing (\forall ...) or (\exists ...)
+    if tokens and tokens[-1].kind == "sym" and tokens[-1].value == ")":
+        depth = 0
+        open_idx = None
+        for i in range(len(tokens) - 1, -1, -1):
+            if tokens[i].kind == "sym" and tokens[i].value == ")":
+                depth += 1
+            elif tokens[i].kind == "sym" and tokens[i].value == "(":
+                depth -= 1
+                if depth == 0:
+                    open_idx = i
+                    break
+        if open_idx is not None and open_idx + 1 < len(tokens):
+            if tokens[open_idx + 1].kind == "cmd" and tokens[open_idx + 1].value in ("forall", "exists"):
+                q_toks = tokens[open_idx + 1:-1]
+                rem_toks = tokens[:open_idx]
+                q_text = _tex(q_toks)
+                quantifiers.append(q_text)
+                if "\\mathbb{N}" in q_text or "\\mathbb{Z}" in q_text:
+                    domain = "integer"
+                m_ineq = re.search(r"([A-Za-z]\s*(?:>|<|\\ge|\\geq|\\le|\\leq|\\in)\s*[^,]+)", q_text)
+                if m_ineq:
+                    assumptions.append(m_ineq.group(1).strip())
+                return rem_toks, quantifiers, assumptions, domain
+
+    return tokens, quantifiers, assumptions, domain
 
 
 def _prefix(md: str, pos: int) -> str:
@@ -223,11 +315,27 @@ def _join_continuations(tokens: list[Tok]) -> list[Tok]:
                 return True
         return False
 
+    def starts_with_relation(line: list[Tok]) -> bool:
+        for tok in line:
+            if tok.kind == "sym" and tok.value in ("(", "[", "{"):
+                return False
+            if tok.kind == "sym" and tok.value == "=":
+                return True
+            if tok.kind == "cmd" and (tok.value in RELATIONS or tok.value in INEQUALITIES):
+                return True
+            if tok.kind == "sym" and tok.value in INEQUALITIES:
+                return True
+            if tok.kind in ("letter", "num", "word"):
+                return False
+        return False
+
     merged: list[list[Tok]] = []
     for line in cleaned:
-        if merged and line and not has_relation(line):
+        if not line:
+            continue
+        if merged and (not has_relation(line) or starts_with_relation(line)):
             merged[-1].extend(line)
-        elif line:
+        else:
             merged.append(line)
     out_tokens: list[Tok] = []
     for k, line in enumerate(merged):
@@ -276,8 +384,36 @@ def _clean_tokens(tokens: list[Tok]) -> list[Tok] | None:
     return out
 
 
+INEQUALITIES_MAP = {
+    "<": "lt",
+    ">": "gt",
+    "le": "le",
+    "leq": "le",
+    "leqslant": "le",
+    "ge": "ge",
+    "geq": "ge",
+    "geqslant": "ge",
+    "neq": "ne",
+    "ne": "ne",
+    "lt": "lt",
+    "gt": "gt",
+}
+
+
+def _split_pmod(tokens: list[Tok]) -> tuple[list[Tok], list[Tok] | None]:
+    for idx, tok in enumerate(tokens):
+        if tok.kind == "cmd" and tok.value in ("pmod", "pod"):
+            stripped = tokens[:idx]
+            mod_toks = tokens[idx + 1:]
+            if mod_toks and mod_toks[0].kind == "sym" and mod_toks[0].value == "{":
+                if mod_toks[-1].kind == "sym" and mod_toks[-1].value == "}":
+                    mod_toks = mod_toks[1:-1]
+            return stripped, mod_toks
+    return tokens, None
+
+
 def _split_relations(tokens: list[Tok]) -> tuple[list[list[Tok]], list[str]] | None:
-    """Terms and the relations between them; None when the statement is an inequality or uses +-."""
+    """Terms and the relations between them; None when the statement has unhandled relations or uses +-."""
     terms: list[list[Tok]] = [[]]
     rels: list[str] = []
     depth = 0
@@ -292,6 +428,10 @@ def _split_relations(tokens: list[Tok]) -> tuple[list[list[Tok]], list[str]] | N
                 rel = "eq"
             elif tok.kind == "cmd" and tok.value in RELATIONS:
                 rel = RELATIONS[tok.value]
+            elif tok.kind == "sym" and tok.value in INEQUALITIES_MAP:
+                rel = INEQUALITIES_MAP[tok.value]
+            elif tok.kind == "cmd" and tok.value in INEQUALITIES_MAP:
+                rel = INEQUALITIES_MAP[tok.value]
             elif (tok.kind == "sym" and tok.value in INEQUALITIES) or (tok.kind == "cmd" and tok.value in INEQUALITIES):
                 return None
             if rel is not None:
@@ -301,6 +441,14 @@ def _split_relations(tokens: list[Tok]) -> tuple[list[list[Tok]], list[str]] | N
         if tok.kind == "cmd" and tok.value in ("pm", "mp", "cdots", "ldots", "dots", "lim", "to"):
             return None
         terms[-1].append(tok)
+    cleaned_terms: list[list[Tok]] = []
+    for i, t in enumerate(terms):
+        stripped, mod_toks = _split_pmod(t)
+        if mod_toks is not None and i > 0:
+            mod_text = _tex(mod_toks)
+            rels[i - 1] = f"equiv_mod:{mod_text}"
+        cleaned_terms.append(stripped)
+    terms = cleaned_terms
     if any(not t for t in terms):
         return None
     return terms, rels
@@ -577,6 +725,26 @@ class _Env:
             raise Unsupported("bindings refer to each other")
         funcs = self.funcs
 
+        def expand_iterates(e: sp.Expr) -> sp.Expr:
+            def replace_iter(node: Any) -> Any:
+                if not isinstance(node, AppliedUndef):
+                    return node
+                name = type(node).__name__
+                m = re.fullmatch(r"(.+)__pow_(\d+)", name)
+                if not m:
+                    return node
+                base_name, k = m.group(1), int(m.group(2))
+                c = canonical_name(base_name)
+                if c not in funcs and c not in self.defined:
+                    return node
+                cur = node.args[0]
+                for _ in range(k):
+                    cur = sp.Function(base_name)(cur)
+                return cur
+            return e.replace(lambda x: isinstance(x, AppliedUndef), replace_iter)
+
+        expr = expand_iterates(expr)
+
         def is_bound_app(e: Any) -> bool:
             if not isinstance(e, AppliedUndef):
                 return False
@@ -749,6 +917,7 @@ class _Auditor:
         self.functions = functions
         self.claims: list[MathClaim] = []
         self.definitions: list[MathClaim] = []
+        self.seen_claims: set[tuple[str, str, str, str]] = set()
         # (claim, link index, a, b, relation, heading, symbols unknown when it was deferred)
         self.pending: list[tuple[MathClaim, int, _Term, _Term, str, str, frozenset[str]]] = []
         self._n = 0
@@ -913,37 +1082,109 @@ class _Auditor:
         extra_abs, extra_rel = self.env.precision_of(a.expr, b.expr)
         fl, fr = left.free_symbols, right.free_symbols
         integral = left.has(sp.Integral) or right.has(sp.Integral)
-        if fl != fr:
+        if rel in ("eq", "approx") and fl != fr:
             return "equation", f"unknowns {', '.join(sorted(str(s) for s in (fl ^ fr)))[:80]}"
-        if not fl:
+        all_syms = sorted(fl | fr, key=lambda s: s.name)
+        if not all_syms:
             lv, rv = _as_complex(left), _as_complex(right)
             if lv is None or rv is None:
                 return INCONCLUSIVE, "could not be evaluated numerically"
             scale = max(abs(lv), abs(rv), _scale(left), _scale(right))
             abs_tol, rel_tol = self._tolerance(a, b, rel, scale, integral)
             abs_tol, rel_tol = abs_tol + self._inherited_abs(a, b, lv - rv), max(rel_tol, extra_rel)
-            if abs(lv - rv) <= abs_tol + rel_tol * max(abs(lv), abs(rv)):
+            tol = abs_tol + rel_tol * max(abs(lv), abs(rv))
+
+            if rel.startswith("equiv_mod:"):
+                mod_str = rel.split(":", 1)[1]
+                try:
+                    mod_expr = self.env.resolve(parse_tokens(tokenize(mod_str), ParseContext(symbols=set(self.unknowns))))
+                    mv = complex(sp.N(mod_expr))
+                except Exception:
+                    try:
+                        mv = complex(float(mod_str))
+                    except Exception:
+                        mv = None
+                if mv is not None and abs(mv.imag) < 1e-9 and abs(mv.real) > 1e-9:
+                    m_val = abs(mv.real)
+                    diff = (lv.real - rv.real) / m_val
+                    err = abs(diff - round(diff)) * m_val
+                    if abs(lv.imag) < 1e-9 and abs(rv.imag) < 1e-9 and err <= tol:
+                        return PASSED, ""
+                    return FAILED, f"{_short(a.text)} ({_fmt(lv)}) is not congruent to {_short(b.text)} ({_fmt(rv)}) modulo {mod_str}"
+                return INCONCLUSIVE, f"unknown modulus {mod_str}"
+
+            if rel in ("lt", "gt", "le", "ge", "ne"):
+                if abs(lv.imag) > 1e-9 or abs(rv.imag) > 1e-9:
+                    return INCONCLUSIVE, "inequality on complex values"
+                lr, rr = lv.real, rv.real
+                ok = False
+                if rel == "lt":
+                    ok = (lr < rr + tol) and not (lr >= rr and tol == 0.0)
+                elif rel == "le":
+                    ok = (lr <= rr + tol)
+                elif rel == "gt":
+                    ok = (lr > rr - tol) and not (lr <= rr and tol == 0.0)
+                elif rel == "ge":
+                    ok = (lr >= rr - tol)
+                elif rel == "ne":
+                    ok = abs(lr - rr) > tol
+                if ok:
+                    return PASSED, ""
+                op_str = {"lt": "<", "le": "<=", "gt": ">", "ge": ">=", "ne": "!="}.get(rel, rel)
+                return FAILED, f"{_short(a.text)} evaluates to {_fmt(lv)}, which is not {op_str} {_short(b.text)} ({_fmt(rv)})"
+
+            if abs(lv - rv) <= tol:
                 return PASSED, ""
             case_info = f" (case: {self.current_case})" if self.current_case else ""
             used = {k: v for k, v in self.env.values.items() if (a.expr and sp.Symbol(k) in a.expr.free_symbols) or (b.expr and sp.Symbol(k) in b.expr.free_symbols)}
             substs = used if used else self.env.values
             subst_info = f" with {', '.join(f'{k}={_fmt(v)}' for k, v in substs.items())}" if substs else ""
             return FAILED, f"{_short(a.text)} evaluates to {_fmt(lv)}, {_short(b.text)} to {_fmt(rv)}{case_info}{subst_info}"
-        # An identity in the shared free symbols, tested at sample points.
-        syms = sorted(fl, key=lambda s: s.name)
+        # An identity or inequality in the shared free symbols, tested at sample points.
+        syms = all_syms
+        if rel in ("eq", "approx") and not integral:
+            try:
+                if sp.simplify(left - right) == 0:
+                    return PASSED, ""
+            except Exception:
+                pass
+        mod_val = None
+        if rel.startswith("equiv_mod:"):
+            mod_str = rel.split(":", 1)[1]
+            try:
+                mod_expr = self.env.resolve(parse_tokens(tokenize(mod_str), ParseContext(symbols=set(self.unknowns))))
+                if not integral:
+                    if sp.simplify(sp.Mod(left - right, mod_expr)) == 0:
+                        return PASSED, ""
+                mod_val = float(sp.N(mod_expr))
+            except Exception:
+                try:
+                    mod_val = float(mod_str)
+                except Exception:
+                    return INCONCLUSIVE, f"unknown modulus {mod_str}"
+
         try:
             fa = sp.lambdify(syms, _numeric_integrals(left), modules=["mpmath"])
             fb = sp.lambdify(syms, _numeric_integrals(right), modules=["mpmath"])
         except Exception:  # noqa: BLE001
             return INCONCLUSIVE, "could not be evaluated numerically"
+
         rng = random.Random(7)
-        t_values = [0.37, 1.13, 2.71, 4.4, 6.9, 0.05]
+        prob = (self.record.problem if self.record else None) or {}
+        is_int_sym = {s: (s.name in ("n", "k", "m", "i", "j") or "integer" in prob.get("domain", "")) for s in syms}
+        t_values = [1.0, 2.0, 3.0, 5.0, 7.0, 11.0] if all(is_int_sym.values()) else [0.37, 1.13, 2.71, 4.4, 6.9, 0.05]
         ok = bad = 0
         worst = ""
         for k in range(6):
             point = []
             for s in syms:
-                point.append(t_values[k] if s == self.env.var else rng.uniform(0.35, 2.2))
+                if is_int_sym.get(s):
+                    pt = float(k + 1)
+                elif s == self.env.var:
+                    pt = t_values[k]
+                else:
+                    pt = rng.uniform(0.35, 2.2)
+                point.append(pt)
             try:
                 lv, rv = complex(fa(*point)), complex(fb(*point))
             except Exception:  # noqa: BLE001 - a singular sample point is skipped
@@ -952,7 +1193,31 @@ class _Auditor:
                 continue
             abs_tol, rel_tol = self._tolerance(a, b, rel, max(abs(lv), abs(rv)), integral)
             abs_tol, rel_tol = abs_tol + 0.5 * extra_abs, max(rel_tol, extra_rel)
-            if abs(lv - rv) <= abs_tol + rel_tol * max(abs(lv), abs(rv)):
+            tol = abs_tol + rel_tol * max(abs(lv.real), abs(rv.real))
+
+            sample_ok = False
+            if rel.startswith("equiv_mod:") and mod_val is not None:
+                if abs(lv.imag) < 1e-9 and abs(rv.imag) < 1e-9:
+                    diff = (lv.real - rv.real) / mod_val
+                    err = abs(diff - round(diff)) * mod_val
+                    sample_ok = (err <= tol)
+            elif rel in ("lt", "gt", "le", "ge", "ne"):
+                if abs(lv.imag) < 1e-9 and abs(rv.imag) < 1e-9:
+                    lr, rr = lv.real, rv.real
+                    if rel == "lt":
+                        sample_ok = (lr < rr + tol) and not (lr >= rr and tol == 0.0)
+                    elif rel == "le":
+                        sample_ok = (lr <= rr + tol)
+                    elif rel == "gt":
+                        sample_ok = (lr > rr - tol) and not (lr <= rr and tol == 0.0)
+                    elif rel == "ge":
+                        sample_ok = (lr >= rr - tol)
+                    elif rel == "ne":
+                        sample_ok = abs(lr - rr) > tol
+            else:
+                sample_ok = abs(lv - rv) <= tol
+
+            if sample_ok:
                 ok += 1
             else:
                 bad += 1
@@ -960,7 +1225,8 @@ class _Auditor:
                     at = ", ".join(f"{s}={v:.3g}" for s, v in zip(syms, point, strict=True))
                     worst = f"at {at}: {_fmt(lv)} vs {_fmt(rv)}"
         if bad:
-            return FAILED, f"{_short(a.text)} and {_short(b.text)} differ ({worst})"
+            op_label = {"lt": "<", "le": "<=", "gt": ">", "ge": ">=", "ne": "!="}.get(rel, rel)
+            return FAILED, f"{_short(a.text)} and {_short(b.text)} differ under {op_label} ({worst})"
         if ok >= 3:
             return PASSED, ""
         return INCONCLUSIVE, "too few valid sample points"
@@ -968,18 +1234,32 @@ class _Auditor:
     # -- claims ---------------------------------------------------------------------------------------------------------
     def _new_claim(self, st: _Statement, kind: str) -> MathClaim:
         self._n += 1
-        return MathClaim(claim_id=f"m{self._n}", text=st.text[:300], context=st.context[:160], kind=kind,
-                         status=INCONCLUSIVE, position=st.position, source_text=st.source or st.text, lead=st.lead)
+        return MathClaim(
+            claim_id=f"m{self._n}",
+            text=st.text[:300],
+            context=st.context[:160],
+            kind=kind,
+            status=INCONCLUSIVE,
+            position=st.position,
+            source_text=st.source or st.text,
+            lead=st.lead,
+            domain=st.domain,
+            assumptions=list(st.assumptions),
+            quantifiers=list(st.quantifiers),
+            case_id=st.case_id or (self.current_case or ""),
+        )
 
     @staticmethod
     def _settle(claim: MathClaim) -> None:
+        if claim.kind in ("heading", "instruction"):
+            return
         statuses = [lk.status for lk in claim.links]
         if FAILED in statuses:
             claim.status = FAILED
             claim.detail = next(lk.detail for lk in claim.links if lk.status == FAILED)
         elif statuses and all(s == PASSED for s in statuses):
             claim.status = PASSED
-            claim.detail = ""
+            claim.detail = claim.links[0].detail if claim.kind == "refuted" and claim.links else ""
         else:
             claim.status = INCONCLUSIVE
             decided = sum(1 for s in statuses if s == PASSED)
@@ -1004,6 +1284,18 @@ class _Auditor:
         return None
 
     def statement(self, st: _Statement) -> None:
+        if st.kind == "heading":
+            claim = self._new_claim(st, "heading")
+            claim.status = INCONCLUSIVE
+            claim.detail = "Section heading (not an asserted factual identity)"
+            self.claims.append(claim)
+            return
+        if st.kind == "instruction":
+            claim = self._new_claim(st, "instruction")
+            claim.status = INCONCLUSIVE
+            claim.detail = "Instruction or goal statement"
+            self.claims.append(claim)
+            return
         cleaned = _clean_tokens(st.tokens)
         if cleaned is None:
             return
@@ -1014,14 +1306,31 @@ class _Auditor:
         if not rels:
             return
         terms = [self.term(t) for t in term_toks]
-        if terms[0].expr is not None and terms[0].expr == self.env.var:
+        if rels and rels[0] in ("eq", "approx") and terms[0].expr is not None and terms[0].expr == self.env.var:
             return  # "t = 0" says where the next statements are evaluated; it is not a claim
-        if isinstance(terms[0].expr, sp.Symbol) and canonical_name(terms[0].expr.name) in self.unknowns:
+        if rels and rels[0] in ("eq", "approx") and isinstance(terms[0].expr, sp.Symbol) and canonical_name(terms[0].expr.name) in self.unknowns:
             return  # "x = 45/8 gives equality": a root, endpoint or test point of the problem's unknown, not a binding
         if terms[0].expr is None and len(terms) >= 3:
             # An unreadable first term ("P(K = 3) = binom(10,3) 0.5^3 ... ~ 0.117") is a label; the relations after it
             # carry the claim.
             terms, rels = terms[1:], rels[1:]
+        if st.kind == "refuted":
+            claim = self._new_claim(st, "refuted")
+            for i, rel in enumerate(rels, start=1):
+                a, b = terms[i - 1], terms[i]
+                status, detail = self.compare(a, b, rel)
+                if status == FAILED:
+                    claim.links.append(Link(a.text[:120], b.text[:120], rel, PASSED, f"Refutation confirmed: statement does not hold ({detail})"))
+                elif status == PASSED:
+                    claim.links.append(Link(a.text[:120], b.text[:120], rel, FAILED, "Statement holds, but was asserted to be false / refuted"))
+                else:
+                    claim.links.append(Link(a.text[:120], b.text[:120], rel, INCONCLUSIVE, detail))
+            self._settle(claim)
+            dedup_key = (claim.text, claim.kind, claim.case_id or (self.current_case or ""), claim.context)
+            if dedup_key not in self.seen_claims or claim.status == FAILED:
+                self.seen_claims.add(dedup_key)
+                self.claims.append(claim)
+            return
         head = self._definable(terms[0])
         if head and head[0] == "function" and canonical_name(head[1]) not in self.env.defined:
             c = canonical_name(head[1])
@@ -1080,11 +1389,9 @@ class _Auditor:
                 (a.expr and any(canonical_name(s.name) in self.env.values for s in a.expr.free_symbols))
                 or (b.expr and any(canonical_name(s.name) in self.env.values for s in b.expr.free_symbols))
             )
-            if status == FAILED and not (a.refs or b.refs or has_bound_var or (i == 1 and defined)) and not self._numeric_only(a, b):
-                # An identity that fails without referring to anything bound may be an equation to solve.
-                claim.links.append(Link(a.text[:120], b.text[:120], rel, INCONCLUSIVE, "pending: possibly an equation"))
-                self.pending.append((claim, len(claim.links) - 1, a, b, rel, _heading_of(claim), self._unknowns(a, b)))
-                continue
+            is_ineq = rel in ("lt", "gt", "le", "ge", "ne")
+            has_quantifier = bool(st.quantifiers)
+            if status == FAILED and not is_ineq and not has_quantifier and not (a.refs or b.refs or has_bound_var or (i == 1 and defined)) and not self._numeric_only(a, b):
                 # An identity that fails without referring to anything bound may be an equation to solve.
                 claim.links.append(Link(a.text[:120], b.text[:120], rel, INCONCLUSIVE, "pending: possibly an equation"))
                 self.pending.append((claim, len(claim.links) - 1, a, b, rel, _heading_of(claim), self._unknowns(a, b)))
@@ -1104,7 +1411,10 @@ class _Auditor:
             self.definitions.append(claim)
             return
         self._settle(claim)
-        self.claims.append(claim)
+        dedup_key = (claim.text, claim.kind, claim.case_id or (self.current_case or ""), claim.context)
+        if dedup_key not in self.seen_claims or claim.status == FAILED:
+            self.seen_claims.add(dedup_key)
+            self.claims.append(claim)
 
     def _question_branch(self, head: tuple[str, str, tuple[sp.Symbol, ...]], terms: list[_Term]) -> dict[str, Any] | None:
         """The question's multi-branch definition whose branch this statement writes, renamed to the answer's name."""
@@ -1444,6 +1754,13 @@ def _tool_numbers(tool_results: dict[str, Any]) -> list[float]:
     return sorted(out)
 
 
+_BUILTIN_FUNCS = {
+    "sin", "cos", "tan", "sec", "csc", "cot", "sinh", "cosh", "tanh",
+    "exp", "ln", "log", "sqrt", "abs", "sgn", "sign", "Re", "Im",
+    "asin", "acos", "atan", "arcsin", "arccos", "arctan",
+}
+
+
 def _document_functions(md: str, problem_function: str) -> tuple[set[str], str]:
     """Names used as functions (x(t), x_p(t), E(0), \\dot x) and the independent variable."""
     names: set[str] = set()
@@ -1453,16 +1770,18 @@ def _document_functions(md: str, problem_function: str) -> tuple[set[str], str]:
         body = re.sub(r"\\rm\s+", "", body)
         for m in re.finditer(r"(?<![\\A-Za-z])([A-Za-z])(?:_\{?([A-Za-z0-9]+)\}?)?\s*\(\s*([A-Za-z]|[-\d.]+)\s*\)", body):
             base = m.group(1) + (f"_{m.group(2)}" if m.group(2) else "")
-            if base in ("e", "d", "i"):
+            if base in ("e", "d", "i") or base in _BUILTIN_FUNCS:
                 continue
             names.add(base)
             if re.fullmatch(r"[A-Za-z]", m.group(3)):
                 var_counts[m.group(3)] = var_counts.get(m.group(3), 0) + 1
         # \dot x, \ddot{x}; not \dots (an ellipsis: "s = -2, -4, \dots" made s a function and bound it).
         for m in re.finditer(r"\\d?dot(?![A-Za-z])\s*\{?\s*([A-Za-z])", body):
-            names.add(m.group(1))
-    if problem_function:
+            if m.group(1) not in _BUILTIN_FUNCS:
+                names.add(m.group(1))
+    if problem_function and problem_function not in _BUILTIN_FUNCS:
         names.add(problem_function)
+    names = {n for n in names if n not in _BUILTIN_FUNCS}
     variable = max(var_counts, key=lambda k: var_counts[k]) if var_counts else "t"
     return names, variable
 
@@ -1520,6 +1839,7 @@ def audit_answer(
                        _unknowns(md, problem, physical=_physical_question(query)))
 
     statements: list[_Statement] = []
+    case_marks = _case_marks(md, auditor.cases)
     for pos, body, in_table in sorted(_segments(md) + _plain_segments(md)):
         if in_table:
             continue
@@ -1527,13 +1847,40 @@ def audit_answer(
         if _CONDITIONAL_RE.search(prefix) or _REFERENCE_CUE_RE.search(prefix[-28:]):
             continue
         heading = _heading_before(md, pos)
+        suffix = md[pos + len(body):pos + len(body) + 60]
+        around = prefix[-60:] + " " + suffix
+
+        kind = "relation"
+        if _is_in_heading(md, pos):
+            kind = "heading"
+        elif _REFUTED_CUE_RE.search(prefix[-120:]) or _REFUTED_CUE_RE.search(suffix):
+            kind = "refuted"
+        elif _INSTRUCTION_CUE_RE.search(prefix[-80:]):
+            kind = "instruction"
+
+        case_id = next((cid for p, cid in reversed(case_marks) if p <= pos), "")
+
         try:
             tokens = _join_continuations(tokenize(body))
         except Exception:  # noqa: BLE001
             continue
-        for part in _depth_split(tokens, _is_separator):
-            statements.append(_Statement(part, _tex(part), heading, pos, source=body, lead=prefix[-160:],
-                                         around=prefix[-60:] + " " + md[pos + len(body):pos + len(body) + 60]))
+        clean_tokens, quantifiers, assumptions, domain = _extract_quantifiers(tokens)
+        for q in quantifiers:
+            for v in re.findall(r"\\(?:forall|exists)\s*([A-Za-z])", q):
+                auditor.unknowns.add(canonical_name(v))
+
+        for part in _depth_split(clean_tokens, _is_separator):
+            statements.append(_Statement(
+                part, _tex(part), heading, pos,
+                kind=kind,
+                source=body,
+                lead=prefix[-160:],
+                around=around,
+                domain=domain,
+                assumptions=list(assumptions),
+                quantifiers=list(quantifiers),
+                case_id=case_id,
+            ))
 
     row_items: list[tuple[int, str, list[tuple[float, float, str]], str, str]] = []
     for pos, _header, cells, heading in _table_rows(md):
