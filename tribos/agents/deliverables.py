@@ -17,6 +17,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
+_COMPOUND_VERBS = (
+    "prove or disprove", "show or disprove", "prove/disprove",
+)
+_COMPOUND_VERB_RE = re.compile(r"(?<![\w-])(?:" + "|".join(re.escape(v) for v in _COMPOUND_VERBS) + r")(?![\w-])", re.I)
+
 _VERBS = (
     "calculate", "compute", "determine", "find", "derive", "report", "give", "state", "estimate", "evaluate", "plot",
     "simulate", "verify", "check", "compare", "investigate", "explain", "discuss", "consult", "provide", "include",
@@ -30,12 +35,12 @@ _PROSE_VERBS = {"explain", "discuss", "consult", "describe"}
 _QUANTITY_VERBS = {
     "calculate", "compute", "determine", "find", "derive", "report", "estimate", "evaluate", "solve",
     "quantify", "predict", "give", "state", "prove", "disprove", "refute", "verify", "check", "test", "decide",
+    "prove or disprove",
 }
-_LEAD_RE = re.compile(r"^(?:\s*(?:the|a(?=\s+[a-z]{2,})|an|its|their|all|any|both|each|independently|clearly|also)\b)+", re.I)
+_LEAD_RE = re.compile(r"^(?:\s*(?:the|a(?=\s+[a-z]{2,})|an|its|their|all|any|both|each|independently|clearly|also|that|whether|if)\b)+", re.I)
 
 _TAIL_RE = re.compile(
-    r"\b(?:using|with|via|in order|so that|by|at|under|within|governed|given|defined|where|"
-    r"which|that|whose)\b.*$",
+    r"\b(?:using|with|via|in order|so that|by|under|within|governed|defined|whose)\b.*$",
     re.I,
 )
 _GENERIC_OVER_FOR = re.compile(
@@ -47,7 +52,7 @@ _STOP = {
     "the", "and", "for", "with", "that", "this", "from", "into", "its", "their", "any", "all", "results", "result",
     "values", "value", "including", "both", "each",
 }
-_SUBJECT_WORDS = {"system", "problem", "model", "question", "setup", "configuration"}
+_SUBJECT_WORDS = {"system", "problem", "model", "question", "setup", "configuration", "claim"}
 _ACTIVITY = {"simulate": "numerical simulation", "compare": "comparison", "plot": "plot"}
 _SPLIT_RE = re.compile(r"(?<!\d),(?!\d)\s*(?:and\s+|or\s+)?|\s+and\s+(?=(?:the\s+)?[a-z\-]+(?:\s+[a-z\-]+){0,3}\s*(?:,|$))", re.I)
 # Given parameter assignment like m = 2 kg, F0 = 10 N, x(0) = 0.1 m, \omega = 4 rad/s
@@ -82,7 +87,10 @@ def _clauses(question: str) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     question = _clean_question(question)
     for sentence in re.split(r"[.;:?!](?:\s+|$)", question or ""):
-        all_hits = list(_VERB_RE.finditer(sentence))
+        compound_hits = list(_COMPOUND_VERB_RE.finditer(sentence))
+        simple_hits = list(_VERB_RE.finditer(sentence))
+        filtered_simple = [m for m in simple_hits if not any(c.start() <= m.start() < c.end() for c in compound_hits)]
+        all_hits = sorted(compound_hits + filtered_simple, key=lambda m: m.start())
         hits = [m for m in all_hits if not _AUX_BEFORE_RE.search(sentence[:m.start()])]
         for i, m in enumerate(hits):
             end = hits[i + 1].start() if i + 1 < len(hits) else len(sentence)
@@ -213,10 +221,29 @@ def assess(
 
         proof_item = re.search(r"(?i)\b(?:proof|justification|argument|demonstration|refutation)\b", item)
         is_verdict_query = bool(
-            re.match(r"(?i)^(?:whether|if)\b", item) or proof_item or verb in ("decide", "prove", "disprove", "refute", "test")
+            re.match(r"(?i)^(?:whether|if)\b", item) or proof_item or verb in ("decide", "prove", "disprove", "refute", "test", "prove or disprove")
         )
 
-        if item_stems:
+        is_algebra_item = bool(re.search(r"(?i)\balgebra\b|\balgebraic\b", item))
+        has_algebra_work = bool(re.search(r"[-+*/]\s*[^=<>]+[=<>]\s*[-+*/]|\b[a-z]\s*[-+*]\s*\d+|[=<>]\s*[-+*/0-9a-z]+\s*[=<>]\s*[-+*/0-9a-z]+|\b[a-z]\([a-z0-9]+\)\s*[-+*]", answer or ""))
+
+        is_num_checks_item = bool(re.search(r"(?i)\b(?:numerical\s+checks?|checks?|comparisons?)\b", item))
+        has_num_checks = len(re.findall(r"\d+\s*(?:>|<|>=|<=|=)\s*\d+", answer or "")) >= 2
+
+        # Check if item is evaluating functions at specific values (e.g. "a(i) and b(i) separately for i = 0, 1, 2")
+        m_fn_vals = re.findall(r"([A-Za-z]\w*)\s*\(", item)
+        nums = re.findall(r"\d+", item)
+        is_point_eval = bool(m_fn_vals and nums and re.search(r"(?i)\b(?:for|at|when|with)\b", item))
+
+        if is_point_eval:
+            apps = [rf"(?<![\w.]){fn}\s*\(\s*{n}\s*\)" for fn in m_fn_vals for n in nums]
+            hits = sum(1 for rx in apps if re.search(rx, answer or ""))
+            present = hits / len(apps) if apps else 0.0
+        elif is_algebra_item:
+            present = 1.0 if has_algebra_work else 0.0
+        elif is_num_checks_item:
+            present = 1.0 if has_num_checks else 0.0
+        elif item_stems:
             present = sum(1 for s in item_stems if _has(stems_all, s)) / len(item_stems)
         else:
             present = 1.0 if has_math and re.sub(r"\s+", "", item) in re.sub(r"\s+", "", answer or "") else 0.0
@@ -225,7 +252,13 @@ def assess(
         if is_verdict_query and status_match:
             present = 1.0
 
-        if present < 0.4 and not (has_math and any(sym in answer for sym in re.findall(r"[A-Za-z0-9]+", item))):
+        is_missing = False
+        if is_point_eval:
+            is_missing = (present < 0.5)
+        elif present < 0.4 and not (has_math and any(sym in answer for sym in re.findall(r"[A-Za-z0-9]+", item))):
+            is_missing = True
+
+        if is_missing:
             results.append({
                 "id": item_id,
                 "item": item,
@@ -246,6 +279,17 @@ def assess(
                 score += 1.0
             if score > best_score:
                 best, best_score = text, score
+
+        if not best and is_algebra_item and has_algebra_work:
+            for text, _ in passages:
+                if re.search(r"[-+*/]\s*[^=<>]+[=<>]\s*[-+*/]|\b[a-z]\([a-z0-9]+\)\s*[-+*]", text):
+                    best = text
+                    break
+        if not best and is_num_checks_item and has_num_checks:
+            for text, _ in passages:
+                if re.search(r"\d+\s*(?:>|<|>=|<=|=)\s*\d+", text):
+                    best = text
+                    break
 
         if not best and status_match:
             best = status_match.group(0)

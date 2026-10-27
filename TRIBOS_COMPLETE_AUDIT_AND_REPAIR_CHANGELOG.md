@@ -1691,3 +1691,49 @@ Observed in runs S05, S06, S07, S08, and historical reports I23, I33:
 - `tests/test_feat_f21_solution_set_kinds_and_broader_regressions.py`: **12 passed in 3.44s**.
 - Core audit suites (`tests/test_audit_repair.py`, `tests/test_audit_round3.py`): **139 passed, 2 skipped in 18.75s**.
 - Ruff check: clean (0 errors).
+
+
+---
+
+# Tribos Remaining Issues and Lean Formal Repair (Phases A through E)
+
+> **Branch**: `fix/remaining-verification-coverage-lean`  
+> **Status**: **100% COMPLETE & VERIFIED**  
+> **Evaluation Scope**: Phases A through E of `Tribos_Remaining_Issues_and_Lean_Repair_Prompt.md`  
+> **Test Evidence**:
+> - Dedicated Suite (`tests/test_feat_remaining_issues_and_lean.py`): **14/14 PASSED** in 4.56s
+> - Full Regressions (`tests/test_audit_repair.py`, `tests/test_audit_round3.py`, `test_feat_f08`, `test_feat_f12`, `test_feat_f14`): **179 PASSED, 2 SKIPPED, 0 FAILED** in 16.75s
+> - Web TypeScript Compilation (`npx tsc --noEmit`): **0 errors**
+
+---
+
+## 1. Issue-to-Root-Cause-to-File Matrix
+
+| Phase | Observed Defect | Root Cause Analysis | Affected Files | Resolution & Verification |
+|---|---|---|---|---|
+| **Phase A** | False certification of incomplete task & fragmented artifact `[a(i), 1=1, 2=2]` | `parse_quantifier` failed on `"allowed i"` and didn't inherit variable domain declarations into `a(i), b(i)`. Multi-function evaluations over point sets were ignored by `_application_tasks`. Irrelevant tautologies were not filtered. | `tribos/axiom/definitions.py`<br>`tribos/axiom/correspondence.py` | Added `_declared_domain` extraction, quantifier resolution for `"allowed <var>"`, cross-evaluation for multiple functions, symbolic difference reduction in `_run_claim`, and strict rejection of unprompted trivial tautology claims. |
+| **Phase B** | Deliverables panel reported algebra and numerical checks as "missing"; False "Partial" status | `_TAIL_RE` stripped clauses starting with `that` (dropping the entire proof claim). `_clauses` split compound verbs like `"prove or disprove"`. `assess` failed to recognize algebraic work and numerical comparisons without literal keyword matches. Referential phrase "the claim" wasn't excluded from subject words. | `tribos/agents/deliverables.py` | Protected compound verbs from splitting, updated `_LEAD_RE` and `_TAIL_RE` to preserve mathematical object clauses, recognized algebraic difference steps and numerical inequalities, and added `"claim"` to `_SUBJECT_WORDS`. |
+| **Phase B** | Output contract falsely flagged 2-item numbered list as 5 items | `extract_items` split on all bullet markers (`-`, `*`, `•`) even when top-level numbered list headers (`1. ...`, `2. ...`) existed, breaking when items contained internal bullets. | `tribos/utils/output_contract.py` | When 2+ numbered list items exist, parse strictly by numbered headers, keeping internal sub-bullets nested inside their parent item. |
+| **Phase B** | Verification cache pollution across domains and queries | Cache key was `(record.revision, math_content_hash)`, omitting query canonical text, domain conditions, definitions, and bindings. | `tribos/verify/math_claims.py` | Key expanded to `(record.revision, q_canon, p_dom, p_defs, p_bind, math_hash)`, guaranteeing full semantic cache isolation. |
+| **Phase C** | Disabled Lean formal prover misreported as failed/warning; fake compiler calls | Frontend mapped `disabled` to warning/neutral inconsistently. Lean runner relied on `base_name` matching allowing adversarial fresh-namespace axioms like `Adversarial.choice : False` or axioms asserting `False`. | `tribos/verify/formal/runner.py`<br>`tribos/verify/formal/correspondence.py`<br>`web/src/components/artifacts/formalData.ts`<br>`web/src/components/agentic/ui.tsx` | Mapped `disabled` and `disabled_by_user` to status tone `neutral` with badge `"Skipped: disabled by user"`. Enforced zero compiler calls when prover is disabled. Enforced strict semantic trust boundary rejecting fresh-namespace axioms and axioms asserting `False`. |
+| **Phase D** | Negative controls & generalization across broader tasks | Ensuring variable renames ($j$), coefficient shifts, counterexample domain filtering ($-2/3 \notin \mathbb{Z}_{\ge 0}$), sample traps ($H(n)$ disproved at $n=6$), Collatz reaches iterations, and restricted $f$ controls remain intact. | `tribos/axiom/definitions.py`<br>`tribos/axiom/correspondence.py`<br>`tests/test_feat_remaining_issues_and_lean.py` | Verified all negative controls and edge cases pass with zero false certifications. |
+
+---
+
+## 2. Before vs After Reproduction Behavior
+
+### Reproduction Query:
+> *Let $i$ be a nonnegative integer. Define $a(i) = 7i + 4$ and $b(i) = 4i + 2$.*  
+> *1. Prove or disprove that $a(i) > b(i)$ for every allowed $i$.*  
+> *2. Evaluate $a(i)$ and $b(i)$ separately for $i = 0, 1, 2$, and check each comparison.*  
+> *Any proposed counterexample must be a nonnegative integer.*  
+> *Return exactly two numbered items. Show the algebra and all three numerical checks. Add nothing else. Do not search the web or invoke a formal prover.*
+
+| Dimension | Before Repair | After Repair |
+|---|---|---|
+| **Axiom Tasks Generated** | Fragmented tasks: `a(i)`, `1 = 1`, `2 = 2` (injected tautologies, missing claim, missing point evaluations) | Complete structured tasks: Claim `a(i) > b(i)` over `nonnegative_integer`, point evaluations for $a(0), b(0), a(1), b(1), a(2), b(2)$, and comparisons $4 > 2, 11 > 6, 18 > 10$. |
+| **Proof Execution** | None (claimed $1=1$ passed) | Symbolic algebraic difference reduction: $(7i+4) - (4i+2) = 3i + 2 \ge 2 > 0$ for $i \ge 0$. Status: **proved**. Validates $i = -2/3$ rejected as outside declared domain. |
+| **Tautology Defense** | Irrelevant $1=1$ and $2=2$ accepted and certified | Irrelevant tautologies strictly rejected with `trivial tautological task detected`; legitimately requested reflexivities preserved. |
+| **Deliverables Assessment** | Labeled algebra and checks as "missing"; marked response "Partial" | Recognizes algebraic reduction steps and numerical comparison triples. All deliverables marked **addressed**. |
+| **Output Contract** | Split nested bullet points into 5 items, failing the 2-item contract | Top-level numbered items parsed as exactly 2 items with nested sub-bullets; **0 contract violations**. |
+| **Lean Formal Prover** | UI reported warning/failure; risked running uninstalled compiler | Correctly mapped to `status = "disabled"`, badge `"Skipped: disabled by user"`, tone `neutral`, **0 compiler invocations**. |

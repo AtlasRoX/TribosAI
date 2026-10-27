@@ -71,7 +71,7 @@ def _parse_sympy_value(val: Any) -> sp.Expr | None:
 
 
 def is_tautology_claim(claim_dict: dict[str, Any]) -> bool:
-    """Detect trivial tautological claims like 1=1 or 2=2 without variables or definitions."""
+    """Detect trivial tautological claims like 1=1 or 2=2 or bare number evaluations like '1' without variables or definitions."""
     lhs = str(claim_dict.get("lhs", "")).strip()
     rhs = str(claim_dict.get("rhs", "")).strip()
     var = claim_dict.get("variable")
@@ -82,6 +82,10 @@ def is_tautology_claim(claim_dict: dict[str, Any]) -> bool:
         parts = [p.strip() for p in expr.split("=", 1)]
         if len(parts) == 2 and parts[0] == parts[1] and re.fullmatch(r"[-+]?\d+(?:\.\d+)?", parts[0]):
             return True
+    cid = str(claim_dict.get("id", "")).strip()
+    op = claim_dict.get("op")
+    if (op == "evaluate" or not op) and re.fullmatch(r"[-+]?\d+", expr) and cid == expr:
+        return True
     return False
 
 
@@ -145,14 +149,56 @@ def check_task_correspondence(
                     {"mismatch": "target_expression_omitted"},
                 )
 
-    # 4. Tautology checks (1=1, 2=2)
-    # Check if tasks in structured data are trivial numeric tautologies
+    # 4. Tautology checks (1=1, 2=2, bare numeric tasks)
+    # Reject irrelevant tautologies or bare identity evaluations, while preserving legitimately requested ones
     for t in (args.get("tasks") or []) + (data.get("tasks") or []):
         if isinstance(t, dict) and is_tautology_claim(t):
+            t_expr = str(t.get("expression") or t.get("id") or "").strip()
+            lhs = str(t.get("lhs") or "").strip()
+            rhs = str(t.get("rhs") or "").strip()
+            clean_q = re.sub(r"\s+", " ", q_text)
+            clean_t = re.sub(r"\s+", " ", t_expr)
+
+            is_bare_number = bool(re.fullmatch(r"-?\d+(?:\.\d+)?", clean_t))
+            if is_bare_number:
+                is_legit = bool(
+                    re.search(
+                        rf"(?i)\b(?:evaluate|compute|calculate)\s+(?:the\s+value\s+of\s+|the\s+number\s+)?{re.escape(clean_t)}\b",
+                        q_text,
+                    )
+                )
+            else:
+                is_legit = bool(
+                    (clean_t and "=" in clean_t and clean_t in clean_q)
+                    or (lhs and rhs and re.search(rf"\b{re.escape(lhs)}\s*=\s*{re.escape(rhs)}\b", q_text))
+                    or (
+                        t_expr
+                        and re.search(
+                            rf"(?i)\b(?:evaluate|compute|calculate|prove|verify)\s+(?:that\s+|the\s+value\s+of\s+)?{re.escape(t_expr)}\b",
+                            q_text,
+                        )
+                    )
+                )
+            if not is_legit:
+                return (
+                    False,
+                    f"trivial tautological task '{t.get('id')}' detected; does not validate problem claims",
+                    {"mismatch": "tautology_claim"},
+                )
+
+    # 5. Proof obligation retention (Remaining Issues Phase A)
+    # If the question asks to prove/disprove an inequality or statement, but the tool only ran evaluations
+    # without a proof obligation or theorem:
+    if intents["proof"]:
+        tasks_list = [t for t in (args.get("tasks") or []) + (data.get("tasks") or []) if isinstance(t, dict)]
+        has_proof_task = any(t.get("op") in ("claim", "reaches") or t.get("proof") for t in tasks_list)
+        res_list = [r for r in (data.get("results") or []) if isinstance(r, dict)]
+        has_proof_result = any(r.get("op") in ("claim", "reaches") or r.get("status") in ("proved", "disproved", "unresolved") for r in res_list)
+        if tasks_list and not (has_proof_task or has_proof_result):
             return (
                 False,
-                f"trivial tautological task '{t.get('id')}' detected; does not validate problem claims",
-                {"mismatch": "tautology_claim"},
+                "original task requested a proof or refutation, but tool evidence contains only numerical/definition evaluations",
+                {"mismatch": "proof_obligation_omitted"},
             )
 
     # 6. Domain & witness validity check (S07 / I08)

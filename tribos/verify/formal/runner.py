@@ -35,6 +35,7 @@ STATUS_TITLES = {
     "timeout": "formalisation failed",
     "unavailable": "formal checker unavailable",
     "disabled": "formal prover disabled by user",
+    "disabled_by_user": "formal prover disabled by user",
     # Audit I33: the written theorem does not state the question (True/False target, assumed conclusion, changed
     # domain), or the question cannot be stated in the installed Lean environment.
     "mismatch": "formal statement does not match the question",
@@ -98,9 +99,16 @@ def uses_unproved(code: str) -> list[str]:
     found = sorted({m.group(1) for m in _SORRY_RE.finditer(body)})
     for m in _AXIOM_RE.finditer(body):
         ax_name = m.group(1).strip()
-        base_name = ax_name.split(".")[-1]
-        if ax_name not in _TRUSTED_FOUNDATIONAL_AXIOMS and base_name not in _TRUSTED_FOUNDATIONAL_AXIOMS:
+        if ax_name not in _TRUSTED_FOUNDATIONAL_AXIOMS:
             found.append(f"axiom {ax_name}")
+            continue
+        tail = body[m.end():]
+        colon = tail.find(":")
+        if colon != -1:
+            end_line = tail.find("\n", colon)
+            ax_type = tail[colon + 1:end_line if end_line != -1 else len(tail)].strip()
+            if re.search(r"\bFalse\b", ax_type):
+                found.append(f"axiom {ax_name} (asserts False)")
     return sorted(found)
 
 

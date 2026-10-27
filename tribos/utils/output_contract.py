@@ -361,7 +361,11 @@ _LIMITATIONS_BLOCK_RE = re.compile(r"(?ms)\n{2,}###\s+Evidence limitations\b.*$"
 
 def extract_items(text: str) -> list[str]:
     """Returns top-level items extracted from a list in the text."""
-    matches = list(_ITEM_START_RE.finditer(text))
+    numbered = list(_NUMBERED_START_RE.finditer(text))
+    if len(numbered) >= 2:
+        matches = numbered
+    else:
+        matches = list(_ITEM_START_RE.finditer(text))
     if not matches:
         return []
     items: list[str] = []
@@ -373,7 +377,7 @@ def extract_items(text: str) -> list[str]:
             paras = re.split(r"\n[ \t]*\n", item_raw)
             kept = [paras[0]]
             for p in paras[1:]:
-                if p.startswith((" ", "\t", ">")):
+                if p.startswith((" ", "\t", ">")) or re.match(r"^[ \t]*[-*•]\s+", p):
                     kept.append(p)
                 else:
                     break

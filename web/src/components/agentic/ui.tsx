@@ -70,7 +70,8 @@ export function statusTone(status: unknown): Tone {
   const s = str(status).toLowerCase();
   if (["done", "ok", "succeeded", "success", "answered", "approved", "completed", "supported", "identifiable", "high"].includes(s)) return "ok";
   if (["running", "queued", "pending", "in_progress", "waiting_approval", "edited", "auto", "medium"].includes(s)) return "info";
-  if (["partial", "skipped", "timeout", "interrupted", "low", "practically_non_identifiable", "neutral"].includes(s)) return "warn";
+  if (["disabled", "disabled_by_user", "not_applicable", "not_run", "skipped", "neutral"].includes(s)) return "neutral";
+  if (["partial", "timeout", "interrupted", "low", "practically_non_identifiable"].includes(s)) return "warn";
   if (["error", "failed", "missing", "rejected", "cancelled", "contradicts", "structurally_non_identifiable", "exhausted"].includes(s)) return "bad";
   return "neutral";
 }

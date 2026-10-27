@@ -394,13 +394,14 @@ def _declared_domain(text: str, name: str) -> str | None:
         if dom:
             return dom
     for pat in (
+        rf"\b(?:let|assume|given|where|suppose|for)\s+{n}\s+(?:be|is|in|\\in)\s+(?:a\s+|an\s+)?(\{{[^}}]*\}}|\[[^\]]*\]|\([^)]*\)|[^\n.;,]+)",
         rf"\bdomain\s+of\s+{n}\s+(?:is|=|:)\s*(\{{[^}}]*\}}|\[[^\]]*\]|\([^)]*\)|.+?(?=[.;\n]|\s*,\s*(?:with|where|and)\b|$))",
         rf"(?<![\w.]){n}\s+(?:has|have|with)\s+(?:the\s+)?domain\s*(?:is|=|:)?\s*(\{{[^}}]*\}}|\[[^\]]*\]|\([^)]*\)|.+?(?=[.;\n]|\s*,\s*(?:with|where|and)\b|$))",
         rf"(?<![\w.]){n}\s+(?:is|be)\s+defined\s+on\s+(?:the\s+domain\s+)?(\{{[^}}]*\}}|\[[^\]]*\]|\([^)]*\)|.+?(?=[.;\n]|\s*,\s*(?:with|where|and)\b|$))",
     ):
         m = re.search(pat, text, re.I)
         if m:
-            dom = domain_from_words(m.group(1).strip())
+            dom = _domain_from_symbol(m.group(1).strip()) or domain_from_words(m.group(1).strip())
             if dom:
                 return dom
     return None
@@ -453,13 +454,14 @@ def parse_definitions(text: str) -> tuple[list[dict[str, Any]], list[tuple[int, 
             declared[m.group(1)] = dom
             spans.append(m.span())
     for pat in (
+        r"\b(?:let|assume|given|where|suppose|for)\s+([A-Za-z][A-Za-z0-9_]{0,15})\s+(?:be|is|in|\\in)\s+(?:a\s+|an\s+)?(\{[^}]*\}|\[[^\]]*\]|\([^)]*\)|[^\n.;,]+)",
         r"\bdomain\s+of\s+([A-Za-z][A-Za-z0-9_]{0,15})\s+(?:is|=|:)\s*(\{[^}]*\}|\[[^\]]*\]|\([^)]*\)|[^\n.;]+)",
         r"(?<![\w.])([A-Za-z][A-Za-z0-9_]{0,15})\s+(?:has|have|with)\s+(?:the\s+)?domain\s*(?:is|=|:)?\s*(\{[^}]*\}|\[[^\]]*\]|\([^)]*\)|[^\n.;]+)",
         r"(?<![\w.])([A-Za-z][A-Za-z0-9_]{0,15})\s+(?:is|be)\s+defined\s+on\s+(?:the\s+domain\s+)?(\{[^}]*\}|\[[^\]]*\]|\([^)]*\)|[^\n.;]+)",
     ):
         for m in re.finditer(pat, text, re.I):
             fn_name = m.group(1)
-            dom = domain_from_words(m.group(2).strip())
+            dom = _domain_from_symbol(m.group(2).strip()) or domain_from_words(m.group(2).strip())
             if dom:
                 declared[fn_name] = dom
                 spans.append(m.span())
@@ -513,6 +515,8 @@ def parse_definitions(text: str) -> tuple[list[dict[str, Any]], list[tuple[int, 
         sentence_dom = _sentence_domain(text, first_at.get(name, 0))
         if name in declared or _declared_domain(text, name):
             entry["domain"] = declared.get(name) or _declared_domain(text, name)
+        elif entry.get("parameter") in declared or _declared_domain(text, entry.get("parameter", "")):
+            entry["domain"] = declared.get(entry["parameter"]) or _declared_domain(text, entry["parameter"])
         elif len(branch_domains) == 1:
             entry["domain"] = branch_domains.pop()
         elif sentence_dom:
@@ -664,19 +668,47 @@ def _mask(text: str, spans: list[tuple[int, int]]) -> str:
 
 
 def _application_tasks(text: str, defs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    names = "|".join(re.escape(d["name"]) for d in defs)
+    names = "|".join(re.escape(d["name"]) for d in defs) if defs else "$^"
     tasks: list[dict[str, Any]] = []
+
+    # 1. Multi-function evaluations across specified points:
+    # "Evaluate a(i) and b(i) separately for i = 0, 1, 2, and check each comparison."
+    m_eval_multi = re.search(
+        r"(?i)\b(?:evaluate|compute|calculate|check)\s+(?P<fns>[^.;:\n]+?)\s+(?:separately\s+)?(?:for|at|when|with)\s+(?:[a-z]\s*=\s*)?(?P<vals>(?:\d+(?:\s*,\s*|\s+and\s+)?)+)",
+        text,
+    )
+    if m_eval_multi and defs:
+        fns_part = m_eval_multi.group("fns")
+        vals_part = m_eval_multi.group("vals")
+        matched_defs = [d for d in defs if re.search(rf"(?<![\w.]){re.escape(d['name'])}(?![\w(])|(?<![\w.]){re.escape(d['name'])}\s*\(", fns_part)]
+        if not matched_defs:
+            matched_defs = defs
+        nums = re.findall(r"\d+", vals_part)
+        for val in nums:
+            for d in matched_defs:
+                expr = f"{d['name']}({val})"
+                tasks.append({"id": expr, "op": "evaluate", "expression": expr})
+        if re.search(r"(?i)\b(?:check\s+each\s+comparison|compare\s+(?:them|each)|check\s+comparisons?)\b", text):
+            if len(matched_defs) == 2:
+                m_rel = re.search(rf"(?<![\w.]){re.escape(matched_defs[0]['name'])}\s*\(\s*[a-z]\s*\)\s*(<=|>=|!=|<|>|=)\s*{re.escape(matched_defs[1]['name'])}\s*\(\s*[a-z]\s*\)", text)
+                rel_sym = m_rel.group(1) if m_rel else ">"
+                for val in nums:
+                    expr = f"{matched_defs[0]['name']}({val}) {rel_sym} {matched_defs[1]['name']}({val})"
+                    tasks.append({"id": expr, "op": "evaluate", "expression": expr})
+
     m_eval_at = re.search(
         r"(?i)\b(?:evaluate|compute|calculate|check)\s+(?:(?:at|for)\s+)?(?:[a-z]\s*=\s*)?((?:\d+(?:\s*,\s*|\s+and\s+)?)+)",
         text,
     )
-    if m_eval_at and defs:
+    if m_eval_at and defs and not tasks:
         nums = re.findall(r"\d+", m_eval_at.group(1))
         for val in nums:
             for d in defs:
                 expr = f"{d['name']}({val})"
                 tasks.append({"id": expr, "op": "evaluate", "expression": expr})
     for sentence in re.split(r"(?<=[.?!])\s+|\n+", text):
+        if m_eval_multi and m_eval_multi.group(0).strip() in sentence:
+            continue
         verb = _EVAL_VERB_RE.search(sentence)
         if not verb or not re.search(rf"(?<![\w.])(?:{names})\s*\(", sentence):
             continue
@@ -692,7 +724,8 @@ def _application_tasks(text: str, defs: list[dict[str, Any]]) -> list[dict[str, 
                     closed = not parse_with_definitions(piece, defs).free_symbols and re.search(r"\d", piece)
                 except Exception:  # noqa: BLE001
                     closed = False
-                if closed and not re.search(r"[A-Za-z]{2,}", piece):
+                # Must be a real arithmetic expression with operators, not a bare number fragment like "1" or "2"
+                if closed and not re.search(r"[A-Za-z]{2,}", piece) and re.search(r"[-+*/^]", piece):
                     tasks.append({"id": re.sub(r"\s+", "", piece), "op": "evaluate", "expression": piece})
                 continue
             if re.search(r"[A-Za-z]{3,}", re.sub(rf"(?<![\w.])(?:{names})\s*\(", "(", piece)):
@@ -871,7 +904,7 @@ def _substitution_tasks(text: str, defs: list[dict[str, Any]]) -> list[dict[str,
     return tasks
 
 
-def parse_quantifier(text: str, stmt_symbols: set[str]) -> tuple[str | None, str, list[str]] | None:
+def parse_quantifier(text: str, stmt_symbols: set[str], defs: list[dict[str, Any]] | None = None, full_text: str = "") -> tuple[str | None, str, list[str]] | None:
     """'for every nonnegative integer n' -> ("n", "nonnegative_integer", []); 'for all real x != 0' -> ("x", "real",
     ["x != 0"])."""
     q = _ascii_rel(text)
@@ -885,9 +918,18 @@ def parse_quantifier(text: str, stmt_symbols: set[str]) -> tuple[str | None, str
     if m and dom is None:
         dom = _domain_from_symbol(m.group(1)) or domain_from_words(m.group(1))
     if dom is None:
-        if not re.search(r"\b(?:every|all|each|any)\s+[a-z]\b", q):
+        is_allowed = bool(re.search(rf"\b(?:allowed|valid)\s+(?:values?\s+of\s+)?{re.escape(var)}\b|\b(?:every|all|each|any)\s+(?:(?:allowed|valid)\s+)?(?:values?\s+of\s+)?{re.escape(var)}\b", q))
+        is_generic = bool(re.search(r"\b(?:every|all|each|any)\s+[a-z]\b", q))
+        if not (is_allowed or is_generic):
             return None
-        dom = "unspecified"
+        if defs:
+            owner = next((d for d in defs if d.get("parameter") == var), None) or (defs[0] if len(defs) == 1 else None)
+            if owner and owner.get("domain") and owner["domain"] != "unspecified":
+                dom = owner["domain"]
+        if dom is None and full_text:
+            dom = _declared_domain(full_text, var) or domain_from_words(full_text)
+        if dom is None:
+            dom = "unspecified"
     return var, dom, conds
 
 
@@ -1008,7 +1050,7 @@ def _claim_tasks_explicit(text: str, defs: list[dict[str, Any]]) -> list[dict[st
             continue
         fnames = {d["name"] for d in defs}
         symbols |= {v for side in sides for v in re.findall(r"(?<![\w.])([a-z])(?![\w(])", side) if v not in fnames}
-        quant = parse_quantifier(m.group("q"), symbols)
+        quant = parse_quantifier(m.group("q"), symbols, defs=defs, full_text=text)
         if quant is None:
             continue
         claim["variable"], claim["domain"], claim["conditions"] = quant
@@ -1922,7 +1964,15 @@ def check_structured(params: dict[str, Any], data: dict[str, Any], question: str
     out: list[tuple[str, bool | None, int, str]] = []
 
     from .correspondence import is_tautology_claim
-    tautologies = [str(t.get("id") or t) for t in tasks if isinstance(t, dict) and is_tautology_claim(t)]
+    tautologies = [
+        str(t.get("id") or t) for t in tasks
+        if isinstance(t, dict) and is_tautology_claim(t) and not (
+            question and re.search(
+                rf"(?i)\b(?:evaluate|compute|calculate|prove|verify)\s+(?:the\s+value\s+of\s+)?{re.escape(str(t.get('expression') or t.get('id') or ''))}\b|{re.escape(str(t.get('expression') or t.get('id') or ''))}\s*=\s*{re.escape(str(t.get('expression') or t.get('id') or ''))}",
+                question,
+            )
+        )
+    ]
     out.append(("validity: no trivial tautological claims", not tautologies, 1,
                 f"trivial tautology task(s) detected: {', '.join(tautologies)}" if tautologies else "all tasks are non-tautological"))
 
@@ -2144,6 +2194,8 @@ def check_structured(params: dict[str, Any], data: dict[str, Any], question: str
                 "; ".join(comp_bad)[:400] if comp_bad else f"{checked} recomputation(s) agree"))
 
     missing = [t["id"] for t in tasks if t["id"] not in results or results[t["id"]].get("status") == "error"]  # "undefined" is an answer
+    if question and re.search(r"(?i)\b(?:prove|disprove|show\s+that|verify\s+that)\b", question) and not any(t.get("op") in ("claim", "reaches") or t.get("proof") for t in tasks):
+        missing.append("proof obligation")
     out.append(("coverage: every requested item has a result", not missing, 1,
                 ("no result for " + ", ".join(missing)) if missing else f"{len(tasks)} item(s) answered"))
     return out

@@ -54,7 +54,22 @@ def _split_header(statement: str) -> tuple[str, list[tuple[str, str]], str] | No
         return None
     binders = [(b.split(":", 1)[0].strip(), b.split(":", 1)[1].strip())
                for b in re.findall(r"[(\[{⦃]([^()\[\]{}⦃⦄]*:[^()\[\]{}⦃⦄]*)[)\]}⦄]", rest[:colon])]
-    return name, binders, rest[colon + 1:].strip()
+    raw_concl = rest[colon + 1:].strip()
+    depth = 0
+    concl_end = len(raw_concl)
+    for i, ch in enumerate(raw_concl):
+        if ch in "([{⦃":
+            depth += 1
+        elif ch in ")]}⦄":
+            depth -= 1
+        elif depth == 0 and raw_concl[i:i + 2] == ":=":
+            concl_end = i
+            break
+        elif depth == 0 and (raw_concl[i:i + 3] == "by " or raw_concl[i:i + 3] == "by\n"):
+            concl_end = i
+            break
+    conclusion = raw_concl[:concl_end].strip()
+    return name, binders, conclusion
 
 
 def _norm(prop: str) -> str:
@@ -137,15 +152,18 @@ def statement_issues(question: str, statement: str, *, mathlib: bool) -> list[st
     final_target = _norm(impl_parts[-1]) if impl_parts else concl
 
     if concl == "True" or final_target == "True":
-        issues.append("the target is the proposition True, which says nothing about the question")
+        if not re.search(r"\b(?:True|true)\b", question or ""):
+            issues.append("the target is the proposition True, which says nothing about the question")
     elif concl == "False" or final_target == "False":
         if not hyps and len(impl_parts) <= 1:
-            issues.append("the target is False with no hypotheses: it is not the question's statement (and is unprovable)")
+            if not re.search(r"\b(?:False|false)\b", question or ""):
+                issues.append("the target is False with no hypotheses: it is not the question's statement (and is unprovable)")
         elif not _DISPROVE_RE.search(question or ""):
             issues.append("the target is False from the stated hypotheses, a refutation of them, but the question does "
                           "not ask to refute them")
     elif concl in ("trivial", "1=1", "0=0"):
-        issues.append(f"the target is a trivial proposition ({conclusion.strip()}), which says nothing about the question")
+        if concl not in _norm(question or "") and conclusion.strip() not in (question or ""):
+            issues.append(f"the target is a trivial proposition ({conclusion.strip()}), which says nothing about the question")
     elif "=" in concl and "<" not in concl and ">" not in concl:
         sides = concl.split("=", 1)
         if len(sides) == 2 and sides[0] == sides[1] and concl not in _norm(question or ""):

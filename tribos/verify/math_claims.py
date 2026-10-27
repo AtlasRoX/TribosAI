@@ -1853,8 +1853,13 @@ def audit_answer(
         record = build_result_record(query, tool_results)
     md = response or ""
 
+    problem = record.problem or {}
+    q_canon = re.sub(r"\s+", " ", str(query or "").strip().lower())
+    p_dom = str(problem.get("domain") or "")
+    p_defs = tuple(sorted((str(d.get("name", "")), str(d.get("parameter", "")), str(d.get("domain", ""))) for d in problem.get("definitions") or [] if isinstance(d, dict)))
+    p_bind = tuple(sorted((str(k), str(v)) for k, v in (problem.get("bindings") or {}).items()))
     math_hash = _math_content_hash(md)
-    cache_key = (record.revision, math_hash)
+    cache_key = (record.revision, q_canon, p_dom, p_defs, p_bind, math_hash)
     if cache_key in _AUDIT_CACHE:
         cached = _AUDIT_CACHE[cache_key]
         return MathAudit(
@@ -1865,7 +1870,6 @@ def audit_answer(
             units=dict(cached.units),
             reused=True,
         )
-    problem = record.problem or {}
     func = re.sub(r"\(.*$", "", str(problem.get("function") or ""))
     functions, variable = _document_functions(md, func)
     functions |= {str(d["name"]) for d in problem.get("definitions") or [] if d.get("name")}
