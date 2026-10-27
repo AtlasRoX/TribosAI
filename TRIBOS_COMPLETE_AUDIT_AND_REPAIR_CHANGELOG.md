@@ -38,6 +38,8 @@
   - [F19: Audit Memory Writes and Prevent Unverified Trusted Knowledge](#ticket-f19)
   - [F20: Protect Saved Conversations Under Quota and Write Failures](#ticket-f20)
   - [F21: Preserve Solution-Set Kinds and Independent Checks Across Regressions](#ticket-f21)
+- [Addendum: Remaining Issues & Lean Repair (Phases A-E)](#addendum-remaining-issues-and-lean-repair-phases-a-through-e)
+- [Addendum: Perfect Agentic Engineering Harness & Unified Cognitive Memory Engine](#addendum-perfect-agentic-engineering-harness--unified-cognitive-memory-engine)
 
 
 ---
