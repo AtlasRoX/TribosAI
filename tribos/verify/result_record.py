@@ -178,8 +178,14 @@ def build_result_record(query: str, tool_results: dict[str, Any]) -> ResultRecor
             # stays a parameter of the problem. A claim's variable is case-local too: "n = 40 gives 1681" and
             # "n = 41 gives 1763" are two tested values.
             bound = [k for t in tasks for k in (t.get("bindings") or {})]
-            rec.problem["case_scoped"] = sorted({k for k in bound if bound.count(k) > 1}
-                                                | {t["variable"] for t in tasks if t.get("op") == "claim" and t.get("variable")})
+            cases = rec.problem["cases"]
+            case_vars = {k for c in cases for k in c.get("bindings", {})} if len(cases) > 1 else {k for k in bound if bound.count(k) > 1}
+            rec.problem["case_scoped"] = sorted(case_vars | {t["variable"] for t in tasks if t.get("op") == "claim" and t.get("variable")})
+        m_local = re.search(r"\b([a-z])\s+local\s+to\s+each\b", str(query or "").lower())
+        if m_local:
+            existing = set(rec.problem.get("case_scoped") or ())
+            existing.add(m_local.group(1))
+            rec.problem["case_scoped"] = sorted(existing)
     except Exception:  # noqa: BLE001 - an unparsed question still gets a record of its tool outputs
         rec.problem = {"text": (query or "")[:4000], "kind": "unknown"}
     rec.parameters = given_values(query or "", set(rec.problem.get("case_scoped") or ()))

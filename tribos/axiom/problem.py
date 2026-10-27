@@ -657,6 +657,16 @@ def _parse_solve(text: str, low: str, spec: ProblemSpec) -> bool:
     parts = [p for p in re.split(r";|,(?![^()\[\]]*[)\]])|\band\b", body) if p.strip()]
     eqs = [e for e in (extract_math(p, equation=True) for p in parts if "=" in p) if e]
     if len(eqs) >= 2:
+        # F02: Never merge separate assignments into a conjunction when the problem is an independent evaluation
+        if re.search(r"\b(?:independent|independently|local to each|in each|separately)\b", low):
+            return False
+        if not asks and re.search(r"\b(?:evaluate|compute|calculate)\b", low):
+            return False
+        if not asks and not re.search(r"\b(?:system|simultaneous)\b", low):
+            eq_vars = [re.findall(r"\b[a-z]\b", e.lower()) for e in eqs]
+            single_vars = [v[0] for v in eq_vars if len(v) == 1]
+            if len(single_vars) >= 2 and len(set(single_vars)) < len(single_vars):
+                return False
         spec.kind, spec.equations = "solve", eqs
         vs = re.search(r"(?i)\bfor\s+([a-z](?:\s*(?:,|and)\s*[a-z])+)\s*[.?]?\s*$", text)
         spec.variables = re.findall(r"\b[a-z]\b", vs.group(1)) if vs else []

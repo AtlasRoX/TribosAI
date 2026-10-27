@@ -511,6 +511,7 @@ class _Env:
         self.func_rel: dict[str, float] = {}
         self.func_dec: dict[str, list[str]] = {}
         self.bound_heading: dict[str, str] = {}  # symbol -> heading of the statement that bound it
+        self.bound_case: dict[str, str | None] = {}  # symbol -> case id under which it was bound
         # Functions the question itself defines (axiom/definitions.py: branches, conditions, domains). They are applied
         # through their own definition, never re-bound by a restatement in the answer and never read as a product.
         self.defined: dict[str, dict[str, Any]] = {}
@@ -680,12 +681,20 @@ def _short(text: str, limit: int = 70) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def _fmt(v: complex | float) -> str:
-    if isinstance(v, complex):
-        if abs(v.imag) > 1e-12 * max(1.0, abs(v.real)):
-            return f"{v.real:.6g}{v.imag:+.6g}i"
-        v = v.real
-    return f"{v:.6g}"
+def _fmt(v: Any) -> str:
+    if isinstance(v, (int, sp.Integer)):
+        return str(v)
+    if isinstance(v, sp.Rational):
+        fl = float(v)
+        return str(int(fl)) if fl.is_integer() else f"{fl:.6g}"
+    try:
+        c = complex(v)
+    except Exception:
+        return str(v)
+    if abs(c.imag) > 1e-12 * max(1.0, abs(c.real)):
+        return f"{c.real:.6g}{c.imag:+.6g}i"
+    r = c.real
+    return f"{r:.6g}"
 
 
 @dataclass
@@ -886,7 +895,11 @@ class _Auditor:
             abs_tol, rel_tol = abs_tol + self._inherited_abs(a, b, lv - rv), max(rel_tol, extra_rel)
             if abs(lv - rv) <= abs_tol + rel_tol * max(abs(lv), abs(rv)):
                 return PASSED, ""
-            return FAILED, f"{_short(a.text)} evaluates to {_fmt(lv)}, {_short(b.text)} to {_fmt(rv)}"
+            case_info = f" (case: {self.current_case})" if self.current_case else ""
+            used = {k: v for k, v in self.env.values.items() if (a.expr and sp.Symbol(k) in a.expr.free_symbols) or (b.expr and sp.Symbol(k) in b.expr.free_symbols)}
+            substs = used if used else self.env.values
+            subst_info = f" with {', '.join(f'{k}={_fmt(v)}' for k, v in substs.items())}" if substs else ""
+            return FAILED, f"{_short(a.text)} evaluates to {_fmt(lv)}, {_short(b.text)} to {_fmt(rv)}{case_info}{subst_info}"
         # An identity in the shared free symbols, tested at sample points.
         syms = sorted(fl, key=lambda s: s.name)
         try:
@@ -997,8 +1010,26 @@ class _Auditor:
                 head = None
         if head and head[0] == "function" and canonical_name(head[1]) in self.env.defined:
             head = None  # "T(n) = n/2" restates a branch of the question's definition: checked, never re-bound
-        if head and head[0] == "symbol" and canonical_name(head[1]) in self.case_scoped and self._is_bound(head):
-            self._open_case_scope(head[1])
+        if head and head[0] == "symbol" and self._is_bound(head):
+            c_name = canonical_name(head[1])
+            is_case = c_name in self.case_scoped
+            if not is_case and c_name not in self.env.params:
+                bound_case = self.env.bound_case.get(c_name)
+                case_changed = self.current_case is not None and bound_case != self.current_case
+                is_case_heading = bool(re.search(r"(?i)\b(?:case|example|item)\b", st.context or ""))
+                heading_changed = bool(st.context and self.env.bound_heading.get(c_name) and st.context != self.env.bound_heading.get(c_name))
+                has_case_cue = bool(re.search(r"(?i)\b(?:case|example|item)\s+[A-Za-z0-9]+\b", st.lead + " " + st.around))
+                if case_changed or (heading_changed and is_case_heading) or has_case_cue:
+                    is_case = True
+                    self.case_scoped.add(c_name)
+            if is_case:
+                self._open_case_scope(head[1])
+                if not self.current_case or self.current_case not in self.cases:
+                    case_label = re.search(r"(?i)\b(?:case|example|item)\s+([A-Za-z0-9]+)\b", st.lead + " " + st.around)
+                    if case_label:
+                        self.current_case = f"Case {case_label.group(1)}"
+                    elif len(terms) > 1:
+                        self.current_case = f"{head[1]} = {terms[1].text}"
         kind = "table_row" if st.kind == "table_row" else ("derivative" if head and head[0] == "derivative" else "relation")
         claim = self._new_claim(st, kind)
         defined: tuple[str, str, tuple[sp.Symbol, ...]] | None = None
@@ -1016,7 +1047,15 @@ class _Auditor:
                 claim.links.append(Link(a.text[:120], b.text[:120], rel, INCONCLUSIVE, "pending: " + detail))
                 self.pending.append((claim, len(claim.links) - 1, a, b, rel, _heading_of(claim), self._unknowns(a, b)))
                 continue
-            if status == FAILED and not (a.refs or b.refs or i == 1 and defined) and not self._numeric_only(a, b):
+            has_bound_var = bool(
+                (a.expr and any(canonical_name(s.name) in self.env.values for s in a.expr.free_symbols))
+                or (b.expr and any(canonical_name(s.name) in self.env.values for s in b.expr.free_symbols))
+            )
+            if status == FAILED and not (a.refs or b.refs or has_bound_var or (i == 1 and defined)) and not self._numeric_only(a, b):
+                # An identity that fails without referring to anything bound may be an equation to solve.
+                claim.links.append(Link(a.text[:120], b.text[:120], rel, INCONCLUSIVE, "pending: possibly an equation"))
+                self.pending.append((claim, len(claim.links) - 1, a, b, rel, _heading_of(claim), self._unknowns(a, b)))
+                continue
                 # An identity that fails without referring to anything bound may be an equation to solve.
                 claim.links.append(Link(a.text[:120], b.text[:120], rel, INCONCLUSIVE, "pending: possibly an equation"))
                 self.pending.append((claim, len(claim.links) - 1, a, b, rel, _heading_of(claim), self._unknowns(a, b)))
@@ -1061,17 +1100,19 @@ class _Auditor:
 
     def enter_case(self, case_id: str) -> None:
         """Statements from here on belong to `case_id`: its bindings replace the previous case's."""
-        if case_id == self.current_case or case_id not in self.cases:
+        if case_id == self.current_case:
             return
         self.current_case = case_id
-        for name, value in self.cases[case_id].items():
-            self._open_case_scope(name)
-            c = canonical_name(name)
-            try:
-                self.env.values[c] = sp.Rational(str(value))
-            except (TypeError, ValueError):
-                continue
-            self.env.order.append(c)
+        if case_id in self.cases:
+            for name, value in self.cases[case_id].items():
+                self._open_case_scope(name)
+                c = canonical_name(name)
+                try:
+                    self.env.values[c] = sp.Rational(str(value))
+                except (TypeError, ValueError):
+                    continue
+                self.env.order.append(c)
+                self.env.bound_case[c] = case_id
 
     def _open_case_scope(self, name: str) -> None:
         """A case-local name is stated again: the previous case ends. Its binding and everything bound after it (values
@@ -1083,9 +1124,11 @@ class _Auditor:
                 self.env.values.pop(later, None)
                 self.env.ulps.pop(later, None)
                 self.env.bound_heading.pop(later, None)
+                self.env.bound_case.pop(later, None)
             del self.env.order[cut:]
         self.env.values.pop(c, None)
         self.env.params.pop(c, None)
+        self.env.bound_case.pop(c, None)
 
     @staticmethod
     def _numeric_only(a: _Term, b: _Term) -> bool:
@@ -1137,6 +1180,7 @@ class _Auditor:
                 self.env.order.remove(c)
             self.env.order.append(c)
             self.env.bound_heading[c] = _heading_of(claim)
+            self.env.bound_case[c] = self.current_case
             ulp = value.ulp
             long_decimals = [d for d in value.decimals if "." in d and len(d.split(".")[1]) >= 3]
             if ulp is None and long_decimals:
@@ -1530,6 +1574,10 @@ def _case_marks(md: str, cases: dict[str, dict[str, str]]) -> list[tuple[int, st
             continue
         pat = rf"\bcase\s+\(?{re.escape(label)}\)?(?![\w])|^[ \t>*-]*\(?{re.escape(label)}\)?\s*[:.)](?!\d)"
         marks += [(m.start(), cid) for m in re.finditer(pat, md, re.I | re.M)]
+    if not marks:
+        pat_generic = r"(?im)^[ \t>*-]*(?:#+\s*)?(?:Case|Example)\s+\(?([A-Za-z0-9]+)\)?\s*[:.)]"
+        for m in re.finditer(pat_generic, md):
+            marks.append((m.start(), f"Case {m.group(1)}"))
     return sorted(marks)
 
 

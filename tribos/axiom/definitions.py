@@ -719,9 +719,22 @@ def _case_tasks(text: str, defs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not cases or not (any(m.group("word") for m in cases) or (len(cases) >= 2 and re.search(r"(?i)\bcases?\b", text))):
         return []
     head = _CASES_EXPR_RE.search(text[: cases[0].start()])
-    if not head:
+    expr = None
+    if head:
+        expr = head.group("expr").strip(" :,")
+    else:
+        tail = _CASES_EXPR_RE.search(text[cases[-1].end():]) or re.search(
+            r"(?i)\b(?:evaluate|compute|calculate|find|determine|work\s+out)\s+(?:the\s+value\s+of\s+)?(?P<expr>[^.;:\n]+)",
+            text[cases[-1].end():],
+        )
+        if tail:
+            expr = re.sub(
+                r"(?i)\s+(?:in\s+each(?:\s+case)?|for\s+each(?:\s+case)?|independently|separately).*$",
+                "",
+                tail.group("expr"),
+            ).strip(" :,")
+    if not expr:
         return []
-    expr = head.group("expr").strip(" :,")
     try:
         parsed = parse_with_definitions(expr, defs)
     except Exception:  # noqa: BLE001
@@ -737,28 +750,113 @@ def _case_tasks(text: str, defs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return tasks
 
 
+_INDEPENDENT_EVAL_RE = re.compile(
+    r"(?i)\b(?:evaluate|compute|calculate|find|determine|work\s+out)\s+(?:the\s+value\s+of\s+)?(?P<expr>[^.;:\n]+)"
+)
+
+
+def _independent_case_tasks(text: str, defs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Parse independent evaluations with local bindings stated before, within, or around the target expression:
+    e.g. 'Three independent calculations, k local to each: k=1, k=3, k=6, evaluate 2k+1.'
+    e.g. 'Three independent items: k=1, k=3, k=6; compute 2k+1 in each, with k local to its item.'
+    e.g. 'Evaluate 2k+1 for k=1, k=3, and k=6 independently.'
+    e.g. 'k=1, k=3, k=6. Evaluate 2k+1 in each.'
+    """
+    m_eval = _INDEPENDENT_EVAL_RE.search(text)
+    if not m_eval:
+        return []
+    expr_raw = m_eval.group("expr").strip(" :,")
+    expr_clean = re.sub(r"(?i)\s+\b(?:for|at|when|where|given)\b.*$", "", expr_raw)
+    expr_clean = re.sub(
+        r"(?i)\s+(?:in\s+each(?:\s+case|\s+item)?|for\s+each(?:\s+case|\s+item)?|independently|separately|"
+        r"with\s+[a-z]\s+local\s+to\s+.*|local\s+to\s+.*).*$",
+        "",
+        expr_clean,
+    ).strip(" :,")
+    if not expr_clean:
+        return []
+    try:
+        parsed = parse_with_definitions(expr_clean, defs)
+    except Exception:  # noqa: BLE001
+        return []
+    if not hasattr(parsed, "free_symbols") or isinstance(parsed, tuple):
+        return []
+    sym_names = {s.name for s in parsed.free_symbols}
+    if not sym_names:
+        return []
+
+    raw_pairs = re.findall(rf"([A-Za-z]\w*)\s*=\s*({_NUMBER})", text)
+    relevant = [(v, val) for v, val in raw_pairs if v in sym_names]
+    if len(relevant) < 2:
+        return []
+
+    is_independent = bool(re.search(
+        r"(?i)\b(?:independent|independently|local to each|in each|for each|separately|separate|cases?)\b",
+        text,
+    ))
+    var_counts = [v for v, _ in relevant]
+    has_repeated_var = len(var_counts) > len(set(var_counts))
+    if not (is_independent or has_repeated_var):
+        return []
+
+    factor = bool(_FACTOR_RE.search(text))
+    tasks = []
+    for i, (v, val) in enumerate(relevant, 1):
+        tasks.append({
+            "id": f"{v} = {val}",
+            "op": "evaluate",
+            "expression": expr_clean,
+            "bindings": {v: val},
+            "factor": factor,
+        })
+    return tasks
+
+
 _SUBSTITUTION_RE = re.compile(
     rf"(?i)\b(?:evaluate|compute|calculate|find|determine|work\s+out)\s+(?:the\s+value\s+of\s+)?(?P<expr>[^.?;]+?)\s+"
     rf"(?:for|at|when|with|if|where|given)\s+(?P<bindings>(?:[A-Za-z]\w*\s*=\s*{_NUMBER}\s*(?:,\s*(?:and\s+)?|\s+and\s+)?)+)"
-    rf"\s*(?:[.?;]|$)")
+    rf"(?:\s+(?:independently|separately|in\s+each\s+case))?\s*(?:[.?;]|$)"
+)
 
 
 def _substitution_tasks(text: str, defs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """"Evaluate n^2 + 1 for n = 3", "compute 2x + y at x = 1, y = 4": one evaluation with its own bindings (read by
-    the generic parsers as the equation n = 3 to solve)."""
+    """"Evaluate n^2 + 1 for n = 3", "compute 2x + y at x = 1, y = 4": evaluation tasks with scoped bindings."""
     tasks = []
     for m in _SUBSTITUTION_RE.finditer(text):
         expr = m.group("expr").strip(" :,")
-        bindings = dict(re.findall(rf"([A-Za-z]\w*)\s*=\s*({_NUMBER})", m.group("bindings")))
+        raw_pairs = re.findall(rf"([A-Za-z]\w*)\s*=\s*({_NUMBER})", m.group("bindings"))
+        if not raw_pairs:
+            continue
         try:
             parsed = parse_with_definitions(expr, defs)
         except Exception:  # noqa: BLE001
             continue
-        if not bindings or not set(bindings) <= {s.name for s in parsed.free_symbols} or not re.search(r"[-+*/^(]", expr):
+        if not hasattr(parsed, "free_symbols") or isinstance(parsed, tuple):
             continue
-        label = ", ".join(f"{k} = {v}" for k, v in bindings.items())
-        tasks.append({"id": f"{expr} at {label}", "op": "evaluate", "expression": expr, "bindings": bindings,
-                      "factor": bool(_FACTOR_RE.search(text))})
+        factor = bool(_FACTOR_RE.search(text))
+        var_names = [v for v, _ in raw_pairs]
+        if len(var_names) > len(set(var_names)):
+            for v, val in raw_pairs:
+                if v in {s.name for s in parsed.free_symbols}:
+                    tasks.append({
+                        "id": f"{v} = {val}",
+                        "op": "evaluate",
+                        "expression": expr,
+                        "bindings": {v: val},
+                        "factor": factor,
+                    })
+        else:
+            bindings = dict(raw_pairs)
+            if not set(bindings) <= {s.name for s in parsed.free_symbols} or not re.search(r"[-+*/^(]", expr):
+                continue
+            label = ", ".join(f"{k} = {v}" for k, v in bindings.items())
+            tasks.append({
+                "id": f"{expr} at {label}",
+                "op": "evaluate",
+                "expression": expr,
+                "bindings": bindings,
+                "factor": factor,
+            })
     return tasks
 
 
@@ -940,6 +1038,8 @@ def parse_structured(text: str) -> tuple[dict[str, Any] | None, list[str]]:
     if defs:
         tasks += _reaches_tasks(rest, defs)
     tasks += _case_tasks(rest, defs)
+    if not tasks:
+        tasks += _independent_case_tasks(rest, defs)
     if not tasks:
         tasks += _substitution_tasks(rest, defs)
     tasks += _claim_tasks(rest, defs)
