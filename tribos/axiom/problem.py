@@ -365,6 +365,12 @@ def _domain_and_assumptions(low: str, spec: ProblemSpec) -> None:
         spec.domain = "real"
     for m in re.finditer(r"\b([a-z])\s*>=\s*0\b", low):
         spec.assumptions.setdefault(m.group(1), "nonnegative")
+    for m in re.finditer(r"\bnon[\s-]?negative\s+integers?\s+([a-z])\b", low):
+        spec.assumptions[m.group(1)] = "nonnegative"
+        spec.domain = "nonnegative_integer"
+    for m in re.finditer(r"\bpositive\s+integers?\s+([a-z])\b", low):
+        spec.assumptions[m.group(1)] = "positive"
+        spec.domain = "positive_integer"
     # "for positive x and y", "positive real numbers a, b"
     for m in re.finditer(r"\bpositive\s+(?:real\s+)?(?:numbers?\s+|values?\s+)?([a-z](?:\s*(?:,|and)\s*[a-z]\b)*)", low):
         for name in re.findall(r"\b[a-z]\b", m.group(1)):
@@ -1091,8 +1097,10 @@ def _fidelity(spec: ProblemSpec, norm: str, low: str) -> list[str]:
 
     covered = {canon(n) for n in re.findall(r"\d+(?:\.\d+)?", " ".join(parts))}
     percents = set(re.findall(r"(\d+(?:\.\d+)?)\s*%", norm))  # "95%" is covered by 0.95
+    ellipsis_pat = r"(?:\.{3}|…|\\ldots|\\dots|\\cdots)"
+    norm_num = re.sub(rf"[{{(]\s*(?:[-+]?\d+(?:\.\d+)?\s*,\s*)+{ellipsis_pat}\s*[}})]", " ", norm)
     missing = [
-        n for n in re.findall(r"(?<![\w.])\d+(?:\.\d+)?(?![\w.])", norm)
+        n for n in re.findall(r"(?<![\w.])\d+(?:\.\d+)?(?![\w.])", norm_num)
         if canon(n) not in covered and not (n in percents and repr(float(n) / 100) in covered)
     ]
     fname = (spec.func or "y(").split("(")[0]

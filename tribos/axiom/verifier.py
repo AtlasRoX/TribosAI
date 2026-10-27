@@ -752,9 +752,34 @@ def _verify_identity(spec: ProblemSpec, args: dict[str, Any], data: dict[str, An
         else:
             # A disproof is checked exactly: substitute the counterexample into the original sides.
             values = {k: (sp.Rational(str(v)) if isinstance(v, (int, float)) else _expr(v)) for k, v in ce.items()}
+            from .definitions import in_domain
+
+            in_dom = True
+            for k, val in values.items():
+                if spec.domain and in_domain(val, spec.domain) is False:
+                    in_dom = False
+                    break
+                asm = (assumptions or {}).get(k)
+                if asm:
+                    for flag in re.split(r"[\s,]+", asm):
+                        flag = flag.strip().lower()
+                        if flag == "positive" and (val.is_extended_real is False or val <= 0):
+                            in_dom = False
+                        elif flag == "nonnegative" and (val.is_extended_real is False or val < 0):
+                            in_dom = False
+                        elif flag == "integer" and val.is_integer is False:
+                            in_dom = False
+                        elif flag == "real" and val.is_extended_real is False:
+                            in_dom = False
+            if not in_dom:
+                checks.append(Check("counterexample in problem domain", False, 1, f"counterexample {ce} violates domain/assumptions"))
+            else:
+                checks.append(Check("counterexample in problem domain", True, 1))
+
             lhs_e, rhs_e = _expr(lhs_t, spec), _expr(rhs_t, spec)
             dl, dr = E._num(lhs_e.subs(_by_name(lhs_e, values)), {}), E._num(rhs_e.subs(_by_name(rhs_e, values)), {})
-            ok = dl is not None and dr is not None and abs(dl - dr) > 1e-9 * max(1.0, abs(dl), abs(dr))
+            num_ok = dl is not None and dr is not None and abs(dl - dr) > 1e-9 * max(1.0, abs(dl), abs(dr))
+            ok = in_dom and num_ok
             checks.append(Check("counterexample re-evaluated on the original sides", ok, 2, f"at {ce}: {dl} vs {dr}"))
             text = f"{lhs_t} = {rhs_t} is NOT an identity: fails at {ce}"
             if data.get("holds_on_positive_reals"):

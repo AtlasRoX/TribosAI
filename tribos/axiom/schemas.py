@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Literal, get_args
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class AxiomSimplifyInput(BaseModel):
@@ -182,8 +182,7 @@ class AxiomSolveProblemInput(BaseModel):
     )
 
 
-_Domain = Literal["unspecified", "complex", "real", "rational", "integer", "nonnegative_integer", "positive_integer"]
-_DOMAINS = frozenset(get_args(_Domain))
+_Domain = str
 
 
 class StructuredBranch(BaseModel):
@@ -206,14 +205,15 @@ class StructuredDefinition(BaseModel):
             return data
         data = dict(data)
         domain = data.get("domain")
-        if isinstance(domain, str) and domain not in _DOMAINS:
-            # "positive_integers", "positive integers", "Z+": the same domain spelled differently, read with the same
-            # words the question parser uses; anything it cannot read is left for validation to reject, never widened.
-            from .definitions import domain_from_words  # local: definitions imports sympy
+        if isinstance(domain, str):
+            from .definitions import domain_from_words, is_valid_domain  # local: definitions imports sympy
 
-            mapped = domain_from_words(domain.replace("_", " "))
-            if mapped:
-                data["domain"] = mapped
+            if not is_valid_domain(domain):
+                mapped = domain_from_words(domain.replace("_", " "))
+                if mapped and is_valid_domain(mapped):
+                    data["domain"] = mapped
+                else:
+                    raise ValueError(f"invalid domain {domain!r}")
         # A single formula given without branches, or a branch whose formula is under another key ("formula",
         # "expr", "rule", "value"), is the same definition written differently; its condition is kept as given.
         if not data.get("branches"):
@@ -274,6 +274,22 @@ class StructuredTask(BaseModel):
     divisor: str | None = Field(default=None, max_length=100)
     variable: str | None = Field(default=None, pattern=r"^[A-Za-z]$")
     domain: _Domain | None = None
+
+    @field_validator("domain", mode="before")
+    @classmethod
+    def _validate_task_domain(cls, v: Any) -> Any:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            from .definitions import domain_from_words, is_valid_domain
+
+            if is_valid_domain(v):
+                return v
+            mapped = domain_from_words(v.replace("_", " "))
+            if mapped and is_valid_domain(mapped):
+                return mapped
+            raise ValueError(f"invalid domain {v!r}")
+        return v
     conditions: list[str] = Field(default_factory=list, max_length=4)
     statement: str | None = Field(default=None, max_length=1000)
     line: str | None = Field(default=None, max_length=40, description="zeros: c of a line Re(v) = c the zeros are compared with")
