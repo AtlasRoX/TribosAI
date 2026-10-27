@@ -828,20 +828,39 @@ def _calibration() -> dict[str, Any]:
         return {}
 
 
-def calibrated_confidence(status: str) -> dict[str, Any] | None:
-    """Empirical P(answer correct | status) from the held-out benchmark (tribos/axiom/math_eval.py). None when no answer
-    was given or no calibration is available: a status label is never turned into a made-up probability."""
-    if status == "failed":
+def clear_calibration_cache() -> None:
+    """Clear the cached calibration.json for testing or runtime reloads."""
+    _calibration.cache_clear()
+
+
+def calibrated_confidence(status: str, cal: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """Empirical P(answer correct | status) from the held-out benchmark (tribos/axiom/math_eval.py).
+
+    Applies strictly to the verified final answer expression only. Returns None when no answer was given,
+    status is not verified, or sample size is below statistical significance threshold: unverified,
+    rejected, invalidated or tiny-sample statuses never function as confidence badges.
+    """
+    if status != "verified":
         return None
-    cal = _calibration()
+    if cal is None:
+        cal = _calibration()
     entry = (cal.get("statuses") or {}).get(status)
-    if not entry or not entry.get("n"):
+    if not entry or not entry.get("n") or entry.get("n", 0) < 10:
         return None
     return {
         "p_correct": entry["confidence"],
         "lower_95": entry["lower_95"],
         "n": entry["n"],
+        "benchmark": cal.get("benchmark", "math-eval-v1"),
+        "split": cal.get("fitted_on", ""),
+        "fitted_at": cal.get("fitted_at"),
         "fitted_on": f"{cal.get('benchmark', '')}: {cal.get('fitted_on', '')}".strip(": "),
+        "scope": "final_expression_only",
+        "is_probability": False,
+        "limitations": (
+            "Held-out benchmark of single problems; applies strictly to the final expression, "
+            "not the surrounding written derivation or current-answer probability."
+        ),
     }
 
 
@@ -930,7 +949,9 @@ __all__ = [
     "StepLabels",
     "TOOL_CARDS",
     "TOOL_SCHEMAS",
+    "calibrated_confidence",
     "classify",
+    "clear_calibration_cache",
     "local_executor",
     "record_trajectory",
     "solve_math_problem",

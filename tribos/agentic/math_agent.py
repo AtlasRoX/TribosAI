@@ -62,8 +62,11 @@ def _evidence_xml(art: dict[str, Any]) -> str:
     # The benchmark rate is measured on verified answers only: it is never attached to an answer that is not verified.
     conf = (art.get("confidence") or {}) if (art.get("status") == "verified" and not invalidated) else {}
     conf_attr = (
+        f'benchmark="{escape(str(conf.get("benchmark", "math-eval-v1")), quote=True)}" '
+        f'benchmark_split="{escape(str(conf.get("split", "")), quote=True)}" '
         f'benchmark_precision="{conf["p_correct"]}" calibration_n="{conf["n"]}" '
         'precision_scope="this final answer expression only, not the written explanation" '
+        'is_probability="false" '
         if conf else ""
     )
     inval_attr = f'invalidated="true" invalidation_reason="{escape(inval_reason, quote=True)}" ' if invalidated else ""
@@ -187,7 +190,7 @@ class MathAgentPhase(AgentPhase):
         from ..tools.registry import ErrorType, ToolResult
 
         ok = run.status != "failed" and not art.get("invalidated") and art.get("status") not in ("rejected", "failed")
-        err_msg = art.get("invalidation_reason") if art.get("invalidated") else ("; ".join(art["uncertainty"][:2]) or "no verified answer")
+        err_msg = art.get("invalidation_reason") if art.get("invalidated") else ("; ".join((art.get("uncertainty") or [])[:2]) or "no verified answer")
         state.add_result(
             RESULT_KEY,
             ToolResult(
@@ -236,9 +239,6 @@ class MathAgentPhase(AgentPhase):
                    "checker confirmed" if any((r or {}).get("steps") for r in run.answer.get("results") or []) else "")
                 + ", and in the Verification section name the independent checks that "
                 f"passed ({'; '.join(passed)[:300]})."
-                + (f" The agent's verified answers were correct in {art['confidence']['p_correct']:.0%} of held-out "
-                   f"benchmark problems (n={art['confidence']['n']}); if you mention it, say it applies to the agent's "
-                   "final answer expression only, never to the whole answer or to values you derive from it." if art.get("confidence") else "")
                 + " Every other quantity you state must be one the evidence computed (for example a <parameter> in "
                   "<ode_verification>), copied exactly; never re-derive a number in the text."
             )

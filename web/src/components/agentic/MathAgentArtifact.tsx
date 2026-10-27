@@ -98,7 +98,7 @@ export function MathAgentArtifact({ data }: { data?: MathData | null }) {
           <Pill tone={status.tone} title="Status from the independent verifier, not from the model">
             {status.label}
           </Pill>
-          {conf && data.status === "verified" && !isInvalidated && !isHistorical ? ( /* a benchmark rate of verified answers says nothing about an unverified one */
+          {conf && typeof conf.p_correct === "number" && typeof conf.n === "number" && conf.n >= 10 && data.status === "verified" && !isInvalidated && !isHistorical ? ( /* a benchmark rate of verified answers says nothing about an unverified or tiny-sample one */
             <Pill
               tone="faint"
               title={

@@ -502,8 +502,18 @@ export interface MathAgentArtifact {
   answer?: { text?: string; latex?: string; [k: string]: any };
   verification?: { status: string; level: number; checks?: MathCheck[]; uncertainty?: string[] } | null;
   uncertainty?: string[];
-  /** Empirical P(correct | status) on the held-out benchmark; absent when no answer was given. */
-  confidence?: { p_correct: number; lower_95: number; n: number; fitted_on?: string } | null;
+  /** Empirical P(correct | status) on the held-out benchmark; absent when no answer was given or not verified. */
+  confidence?: {
+    p_correct: number;
+    lower_95: number;
+    n: number;
+    fitted_on?: string;
+    benchmark?: string;
+    split?: string;
+    scope?: string;
+    is_probability?: boolean;
+    limitations?: string;
+  } | null;
   problem?: { text?: string; kind?: string; [k: string]: any };
   steps?: MathAgentStep[];
   metrics?: Record<string, any>;

@@ -353,6 +353,18 @@ def is_operational_claim(text: str) -> bool:
     return bool(_OPERATIONAL_RE.search(text or ""))
 
 
+_BENCHMARK_CLAIM_RE = re.compile(
+    r"\b(?:held[\s\-]out\s+benchmark|benchmark\s+precision|benchmark\s+accuracy|"
+    r"(?:agent(?:'s)?|model(?:'s)?|verified\s+answers?|mathematics\s+agent)\b[^.;]{0,80}?\b(?:benchmark|calibration|precision|correct\s+in\s+\d+%)|"
+    r"(?:benchmark|calibration)\b[^.;]{0,80}?\b(?:precision\s+\d+%|n\s*=\s*\d+|\d+%\s+of\s+held[\s\-]out))\b",
+    re.IGNORECASE,
+)
+
+
+def is_benchmark_claim(text: str) -> bool:
+    return bool(_BENCHMARK_CLAIM_RE.search(text or ""))
+
+
 # Header words of a simulation output table ("| Variable | Initial | Final |"). A table without them (a discovery
 # table "| Material | Year |") holds no state values, so its bare numbers are not simulation claims.
 _SIM_TABLE_HEADER_RE = re.compile(
@@ -1846,7 +1858,13 @@ class TribosVerifier:
         # -------------------------------------------------------------
         claims: list[ClaimRecord] = []
         claim_defects, claim_support = self._audit_claims(
-            response_markdown, grounding, claims, entailment_judge, tool_events=tool_events, question=query,
+            response_markdown,
+            grounding,
+            claims,
+            entailment_judge,
+            tool_events=tool_events,
+            question=query,
+            tool_results=tool_results,
         )
         defects.extend(claim_defects)
 
@@ -1912,7 +1930,14 @@ class TribosVerifier:
         from ..utils.output_contract import extract as extract_contract
 
         need = getattr(query_context, "evidence_need", None) if query_context is not None else None
-        self_contained = bool(need is not None and getattr(need, "skip_retrieval", False))
+        from ..agents.evidence_need import is_self_contained
+        from ..axiom.problem import has_math_intent
+        is_math = bool(query and has_math_intent(query))
+        self_contained = bool(
+            (need is not None and getattr(need, "skip_retrieval", False))
+            or (query_context is not None and is_self_contained(query_context))
+            or is_math
+        )
         strict_form = extract_contract(query or "").strict_form
         if not non_empty_tools and not self_contained:
             # Response must state that evidence is unavailable
@@ -2903,6 +2928,133 @@ class TribosVerifier:
             "operational status: a statement about this run, not a scientific claim; no matching tool outcome was recorded",
         )
 
+    def _benchmark_claim(
+        self,
+        claims: list[ClaimRecord],
+        text: str,
+        tool_results: dict[str, Any] | None,
+        defects: list[DefectItem],
+    ) -> None:
+        """Ground a statement citing benchmark performance against genuine calibration records.
+
+        A historical metric (e.g. 98% precision on n=43 held-out problems) has traceable dataset/version
+        provenance in calibration.json or tool results. It is neither current-answer confidence nor a
+        substitute for verification; unavailable or contradictory provenance is reported truthfully.
+        """
+        from ..axiom.agent import calibrated_confidence
+
+        math_res = (tool_results or {}).get("agent.math_agent.result") or (tool_results or {}).get("axiom_solve")
+        res_data = getattr(math_res, "data", {}) or {} if math_res else {}
+        res_meta = getattr(math_res, "metadata", {}) or {} if math_res else {}
+        is_invalidated = bool(
+            res_meta.get("invalidated")
+            or res_data.get("invalidated")
+            or res_data.get("status") in ("rejected", "failed")
+        )
+        math_status = res_meta.get("status") or res_data.get("status")
+
+        if is_invalidated or math_status in ("rejected", "failed"):
+            self._add_claim(
+                claims,
+                "metadata",
+                text,
+                "contradicted",
+                "benchmark claim contradicted: mathematics for this problem was rejected or unverified; verified benchmark precision cannot apply",
+                "benchmark:invalidated",
+                "Candidate result rejected or invalidated; verified benchmark precision cannot apply",
+            )
+            defects.append(
+                DefectItem(
+                    category="CLAIM_CONTRADICTED",
+                    severity=DefectSeverity.CRITICAL,
+                    description=f"Sentence '{text}' asserts verified benchmark precision, but the mathematical candidate was rejected or unverified.",
+                    suggested_correction="Do not claim benchmark precision or verification confidence for unverified or rejected mathematics.",
+                    claim=text,
+                )
+            )
+            return
+
+        record = None
+        if isinstance(res_data, dict) and res_data.get("confidence"):
+            record = res_data["confidence"]
+        else:
+            record = calibrated_confidence("verified")
+
+        if not record or not record.get("n"):
+            self._add_claim(
+                claims,
+                "metadata",
+                text,
+                "unsupported",
+                "historical benchmark claim: no benchmark calibration record is available for this run",
+            )
+            defects.append(
+                DefectItem(
+                    category="GROUNDING",
+                    severity=DefectSeverity.MAJOR,
+                    description=f"Benchmark metric in '{text}' has no available benchmark calibration record or provenance.",
+                    suggested_correction="Omit unsupported benchmark metrics or ground them in real calibration records.",
+                    claim=text,
+                )
+            )
+            return
+
+        rec_p = float(record["p_correct"])
+        rec_n = int(record["n"])
+        rec_bench = str(record.get("benchmark") or "math-eval-v1")
+        rec_split = str(record.get("split") or record.get("fitted_on") or "held-out set")
+
+        pcts = re.findall(r"(\d+(?:\.\d+)?)%", text)
+        ns = re.findall(r"\bn\s*=\s*(\d+)", text, re.IGNORECASE) or re.findall(
+            r"(\d+)\s+held[\s\-]out", text, re.IGNORECASE
+        )
+
+        contradiction = False
+        mismatch_detail = []
+        if pcts:
+            for p_str in pcts:
+                p_val = float(p_str)
+                rec_pct = rec_p * 100
+                if abs(p_val - round(rec_pct)) > 1.0 and abs(p_val - rec_pct) > 1.0:
+                    contradiction = True
+                    mismatch_detail.append(f"claimed {p_str}% vs record {rec_p:.0%}")
+        if ns:
+            for n_str in ns:
+                if int(n_str) != rec_n:
+                    contradiction = True
+                    mismatch_detail.append(f"claimed n={n_str} vs record n={rec_n}")
+
+        if contradiction:
+            self._add_claim(
+                claims,
+                "metadata",
+                text,
+                "contradicted",
+                f"benchmark claim contradicted: {', '.join(mismatch_detail)}",
+                f"benchmark:{rec_bench}",
+                f"Benchmark record '{rec_bench}' ({rec_split}): n={rec_n}, precision={rec_p:.4f} (~{rec_p:.0%})",
+            )
+            defects.append(
+                DefectItem(
+                    category="CLAIM_CONTRADICTED",
+                    severity=DefectSeverity.CRITICAL,
+                    description=f"Sentence '{text}' contradicts the actual benchmark record ({', '.join(mismatch_detail)}).",
+                    suggested_correction=f"Report the exact historical benchmark figures ({rec_p:.0%}, n={rec_n}) or omit the claim.",
+                    claim=text,
+                )
+            )
+            return
+
+        self._add_claim(
+            claims,
+            "metadata",
+            text,
+            "supported",
+            f"historical benchmark precision: matches held-out benchmark record ({rec_p:.0%}, n={rec_n}, {rec_bench})",
+            f"benchmark:{rec_bench}",
+            f"Held-out benchmark '{rec_bench}' ({rec_split}): n={rec_n}, p_correct={rec_p:.4f} (~{rec_p:.0%}), 95% lower bound={record.get('lower_95', 0):.4f}",
+        )
+
     def _audit_claims(
         self,
         response: str,
@@ -2911,6 +3063,7 @@ class TribosVerifier:
         judge: Callable[[str, list[dict[str, str]]], dict[str, Any] | None] | None = None,
         tool_events: list[tuple[str, str]] | None = None,
         question: str = "",
+        tool_results: dict[str, Any] | None = None,
     ) -> tuple[list[DefectItem], list[dict[str, Any]]]:
         """Classify, check and record each material claim; return (defects, claim_support)."""
         defects: list[DefectItem] = []
@@ -2928,6 +3081,9 @@ class TribosVerifier:
             if is_operational_claim(plain):
                 # Before the hedge filter: "could not be retrieved" reports the run, it is not a hedge.
                 self._operational_claim(claims, plain.strip(), tool_events or [])
+                continue
+            if is_benchmark_claim(plain):
+                self._benchmark_claim(claims, plain.strip(), tool_results, defects)
                 continue
             if statement_role(plain, question) is not None:
                 continue  # an instruction, error text or mathematical statement (checked by the math audit), audit I30
