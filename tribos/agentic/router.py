@@ -30,7 +30,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
 
-from ..agents.evidence_need import is_closed_computation, is_computation_request
+from ..agents.evidence_need import is_closed_computation, is_computation_request, is_self_contained
 from .budget import BudgetExhausted, RunBudget
 from .config import (
     AGENTIC,
@@ -792,6 +792,13 @@ def rule_decision(query: str, ctx: Any) -> RoutingDecision:
     if getattr(ctx, "scope", "research") != "research":
         return RoutingDecision(AGENTIC, "not_research", "Not a research question; no architecture is needed.", signals,
                                candidates=[AGENTIC], probabilities={AGENTIC: 1.0})
+    if is_closed_computation(ctx) or (is_self_contained(ctx) and getattr(getattr(ctx, "evidence_need", None), "level", "") == "none"):
+        return RoutingDecision(AGENTIC, "closed_computation", "A self-contained calculation: solved and checked by "
+                               "computation, with no evidence search.", signals, candidates=[AGENTIC],
+                               probabilities={AGENTIC: 1.0}, label=DIRECT_WORKFLOW_LABEL)
+    if is_fully_specified(query, signals):
+        return RoutingDecision(AGENTIC, FULLY_SPECIFIED, FULLY_SPECIFIED_REASON, signals, candidates=[AGENTIC],
+                               probabilities={AGENTIC: 1.0}, label=DIRECT_WORKFLOW_LABEL)
     features = deterministic_features(signals)
     return decide(signals, features, bucket=bucket_key(signals.question_type, features),
                   excluded=set(getattr(ctx, "excluded_modules", None) or ()))
@@ -868,9 +875,9 @@ async def choose_framework(
     if getattr(ctx, "scope", "research") != "research":
         return rule_decision(query, ctx)
     signals = routing_signals(query, ctx)
-    if is_closed_computation(ctx):
-        # A self-contained calculation needs no architecture choice: the verified mathematics agent answers it.
-        return RoutingDecision(AGENTIC, "closed_computation", "A self-contained calculation: solved and checked by "
+    if is_closed_computation(ctx) or (is_self_contained(ctx) and getattr(getattr(ctx, "evidence_need", None), "level", "") == "none"):
+        # A self-contained calculation or derivation needs no heavy architecture: the direct workflow answers it.
+        return RoutingDecision(AGENTIC, "closed_computation", "A self-contained task: solved and checked by "
                                "computation, with no evidence search.", signals, candidates=[AGENTIC],
                                probabilities={AGENTIC: 1.0}, label=DIRECT_WORKFLOW_LABEL)
     if is_fully_specified(query, signals):

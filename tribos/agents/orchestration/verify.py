@@ -306,17 +306,41 @@ async def check_and_correct(run: RunContext) -> None:
                 )
                 # An empty draft has nothing to flag and so can outscore any real answer; it never wins over one.
                 draft_empty = len((candidate_response or "").split()) < 20
-                if revised.strip() and (
+                revised_text = revised.strip()
+                original_text = (candidate_response or "").strip()
+                text_changed = revised_text != original_text
+                score_improved = revised_report.verification_score > verification_report.verification_score
+                fewer_defects = len(revised_report.defects) < len(verification_report.defects)
+                provenance_improved = score_improved or fewer_defects
+
+                if revised_text and (
                     draft_empty
                     or revised_report.passed
                     or revised_report.verification_score >= verification_report.verification_score
                 ):
-                    candidate_response, verification_report = revised, revised_report
-                    run.candidate_response = candidate_response
-                    reconcile_math_artifacts_with_answer(run)
-                    await send({"type": "content_reset", "reason": "revision"})
-                    await send({"type": "content_delta", "delta": candidate_response})
-                    await emit("revision", title="Revised the answer")
+                    if not text_changed and not provenance_improved:
+                        # Zero textual change and no provenance improvement: terminate unproductive repair loop
+                        await emit(
+                            "revision",
+                            title="Revision produced no change; keeping the first draft",
+                            text="No textual or verification improvement was produced in the revision round.",
+                            status="done",
+                        )
+                    else:
+                        candidate_response, verification_report = revised, revised_report
+                        run.candidate_response = candidate_response
+                        reconcile_math_artifacts_with_answer(run)
+                        await send({"type": "content_reset", "reason": "revision"})
+                        await send({"type": "content_delta", "delta": candidate_response})
+                        if not text_changed and provenance_improved:
+                            await emit(
+                                "revision",
+                                title="Revised claim provenance",
+                                text="Zero textual change; claim provenance and verification grounding improved.",
+                                status="done",
+                            )
+                        else:
+                            await emit("revision", title="Revised the answer", status="done")
                 else:
                     await emit(
                         "revision",

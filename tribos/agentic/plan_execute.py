@@ -26,7 +26,7 @@ import os
 import re
 from typing import Any
 
-from ..agents.evidence_need import is_closed_computation
+from ..agents.evidence_need import is_closed_computation, is_self_contained
 from .budget import BudgetExhausted
 from .config import AGENTIC, DEBATE, DIRECT_ROUTES, MATH_DIRECT_ROUTES, env_flag, env_float, env_int
 from .executor import PlanExecutor
@@ -245,7 +245,11 @@ class PlanExecutePhase(AgentPhase):
         if state.options.get("enable_plan") is False:
             return False
         specialised = needs_specialised_tool(state)
-        if is_closed_computation(state.ctx) and math_agent_available(state) and not specialised:
+        if (
+            (is_closed_computation(state.ctx) or (is_self_contained(state.ctx) and getattr(getattr(state.ctx, "evidence_need", None), "level", "") == "none"))
+            and math_agent_available(state)
+            and not specialised
+        ):
             return False  # the verified mathematics agent solves and checks it; a tool plan would only repeat that
         rule = (state.bag.get("routing") or {}).get("rule")
         if rule in DIRECT_ROUTES and (rule not in MATH_DIRECT_ROUTES or math_agent_available(state)) and not specialised:

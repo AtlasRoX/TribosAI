@@ -567,8 +567,11 @@ class SupervisorPhase(AgentPhase):
                 continue
             if sp is None:
                 continue
-            delegations += 1
             instruction = neutralise(reply.instruction.strip() or f"Find evidence for: {state.clean_query or state.query}")[:500]
+            if any(h.get("specialist") == sp.name and h.get("instruction") == instruction for h in history):
+                dialogue.add("Supervisor", "stop", None, "terminated unproductive repair loop: repeated identical delegation")
+                break
+            delegations += 1
             dialogue.add("Supervisor", "delegate", None, f"{sp.label}: {instruction}")
             await state.step(dialogue.step_id("supervisor"), f"Supervisor → {sp.label}", instruction, agent="Supervisor")
             report = await run_specialist(

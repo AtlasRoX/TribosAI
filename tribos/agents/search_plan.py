@@ -480,8 +480,14 @@ def _content_phrases(query: str, covered: Sequence[tuple]) -> list[str]:
         if words and not (len(words) == 1 and (words[0].lower() in _GENERIC or len(words[0]) < 3)):
             phrases.append(" ".join(words[:4]))
 
+    _PROOF_THEMED_STOPWORDS = frozenset(
+        "prove proof disprove show demonstrate theorem lemma conjecture hypothesis "
+        "positive negative integer integers natural real complex number numbers "
+        "rule rules process reaches eventually step steps check evaluate calculation".split()
+    )
+
     def flush() -> None:
-        words = [w for w in run if w.lower() not in facet_words] or []
+        words = [w for w in run if w.lower() not in facet_words and w.lower() not in _PROOF_THEMED_STOPWORDS] or []
         heads = [i for i, w in enumerate(words) if _DISEASE_PHRASE_RE.search(w)]
         if heads and (len(words) > 4 or heads[-1] != len(words) - 1):
             # "resected stage II cutaneous melanoma": the disease is its own phrase, its qualifiers another.
@@ -512,6 +518,9 @@ def _content_phrases(query: str, covered: Sequence[tuple]) -> list[str]:
 
 def build_search_plan(ctx: Any, query: str) -> SearchPlan:
     """The deterministic plan: entities first (primary gene, drugs, diseases), then content phrases."""
+    need = getattr(ctx, "evidence_need", None)
+    if need is not None and getattr(need, "skip_retrieval", False):
+        return SearchPlan(concepts=[], subject_groups=0, question_type=classify_question(query))
     query = normalize_dashes(query)  # one character for one, so entity spans still hold
     groups: list[list[str]] = []
     covered: list[tuple] = []
