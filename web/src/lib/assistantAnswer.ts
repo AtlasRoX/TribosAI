@@ -9,6 +9,9 @@ export interface OutputContractView {
   json_only?: boolean;
   exact_lines?: number;
   max_lines?: number;
+  exact_items?: number;
+  max_items?: number;
+  numbered_items?: boolean;
   preserve_whitespace?: boolean;
   violations?: string[];
 }

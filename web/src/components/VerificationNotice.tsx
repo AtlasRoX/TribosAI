@@ -44,8 +44,10 @@ function claimCounts(claims: ClaimCheck[]): Record<ClaimStatus, number> {
  */
 function MathClaimText({ text }: { text: string }) {
   const i = text.indexOf(": ");
-  const context = i > 0 ? text.slice(0, i) : "";
-  const body = i > 0 ? text.slice(i + 2) : text;
+  const rawContext = i > 0 ? text.slice(0, i) : "";
+  const rawBody = i > 0 ? text.slice(i + 2) : text;
+  const context = rawContext.replace(/^\s*#{1,6}\s*/, "").trim();
+  const body = rawBody.replace(/^\s*#{1,6}\s*/, "").trim();
   const content = body.includes("$") || body.includes("|") ? body : `$${body}$`;
   return (
     <span className="verify-claim-text">

@@ -367,7 +367,9 @@ async def check_and_correct(run: RunContext) -> None:
     # deterministically, note the removal under "Evidence limitations", and check the result again.
     flagged = verifier_mod.removable_defects(verification_report)
     if flagged:
-        pruned, removed = verifier_mod.remove_flagged_sentences(candidate_response, flagged)
+        pruned, removed = verifier_mod.remove_flagged_sentences(
+            candidate_response, flagged, contract=getattr(run, "output_contract", None)
+        )
         if removed and pruned.strip():
             try:
                 await before_verification(pruned)

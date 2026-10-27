@@ -1405,9 +1405,10 @@ def _limitation_line(defect: Any) -> str:
     return f'- Removed "{claim}" because a retrieved source contradicts it.'
 
 
-def remove_flagged_sentences(response: str, defects: Iterable[Any]) -> tuple[str, list[Any]]:
+def remove_flagged_sentences(response: str, defects: Iterable[Any], contract: Any | None = None) -> tuple[str, list[Any]]:
     """The answer without the sentences (or table rows) of the given defects, plus one line per removal under an
-    "Evidence limitations" heading (created when missing). Returns (new text, defects actually removed)."""
+    "Evidence limitations" heading (created when missing, suppressed when strict output contract holds).
+    Returns (new text, defects actually removed)."""
     text = response
     removed: list[Any] = []
     seen: set[str] = set()
@@ -1440,6 +1441,9 @@ def remove_flagged_sentences(response: str, defects: Iterable[Any]) -> tuple[str
         removed.append(d)
     if not removed:
         return response, []
+    if contract is not None and getattr(contract, "strict_form", False):
+        text = re.sub(r"\n{3,}", "\n\n", text).strip()
+        return text, removed
     lines = [_limitation_line(d) for d in removed]
     m = _LIMITATIONS_HEADING_RE.search(text)
     if m:
@@ -1885,10 +1889,13 @@ class TribosVerifier:
                           "inconclusive": "inconclusive"}
             for mc in math_audit.claims:
                 sources = list(dict.fromkeys(lk.source for lk in mc.links)) or ["answer"]
+                clean_context = re.sub(r"^\s*#{1,6}\s*", "", mc.context).strip() if mc.context else ""
+                clean_text = re.sub(r"^\s*#{1,6}\s*", "", mc.text).strip()
+                claim_text = (f"{clean_context}: " if clean_context else "") + clean_text
                 claims.append(ClaimRecord(
                     claim_id=f"math:{mc.claim_id}",
                     claim_type="mathematical" if mc.kind != "grounding" else "computational",
-                    claim_text=(f"{mc.context}: " if mc.context else "") + mc.text,
+                    claim_text=claim_text,
                     evidence=[ClaimEvidence(source_key=s, passage=mc.detail[:400]) for s in sources[:3]],
                     status=status_map.get(mc.status, "inconclusive"),
                     reason=mc.detail[:400],

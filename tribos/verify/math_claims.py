@@ -68,7 +68,7 @@ _SEG_RE = re.compile(
     r"\$\$(?P<d1>.+?)\$\$|\\\[(?P<d2>.+?)\\\]|\\\((?P<i1>.+?)\\\)|(?<![\\$\w])\$(?!\s)(?P<i2>[^$\n]+?)(?<!\s)\$(?!\w)",
     re.S,
 )
-_HEADING_RE = re.compile(r"^\s{0,3}(?:#{1,6}\s+(.+?)\s*#*\s*$|\*\*(.+?)\*\*\s*$)", re.M)
+_HEADING_RE = re.compile(r"^\s{0,3}(?:#{1,6}\s*(.+?)\s*#*\s*$|\*\*(.+?)\*\*\s*$)", re.M)
 # A statement about another case than the one solved is not a claim about this problem.
 _CONDITIONAL_RE = re.compile(
     r"\b(?:if|suppose|assum\w*|in the limit|limiting case|for example|e\.g\.|would|hypothetical\w*|undamped case|"
@@ -172,7 +172,8 @@ class _Statement:
 def _heading_before(md: str, pos: int) -> str:
     last = ""
     for m in _HEADING_RE.finditer(md, 0, pos):
-        last = (m.group(1) or m.group(2) or "").strip()
+        raw = (m.group(1) or m.group(2) or "").strip()
+        last = re.sub(r"^\s*#{1,6}\s*", "", raw).strip()
     return last[:120]
 
 
@@ -180,7 +181,12 @@ def _is_in_heading(md: str, pos: int) -> bool:
     line_start = md.rfind("\n", 0, pos) + 1
     line_end = md.find("\n", pos)
     line = md[line_start:line_end] if line_end != -1 else md[line_start:]
-    return bool(re.match(r"^\s{0,3}#{1,6}\s+", line))
+    line_strip = line.strip()
+    if re.match(r"^\s{0,3}#{1,6}(?:\s+|$|[^\s#])", line):
+        return True
+    if line_strip.startswith("**") and line_strip.endswith("**") and len(line_strip) > 4:
+        return True
+    return False
 
 
 _REFUTED_CUE_RE = re.compile(
@@ -1771,13 +1777,15 @@ def _document_functions(md: str, problem_function: str) -> tuple[set[str], str]:
     for _pos, raw, _t in _segments(md):
         body = re.sub(r"\\(?:rm|mathrm|text|textrm|operatorname)\s*\{([^{}]*)\}", r"\1", raw)
         body = re.sub(r"\\rm\s+", "", body)
-        for m in re.finditer(r"(?<![\\A-Za-z])([A-Za-z])(?:_\{?([A-Za-z0-9]+)\}?)?\s*\(\s*([A-Za-z]|[-\d.]+)\s*\)", body):
+        for m in re.finditer(r"(?<![\\A-Za-z])([A-Za-z])(?:_\{?([A-Za-z0-9]+)\}?)?\s*\(\s*([A-Za-z]|[-\d.]+|[0-9]+[+-][A-Za-z]|[A-Za-z][+-][0-9A-Za-z]+)\s*\)", body):
             base = m.group(1) + (f"_{m.group(2)}" if m.group(2) else "")
             if base in ("e", "d", "i") or base in _BUILTIN_FUNCS:
                 continue
             names.add(base)
-            if re.fullmatch(r"[A-Za-z]", m.group(3)):
-                var_counts[m.group(3)] = var_counts.get(m.group(3), 0) + 1
+            pure_var = re.search(r"[A-Za-z]", m.group(3))
+            if pure_var:
+                v = pure_var.group(0)
+                var_counts[v] = var_counts.get(v, 0) + 1
         # \dot x, \ddot{x}; not \dots (an ellipsis: "s = -2, -4, \dots" made s a function and bound it).
         for m in re.finditer(r"\\d?dot(?![A-Za-z])\s*\{?\s*([A-Za-z])", body):
             if m.group(1) not in _BUILTIN_FUNCS:
@@ -1898,8 +1906,9 @@ def audit_answer(
                 auditor.unknowns.add(canonical_name(v))
 
         for part in _depth_split(clean_tokens, _is_separator):
+            clean_part_tex = re.sub(r"^\s*#{1,6}\s*", "", _tex(part)).strip()
             statements.append(_Statement(
-                part, _tex(part), heading, pos,
+                part, clean_part_tex, heading, pos,
                 kind=kind,
                 source=body,
                 lead=prefix[-160:],
