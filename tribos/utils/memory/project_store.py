@@ -678,14 +678,16 @@ class ProjectStore:
                 same = [r for r in existing if r["object_norm"] == o_norm]
                 if f.relation in VALUED_RELATIONS and same and f.value is not None:
                     differing = [r for r in same if r["value"] is not None and r["value"] != f.value]
+                    if differing and not f.verified:
+                        differing = [r for r in differing if not r["verified"]]
                     if differing:
                         # The old value is invalidated before the new one is added (one current fact per key).
                         new_id = new_fact_id()
                         for r in differing:
                             self._invalidate(conn, r["id"], now, new_id, f"value changed from {r['value']} to {f.value}")
                         self._insert(conn, project_id, user_id, f, now, fid=new_id, review_status=review_status)
-                        ops.append({"op": "INVALIDATE", "fact_id": new_id, "invalidated": [r["id"] for r in differing]})
-                        ops.append({"op": "ADD", "fact_id": new_id})
+                        ops.append({"op": "INVALIDATE", "fact_id": new_id, "invalidated": [r["id"] for r in differing], "subject": f.subject, "relation": f.relation, "object": f.object})
+                        ops.append({"op": "ADD", "fact_id": new_id, "subject": f.subject, "relation": f.relation, "object": f.object})
                         written += 1
                         invalidated += len(differing)
                         continue
@@ -704,21 +706,24 @@ class ProjectStore:
                                 f.value, row["id"],
                             ),
                         )
-                        ops.append({"op": "UPDATE", "fact_id": row["id"]})
+                        ops.append({"op": "UPDATE", "fact_id": row["id"], "subject": f.subject, "relation": f.relation, "object": f.object})
                     else:
-                        ops.append({"op": "NOOP", "fact_id": row["id"]})
+                        ops.append({"op": "NOOP", "fact_id": row["id"], "subject": f.subject, "relation": f.relation, "object": f.object})
                     continue
                 contradicted: list[sqlite3.Row] = []
                 if f.relation in SINGLE_VALUED_RELATIONS:
                     in_batch = batch_keys.get((s_norm, f.relation), set())
                     contradicted = [r for r in existing if r["object_norm"] not in in_batch and float(r["recorded_at"]) < now]
+                    # An unverified fact can never invalidate an already verified fact.
+                    if not f.verified:
+                        contradicted = [r for r in contradicted if not r["verified"]]
                 new_id = self._insert(conn, project_id, user_id, f, now, review_status=review_status)
                 for r in contradicted:
                     self._invalidate(conn, r["id"], now, new_id, f"contradicted by a newer {f.relation}: {f.object[:120]}")
                 if contradicted:
-                    ops.append({"op": "INVALIDATE", "fact_id": new_id, "invalidated": [r["id"] for r in contradicted]})
+                    ops.append({"op": "INVALIDATE", "fact_id": new_id, "invalidated": [r["id"] for r in contradicted], "subject": f.subject, "relation": f.relation, "object": f.object})
                     invalidated += len(contradicted)
-                ops.append({"op": "ADD", "fact_id": new_id})
+                ops.append({"op": "ADD", "fact_id": new_id, "subject": f.subject, "relation": f.relation, "object": f.object})
                 written += 1
             if cleaned:
                 self.touch_project(conn, project_id, user_id)
