@@ -295,6 +295,11 @@ def merge_pipeline_phases(run: RunContext) -> None:
         art["stage_seconds"] = stage_seconds(merged)
         art["budget"] = run.agent_state.budget.to_dict()
         art["sub_questions"] = [q.to_dict() for q in run.agent_state.sub_questions]
+        if run.start_time:
+            total_duration = round(time.perf_counter() - run.start_time, 2)
+            art["duration_seconds"] = total_duration
+            if "used" in art["budget"]:
+                art["budget"]["used"]["seconds"] = total_duration
     except Exception as exc:  # noqa: BLE001
         logger.warning("Pipeline phase timing merge failed: %s", exc)
 

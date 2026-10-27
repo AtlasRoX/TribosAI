@@ -322,7 +322,8 @@ export function AgentRunPanel({ data, routing }: { data: AgentRunArtifact; routi
   const sumOf = (gs: PhaseGroup[]) => gs.reduce((sum, g) => sum + (g.seconds ?? 0), 0);
   const pipelineTotal = sumOf(pipelineGroups);
   const agentTotal = sumOf(agentGroups);
-  const runSeconds = isNum(used.seconds) ? used.seconds : null;
+  const durationSec = isNum((data as any).duration_seconds) ? (data as any).duration_seconds : null;
+  const runSeconds = durationSec ?? (isNum(used.seconds) ? used.seconds : null);
   // Agent phases run inside pipeline stages, so the two sums are shown apart and never added up.
   const totalSec = runSeconds ?? (pipelineTotal > 0 ? pipelineTotal : null);
   const timing = [

@@ -12,22 +12,17 @@ Covers:
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any
 from unittest.mock import MagicMock
-
-import pytest
 
 from tribos.agentic.plan_execute import needs_specialised_tool
 from tribos.agentic.state import AgentState
-from tribos.agents.evidence_need import is_closed_computation
 from tribos.agents.orchestration.context import RunContext
 from tribos.agents.orchestration.draft import _verified_render
 from tribos.agents.orchestration.finalize import stage_seconds
 from tribos.agents.query_context import QueryContext
 from tribos.axiom.render import render_verified_answer
 from tribos.tools.registry import ToolResult, get_tool_registry
-from tribos.utils.output_contract import Contract, extract
+from tribos.utils.output_contract import extract
 
 
 def test_factoring_does_not_trigger_physis_engineering_calc():
@@ -135,3 +130,66 @@ def test_timing_consistency_between_pipeline_and_run_duration():
     pipeline_total = sum(p["seconds"] for p in phases)
     run_seconds = 5.65
     assert abs(pipeline_total - run_seconds) < 0.1
+
+
+def test_plan_execute_phase_skips_closed_computation():
+    """PlanExecutePhase does not apply to closed computation math queries."""
+    from tribos.agentic.plan_execute import PlanExecutePhase
+    from tribos.agents.evidence_need import assess_evidence_need
+
+    q = "Factor x^2 - 5x + 6"
+    ev = assess_evidence_need(q)
+    assert ev.level == "none"
+    assert ev.kind == "closed_computation"
+
+    state = MagicMock(spec=AgentState)
+    state.registry = get_tool_registry()
+    state.clean_query = q
+    state.query = q
+    state.options = {}
+    state.bag = {}
+    state.ctx = QueryContext(raw_query=q, clean_query=q, evidence_need=ev)
+
+    pe = PlanExecutePhase()
+    assert pe.applies(state) is False
+
+
+def test_merge_pipeline_phases_reconciles_budget_and_duration_seconds():
+    """merge_pipeline_phases stamps duration_seconds and reconciles budget used seconds."""
+    from tribos.agents.orchestration.finalize import merge_pipeline_phases
+
+    run = MagicMock(spec=RunContext)
+    run.start_time = 100.0
+    run.execution_artifacts = {
+        "agent_run": {
+            "phases": [{"phase": "math_agent", "stage": "augment", "seconds": 0.08, "at": 4.0}],
+            "budget": {"used": {"seconds": 22.0}},
+        }
+    }
+    run.agent_state = MagicMock()
+    run.agent_state.budget.to_dict.return_value = {"used": {"seconds": 22.0}}
+    run.agent_state.sub_questions = []
+    run.pipeline_phases = [
+        {"phase": "plan", "stage": "pipeline", "seconds": 4.0, "at": 0.0},
+        {"phase": "first_draft", "stage": "pipeline", "seconds": 1.5, "at": 4.08},
+    ]
+
+    with unittest_mock_perf_counter(126.0):
+        merge_pipeline_phases(run)
+
+    art = run.execution_artifacts["agent_run"]
+    assert art["duration_seconds"] == 26.0
+    assert art["budget"]["used"]["seconds"] == 26.0
+    assert "phases" in art
+    assert "stage_seconds" in art
+
+
+from contextlib import contextmanager
+from unittest.mock import patch
+
+
+@contextmanager
+def unittest_mock_perf_counter(val: float):
+    with patch("time.perf_counter", return_value=val):
+        yield
+

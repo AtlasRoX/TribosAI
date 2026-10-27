@@ -220,6 +220,8 @@ async def _agentic_preflight(run: RunContext) -> Any | None:
     if control is not None:
         effort_level = (agent_options or {}).get("effort_level", "medium")
         budget = run.pending.pop("agent_budget", None) or ao.RunBudget.from_env((agent_options or {}).get("budget"), effort_level=effort_level)
+        if run.start_time:
+            budget.started = run.start_time
         agent_state = ao.AgentState(
             query=run.query,
             clean_query=run.resolved_query,
