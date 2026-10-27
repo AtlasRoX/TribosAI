@@ -37,18 +37,24 @@ PROVE_RE = re.compile(r"\b(prove|show that|demonstrate that|give a proof|proof t
 
 # What core Lean 4 (no Mathlib) offers, so a formalisation is written for the checker that will run it.
 CORE_LEAN_ENV = (
-    "Mathlib is NOT available: use core Lean 4 only. No import lines. Write Nat and Int (not the Mathlib notation "
-    "for them); there is no Real or Rat. Usable tactics: rfl, decide, simp, simp_arith, omega, exact, intro, intros, "
-    "apply, refine, constructor, cases, rcases, obtain, induction, show, calc, have, by_cases, contradiction, "
-    "exists, unfold. Not available: ring, linarith, nlinarith, norm_num, field_simp, positivity, Mathlib lemmas such "
-    "as Nat.odd_iff or Even/Odd predicates (state parity as n % 2 = 1). omega decides linear arithmetic over Nat and "
-    "Int, including % and / by numerals."
+    "Mathlib is NOT available: use core Lean 4 only. No import lines. Write Nat, Int, and Rat (not the Mathlib notation "
+    "for them); there is no Real. Rational arithmetic is available via Rat in core Lean 4 (Init.Data.Rat). Usable tactics: "
+    "rfl, decide, simp, simp_arith, omega, exact, intro, intros, apply, refine, constructor, cases, rcases, obtain, "
+    "induction, show, calc, have, by_cases, contradiction, exists, unfold. Prefer 'by omega' for linear arithmetic, "
+    "inequalities, comparisons, and bounds over Nat and Int (including % and / by numerals) instead of manual lemma rewrites. "
+    "Not available without Mathlib: ring, linarith, nlinarith, norm_num, field_simp, positivity, Mathlib lemmas such "
+    "as Nat.odd_iff or Even/Odd predicates (state parity as n % 2 = 1)."
 )
 
 
 def core_notation(code: str) -> str:
-    """Mathlib's notation for the integer types replaced by the core names it abbreviates (no change in meaning)."""
-    return re.sub(r"\bimport\s+Mathlib\S*\s*\n", "", code).replace("ℕ", "Nat").replace("ℤ", "Int")
+    """Mathlib's notation for the number types replaced by the core names it abbreviates (no change in meaning)."""
+    return (
+        re.sub(r"\bimport\s+Mathlib\S*\s*\n", "", code)
+        .replace("ℕ", "Nat")
+        .replace("ℤ", "Int")
+        .replace("ℚ", "Rat")
+    )
 
 
 def formal_enabled() -> bool:
@@ -81,12 +87,15 @@ async def formalise_and_check(question: str, complete: Complete | None, *, mathl
     pol = active_tool_policy()
     if pol is not None and pol.prohibit_formal:
         return {"status": "disabled", "title": STATUS_TITLES["disabled"], "attempts": [], "lean_code": "",
-                "statement": "", "error": pol.formal_reason or "Formal prover disabled by user request."}
+                "statement": "", "repairs": 0, "messages": [], "output": "",
+                "error": pol.formal_reason or "Formal prover disabled by user request."}
     if find_lean() is None:
         return {"status": "unavailable", "title": STATUS_TITLES["unavailable"], "attempts": [], "lean_code": "",
-                "statement": "", "error": "Lean is not installed (set TRIBOS_LEAN_PATH, or put lean on PATH)."}
+                "statement": "", "repairs": 0, "messages": [], "output": "",
+                "error": "Lean is not installed (set TRIBOS_LEAN_PATH, or put lean on PATH)."}
     if complete is None:
-        return {"status": "failed", "title": STATUS_TITLES["failed"], "attempts": [], "lean_code": "", "statement": "",
+        return {"status": "failed", "title": STATUS_TITLES["failed"], "attempts": [], "lean_code": "",
+                "statement": "", "repairs": 0, "messages": [], "output": "",
                 "error": "No model is available to write the formalisation."}
     if mathlib is None:
         from tribos.config.settings import get_str
@@ -96,10 +105,9 @@ async def formalise_and_check(question: str, complete: Complete | None, *, mathl
     if lacking:
         # Audit I33: no substitute proposition over Nat/Int is written to obtain a compile; no model call is spent.
         return {"status": "not_formalizable", "title": STATUS_TITLES["not_formalizable"], "attempts": [],
-                "lean_code": "", "statement": "", "repairs": 0, "messages": [],
-                "error": f"The statement needs {lacking}, which core Lean 4 cannot express and Mathlib is not "
-                         "installed (TRIBOS_LEAN_PROJECT). No formal statement was checked; this says nothing about "
-                         "whether the claim is true."}
+                "lean_code": "", "statement": "", "repairs": 0, "messages": [], "output": "",
+                "error": f"The statement needs {lacking}, which requires the Mathlib library (TRIBOS_LEAN_PROJECT is not "
+                         "configured). No formal statement was checked; this says nothing about whether the claim is true."}
     env = "Mathlib is available (import Mathlib)." if mathlib else CORE_LEAN_ENV
     max_repairs = int(get_int("TRIBOS_FORMAL_MAX_REPAIRS"))
     attempts: list[dict[str, Any]] = []
@@ -117,7 +125,7 @@ async def formalise_and_check(question: str, complete: Complete | None, *, mathl
         else:
             result = await asyncio.to_thread(check_lean, code)  # a subprocess with a timeout: off the event loop
         attempts.append({"attempt": attempt, "status": result["status"], "error": result.get("error"),
-                         "code": code})
+                         "code": code, "output": result.get("output") or ""})
         if result["status"] in ("verified", "unavailable", "timeout"):
             break
         if attempt == max_repairs:

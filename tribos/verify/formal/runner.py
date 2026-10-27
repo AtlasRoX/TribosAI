@@ -49,7 +49,18 @@ _CACHE_LOCK = threading.Lock()
 # "file.lean:3:7: error: unknown identifier 'x'" (Lean 4 prints the path it was given, then line:column).
 _MESSAGE_RE = re.compile(r"^(?P<file>[^\n]*?):(?P<line>\d+):(?P<col>\d+):\s*(?P<severity>error|warning|info):\s*(?P<text>.*)$")
 _SORRY_RE = re.compile(r"(?<![\w.'])(sorry|admit)(?![\w'])")
-_AXIOM_RE = re.compile(r"^\s*(?:private\s+|protected\s+)?axiom\s+\S+", re.M)
+_AXIOM_RE = re.compile(r"^\s*(?:private\s+|protected\s+)?axiom\s+([A-Za-z0-9_.]+)", re.M)
+
+# Trusted foundational axioms of Lean/Mathlib that should not be blanket-banned as cheat axioms
+_TRUSTED_FOUNDATIONAL_AXIOMS = frozenset({
+    "propext",
+    "Classical.choice",
+    "Quot.sound",
+    "funext",
+    "choice",
+    "Quot.lift",
+    "Quot.ind",
+})
 _COMMENT_RE = re.compile(r"/-.*?-/|--[^\n]*", re.S)
 
 
@@ -85,8 +96,12 @@ def uses_unproved(code: str) -> list[str]:
     """What makes code not a proof even when it compiles: sorry, admit, or a new axiom (comments ignored)."""
     body = _COMMENT_RE.sub(" ", code)
     found = sorted({m.group(1) for m in _SORRY_RE.finditer(body)})
-    found += [f"axiom {m.group(0).split()[-1]}" for m in _AXIOM_RE.finditer(body)]
-    return found
+    for m in _AXIOM_RE.finditer(body):
+        ax_name = m.group(1).strip()
+        base_name = ax_name.split(".")[-1]
+        if ax_name not in _TRUSTED_FOUNDATIONAL_AXIOMS and base_name not in _TRUSTED_FOUNDATIONAL_AXIOMS:
+            found.append(f"axiom {ax_name}")
+    return sorted(found)
 
 
 def _limit_memory() -> None:  # pragma: no cover - runs in the child on POSIX

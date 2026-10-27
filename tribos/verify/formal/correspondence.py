@@ -21,7 +21,6 @@ _NEEDS_LIBRARY = (
     (re.compile(r"\breal\s+numbers?\b|\bover\s+the\s+reals\b|ℝ|\birrational\b|\bsqrt\b|√|\bπ\b|\bpi\b", re.I), "real numbers"),
     (re.compile(r"\b(?:derivative|differentiab\w*|integral|integrat\w*|limit|continuous|converge\w*|series)\b", re.I), "analysis"),
     (re.compile(r"\b(?:sin|cos|tan|exp|log|ln)\s*\(", re.I), "transcendental functions"),
-    (re.compile(r"(?<![\w.])\d+\s*/\s*\d+(?![\w.])|\brational\s+numbers?\b|ℚ", re.I), "rational numbers"),
 )
 # Words that only frame the request; numerals in them are not the statement's constants.
 _INSTRUCTION_RE = re.compile(r"(?im)\b\d+[-\s]word\b|\b\d+\s+(?:words|lines|sentences)\b|\bstep\s+\d+\b|^\s*\d+\.\s")
@@ -66,6 +65,62 @@ def _constants(text: str) -> set[str]:
     return set(re.findall(r"(?<![\w.])\d+(?!\w|\.\d)", text or "")) - {"0", "1"}
 
 
+def _split_implication(prop: str) -> list[str]:
+    """Split top-level implications (-> or →) outside parentheses/brackets."""
+    parts: list[str] = []
+    current: list[str] = []
+    depth = 0
+    i = 0
+    while i < len(prop):
+        ch = prop[i]
+        if ch in "([{⦃":
+            depth += 1
+            current.append(ch)
+        elif ch in ")]}⦄":
+            depth -= 1
+            current.append(ch)
+        elif depth == 0 and prop[i:i + 2] == "->":
+            parts.append("".join(current).strip())
+            current = []
+            i += 1
+        elif depth == 0 and ch == "→":
+            parts.append("".join(current).strip())
+            current = []
+        else:
+            current.append(ch)
+        i += 1
+    if current:
+        parts.append("".join(current).strip())
+    return parts
+
+
+def _detect_question_domain(question: str) -> str | None:
+    has_nat = bool(re.search(r"\b(?:natural\s+numbers?|non-?negative\s+integers?|nonnegative\s+integers?)\b|\bNat\b|ℕ", question, re.I))
+    has_int = bool(re.search(r"\b(?:integers?)\b|\bInt\b|ℤ", question, re.I)) and not has_nat
+    has_real = bool(re.search(r"\b(?:real\s+numbers?|over\s+the\s+reals?)\b|\bReal\b|ℝ", question, re.I))
+    has_rat = bool(re.search(r"\b(?:rational\s+numbers?)\b|\bRat\b|ℚ", question, re.I))
+    has_complex = bool(re.search(r"\b(?:complex\s+numbers?)\b|\bComplex\b|ℂ", question, re.I))
+    domains = [d for d, present in [("Nat", has_nat), ("Int", has_int), ("Real", has_real), ("Rat", has_rat), ("Complex", has_complex)] if present]
+    return domains[0] if len(domains) == 1 else None
+
+
+def _detect_binder_domains(binders: list[tuple[str, str]]) -> set[str]:
+    stmt_domains: set[str] = set()
+    for _names, typ in binders:
+        head = typ.split()[0].strip("()").lower()
+        if head in ("nat", "ℕ"):
+            stmt_domains.add("Nat")
+        elif head in ("int", "ℤ"):
+            stmt_domains.add("Int")
+        elif head in ("real", "ℝ"):
+            stmt_domains.add("Real")
+        elif head in ("rat", "ℚ"):
+            stmt_domains.add("Rat")
+        elif head in ("complex", "ℂ"):
+            stmt_domains.add("Complex")
+    return stmt_domains
+
+
 def statement_issues(question: str, statement: str, *, mathlib: bool) -> list[str]:
     """Why the Lean statement does not encode the question (empty when no mismatch was detected)."""
     if not statement.strip():
@@ -77,21 +132,46 @@ def statement_issues(question: str, statement: str, *, mathlib: bool) -> list[st
     issues: list[str] = []
     hyps = [t for _n, t in binders if t.split()[0].lower().strip("()") not in _BASE_TYPES]
     concl = _norm(conclusion)
-    if concl == "True":
+
+    impl_parts = _split_implication(conclusion)
+    final_target = _norm(impl_parts[-1]) if impl_parts else concl
+
+    if concl == "True" or final_target == "True":
         issues.append("the target is the proposition True, which says nothing about the question")
-    elif concl == "False":
-        if not hyps:
+    elif concl == "False" or final_target == "False":
+        if not hyps and len(impl_parts) <= 1:
             issues.append("the target is False with no hypotheses: it is not the question's statement (and is unprovable)")
         elif not _DISPROVE_RE.search(question or ""):
             issues.append("the target is False from the stated hypotheses, a refutation of them, but the question does "
                           "not ask to refute them")
+    elif concl in ("trivial", "1=1", "0=0"):
+        issues.append(f"the target is a trivial proposition ({conclusion.strip()}), which says nothing about the question")
+    elif "=" in concl and "<" not in concl and ">" not in concl:
+        sides = concl.split("=", 1)
+        if len(sides) == 2 and sides[0] == sides[1] and concl not in _norm(question or ""):
+            issues.append(f"the target is a trivial reflexivity equality ({conclusion.strip()}), which says nothing about the question")
+
+    if len(impl_parts) > 1:
+        premises_norm = [_norm(p) for p in impl_parts[:-1]]
+        if final_target in premises_norm:
+            issues.append("the conclusion is an implication whose hypothesis assumes its target")
+
     if concl and any(_norm(t) == concl for t in hyps):
         issues.append("the conclusion is assumed as a hypothesis")
+    elif final_target and any(_norm(t) == final_target for t in hyps):
+        issues.append("the conclusion is assumed as a hypothesis")
+
+    # Domain correspondence check
+    q_dom = _detect_question_domain(question)
+    stmt_doms = _detect_binder_domains(binders)
+    if q_dom and stmt_doms and q_dom not in stmt_doms:
+        issues.append(f"the question is over {q_dom}, but the statement binds variables over {', '.join(sorted(stmt_doms))} (domain mismatch)")
+
     if not mathlib:
         lacking = needs_library(question)
         if lacking:
-            issues.append(f"the question needs {lacking}, which core Lean (without Mathlib) cannot state; a statement "
-                          "over Nat or Int would be a different proposition")
+            issues.append(f"the question needs {lacking}, which requires the Mathlib library (TRIBOS_LEAN_PROJECT is not configured); "
+                          "a statement over Nat or Int would be a different proposition")
     asked = _constants(_INSTRUCTION_RE.sub(" ", question or ""))
     if len(asked) >= 2 and not asked & _constants(statement):
         issues.append(f"the statement uses none of the question's constants ({', '.join(sorted(asked)[:6])})")
