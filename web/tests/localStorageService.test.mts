@@ -123,3 +123,33 @@ test("a full browser never deletes another investigation's conversation to make 
   assert.ok(svc.getInvestigations().every((i) => !i.messagesPruned));
   assert.ok(localStorage.map.size > 0);
 });
+
+test("storage recovery: a fresh session reloads all intact investigations after failed writes", () => {
+  const { svc, localStorage } = setup(120_000);
+  const ids: string[] = [];
+  for (const id of ["alpha", "beta"]) {
+    const thread = svc.createNewThread(id);
+    ids.push(thread.id);
+    svc.saveMessages(thread.id, answer(id));
+  }
+
+  // Attempt to write an oversized thread that fails quota
+  const failedThread = svc.createNewThread("gamma");
+  const oversized = [{ id: "huge", sender: "user", content: "y".repeat(150_000), timestamp: "2026-10-24T00:00:00Z" }];
+  const res = svc.saveMessages(failedThread.id, oversized as any);
+  assert.equal(res.saved, false);
+
+  // Simulate page reload with a new service instance reading the same localStorage
+  const reloadedSvc = new LocalStorageService();
+  reloadedSvc.configure("http://localhost:8000", "token");
+
+  // Verify that all canonical messages from prior successful investigations reload intact
+  const loadedAlpha = reloadedSvc.getMessages(ids[0]) as any[];
+  assert.equal(loadedAlpha.length, 2);
+  assert.equal(loadedAlpha[0].content, "question");
+  assert.equal(loadedAlpha[1].content, "answer");
+
+  const loadedBeta = reloadedSvc.getMessages(ids[1]) as any[];
+  assert.equal(loadedBeta.length, 2);
+  assert.equal(loadedBeta[1].content, "answer");
+});
