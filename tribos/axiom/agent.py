@@ -301,7 +301,7 @@ def local_executor(timeout_s: float = 30.0) -> Executor:
 
 _CANNOT_SOLVE_MARKERS = ("NotImplementedError", "could not solve", "No algorithms are implemented", "not implemented")
 _MODEL_FAULT_EXC = ("TypeError", "AttributeError", "KeyError", "IndexError", "ZeroDivisionError", "PolynomialError",
-                    "CoercionFailed", "SympifyError", "ShapeError", "NonSquareMatrixError", "SyntaxError")
+                    "CoercionFailed", "SympifyError", "ShapeError", "NonSquareMatrixError", "SyntaxError", "UnsupportedShapeError")
 _INFRA_EXC = ("MemoryError", "RecursionError", "OSError", "ConnectionError")
 
 

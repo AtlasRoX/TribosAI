@@ -121,10 +121,24 @@ def _same(a: Any, b: Any) -> bool:
 
 def _equivalent(a: sp.Expr, b: sp.Expr) -> bool | None:
     """Exact or generic-numeric equivalence; None if neither could decide."""
-    ok, method = E._zero_check(a - b, "equivalence")
-    if ok:
-        return True
-    return False if method.startswith("numeric counterexample") or method.startswith("symbolic") else None
+    a_is_c = isinstance(a, (sp.Tuple, tuple, list))
+    b_is_c = isinstance(b, (sp.Tuple, tuple, list))
+    if a_is_c or b_is_c:
+        if not (a_is_c and b_is_c) or len(a) != len(b):
+            return False
+        results = [_equivalent(item_a, item_b) for item_a, item_b in zip(a, b, strict=True)]
+        if all(r is True for r in results):
+            return True
+        if any(r is False for r in results):
+            return False
+        return None
+    try:
+        ok, method = E._zero_check(a - b, "equivalence")
+        if ok:
+            return True
+        return False if method.startswith("numeric counterexample") or method.startswith("symbolic") else None
+    except Exception:
+        return False
 
 
 def _proportional(a: sp.Expr, b: sp.Expr) -> bool:

@@ -9,7 +9,10 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class AxiomSimplifyInput(BaseModel):
-    expression: str = Field(..., min_length=1, max_length=4000, description="Mathematical expression to simplify")
+    expression: str | list[str] | list[Any] | tuple[Any, ...] = Field(
+        ...,
+        description="Mathematical expression string or collection of expressions to simplify",
+    )
     assumptions: dict[str, str] | None = Field(
         default=None,
         description="Optional symbol assumptions mapping variable name to assumption flags (e.g. {'x': 'positive, real'})",
