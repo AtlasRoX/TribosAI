@@ -333,7 +333,9 @@ def _verify_solve(spec: ProblemSpec, tool: str, args: dict[str, Any], data: dict
 
 
 def _pretty_value(v: sp.Expr) -> str:
-    return str(sp.sstr(v)).replace("I", "i").replace("sqrt", "√").replace("**", "^").replace("-", "−").replace("*", "·")
+    s = str(sp.sstr(v)).replace("I", "i").replace("sqrt", "√").replace("**", "^").replace("-", "−")
+    s = re.sub(r"\*i\b", "i", s).replace("*", "·")
+    return s
 
 
 def pretty_set(s: sp.Set | None) -> str:
@@ -482,7 +484,7 @@ def _verify_expression_tool(spec: ProblemSpec, args: dict[str, Any], arg_key: st
     try:
         same = _equivalent(_expr(tool_text, spec), original)
         if not same and spec.text:
-            from .definitions import parse_definitions, parse_with_definitions, evaluate
+            from .definitions import evaluate, parse_definitions, parse_with_definitions
 
             defs, _, _ = parse_definitions(spec.text)
             if defs:
@@ -786,7 +788,7 @@ def _verify_identity(spec: ProblemSpec, args: dict[str, Any], data: dict[str, An
             same = _equivalent(tool_diff, orig_diff)
             same = bool(same) or _proportional(tool_diff, orig_diff)
             if not same and defs:
-                from .definitions import parse_with_definitions, evaluate
+                from .definitions import evaluate, parse_with_definitions
 
                 try:
                     orig_eval = evaluate(parse_with_definitions(f"({lhs_t}) - ({rhs_t})", defs), defs)
@@ -808,7 +810,7 @@ def _verify_identity(spec: ProblemSpec, args: dict[str, Any], data: dict[str, An
             tool_diff = _expr(args.get("lhs")) - _expr(args.get("rhs"))
             exact = E._is_symbolic_zero(tool_diff)
             if not exact and defs:
-                from .definitions import parse_with_definitions, evaluate
+                from .definitions import evaluate, parse_with_definitions
 
                 try:
                     diff_eval = evaluate(parse_with_definitions(f"({args.get('lhs')}) - ({args.get('rhs')})", defs), defs)
