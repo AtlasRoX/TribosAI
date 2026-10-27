@@ -311,8 +311,11 @@ export interface SubQuestion {
   text?: string;
   focus?: string;
   depends_on?: string[];
-  status?: "pending" | "answered" | "partial" | "missing" | string;
+  status?: "pending" | "answered" | "partial" | "missing" | "open" | string;
+  answer_state?: "open" | "answered" | "partial" | "missing" | string;
+  check_state?: "checked" | "supported_by_retrieval" | "unverified" | "failed" | string;
   evidence_keys?: string[];
+  evidence_labels?: string[];
   note?: string;
 }
 

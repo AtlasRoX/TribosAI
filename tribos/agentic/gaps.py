@@ -655,17 +655,25 @@ class GapPhase(AgentPhase):
                 for k in keys:
                     q.add_evidence(k, evidence_key_label(k, round_no))
                 q.status = "partial" if it["status"] != "answered" else "answered"
+                q.answer_state = "answered" if it["status"] == "answered" else "partial"
+                q.check_state = "supported_by_retrieval"
                 q.note = f"new evidence retrieved in gap round {round_no + 1}"
             elif it["status"] == "missing" and it["id"] in searched:
                 outcome = (outcomes or {}).get(it["id"], "empty")
                 if outcome in DEFINITIVE_OUTCOMES:
                     q.status = "unanswerable"
+                    q.answer_state = "missing"
+                    q.check_state = "unverified"
                     q.note = "no evidence found after re-retrieval"
                 else:  # a failed, timed-out or off-topic search does not show the evidence is absent
                     q.status = "missing"
+                    q.answer_state = "missing"
+                    q.check_state = "unverified"
                     q.note = GapPhase._OUTCOME_NOTES.get(outcome, "unresolved")
             else:
                 q.status = it["status"] if it["status"] in ("answered", "partial") else q.status
+                if q.status == "answered":
+                    q.answer_state = "answered"
 
 
 GAP_PHASE = GapPhase()

@@ -48,10 +48,15 @@ export interface TaskOutcome {
 }
 
 export interface Deliverable {
+  id?: string;
   item: string;
+  verb?: string;
   status: "verified" | "addressed" | "failed_check" | "missing";
+  answer_state?: "open" | "answered" | "partial" | "missing" | string;
+  check_state?: "checked" | "supported_by_retrieval" | "unverified" | "failed" | string;
   where?: string;
   quantity?: boolean;
+  evidence?: string[];
 }
 
 /** How much of an answer the checks covered, apart from how it scored. */

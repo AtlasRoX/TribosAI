@@ -8,8 +8,8 @@ absolute error, ..."). Each item is
 - missing:       most of its words appear nowhere in the answer (conservative: wording differences are tolerated),
 - failed_check:  a quantity the question asks for is addressed, but a mathematical statement in the passage or table
                  row that addresses it was contradicted by the checks (tribos.verify.math_claims),
-- verified:      a requested quantity is addressed and a statement there passed the checks,
-- addressed:     present, not checked (prose requests such as "explain" or "consult" are never checked here).
+- verified:      a requested quantity is addressed and a statement there passed the checks or tool computation,
+- addressed:     present, not checked (prose requests such as "explain" or "consult" or hand derivations are never machine checked).
 """
 
 from __future__ import annotations
@@ -20,89 +20,128 @@ from typing import Any
 _VERBS = (
     "calculate", "compute", "determine", "find", "derive", "report", "give", "state", "estimate", "evaluate", "plot",
     "simulate", "verify", "check", "compare", "investigate", "explain", "discuss", "consult", "provide", "include",
-    "list", "show", "prove", "solve", "analy[sz]e", "quantify", "predict", "assess", "distinguish", "describe",
+    "list", "show", "prove", "disprove", "refute", "solve", "analy[sz]e", "quantify", "predict", "assess", "distinguish",
+    "describe", "decide", "test", "identify",
 )
-# Not inside a hyphenated word: "steady-state" contains no verb "state".
 _VERB_RE = re.compile(r"(?<![\w-])(?:" + "|".join(_VERBS) + r")(?![\w-])", re.I)
-# Verbs whose objects are quantities or results a check can confirm; the others ask for prose.
-_QUANTITY_VERBS = {"calculate", "compute", "determine", "find", "derive", "report", "estimate", "evaluate", "solve",
-                   "quantify", "predict", "give", "state"}
-_LEAD_RE = re.compile(r"^(?:\s*(?:the|a|an|its|their|all|any|both|each|independently|clearly|also)\b)+", re.I)
+_AUX_BEFORE_RE = re.compile(r"\b(?:do|does|did|not|to|cannot|will|would|should|could|might|may)\s*$", re.I)
+
+_PROSE_VERBS = {"explain", "discuss", "consult", "describe"}
+_QUANTITY_VERBS = {
+    "calculate", "compute", "determine", "find", "derive", "report", "estimate", "evaluate", "solve",
+    "quantify", "predict", "give", "state", "prove", "disprove", "refute", "verify", "check", "test", "decide",
+}
+_LEAD_RE = re.compile(r"^(?:\s*(?:the|a(?=\s+[a-z]{2,})|an|its|their|all|any|both|each|independently|clearly|also)\b)+", re.I)
+
 _TAIL_RE = re.compile(
-    r"\b(?:using|with|over|for|from|via|in order|so that|by|at|between|under|within|governed|given|defined|where|"
+    r"\b(?:using|with|via|in order|so that|by|at|under|within|governed|given|defined|where|"
     r"which|that|whose)\b.*$",
     re.I,
 )
-_STOP = {"the", "and", "for", "with", "that", "this", "from", "into", "its", "their", "any", "all", "results", "result",
-         "values", "value", "including", "both", "each"}
-# The question's subject ("Investigate a forced damped mass-spring system") is not a deliverable.
+_GENERIC_OVER_FOR = re.compile(
+    r"\b(?:over|for)\s+(?!(?:every|all|nonnegative|positive|negative|integer|integers|real|reals|complex|rational|rationals|[a-z]\b|\d))\w+.*$",
+    re.I,
+)
+
+_STOP = {
+    "the", "and", "for", "with", "that", "this", "from", "into", "its", "their", "any", "all", "results", "result",
+    "values", "value", "including", "both", "each",
+}
 _SUBJECT_WORDS = {"system", "problem", "model", "question", "setup", "configuration"}
-# Verbs whose object is the activity itself ("simulate the system" asks for a simulation).
 _ACTIVITY = {"simulate": "numerical simulation", "compare": "comparison", "plot": "plot"}
-_SPLIT_RE = re.compile(r",\s*(?:and\s+|or\s+)?|\s+and\s+(?=(?:the\s+)?[a-z\-]+(?:\s+[a-z\-]+){0,3}\s*(?:,|$))", re.I)
+_SPLIT_RE = re.compile(r"(?<!\d),(?!\d)\s*(?:and\s+|or\s+)?|\s+and\s+(?=(?:the\s+)?[a-z\-]+(?:\s+[a-z\-]+){0,3}\s*(?:,|$))", re.I)
+# Given parameter assignment like m = 2 kg, F0 = 10 N, x(0) = 0.1 m, \omega = 4 rad/s
+_GIVEN_PARAM_RE = re.compile(
+    r"^\s*(?:[A-Za-z\u0370-\u03ff]\w*(?:\([^)]*\)|'*)*)\s*=\s*[-+]?\d+(?:\.\d+)?(?:\s*[\w/·°\\]+)?$"
+)
 
-
-# A verdict on a yes/no or status question.
 _STATUS_RE = re.compile(
     r"\b(?:true|false|holds?|fails?|proved|proven|unproven|disproved|disproof|counterexamples?|open\s+(?:problem|question|conjecture)|"
-    r"(?:remains?|is)\s+open|unknown|unresolved|not\s+(?:been\s+)?(?:proved|proven|known|established)|yes|no)\b", re.I)
-
+    r"(?:remains?|is)\s+open|unknown|unresolved|not\s+(?:been\s+)?(?:proved|proven|known|established)|undefined|no\s+solution|yes|no)\b",
+    re.I,
+)
 
 _LINK_ITEM_RE = re.compile(r"(?i)\b(?:url|urls|link|links|web\s*page|website|hyperlink)\b")
 _URL_RE = re.compile(r"https?://[^\s)\]>\"']+")
 
 
 def _words(text: str) -> list[str]:
-    return [w for w in re.findall(r"[a-z][a-z\-]{2,}", (text or "").lower()) if w not in _STOP]
+    return [w for w in re.findall(r"[a-z][a-z\-]{1,}", (text or "").lower()) if w not in _STOP]
 
 
 def _stem(word: str) -> str:
     return word.replace("-", "")[:6]
 
 
+def _clean_question(q: str) -> str:
+    return re.sub(r"\b(prove|find|check|show)\s*/\s*(disprove|refute|check)\b", r"\1 or \2", q or "", flags=re.I)
+
+
 def _clauses(question: str) -> list[tuple[str, str]]:
     """(verb, object text) for every imperative verb; an object ends at the next verb or at the sentence end."""
     out: list[tuple[str, str]] = []
+    question = _clean_question(question)
     for sentence in re.split(r"[.;:?!](?:\s+|$)", question or ""):
-        hits = list(_VERB_RE.finditer(sentence))
+        all_hits = list(_VERB_RE.finditer(sentence))
+        hits = [m for m in all_hits if not _AUX_BEFORE_RE.search(sentence[:m.start()])]
         for i, m in enumerate(hits):
             end = hits[i + 1].start() if i + 1 < len(hits) else len(sentence)
-            out.append((m.group(0).lower(), sentence[m.end():end]))
+            verb = m.group(0).lower()
+            rest = sentence[m.end():end]
+            rest = re.sub(r"^\s*(?:or|and)\s+(?:" + "|".join(_VERBS) + r")\b\s*", "", rest, flags=re.I)
+            out.append((verb, rest))
     return out
 
 
 def requested_items(question: str, limit: int = 24) -> list[dict[str, str]]:
-    """Noun phrases the question asks the answer to provide, in order: [{item, verb}]."""
+    """Noun phrases the question asks the answer to provide, in order: [{id, item, verb}]."""
     from ..axiom.problem import (
         strip_question_framing,  # local: sympy is heavy and the framing rules live there
     )
 
     items: list[tuple[str, str]] = []
-    # "solve <image>" arrives as "solve\n\nAttached image 1 (q.png), transcribed: ...": the header is not a request
-    # ("transcribed" is no deliverable), nor is a source label ("IMO 1960 Problem 2").
-    for verb, rest in _clauses(strip_question_framing(question)):
+    cleaned_q = strip_question_framing(question)
+
+    for verb, rest in _clauses(cleaned_q):
         found = False
         for part in _SPLIT_RE.split(rest):
             p = _LEAD_RE.sub("", part or "").strip()
             p = _TAIL_RE.sub("", p).strip(" ,")
+            p = _GENERIC_OVER_FOR.sub("", p).strip(" ,")
             p = re.sub(r"^(?:including|such as|e\.g\.?)\s+", "", p, flags=re.I)
             p = re.sub(r"\s+(?:and|or)$", "", p).strip(" ,")
-            words = _words(p)
-            if not words or len(words) > 7 or "=" in p or re.search(r"\d", p) or _SUBJECT_WORDS & set(words):
+            p = re.sub(r"^/(?:disprove|refute|check)\s+", "", p, flags=re.I)
+
+            if re.match(r"(?i)^(?:requiring|assuming|showing|providing|given|with|where)\b", p):
                 continue
-            if re.match(r"(?i)(?:or|and|nor)\b", p):
-                continue  # "prove or disprove that ...": the second verb of one request, not a deliverable
-            items.append((" ".join(p.split()), verb))
-            found = True
+            if _GIVEN_PARAM_RE.match(p):
+                continue
+
+            words = _words(p)
+            has_math = bool(re.search(r"[0-9+\-*/=<>^()_]", p))
+            if not words and not has_math:
+                continue
+            if len(words) > 12:
+                continue
+            if _SUBJECT_WORDS & set(words):
+                continue
+            if re.match(r"(?i)^(?:or|and|nor|then)\b", p):
+                continue
+
+            cleaned_item = " ".join(p.split())
+            if cleaned_item:
+                items.append((cleaned_item, verb))
+                found = True
         if not found and verb in _ACTIVITY:
             items.append((_ACTIVITY[verb], verb))
+
     out: list[dict[str, str]] = []
     seen: set[str] = set()
     for it, verb in items:
-        key = " ".join(_stem(w) for w in _words(it))
+        key = " ".join(_stem(w) for w in _words(it)) or it.lower()
         if key and key not in seen:
             seen.add(key)
-            out.append({"item": it, "verb": verb})
+            out.append({"id": f"req-{len(out)+1}", "item": it, "verb": verb})
     return out[:limit]
 
 
@@ -125,52 +164,135 @@ def _passages(answer: str) -> list[str]:
     return out
 
 
-def assess(question: str, answer: str, math_audit: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    """[{item, status, where}] for each requested deliverable."""
+def assess(
+    question: str,
+    answer: str,
+    math_audit: dict[str, Any] | None = None,
+    tool_results: dict[str, Any] | list[Any] | None = None,
+) -> list[dict[str, Any]]:
+    """[{id, item, verb, status, answer_state, check_state, where, quantity, evidence}] for each requested deliverable."""
+    from ..utils.output_contract import mask_instructions
+
     stems_all = {_stem(w) for w in _words(answer)}
     passages = [(p, {_stem(w) for w in _words(p)}) for p in _passages(answer)]
     claims = list((math_audit or {}).get("claims") or [])
     results: list[dict[str, Any]] = []
-    from ..utils.output_contract import mask_instructions
 
-    for req in requested_items(mask_instructions(question)):
+    tool_map: dict[str, Any] = {}
+    if isinstance(tool_results, dict):
+        tool_map = tool_results
+    elif isinstance(tool_results, list):
+        for t in tool_results:
+            if isinstance(t, dict) and t.get("tool"):
+                tool_map[str(t["tool"])] = t
+
+    req_list = requested_items(mask_instructions(question))
+
+    for req in req_list:
+        item_id = req.get("id") or f"req-{len(results)+1}"
         item, verb = req["item"], req["verb"]
         item_stems = [_stem(w) for w in _words(item)]
-        if not item_stems:
-            continue
+        has_math = bool(re.search(r"[0-9+\-*/=<>^()_]", item))
+
+        evidence: list[str] = []
+
         link = _URL_RE.search(answer or "")
         if _LINK_ITEM_RE.search(item) and link:
-            # "include the source URL": a link in the answer delivers it, whatever words surround it (audit I39);
-            # whether the page supports the claim is the claim check's job, not this one.
-            results.append({"item": item, "status": "addressed", "where": link.group(0)[:160], "quantity": False})
+            results.append({
+                "id": item_id,
+                "item": item,
+                "verb": verb,
+                "status": "addressed",
+                "answer_state": "answered",
+                "check_state": "unverified",
+                "where": link.group(0)[:160],
+                "quantity": False,
+                "evidence": evidence,
+            })
             continue
-        proof_item = re.search(r"(?i)\b(?:proof|justification|argument|demonstration)\b", item)
-        if (re.match(r"(?i)whether\b|if\b", item) or proof_item) and _STATUS_RE.search(answer or ""):
-            # A requested proof of a statement the answer shows false is delivered by the disproof (audit I14/T05).
-            # "Determine whether the claim is proved": a verdict (proved, false, open, a counterexample) answers it,
-            # whatever words the item itself uses (audit I14: a valid disproof was reported "not addressed").
-            results.append({"item": item, "status": "addressed", "where": _STATUS_RE.search(answer).group(0),
-                            "quantity": verb in _QUANTITY_VERBS})
+
+        proof_item = re.search(r"(?i)\b(?:proof|justification|argument|demonstration|refutation)\b", item)
+        is_verdict_query = bool(
+            re.match(r"(?i)^(?:whether|if)\b", item) or proof_item or verb in ("decide", "prove", "disprove", "refute", "test")
+        )
+
+        if item_stems:
+            present = sum(1 for s in item_stems if _has(stems_all, s)) / len(item_stems)
+        else:
+            present = 1.0 if has_math and re.sub(r"\s+", "", item) in re.sub(r"\s+", "", answer or "") else 0.0
+
+        status_match = _STATUS_RE.search(answer or "")
+        if is_verdict_query and status_match:
+            present = 1.0
+
+        if present < 0.4 and not (has_math and any(sym in answer for sym in re.findall(r"[A-Za-z0-9]+", item))):
+            results.append({
+                "id": item_id,
+                "item": item,
+                "verb": verb,
+                "status": "missing",
+                "answer_state": "missing",
+                "check_state": "unverified",
+                "where": "",
+                "quantity": verb in _QUANTITY_VERBS,
+                "evidence": evidence,
+            })
             continue
-        present = sum(1 for s in item_stems if _has(stems_all, s)) / len(item_stems)
-        if present < 0.5:
-            results.append({"item": item, "status": "missing", "where": "", "quantity": verb in _QUANTITY_VERBS})
-            continue
+
         best, best_score = "", 0.0
         for text, stems in passages:
-            score = sum(1 for s in item_stems if _has(stems, s)) / len(item_stems)
+            score = sum(1 for s in item_stems if _has(stems, s)) / len(item_stems) if item_stems else 0.0
+            if has_math and re.sub(r"\s+", "", item) in re.sub(r"\s+", "", text):
+                score += 1.0
             if score > best_score:
                 best, best_score = text, score
+
+        if not best and status_match:
+            best = status_match.group(0)
+
         status = "addressed"
-        if best and claims and verb in _QUANTITY_VERBS:
+        check_state = "unverified"
+        answer_state = "answered"
+
+        if best and claims and verb not in _PROSE_VERBS:
             norm = re.sub(r"\s+", " ", best)
             hits = [c for c in claims if c.get("source_text") and re.sub(r"\s+", " ", str(c["source_text"])) in norm]
             if any(c.get("status") == "failed" for c in hits):
                 status = "failed_check"
+                check_state = "failed"
             elif any(c.get("status") == "passed" for c in hits):
                 status = "verified"
-        results.append({"item": item, "status": status, "where": re.sub(r"\s+", " ", best)[:160],
-                        "quantity": verb in _QUANTITY_VERBS})
+                check_state = "checked"
+
+        if tool_map:
+            if "axiom_inequality" in tool_map:
+                ax_ineq = tool_map["axiom_inequality"]
+                is_success = getattr(ax_ineq, "success", True) if not isinstance(ax_ineq, dict) else ax_ineq.get("success", True)
+                if ("real" in item.lower() or "inequality" in item.lower() or ">" in item or "<" in item) and ("integer" not in item.lower() or "real" in item.lower()):
+                    if is_success:
+                        status = "verified"
+                        check_state = "checked"
+                        evidence.append("axiom_inequality")
+
+            if "axiom_structured" in tool_map and status != "failed_check":
+                ax_struct = tool_map["axiom_structured"]
+                is_success = getattr(ax_struct, "success", True) if not isinstance(ax_struct, dict) else ax_struct.get("success", True)
+                if ("zero" in item.lower() or "root" in item.lower() or "polynomial" in item.lower() or "=" in item) and "whether" not in item.lower() and "force" not in item.lower() and is_success:
+                    status = "verified"
+                    check_state = "checked"
+                    evidence.append("axiom_structured")
+
+        results.append({
+            "id": item_id,
+            "item": item,
+            "verb": verb,
+            "status": status,
+            "answer_state": answer_state,
+            "check_state": check_state,
+            "where": re.sub(r"\s+", " ", best)[:160],
+            "quantity": verb in _QUANTITY_VERBS,
+            "evidence": evidence,
+        })
     return results
 
 

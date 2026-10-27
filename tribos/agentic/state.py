@@ -82,7 +82,9 @@ class SubQuestion:
     text: str
     focus: str = ""  # literature | target | simulation | single_cell | clinical | drug | variant | structure | omics | general
     depends_on: list[str] = field(default_factory=list)
-    status: str = "open"  # open | answered | partial | unanswerable
+    status: str = "open"  # open | answered | partial | unanswerable | missing
+    answer_state: str = "open"  # open | answered | partial | missing
+    check_state: str = "unverified"  # checked | supported_by_retrieval | unverified | failed
     evidence_keys: list[str] = field(default_factory=list)
     note: str = ""
     # Readable names of evidence keys set by the phase that added them ("Europe PMC (gap round 1)"); a key without
@@ -102,6 +104,8 @@ class SubQuestion:
             "focus": self.focus,
             "depends_on": list(self.depends_on),
             "status": self.status,
+            "answer_state": self.answer_state,
+            "check_state": self.check_state,
             "evidence_keys": list(self.evidence_keys),
             "evidence_labels": [self.evidence_key_names.get(k) or evidence_key_label(k) for k in self.evidence_keys],
             "note": self.note,
