@@ -1978,6 +1978,36 @@ class TribosVerifier:
                     )
                 )
 
+        # F09: Invalidate stale verification after revisions and contradictory evidence
+        # If response asserts that independent domain checks passed, but a tool result or candidate witness
+        # was invalidated, rejected, or failed domain checks:
+        has_domain_failure = bool(mismatched_tools) or any(
+            getattr(t_res, "metadata", {}).get("invalidated")
+            or getattr(t_res, "metadata", {}).get("verification_status") in ("rejected", "failed")
+            or any(
+                c.get("name") == "domain" and c.get("passed") is False
+                for c in ((getattr(t_res, "data", {}) or {}).get("verification") or {}).get("checks") or []
+            )
+            for t_res in (tool_results or {}).values()
+            if t_res is not None
+        )
+        if has_domain_failure and re.search(r"\b(?:independent\s+)?domain\s+checks?\s+passed\b|\bindependent\s+checks?\s+passed\s*\(domain\)", resp_lower):
+            matched_sentence = ""
+            for s in self._split_sentences(response_markdown):
+                if re.search(r"\b(?:independent\s+)?domain\s+checks?\s+passed\b|\bindependent\s+checks?\s+passed\s*\(domain\)", s.lower()):
+                    matched_sentence = s
+                    break
+            defects.append(
+                DefectItem(
+                    category="CLAIM_CONTRADICTED",
+                    severity=DefectSeverity.CRITICAL,
+                    description="Response asserts that independent domain checks passed, but the candidate witness or computation was rejected as out of domain.",
+                    suggested_correction="Omit the assertion that independent domain checks passed.",
+                    sentence=matched_sentence or None,
+                    claim="independent domain checks passed",
+                )
+            )
+
         # -------------------------------------------------------------
         # 4b. REGISTERED FEATURE CHECKS (ODE parameters, evidence grades, dataset consent, ...)
         # -------------------------------------------------------------

@@ -31,6 +31,7 @@ the checker computed, which the bounded correction loop sends back to the writer
 from __future__ import annotations
 
 import bisect
+import hashlib
 import logging
 import math
 import random
@@ -130,6 +131,7 @@ class MathAudit:
     record_revision: str = ""
     variable: str = "t"
     units: dict[str, Any] = field(default_factory=dict)
+    reused: bool = False
 
     def counts(self) -> dict[str, int]:
         out = {PASSED: 0, FAILED: 0, INCONCLUSIVE: 0, UNSUPPORTED: 0}
@@ -145,6 +147,7 @@ class MathAudit:
 
     def to_dict(self) -> dict[str, Any]:
         return {"counts": self.counts(), "variable": self.variable, "record_revision": self.record_revision, "units": self.units,
+                "reused": self.reused,
                 "claims": [c.to_dict() for c in self.claims][:200],
                 "definitions": [d.to_dict() for d in self.definitions][:60]}
 
@@ -1816,6 +1819,18 @@ def _unknowns(md: str, problem: dict[str, Any], physical: bool = True) -> set[st
     return out
 
 
+_AUDIT_CACHE: dict[tuple[str, str], MathAudit] = {}
+
+
+def _math_content_hash(md: str) -> str:
+    raw_segments = [
+        body.strip()
+        for _, body, in_table in sorted(_segments(md) + _plain_segments(md))
+        if not in_table and body.strip()
+    ]
+    return hashlib.sha256("||".join(raw_segments).encode("utf-8")).hexdigest()[:16]
+
+
 def audit_answer(
     response: str,
     query: str = "",
@@ -1829,6 +1844,19 @@ def audit_answer(
     if record is None:
         record = build_result_record(query, tool_results)
     md = response or ""
+
+    math_hash = _math_content_hash(md)
+    cache_key = (record.revision, math_hash)
+    if cache_key in _AUDIT_CACHE:
+        cached = _AUDIT_CACHE[cache_key]
+        return MathAudit(
+            claims=list(cached.claims),
+            definitions=list(cached.definitions),
+            record_revision=cached.record_revision,
+            variable=cached.variable,
+            units=dict(cached.units),
+            reused=True,
+        )
     problem = record.problem or {}
     func = re.sub(r"\(.*$", "", str(problem.get("function") or ""))
     functions, variable = _document_functions(md, func)
@@ -1921,8 +1949,18 @@ def audit_answer(
     for i, issue in enumerate(units["inconsistent"]):
         auditor.claims.append(MathClaim(claim_id=f"units-{i}", text=issue["statement"], context="Units",
             kind="units", status=FAILED, detail=issue["reason"], source_text=issue["statement"]))
-    return MathAudit(claims=auditor.claims, definitions=auditor.definitions, record_revision=record.revision,
-                     variable=variable, units=units)
+    audit_res = MathAudit(
+        claims=auditor.claims,
+        definitions=auditor.definitions,
+        record_revision=record.revision,
+        variable=variable,
+        units=units,
+        reused=False,
+    )
+    if len(_AUDIT_CACHE) > 100:
+        _AUDIT_CACHE.clear()
+    _AUDIT_CACHE[cache_key] = audit_res
+    return audit_res
 
 
 _UNIT_NAME_RE = re.compile(

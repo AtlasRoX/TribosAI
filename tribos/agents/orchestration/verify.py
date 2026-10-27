@@ -14,6 +14,77 @@ from ...verify.verifier import VerificationReport
 from .context import RunContext, logger, orchestrator_module
 
 
+def reconcile_math_artifacts_with_answer(run: RunContext) -> None:
+    """Make mathematical tool results and artifacts agree with the final revised text.
+
+    If the revised text explicitly rejects a candidate witness / counterexample, or proves the universal theorem
+    instead of accepting the refutation, the tool result and artifact are invalidated and marked as historical
+    attempts so they cannot certify the corrected answer.
+    """
+    import re
+
+    resp = (run.candidate_response or "").lower()
+    art = run.execution_artifacts.get("math_agent")
+    if not isinstance(art, dict) and run.agent_state is not None:
+        art = (getattr(run.agent_state, "artifacts", None) or {}).get("math_agent")
+    if not isinstance(art, dict):
+        return
+
+    # Check for candidate witness in art
+    results = ((art.get("answer") or {}).get("results") or []) + (art.get("results") or [])
+    ces: list[str] = [str(r.get("counterexample")) for r in results if isinstance(r, dict) and r.get("counterexample") is not None]
+    if art.get("counterexample") is not None:
+        ces.append(str(art.get("counterexample")))
+
+    rejected_in_text = False
+    rejection_reason = ""
+    for ce in ces:
+        ce_clean = ce.strip("{}'\" ")
+        if ce_clean and (
+            ("reject" in resp and ce_clean in resp)
+            or ("outside" in resp and ce_clean in resp)
+            or ("not in" in resp and ce_clean in resp)
+            or ("invalid" in resp and ce_clean in resp)
+        ):
+            rejected_in_text = True
+            rejection_reason = f"Candidate witness {ce} rejected in revised answer as out of domain"
+            break
+
+    # Also check if text proves the universal inequality / statement contrary to tool's disproof
+    if not rejected_in_text and art.get("status") in ("verified", "partially_verified") and any(r.get("status") == "disproved" for r in results if isinstance(r, dict)):
+        if re.search(r"\b(?:for\s+every|for\s+all)\b.*>.*(?:holds|true|established)", resp) or ">= 1 > 0" in resp or ">= 1" in resp:
+            rejected_in_text = True
+            rejection_reason = "Final answer established the universal claim and rejected candidate refutation"
+
+    if rejected_in_text:
+        art["status"] = "rejected"
+        art["invalidated"] = True
+        art["historical"] = True
+        art["invalidation_reason"] = rejection_reason
+        art["caveat"] = f"Candidate witness rejected: {rejection_reason}"
+        if "confidence" in art:
+            art["confidence"] = None
+        for c in (art.get("verification") or {}).get("checks") or []:
+            if "domain" in c.get("name", ""):
+                c["passed"] = False
+                c["detail"] = rejection_reason
+
+        # Invalidate in tool_results as well
+        for key, res in list(run.tool_results.items()):
+            if "math_agent" in key or getattr(res, "tool_name", "") == "axiom_solve_problem":
+                res.success = False
+                res.error = rejection_reason
+                if res.metadata is None:
+                    res.metadata = {}
+                res.metadata["invalidated"] = True
+                res.metadata["historical"] = True
+                res.metadata["verification_status"] = "rejected"
+
+        if run.agent_state is not None:
+            run.agent_state.artifacts["math_agent"] = art
+        run.execution_artifacts["math_agent"] = art
+
+
 def prefer_primary_reports(text: str, tool_results: dict[str, Any]) -> str:
     """The answer with a named result's retrieved primary paper cited where only a review was cited for its figures."""
     from ...verify import verifier as verifier_mod
@@ -98,6 +169,8 @@ async def check_and_correct(run: RunContext) -> None:
         await send({"type": "content_reset", "reason": "cleanup"})
         await send({"type": "content_delta", "delta": candidate_response})
 
+    run.candidate_response = candidate_response
+    reconcile_math_artifacts_with_answer(run)
     await before_verification(candidate_response)
 
     # -------------------------------------------------------------
@@ -239,6 +312,8 @@ async def check_and_correct(run: RunContext) -> None:
                     or revised_report.verification_score >= verification_report.verification_score
                 ):
                     candidate_response, verification_report = revised, revised_report
+                    run.candidate_response = candidate_response
+                    reconcile_math_artifacts_with_answer(run)
                     await send({"type": "content_reset", "reason": "revision"})
                     await send({"type": "content_delta", "delta": candidate_response})
                     await emit("revision", title="Revised the answer")
@@ -285,6 +360,8 @@ async def check_and_correct(run: RunContext) -> None:
                 logger.warning("Re-check after removing flagged claims failed: %s", prune_err)
             else:
                 candidate_response, verification_report = pruned, pruned_report
+                run.candidate_response = candidate_response
+                reconcile_math_artifacts_with_answer(run)
                 await send({"type": "content_reset", "reason": "cleanup"})
                 await send({"type": "content_delta", "delta": candidate_response})
                 await emit(

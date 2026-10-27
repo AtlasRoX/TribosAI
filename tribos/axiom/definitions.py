@@ -21,8 +21,8 @@ every search is bounded.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
 import re
+from collections.abc import Callable
 from fractions import Fraction
 from typing import Any
 
@@ -130,10 +130,11 @@ def domain_from_words(text: str) -> str | None:
             return f"finite_set:{{{','.join(nums)}}}"
     if _SET_NONNEG_RE.search(low) or re.search(
             r"\bnon[\s-]?negative[\s-]+(?:integers?|whole[\s-]+numbers?)\b|\bwhole[\s-]+numbers?\b|ℕ\s*(?:_\{?0\}?|₀|∪\s*\{\s*0\s*\})|"
-            r"ℤ\s*(?:_\{?\s*(?:≥|>=|\\geq?)\s*0\s*\}?|≥0)|\bn\s*0\b", low):
+            r"(?:[zℤ]|\\mathbb\{z\})\s*(?:_\{?\s*(?:≥|>=|\\geq?)\s*0\s*\}?|≥0|>=0|\\geq?0)|\b(?:[a-z]\s*(?:in|∈|\\in)\s*)?(?:[zℤ]|\\mathbb\{z\})\s*(?:>=|≥|\\geq?)\s*0|\bn\s*0\b", low):
         return "nonnegative_integer"
     if _SET_POSITIVE_RE.search(low) or re.search(
-            r"\bpositive[\s-]+integers?\b|\bnatural[\s-]+numbers?\b|ℕ|ℤ\s*(?:\+|⁺|\^\{?\+\}?)|ℤ\s*_\{?\s*(?:>|≥\s*1|>=\s*1|\\geq?\s*1)\s*0?\s*\}?|\bz\s*\+",
+            r"\bpositive[\s-]+integers?\b|\bnatural[\s-]+numbers?\b|ℕ|(?:[zℤ]|\\mathbb\{z\})\s*(?:\+|⁺|\^\{?\+\}?|_\+)|"
+            r"(?:[zℤ]|\\mathbb\{z\})\s*(?:_\{?\s*(?:>|≥\s*1|>=\s*1|\\geq?\s*1)\s*0?\s*\}?|>0|>=1|≥1)|\b(?:[a-z]\s*(?:in|∈|\\in)\s*)?(?:[zℤ]|\\mathbb\{z\})\s*(?:>0|>=1|≥1)|\bz\s*\+",
             low):
         return "positive_integer"
     if _SET_INTEGER_RE.search(low):
@@ -928,17 +929,21 @@ def _implicit_claims(text: str, defs: list[dict[str, Any]], taken: list[tuple[in
             continue
         domain = owner.get("domain") or "unspecified"
         if domain == "unspecified":
-            m_dom = re.search(r"\b(?:non[\s-]?negative\s+integer|positive\s+integer|integer|natural|real)\b", text, re.I)
-            if m_dom:
-                d_str = m_dom.group(0).lower().replace(" ", "_").replace("-", "")
-                if "nonnegative" in d_str:
-                    domain = "nonnegative_integer"
-                elif "positive" in d_str:
-                    domain = "positive_integer"
-                elif "integer" in d_str or "natural" in d_str:
-                    domain = "integer"
-                elif "real" in d_str:
-                    domain = "real"
+            dw = domain_from_words(text)
+            if dw:
+                domain = dw
+            else:
+                m_dom = re.search(r"\b(?:non[\s-]?negative\s+integer|positive\s+integer|integer|natural|real)\b", text, re.I)
+                if m_dom:
+                    d_str = m_dom.group(0).lower().replace(" ", "_").replace("-", "")
+                    if "nonnegative" in d_str:
+                        domain = "nonnegative_integer"
+                    elif "positive" in d_str:
+                        domain = "positive_integer"
+                    elif "integer" in d_str or "natural" in d_str:
+                        domain = "integer"
+                    elif "real" in d_str:
+                        domain = "real"
         n = first_id + len(tasks)
         tasks.append({"id": "claim" if n == 0 else f"claim {n + 1}", "op": "claim", "lhs": lhs, "relation": rel.group(1),
                       "rhs": rhs, "variable": var, "domain": domain, "conditions": [],
@@ -1670,7 +1675,7 @@ def _run_zeros(task: dict[str, Any], defs: list[dict[str, Any]]) -> dict[str, An
         sset = sp.solveset(expr, var, domain=sp.S.Reals if domain in ("real", "rational") else sp.S.Complexes)
         if not isinstance(sset, sp.FiniteSet):
             return {"status": "unresolved", "steps": steps, "text": f"{task['id']}: the zero set is {sset}, not a finite list"}
-        roots, degree, complete = {z: 1 for z in sset}, None, True
+        roots, degree, complete = dict.fromkeys(sset, 1), None, True
         steps.append(f"{defn['name']}({var}) = 0 has exactly the solutions {', '.join(_value_text(z) for z in sset)}")
     else:
         poly = sp.Poly(expr, var)
@@ -1983,9 +1988,9 @@ def check_structured(params: dict[str, Any], data: dict[str, Any], question: str
                     if want_fn and in_domain(w, want_fn) is False:
                         domain_bad.append(f"witness {t['variable']} = {w} is outside question domain of {d['name']} ({domain_label(want_fn)})")
             if question:
-                qm = re.search(rf"\bfor\s+(?:every|all|each|any)\s+([^.?!;\n]+?\b{re.escape(t['variable'])}\b[^.?!;\n]*)", question, re.I)
+                qm = re.search(rf"\bfor\s+(?:(?:every|all|each|any)\s+)?([^.?!;\n]*?\b{re.escape(t['variable'])}\b[^,;:.?!(\n]*)", question, re.I)
                 if qm:
-                    q_dom = domain_from_words(qm.group(1))
+                    q_dom = domain_from_words(qm.group(0)) or domain_from_words(qm.group(1))
                     if q_dom and in_domain(w, q_dom) is False:
                         domain_bad.append(f"witness {t['variable']} = {w} violates question condition {qm.group(0).strip()}")
         if t["op"] == "orbit":

@@ -207,12 +207,19 @@ def build_result_record(query: str, tool_results: dict[str, Any]) -> ResultRecor
     var = str(rec.problem.get("variable") or "t")
 
     for key, res in (tool_results or {}).items():
-        if res is None or not getattr(res, "success", False):
+        if res is None:
+            continue
+        tool = str(getattr(res, "tool_name", "") or "")
+        if getattr(res, "metadata", {}).get("invalidated") or not getattr(res, "success", False):
+            rec.provenance.append({
+                "key": str(key), "tool": tool, "success": False,
+                "status": "invalidated" if getattr(res, "metadata", {}).get("invalidated") else "failed",
+                "reason": str(getattr(res, "error", "") or "invalidated or failed tool execution"),
+            })
             continue
         data = getattr(res, "data", None)
         if not isinstance(data, dict):
             continue
-        tool = str(getattr(res, "tool_name", "") or "")
         from ..axiom.correspondence import check_task_correspondence
         from ..axiom.problem import parse_problem
 

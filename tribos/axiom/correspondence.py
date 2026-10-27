@@ -158,19 +158,26 @@ def check_task_correspondence(
     # 6. Domain & witness validity check (S07 / I08)
     dom = spec.domain or ""
     low_text = q_text.lower()
-    if "nonnegative" in low_text or "non-negative" in low_text:
+    from .definitions import domain_from_words
+    dw = domain_from_words(q_text)
+    if dw:
+        dom = dw
+    elif "nonnegative" in low_text or "non-negative" in low_text or "z>=0" in low_text or "z >= 0" in low_text or "z_{\\ge 0}" in low_text:
         dom = "nonnegative_integer"
-    elif "positive integer" in low_text or "natural number" in low_text:
+    elif "positive integer" in low_text or "natural number" in low_text or "z>0" in low_text or "z > 0" in low_text:
         dom = "positive_integer"
     elif "integer" in low_text and not dom:
         dom = "integer"
 
     if dom:
-        # Check counterexample in data top-level and in results
+        # Check counterexample in data top-level, in answer, and in results
+        ans = data.get("answer") if isinstance(data.get("answer"), dict) else {}
         ces: list[Any] = []
         if data.get("counterexample") is not None:
             ces.append(data.get("counterexample"))
-        for r in data.get("results") or []:
+        if ans.get("counterexample") is not None:
+            ces.append(ans.get("counterexample"))
+        for r in (data.get("results") or []) + (ans.get("results") or []):
             if isinstance(r, dict) and r.get("counterexample") is not None:
                 ces.append(r.get("counterexample"))
 

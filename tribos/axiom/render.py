@@ -25,7 +25,7 @@ _SET_REQUEST_RE = re.compile(r"\bset[\s-]+notation\b|\bsolution\s+set\b|\bas\s+a
 
 def render_verified_answer(question: str, math_artifact: dict[str, Any] | None, contract: Contract | None) -> str | None:
     """The requested answer as text, or None when the verified result is not by itself the full answer."""
-    if not math_artifact or math_artifact.get("status") != "verified" or contract is None or not contract.strict_form:
+    if not math_artifact or math_artifact.get("status") != "verified" or math_artifact.get("invalidated") or contract is None or not contract.strict_form:
         return None
     if contract.literal is not None or contract.json_only:
         return None

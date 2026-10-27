@@ -494,7 +494,11 @@ export interface MathAgentStep {
 
 /** Verified mathematics agent run (tribos/axiom/agent.py). */
 export interface MathAgentArtifact {
-  status: "verified" | "partially_verified" | "unverified" | "failed";
+  status: "verified" | "partially_verified" | "unverified" | "failed" | "rejected" | "invalidated";
+  invalidated?: boolean;
+  historical?: boolean;
+  invalidation_reason?: string;
+  superseded?: boolean;
   answer?: { text?: string; latex?: string; [k: string]: any };
   verification?: { status: string; level: number; checks?: MathCheck[]; uncertainty?: string[] } | null;
   uncertainty?: string[];
