@@ -130,6 +130,7 @@ for _router_module in (
     "app.backend.routers.a2a",
     "app.backend.routers.vision",
     "app.backend.routers.simulate",
+    "app.backend.routers.harness",
 ):
     try:
         app.include_router(importlib.import_module(_router_module).router)

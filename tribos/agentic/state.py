@@ -149,6 +149,14 @@ class AgentState:
     _running_steps: dict[str, dict[str, str]] = field(default_factory=dict)  # step id -> {title, agent} still spinning
 
     @property
+    def working_memory(self) -> Any:
+        """Active working memory scratchpad for this run."""
+        if not hasattr(self, "_working_memory") or getattr(self, "_working_memory", None) is None:
+            from ..memory.working import WorkingMemory
+            self._working_memory = WorkingMemory(query=self.query)
+        return self._working_memory
+
+    @property
     def effort_level(self) -> str:
         """The effort level for this agentic run (low, medium, high, ultra)."""
         return str(self.options.get("effort_level") or getattr(self.ctx, "effort_level", "medium") or "medium")
@@ -208,6 +216,30 @@ class AgentState:
                 if store:
                     self.add_result(key or self.next_key(phase, tool_name), res, phase=phase, purpose=purpose)
                 return res
+
+        # Pre-flight dimensional and argument gating (F-06 / P0.6)
+        from ..harness.preflight import PreflightGate
+        pf_ok, pf_reason = PreflightGate.inspect_tool_call(tool_name, kwargs)
+        if not pf_ok:
+            res = ToolResult(
+                success=False,
+                tool_name=tool_name,
+                error=f"Pre-flight gate rejected: {pf_reason}",
+                error_type=ErrorType.VALIDATION_ERROR,
+                metadata={"failure_class": "dimensional_mismatch", "preflight_failed": True},
+            )
+            self.trace.append({
+                "phase": phase,
+                "tool": tool_name,
+                "purpose": purpose[:200],
+                "success": False,
+                "error_type": "VALIDATION_ERROR",
+                "seconds": 0.0,
+            })
+            if store:
+                self.add_result(key or self.next_key(phase, tool_name), res, phase=phase, purpose=purpose)
+            return res
+
         try:
             self.budget.charge_tool(phase)
         except BudgetExhausted as exc:
@@ -236,6 +268,13 @@ class AgentState:
     def add_result(self, key: str, result: Any, *, phase: str, purpose: str, render: bool = True) -> str:
         self.tool_results[key] = result
         self.evidence_labels[key] = {"phase": phase, "purpose": purpose[:240], "render": "1" if render else ""}
+        # Mirror key outputs to working memory for sibling specialist discovery
+        if isinstance(result, dict) or hasattr(result, "data"):
+            data = getattr(result, "data", None) or (result if isinstance(result, dict) else {})
+            if isinstance(data, dict):
+                for k, v in data.items():
+                    if isinstance(v, (int, float, str)) and k in ("stress", "force", "thickness", "mass", "result", "value", "status"):
+                        self.working_memory.set_variable(f"{key.split('.')[-1]}_{k}", v)
         return key
 
     def agent_result_keys(self) -> list[str]:
