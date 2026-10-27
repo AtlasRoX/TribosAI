@@ -171,16 +171,17 @@ def _sync_sub_questions(agent_state: Any, items: list[dict[str, Any]], tool_resu
     if agent_state is None:
         return
     subs = getattr(agent_state, "sub_questions", None)
-    if not subs and len(items) > 1:
+    if not subs and len(items) >= 1:
         from ...agentic.state import SubQuestion
 
         new_subs: list[SubQuestion] = []
         for it in items:
+            it_status = it.get("status", "addressed")
             sq = SubQuestion(
                 id=it.get("id") or f"q{len(new_subs)+1}",
                 text=it.get("item", ""),
-                status="answered" if it.get("status") in ("verified", "addressed") else it.get("status", "open"),
-                answer_state=it.get("answer_state", "answered" if it.get("status") != "missing" else "missing"),
+                status="answered" if it_status in ("verified", "addressed") else it_status,
+                answer_state=it.get("answer_state", "answered" if it_status != "missing" else "missing"),
                 check_state=it.get("check_state", "unverified"),
             )
             for ev in it.get("evidence") or []:
@@ -209,6 +210,9 @@ def _sync_sub_questions(agent_state: Any, items: list[dict[str, Any]], tool_resu
             sq.check_state = match.get("check_state", "unverified")
             if it_status in ("verified", "addressed"):
                 sq.status = "answered"
+            elif it_status == "partial":
+                sq.status = "partial"
+                sq.note = "partly answered or unchecked"
             elif it_status == "failed_check":
                 sq.status = "partial"
                 sq.note = "contradicted by claim check"

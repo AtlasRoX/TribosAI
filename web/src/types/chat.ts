@@ -51,7 +51,7 @@ export interface Deliverable {
   id?: string;
   item: string;
   verb?: string;
-  status: "verified" | "addressed" | "failed_check" | "missing";
+  status: "verified" | "addressed" | "partial" | "failed_check" | "missing" | string;
   answer_state?: "open" | "answered" | "partial" | "missing" | string;
   check_state?: "checked" | "supported_by_retrieval" | "unverified" | "failed" | string;
   where?: string;

@@ -1862,3 +1862,53 @@ All 17 harness endpoints were verified and tested with zero authorization or rou
   - `tests/test_feat_remaining_issues_and_lean.py`: **14/14 passed**
   - `tests/test_audit_repair.py`: **62/64 passed, 2 skipped** (Lean binary required)
   - **Result: 76 passed, 2 skipped in 17.41s, 0 regressions**
+
+
+---
+
+## Addendum: Requested-Item Coverage Status Consistency & Obligation Verification Repair
+
+### 1. Root Cause Summary
+- **Symptom**: For the query *"For integer x, solve x^2 - 5x + 6 = 0. Return exactly one numbered item containing a factorization, the complete set of integer roots, and a substitution check for each root. Do not search the web or invoke a formal prover."*, the verification panel correctly stated *"All 3 claims checked and supported by the evidence"*, while the run summary contradicted it with `"Requested items: 1 answered, not checked."`
+- **Root Causes**:
+  1. **Passage Scoring on Math Deliverables**: In `tribos/agents/deliverables.py`, `_words()` filtered tokens with length $< 2$, eliminating single-letter variables (`x`) and math symbols. Equation items like `x^2 - 5x + 6 = 0` produced empty stems (`item_stems = []`), resulting in a passage score of `0.0`. Furthermore, strict literal substring check `re.sub(r"\s+", "", item) in text` failed when the answer wrote `x^2 - 5*x + 6 = (x - 2)*(x - 3)` or omitted `= 0` in factored lines, leaving `best = ""` and skipping mathematical claim assessment entirely.
+  2. **Passage Claim Isolation**: In multi-passage answers (e.g. paragraphs separating factorization from roots and substitution checks), claim linking was restricted to a single passage (`hits = [c for c in claims if ... in norm]`), ignoring claims in subsequent paragraphs or bullet points.
+  3. **Composite Obligation Validation**: Deliverables assessment did not inspect composite requirements (factorization, complete roots, substitution check for each root), meaning items could either falsely fail to verify when all parts passed, or risk being marked verified when required parts were incomplete or omitted.
+  4. **Frontend & Pipeline Synchronization**: `_sync_sub_questions()` only synced when `len(items) > 1`, leaving single requested-item sub-questions out of sync. In `VerificationNotice.tsx`, `DELIVERABLE_LABEL` lacked support for `"partial"` items.
+
+### 2. Implementation & Repairs
+- **`tribos/agents/deliverables.py`**:
+  - Implemented `_math_tokens()` and `_norm_math()` to normalize math symbols and multiplication operators (`5*x` $\leftrightarrow$ `5x`).
+  - Enhanced passage scoring to match equation LHS, normalized math expressions, and mathematical token overlap, ensuring deliverable passages are accurately located.
+  - Linked relevant claims across the full response for single-item requests and across symbol-matching passages for multi-item requests.
+  - Implemented requirement-aware obligation checking:
+    - `asks_factorization`: verified algebraic factorization identity or verified factored polynomial form.
+    - `asks_roots` / `asks_complete_roots`: solved equation with SymPy and validated that all required roots are explicitly stated.
+    - `asks_subst_check` / `asks_each_root`: verified that each required root has a passing numerical substitution claim.
+  - Enforced fail-closed behavior: any contradicted claim immediately marks `status: "failed_check"` (`check_state: "failed"`).
+  - Incomplete parts maintain `status: "addressed"` (`check_state: "unverified"`) without falsely marking the item checked.
+  - When all required parts pass verification, marked `status: "verified"` (`check_state: "checked"`).
+- **`tribos/agents/orchestration/finalize.py`**:
+  - Updated `_sync_sub_questions()` to synchronize single items (`len(items) >= 1`).
+  - Mapped deliverable statuses accurately to `SubQuestion` state (`check_state: "checked"` for verified items, `"unverified"` for addressed, `"failed"` for failed checks).
+- **`web/src/components/VerificationNotice.tsx`**:
+  - Added support for `"partial"` in `DELIVERABLE_LABEL` and `parts` summary.
+  - Unified deliverable status counts (`count("verified")`, `count("addressed")`, `count("partial")`, `count("failed_check")`, `count("missing")`).
+- **`web/src/components/agentic/AgentRunPanel.tsx` & `ui.tsx` & `artifactDisclosure.ts`**:
+  - Included `q.status === "verified"` alongside `q.check_state === "checked"` to render `<Pill tone="ok">tool checked</Pill>`.
+  - Added `"verified"` to `statusTone` (`"ok"`) and `artifactDisclosure.ts` closed sub-question status lists.
+- **`web/src/types/chat.ts`**:
+  - Extended `Deliverable` status union to include `"partial"`.
+
+### 3. Verification & Regression Coverage
+- **Dedicated Regression Suite** (`tests/test_feat_f08_requested_item_coverage.py`):
+  - `test_f08_reproduction_solve_factorization_roots_subst_checks`: **PASSED** (1 checked, verifier fully verified, summary agrees).
+  - `test_f08_partial_answer_omitted_substitution_check`: **PASSED** (remains addressed/unverified when substitution checks omitted).
+  - `test_f08_partial_answer_incomplete_roots`: **PASSED** (remains addressed/unverified when root subset is incomplete).
+  - `test_f08_contradicted_answer_failing_substitution_check`: **PASSED** (marked failed_check when substitution arithmetic fails).
+  - Suite: **11/11 PASSED in 4.00s**.
+- **Broader Regressions**:
+  - `tests/test_harness_and_memory.py`: **13/13 PASSED**
+  - `tests/test_feat_remaining_issues_and_lean.py`: **14/14 PASSED**
+  - `tests/test_feat_f04_task_correspondence.py`: **9/9 PASSED**
+  - Web unit tests (`npm test` in `web/`): **204/204 PASSED** in 5.06s.

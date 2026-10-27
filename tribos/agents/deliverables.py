@@ -74,6 +74,17 @@ def _words(text: str) -> list[str]:
     return [w for w in re.findall(r"[a-z][a-z\-]{1,}", (text or "").lower()) if w not in _STOP]
 
 
+def _math_tokens(text: str) -> list[str]:
+    return [tok.lower() for tok in re.findall(r"[A-Za-z]\w*|\d+(?:\.\d+)?", text or "") if tok.lower() not in _STOP]
+
+
+def _norm_math(s: str) -> str:
+    s = re.sub(r"\s+", "", (s or "").lower())
+    s = re.sub(r"([0-9])\*([a-z])", r"\1\2", s)
+    s = re.sub(r"([a-z])\*([a-z])", r"\1\2", s)
+    return s
+
+
 def _stem(word: str) -> str:
     return word.replace("-", "")[:6]
 
@@ -273,10 +284,25 @@ def assess(
             continue
 
         best, best_score = "", 0.0
+        norm_item = _norm_math(item)
+        lhs = item.split("=")[0].strip() if "=" in item else ""
+        norm_lhs = _norm_math(lhs)
+
         for text, stems in passages:
             score = sum(1 for s in item_stems if _has(stems, s)) / len(item_stems) if item_stems else 0.0
-            if has_math and re.sub(r"\s+", "", item) in re.sub(r"\s+", "", text):
-                score += 1.0
+            norm_text = _norm_math(text)
+            if has_math:
+                if norm_item and norm_item in norm_text:
+                    score += 2.0
+                elif norm_lhs and norm_lhs in norm_text:
+                    score += 1.5
+                elif re.sub(r"\s+", "", item) in re.sub(r"\s+", "", text):
+                    score += 1.0
+                else:
+                    m_toks = _math_tokens(item)
+                    t_toks = set(_math_tokens(text))
+                    if m_toks:
+                        score += sum(1 for t in m_toks if t in t_toks) / len(m_toks)
             if score > best_score:
                 best, best_score = text, score
 
@@ -294,19 +320,112 @@ def assess(
         if not best and status_match:
             best = status_match.group(0)
 
+        if not best and len(req_list) == 1 and passages:
+            best = passages[0][0]
+
         status = "addressed"
         check_state = "unverified"
         answer_state = "answered"
 
-        if best and claims and verb not in _PROSE_VERBS:
+        # Determine relevant claims for this item
+        if len(req_list) == 1:
+            item_claims = claims
+        elif best:
             norm = re.sub(r"\s+", " ", best)
-            hits = [c for c in claims if c.get("source_text") and re.sub(r"\s+", " ", str(c["source_text"])) in norm]
-            if any(c.get("status") == "failed" for c in hits):
-                status = "failed_check"
-                check_state = "failed"
-            elif any(c.get("status") == "passed" for c in hits):
+            item_claims = [c for c in claims if c.get("source_text") and re.sub(r"\s+", " ", str(c["source_text"])) in norm]
+            if not item_claims and has_math:
+                m_toks = set(_math_tokens(item))
+                item_claims = [c for c in claims if any(t in m_toks for t in _math_tokens(str(c.get("text", ""))))]
+        else:
+            item_claims = []
+
+        failed_claims = [c for c in item_claims if c.get("status") in ("failed", "contradicted")]
+        passed_claims = [c for c in item_claims if c.get("status") in ("passed", "supported")]
+
+        if failed_claims:
+            status = "failed_check"
+            check_state = "failed"
+        elif item_claims and verb not in _PROSE_VERBS:
+            q_lower = (question or "").lower()
+            asks_factorization = bool(re.search(r"\b(?:factori[sz]ation|factored(?:\s+form)?|factors?)\b", q_lower))
+            asks_roots = bool(re.search(r"\b(?:roots?|zeros?|solutions?)\b", q_lower) or verb in ("solve", "find", "determine"))
+            asks_complete_roots = bool(re.search(r"\b(?:complete\s+set|all\s+(?:integer\s+)?roots|all\s+zeros|all\s+solutions)\b", q_lower))
+            asks_subst_check = bool(re.search(r"\b(?:substitution\s+checks?|substitution|substitut(?:e|ing)|check\s+(?:for\s+)?each\s+root|verify\s+(?:by\s+)?substitution)\b", q_lower))
+            asks_each_root = bool(re.search(r"\b(?:each\s+root|both\s+roots|all\s+roots)\b", q_lower))
+
+            expected_roots: list[str] = []
+            if (asks_complete_roots or asks_roots or asks_subst_check) and "=" in item:
+                try:
+                    import sympy as sp
+                    eq_parts = item.split("=")
+                    s_lhs = re.sub(r"([0-9])([a-z])", r"\1*\2", eq_parts[0].strip()).replace("^", "**")
+                    s_rhs = re.sub(r"([0-9])([a-z])", r"\1*\2", eq_parts[1].strip()).replace("^", "**") if len(eq_parts) > 1 and eq_parts[1].strip() else "0"
+                    syms = list(sp.sympify(s_lhs).free_symbols)
+                    if syms:
+                        var_sym = syms[0]
+                        roots = sp.solve(sp.sympify(s_lhs) - sp.sympify(s_rhs), var_sym)
+                        if "integer" in q_lower:
+                            roots = [r for r in roots if getattr(r, "is_integer", False)]
+                        expected_roots = [str(r) for r in roots]
+                except Exception:
+                    pass
+
+            def has_root_statement(ans: str, r: str, var: str = "x") -> bool:
+                patterns = [
+                    rf"\b{var}\s*=\s*{r}\b",
+                    rf"\b(?:roots?|zeros?|solutions?)\b[^\n]*\b{r}\b",
+                    rf"\b(?:for|at|when)\s+{var}\s*=\s*{r}\b",
+                ]
+                return any(re.search(p, ans, re.I) for p in patterns)
+
+            subst_validated_roots = set()
+            for c in passed_claims:
+                c_text = str(c.get("text", "")) + " " + str(c.get("source_text", ""))
+                for r in expected_roots:
+                    if re.search(rf"\b{re.escape(r)}\^|\*\s*{re.escape(r)}\b|\(\s*{re.escape(r)}\s*\)", c_text):
+                        if re.search(r"\b0\b", c_text):
+                            subst_validated_roots.add(r)
+
+            subst_passed = False
+            if asks_subst_check:
+                if asks_each_root and expected_roots:
+                    subst_passed = all(r in subst_validated_roots for r in expected_roots)
+                else:
+                    subst_passed = bool(subst_validated_roots) or any(
+                        (re.search(r"\b0\b", str(c.get("text", ""))) and re.search(r"\d+", str(c.get("text", ""))))
+                        for c in passed_claims
+                    )
+
+            factor_passed = False
+            if asks_factorization:
+                factor_passed = any(
+                    re.search(r"\([a-z]\s*[-+]\s*\d+\)", str(c.get("text", "") or c.get("source_text", "")))
+                    for c in passed_claims
+                )
+                if not factor_passed and re.search(r"\([a-z]\s*[-+]\s*\d+\)\s*(?:\*?\s*\([a-z]\s*[-+]\s*\d+\))+", answer, re.I):
+                    factor_passed = True
+
+            roots_complete = True
+            if (asks_complete_roots or asks_roots) and expected_roots:
+                for r in expected_roots:
+                    if not has_root_statement(answer, r):
+                        roots_complete = False
+                        break
+
+            validation_incomplete = False
+            if asks_subst_check and not subst_passed:
+                validation_incomplete = True
+            if asks_factorization and not factor_passed:
+                validation_incomplete = True
+            if asks_complete_roots and not roots_complete:
+                validation_incomplete = True
+
+            if not validation_incomplete and passed_claims:
                 status = "verified"
                 check_state = "checked"
+            else:
+                status = "addressed"
+                check_state = "unverified"
 
         if tool_map:
             if "axiom_inequality" in tool_map:

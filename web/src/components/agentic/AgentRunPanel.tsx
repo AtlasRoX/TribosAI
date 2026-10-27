@@ -154,7 +154,7 @@ function SubQuestions({ items }: { items: SubQuestion[] }) {
             <StatusIcon status={q.status} />
             <div className={styles.subqBody}>
               <span className={styles.subqText}>{q.text || "(empty sub-question)"}</span>
-              {q.check_state === "checked" ? (
+              {q.check_state === "checked" || q.status === "verified" ? (
                 <> <Pill tone="ok">tool checked</Pill></>
               ) : q.check_state === "supported_by_retrieval" ? (
                 <> <Pill tone="info">retrieval</Pill></>

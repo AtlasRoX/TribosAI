@@ -111,7 +111,7 @@ export function runNeedsAttention(run: Data, taskStatus?: DisclosureInput["taskS
   }
   if (!run || typeof run !== "object") return false;
   if (run.budget?.exhausted) return true;
-  if (list(run.sub_questions).some((q) => q && q.status && !["answered", "done"].includes(String(q.status)))) return true;
+  if (list(run.sub_questions).some((q) => q && q.status && !["answered", "done", "verified"].includes(String(q.status)))) return true;
   if (list(run.trace).some((t) => t && t.success === false)) return true;
   return list(run.phases).some((p) => p && /^(?:error|budget|timeout|llm_unavailable|cancelled)$/.test(String(p.status || "")));
 }
@@ -197,7 +197,7 @@ export function runAttentionReason(run: Data, taskStatus?: DisclosureInput["task
   }
   if (!run || typeof run !== "object") return "";
   if (run.budget?.exhausted) return "The agent budget ran out";
-  const open = list(run.sub_questions).filter((q) => q && q.status && !["answered", "done"].includes(String(q.status))).length;
+  const open = list(run.sub_questions).filter((q) => q && q.status && !["answered", "done", "verified"].includes(String(q.status))).length;
   if (open) return `${plural(open, "sub-question")} not answered by a tool-backed step`;
   const failedCalls = list(run.trace).filter((t) => t && t.success === false).length;
   if (failedCalls) return `${plural(failedCalls, "tool call")} failed`;

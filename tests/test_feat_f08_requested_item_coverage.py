@@ -205,3 +205,141 @@ def test_f08_actual_missing_section_is_marked_missing():
     out = apply_deliverables({"task_status": "completed"}, assessed)
     # The missing prose item is recorded in deliverables
     assert any(it["status"] == "missing" for it in out["deliverables"])
+
+
+def test_f08_reproduction_solve_factorization_roots_subst_checks():
+    """Reproduction: Solving quadratic with factorization, complete roots, and substitution checks.
+    When all 3 claims are checked and supported, the requested item must be 'verified' / 'checked',
+    not 'answered, not checked', ensuring summary, item row, and verification panel agree.
+    """
+    from tribos.verify.math_claims import audit_answer
+    from tribos.verify.verifier import TribosVerifier
+
+    q = (
+        "For integer x, solve x^2 - 5x + 6 = 0. Return exactly one numbered item containing a "
+        "factorization, the complete set of integer roots, and a substitution check for each root. "
+        "Do not search the web or invoke a formal prover."
+    )
+    answer = (
+        "1. Factorization, roots, and substitution check:\n"
+        "- Factorization: x^2 - 5*x + 6 = (x - 2)*(x - 3)\n"
+        "- Complete set of integer roots: x = 2 and x = 3\n"
+        "- Substitution checks:\n"
+        "  For x = 2: 2^2 - 5*2 + 6 = 0\n"
+        "  For x = 3: 3^2 - 5*3 + 6 = 0"
+    )
+
+    audit = audit_answer(answer, query=q)
+    assert len(audit.claims) == 3
+    assert all(c.status == "passed" for c in audit.claims)
+
+    assessed = assess(q, answer, math_audit=audit.to_dict())
+    assert len(assessed) == 1
+    it = assessed[0]
+    assert it["item"] == "x^2 - 5x + 6 = 0"
+    assert it["status"] == "verified"
+    assert it["check_state"] == "checked"
+    assert it["answer_state"] == "answered"
+    assert it["where"] != ""
+
+    # Task status reflects verified deliverable
+    outcome = apply_deliverables({"task_status": "completed"}, assessed)
+    assert outcome["task_status"] == "completed"
+    assert outcome["deliverables"][0]["status"] == "verified"
+
+    # End-to-end verifier agreement
+    report = TribosVerifier().verify_response(q, answer, {})
+    assert report.passed is True
+    assert report.fully_verified is True
+    assert len(report.claims) == 3
+    assert all(c.status == "supported" for c in report.claims)
+
+
+def test_f08_partial_answer_omitted_substitution_check():
+    """Partial answer case 1: When required substitution checks are omitted,
+    the requested item must NOT be marked checked; it must remain unverified/addressed.
+    """
+    from tribos.verify.math_claims import audit_answer
+
+    q = (
+        "For integer x, solve x^2 - 5x + 6 = 0. Return exactly one numbered item containing a "
+        "factorization, the complete set of integer roots, and a substitution check for each root. "
+        "Do not search the web or invoke a formal prover."
+    )
+    # Factorization and roots provided, but substitution checks omitted
+    answer = (
+        "1. Factorization and integer roots:\n"
+        "- Factorization: x^2 - 5*x + 6 = (x - 2)*(x - 3)\n"
+        "- Complete set of integer roots: x = 2 and x = 3"
+    )
+
+    audit = audit_answer(answer, query=q)
+    assessed = assess(q, answer, math_audit=audit.to_dict())
+    assert len(assessed) == 1
+    it = assessed[0]
+    assert it["status"] == "addressed"
+    assert it["check_state"] == "unverified"
+    assert it["answer_state"] == "answered"
+
+
+def test_f08_partial_answer_incomplete_roots():
+    """Partial answer case 2: When complete roots are requested but only a subset is provided,
+    the item is marked unverified/addressed.
+    """
+    from tribos.verify.math_claims import audit_answer
+
+    q = (
+        "For integer x, solve x^2 - 5x + 6 = 0. Return exactly one numbered item containing a "
+        "factorization, the complete set of integer roots, and a substitution check for each root. "
+        "Do not search the web or invoke a formal prover."
+    )
+    # Only root x = 2 is provided; x = 3 is missing
+    answer = (
+        "1. Solution:\n"
+        "- Factorization: x^2 - 5*x + 6 = (x - 2)*(x - 3)\n"
+        "- Integer root: x = 2\n"
+        "- Substitution check: 2^2 - 5*2 + 6 = 0"
+    )
+
+    audit = audit_answer(answer, query=q)
+    assessed = assess(q, answer, math_audit=audit.to_dict())
+    assert len(assessed) == 1
+    it = assessed[0]
+    assert it["status"] == "addressed"
+    assert it["check_state"] == "unverified"
+
+
+def test_f08_contradicted_answer_failing_substitution_check():
+    """Contradicted case: When an arithmetic claim in substitution fails,
+    the item must be marked 'failed_check' and task status becomes partial.
+    """
+    from tribos.verify.math_claims import audit_answer
+
+    q = (
+        "For integer x, solve x^2 - 5x + 6 = 0. Return exactly one numbered item containing a "
+        "factorization, the complete set of integer roots, and a substitution check for each root. "
+        "Do not search the web or invoke a formal prover."
+    )
+    # The substitution check for x = 2 has a false equality: 2^2 - 5*2 + 6 = 1 = 0
+    answer = (
+        "1. Solution:\n"
+        "- Factorization: x^2 - 5*x + 6 = (x - 2)*(x - 3)\n"
+        "- Complete set of integer roots: x = 2 and x = 3\n"
+        "- Substitution checks:\n"
+        "  For x = 2: 2^2 - 5*2 + 6 = 1 = 0\n"
+        "  For x = 3: 3^2 - 5*3 + 6 = 0"
+    )
+
+    audit = audit_answer(answer, query=q)
+    assert any(c.status == "failed" for c in audit.claims)
+
+    assessed = assess(q, answer, math_audit=audit.to_dict())
+    assert len(assessed) == 1
+    it = assessed[0]
+    assert it["status"] == "failed_check"
+    assert it["check_state"] == "failed"
+
+    outcome = apply_deliverables({"task_status": "completed"}, assessed)
+    assert outcome["task_status"] == "partial"
+    assert any("contradict" in r.lower() for r in outcome["incomplete_reasons"])
+

@@ -260,6 +260,7 @@ function taskTitle(status: TaskStatus, op: string): string {
 const DELIVERABLE_LABEL: Record<string, string> = {
   verified: "checked",
   addressed: "answered, not checked",
+  partial: "partly answered or unchecked",
   failed_check: "value contradicted by the checks",
   missing: "not addressed",
 };
@@ -274,6 +275,7 @@ function TaskDetails({ outcome }: { outcome: TaskOutcome }) {
   const parts = [
     count("verified") && `${count("verified")} checked`,
     count("addressed") && `${count("addressed")} answered, not checked`,
+    count("partial") && `${count("partial")} partial`,
     count("failed_check") && `${count("failed_check")} contradicted`,
     count("missing") && `${count("missing")} not addressed`,
   ].filter(Boolean);

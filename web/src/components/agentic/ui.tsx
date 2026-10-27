@@ -68,7 +68,7 @@ export function Pill({ tone = "neutral", title, children }: { tone?: Tone; title
 /** Tone for a generic status word (node, phase, job, sub-question). */
 export function statusTone(status: unknown): Tone {
   const s = str(status).toLowerCase();
-  if (["done", "ok", "succeeded", "success", "answered", "approved", "completed", "supported", "identifiable", "high"].includes(s)) return "ok";
+  if (["done", "ok", "succeeded", "success", "answered", "approved", "completed", "supported", "identifiable", "high", "verified"].includes(s)) return "ok";
   if (["running", "queued", "pending", "in_progress", "waiting_approval", "edited", "auto", "medium"].includes(s)) return "info";
   if (["disabled", "disabled_by_user", "not_applicable", "not_run", "skipped", "neutral"].includes(s)) return "neutral";
   if (["partial", "timeout", "interrupted", "low", "practically_non_identifiable"].includes(s)) return "warn";
