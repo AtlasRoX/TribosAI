@@ -58,6 +58,7 @@ const MATCH_LABELS: Record<string, string> = {
 };
 
 const KIND_LABELS: Record<string, string> = {
+  ambiguous: "Ambiguous",
   mass: "Mass",
   damping: "Damping",
   stiffness: "Stiffness",

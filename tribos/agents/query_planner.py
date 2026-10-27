@@ -1521,6 +1521,7 @@ def _offline_stem_entities(query: str, covered_spans: Sequence[tuple[int, int]])
         for item in items:
             item_metadata: dict[str, Any] = {}
             item_ids: dict[str, str] = {}
+            ambiguous_with: list[str] = []
             if isinstance(item, dict):
                 mention = str(item.get("mention") or item.get("canonical") or item.get("key") or "")
                 label = str(item.get("label") or item.get("canonical") or item.get("key") or mention)
@@ -1533,9 +1534,11 @@ def _offline_stem_entities(query: str, covered_spans: Sequence[tuple[int, int]])
                     item_ids["physical_type"] = str(phys)
                 if item.get("display_name"):
                     item_metadata["display_name"] = str(item["display_name"])  # shown to the reader; label stays the id
-                for k in ("value", "units", "param_name", "physical_type"):
+                for k in ("value", "units", "param_name", "physical_type", "ambiguous", "ambiguous_with"):
                     if k in item and item[k] is not None:
                         item_metadata[k] = item[k]
+                if item.get("ambiguous_with"):
+                    ambiguous_with = list(item["ambiguous_with"])
             elif isinstance(item, (list, tuple)) and len(item) == 3:
                 mention, label, span = item
             else:
@@ -1555,6 +1558,7 @@ def _offline_stem_entities(query: str, covered_spans: Sequence[tuple[int, int]])
                     matched_on="name",
                     validated=True,
                     metadata=item_metadata,
+                    ambiguous_with=ambiguous_with,
                 )
             )
 

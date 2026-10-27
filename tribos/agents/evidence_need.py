@@ -111,8 +111,21 @@ _ASKS_VALUE_RE = re.compile(
 
 def _given_quantities(text: str) -> int:
     from ..verify.latex_math import is_unit_word
+    from .entity_lexicon import _is_algebraic_occurrence, extract_declared_variables
 
-    return sum(1 for m in _GIVEN_QUANTITY_RE.finditer(text) if is_unit_word(m.group(1).split("/")[0]))
+    declared = extract_declared_variables(text or "")
+    count = 0
+    for m in _GIVEN_QUANTITY_RE.finditer(text or ""):
+        unit_word = m.group(1).split("/")[0]
+        if not is_unit_word(unit_word):
+            continue
+        if len(unit_word) == 1 and unit_word.isalpha():
+            if unit_word in declared or unit_word.lower() in {d.lower() for d in declared}:
+                continue
+            if _is_algebraic_occurrence(text or "", m.start(), m.end(), unit_word):
+                continue
+        count += 1
+    return count
 
 
 # "the current accepted status of", "acknowledge its accepted status", "has it been proved", "is it still open".

@@ -623,10 +623,164 @@ def _infer_physical_type(unit: str, param_name: str | None = None) -> str:
     return "quantity"
 
 
-def find_offline_quantities(text: str) -> list[dict[str, Any]]:
-    """Extract explicit physical quantities (number + SI/engineering unit) from ``text``."""
+_AMBIGUOUS_UNITS: frozenset[str] = frozenset(
+    {"m", "s", "g", "h", "d", "t", "l", "L", "N", "J", "W", "V", "A", "C", "F", "H", "T", "K", "Pa"}
+)
+
+_PHYSICAL_CONTEXT_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "m": (
+        "length", "distance", "height", "depth", "width", "altitude", "radius", "diameter",
+        "thickness", "wavelength", "displacement", "span", "long", "wide", "tall", "deep",
+        "meter", "metre", "meters", "metres", "wire", "rope", "rod", "beam", "cable", "track",
+        "travel", "travels", "traveled", "moves", "moved", "speed", "velocity", "acceleration",
+        "drop", "drops", "fall", "falls", "perimeter", "circumference", "elevation",
+    ),
+    "s": (
+        "time", "duration", "period", "interval", "second", "seconds", "sec", "elapsed",
+        "after", "during", "wait", "waits", "takes", "clock", "speed", "velocity", "acceleration",
+        "rate", "frequency", "travel", "travels", "traveled", "move", "moves", "moved", "motion",
+        "run", "runs", "ran", "flight", "car", "particle",
+    ),
+    "g": (
+        "mass", "weight", "gram", "grams", "weigh", "weighs", "weighed", "substance", "sample",
+        "powder", "dose", "dosage", "dissolve", "dissolves", "dissolved", "solution", "solute",
+        "solvent", "concentration", "salt", "water", "mixture", "compound", "acid", "base",
+    ),
+    "h": ("hour", "hours", "duration", "time", "period", "elapsed"),
+    "d": ("day", "days", "duration", "time", "period", "elapsed"),
+    "t": ("tonne", "tonnes", "tons", "mass", "weight", "payload", "load"),
+    "l": ("liter", "litre", "liters", "litres", "volume", "capacity", "fluid", "liquid", "tank"),
+    "L": ("liter", "litre", "liters", "litres", "volume", "capacity", "fluid", "liquid", "tank"),
+    "N": ("force", "tension", "load", "newton", "newtons", "thrust", "friction", "weight"),
+    "J": ("energy", "work", "heat", "joule", "joules"),
+    "W": ("power", "watt", "watts"),
+    "V": ("voltage", "volt", "volts", "potential"),
+    "A": ("current", "ampere", "amperes", "amp", "amps"),
+    "C": ("charge", "coulomb", "coulombs"),
+    "F": ("capacitance", "farad", "farads"),
+    "H": ("inductance", "henry", "henries"),
+    "T": ("magnetic", "tesla", "teslas", "field"),
+    "K": ("temperature", "kelvin"),
+    "Pa": ("pressure", "stress", "pascal", "pascals"),
+}
+
+
+def extract_declared_variables(text: str) -> set[str]:
+    """Identify variables explicitly declared in mathematical / algorithmic context in text."""
+    if not text:
+        return set()
+    declared: set[str] = set()
+
+    # Authoritative problem spec assumptions if available
+    try:
+        from ..axiom.problem import parse_problem
+        spec = parse_problem(text)
+        if spec.assumptions:
+            for k in spec.assumptions:
+                if len(k) == 1 and k.isalpha():
+                    declared.add(k)
+        if spec.variable and len(spec.variable) == 1 and spec.variable.isalpha():
+            declared.add(spec.variable)
+    except Exception:
+        pass
+
+    # 1. 'for every nonnegative integer m', 'for integer m', 'for any real x'
+    for m in re.finditer(
+        r"\bfor\s+(?:every|all|any|each|some)\s+(?:non[\s-]?negative|positive|negative|non-positive)?\s*"
+        r"(?:integer|real|natural|rational|complex|scalar|vector|matrix)?s?\s+([a-zA-Z])\b",
+        text,
+        re.I,
+    ):
+        declared.add(m.group(1))
+
+    # 2. 'nonnegative integer m', 'positive integer m', 'integer m', 'real x'
+    for m in re.finditer(
+        r"\b(?:non[\s-]?negative|positive|negative|non-positive)\s+(?:integers?|reals?|naturals?)\s+([a-zA-Z])\b",
+        text,
+        re.I,
+    ):
+        declared.add(m.group(1))
+    for m in re.finditer(r"\b(?:integers?|naturals?)\s+([a-zA-Z])\b", text, re.I):
+        declared.add(m.group(1))
+
+    # 3. 'declare i a nonnegative integer', 'let m be a real number', 'assume s is positive'
+    for m in re.finditer(
+        r"\b(?:declare|let|assume|given|consider|suppose)\s+([a-zA-Z]{1,3})\s+"
+        r"(?:to\s+be\s+|as\s+|be\s+|is\s+|in\s+)?(?:an?\s+)?"
+        r"(?:non[\s-]?negative|positive|negative|integer|real|natural|rational|complex|parameter|"
+        r"scalar|vector|variable|index|constant|generator|element|symbol|matrix|member|subspace|space)\b",
+        text,
+        re.I,
+    ):
+        declared.add(m.group(1))
+
+    # 4. 'variable m', 'in variable m', 'in the variable m'
+    for m in re.finditer(r"\b(?:in\s+(?:the\s+)?)?variable\s+([a-zA-Z])\b", text, re.I):
+        declared.add(m.group(1))
+
+    # 5. 'polynomial in m', 'inequality in m', 'equation in m'
+    for m in re.finditer(r"\b(?:polynomial|inequality|equation|expression|function)s?\s+in\s+([a-zA-Z])\b", text, re.I):
+        declared.add(m.group(1))
+
+    # 6. 'solve ... for m', 'w.r.t. m'
+    for m in re.finditer(r"\bsolve\s+(?:.*?\s+)?for\s+([a-zA-Z])\b", text, re.I):
+        declared.add(m.group(1))
+    for m in re.finditer(r"\b(?:with\s+respect\s+to|w\.r\.t\.?)\s+([a-zA-Z])\b", text, re.I):
+        declared.add(m.group(1))
+
+    # 7. Quantifiers / sets: \forall m, m \in R
+    for m in re.finditer(r"(?:\\forall|\u2200)\s*([a-zA-Z])", text):
+        declared.add(m.group(1))
+    for m in re.finditer(
+        r"\b([a-zA-Z])\s*(?:\\in|\u2208|in)\s*(?:\\mathbb\{[A-Za-z]+\}|[RZNCQ]|reals?|integers?)\b", text
+    ):
+        declared.add(m.group(1))
+
+    # 8. Bounds: m >= 0, i >= 0
+    for m in re.finditer(r"\b([a-zA-Z])\s*(?:>=|>|<=|<)\s*0\b", text):
+        declared.add(m.group(1))
+
+    # 9. Function parameters: a(i), b(i), f(m)
+    for m in re.finditer(r"\b[a-zA-Z]\s*\(\s*([a-zA-Z])\s*\)", text):
+        declared.add(m.group(1))
+
+    return declared
+
+
+def _is_algebraic_occurrence(text: str, start: int, end: int, unit: str) -> bool:
+    """Check if the occurrence is part of an algebraic formula (operator adjacency)."""
+    after = text[end : end + 15].strip()
+    before = text[max(0, start - 15) : start].strip()
+    if after and after[0] in "+-*/^=<>≤≥≠":
+        return True
+    if before and before[-1] in "+-*/^=<>≤≥≠(":
+        return True
+    if after and re.match(r"^(?:<=|>=|==|!=|\*\*|\\in|in\s+(?:\[|\{|\(|[A-Z]|reals?|integers?|domain))", after):
+        return True
+    return False
+
+
+def _has_physical_context(text: str, start: int, end: int, unit: str) -> bool:
+    """Check if the text window around the match contains physical domain keywords for unit."""
+    window = text[max(0, start - 50) : min(len(text), end + 50)].lower()
+    keywords = _PHYSICAL_CONTEXT_KEYWORDS.get(unit, ())
+    if any(re.search(rf"\b{re.escape(kw)}\b", window) for kw in keywords):
+        return True
+    if unit == "s" and re.search(r"\b(?:in|for|at|after|within)\s+\d+(?:\.\d+)?\s*s\b", window):
+        return True
+    if re.search(rf"\b\d+(?:\.\d+)?\s*{re.escape(unit.lower())}\s+of\s+[a-z]", window):
+        return True
+    return False
+
+
+def find_offline_quantities(text: str, declared_variables: set[str] | None = None) -> list[dict[str, Any]]:
+    """Extract explicit physical quantities (number + SI/engineering unit) from ``text``,
+    distinguishing declared algebraic variables from physical measurements."""
     hits: list[dict[str, Any]] = []
     seen: set[str] = set()
+    declared = (
+        set(declared_variables) if declared_variables is not None else extract_declared_variables(text or "")
+    )
     for m in _QUANTITY_RE.finditer(text or ""):
         raw = m.group(0).strip()
         if raw in seen:
@@ -638,13 +792,44 @@ def find_offline_quantities(text: str) -> list[dict[str, Any]]:
         except (ValueError, TypeError):
             val = None
         units = m.group(3)
+        start, end = m.start(), m.end()
         phys_type = _infer_physical_type(units, param_name)
+
+        if units in _AMBIGUOUS_UNITS:
+            is_declared = units in declared or units.lower() in {d.lower() for d in declared}
+            is_alg = _is_algebraic_occurrence(text or "", start, end, units)
+            has_phys = _has_physical_context(text or "", start, end, units)
+
+            if is_declared:
+                if is_alg or not has_phys:
+                    # Declared algebraic variable (e.g. 5m in 5m+4>2m+1), not a physical quantity
+                    continue
+            else:
+                if is_alg and not has_phys:
+                    # Algebraic term without explicit quantifier declaration
+                    continue
+                if not has_phys and not is_alg:
+                    # Truly ambiguous: retain ambiguous state
+                    hits.append({
+                        "canonical": raw,
+                        "mention": raw,
+                        "label": raw,
+                        "span": (start, end),
+                        "value": val,
+                        "units": units,
+                        "param_name": param_name,
+                        "physical_type": "ambiguous",
+                        "ambiguous": True,
+                        "ambiguous_with": [f"variable {units}", f"{phys_type} ({units})"],
+                    })
+                    continue
+
         label = f"{param_name} = {val:g} {units}" if param_name and val is not None else raw
         hits.append({
             "canonical": label,
             "mention": raw,
             "label": label,
-            "span": (m.start(), m.end()),
+            "span": (start, end),
             "value": val,
             "units": units,
             "param_name": param_name,
