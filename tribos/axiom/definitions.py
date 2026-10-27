@@ -665,6 +665,16 @@ def _mask(text: str, spans: list[tuple[int, int]]) -> str:
 def _application_tasks(text: str, defs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     names = "|".join(re.escape(d["name"]) for d in defs)
     tasks: list[dict[str, Any]] = []
+    m_eval_at = re.search(
+        r"(?i)\b(?:evaluate|compute|calculate|check)\s+(?:at|for)\s+(?:[a-z]\s*=\s*)?((?:\d+(?:\s*,\s*|\s+and\s+)?)+)",
+        text,
+    )
+    if m_eval_at and defs:
+        nums = re.findall(r"\d+", m_eval_at.group(1))
+        for val in nums:
+            for d in defs:
+                expr = f"{d['name']}({val})"
+                tasks.append({"id": expr, "op": "evaluate", "expression": expr})
     for sentence in re.split(r"(?<=[.?!])\s+|\n+", text):
         verb = _EVAL_VERB_RE.search(sentence)
         if not verb or not re.search(rf"(?<![\w.])(?:{names})\s*\(", sentence):
@@ -884,7 +894,7 @@ def parse_quantifier(text: str, stmt_symbols: set[str]) -> tuple[str | None, str
 # declared domain (the definition's own, e.g. "where s is complex").
 _CLAIM_IMPLICIT_RE = re.compile(
     r"(?i)\b(?:prove|show|verify|demonstrate)\s+(?:that\s+)?"
-    r"(?P<stmt>[^.?!;\n,]*?[A-Za-z]\w*\s*\([^()]*\)[^.?!;\n,]*?(?:<=|>=|!=|=|<|>)[^.?!;\n,]+?)"
+    r"(?P<stmt>[^.?!;\n,]*?[A-Za-z]\w*(?:\s*\([^()]*\))?[^.?!;\n,]*?(?:<=|>=|!=|=|<|>)[^.?!;\n,]+?)"
     r"\s*(?=[,.;?!\n]|\s+and\s+|$)")
 
 
@@ -899,7 +909,12 @@ def _implicit_claims(text: str, defs: list[dict[str, Any]], taken: list[tuple[in
             continue
         lhs, rhs = stmt[: rel.start()].strip(), stmt[rel.end():].strip()
         fnames = {d["name"] for d in defs}
-        if not any(re.search(rf"(?<![\w.]){re.escape(f)}\s*\(", stmt) for f in fnames):
+        var = None
+        if lhs in fnames and rhs in fnames:
+            var = defs[0]["parameter"]
+            lhs = f"{lhs}({var})"
+            rhs = f"{rhs}({var})"
+        elif not any(re.search(rf"(?<![\w.]){re.escape(f)}\s*\(", stmt) for f in fnames):
             continue  # only statements about the question's own definitions
         try:
             symbols = {s.name for side in (lhs, rhs) for s in parse_with_definitions(side, defs).free_symbols}
@@ -912,6 +927,18 @@ def _implicit_claims(text: str, defs: list[dict[str, Any]], taken: list[tuple[in
         if owner is None:
             continue
         domain = owner.get("domain") or "unspecified"
+        if domain == "unspecified":
+            m_dom = re.search(r"\b(?:non[\s-]?negative\s+integer|positive\s+integer|integer|natural|real)\b", text, re.I)
+            if m_dom:
+                d_str = m_dom.group(0).lower().replace(" ", "_").replace("-", "")
+                if "nonnegative" in d_str:
+                    domain = "nonnegative_integer"
+                elif "positive" in d_str:
+                    domain = "positive_integer"
+                elif "integer" in d_str or "natural" in d_str:
+                    domain = "integer"
+                elif "real" in d_str:
+                    domain = "real"
         n = first_id + len(tasks)
         tasks.append({"id": "claim" if n == 0 else f"claim {n + 1}", "op": "claim", "lhs": lhs, "relation": rel.group(1),
                       "rhs": rhs, "variable": var, "domain": domain, "conditions": [],

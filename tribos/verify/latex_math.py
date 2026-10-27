@@ -191,6 +191,7 @@ class ParseContext:
 
     functions: set[str] = field(default_factory=set)
     variable: str = "t"
+    symbols: set[str] = field(default_factory=set)  # declared local symbols that shadow conventional aliases
     imaginary_i: bool = True
     decimals: list[str] = field(default_factory=list)  # decimal literals seen (for tolerances)
     has_function_refs: bool = False  # an explicit application f(...) or derivative of a known function
@@ -430,6 +431,8 @@ class _Parser:
             return TWO_ARG_FUNCTIONS[name](*a)
         if name in FUNCTIONS and self.at("sym", "("):
             return FUNCTIONS[name](*self.args())
+        if name in self.ctx.symbols or name == self.ctx.variable:
+            return sp.Symbol(name)
         if name == "i" and self.ctx.imaginary_i:
             return sp.I
         return sp.Symbol(name)

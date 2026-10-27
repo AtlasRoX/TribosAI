@@ -317,6 +317,9 @@ def parse_math(
     cleaned = check_math_text(text)
     local_dict: dict[str, Any] = {**_CONSTRUCTORS, **(SAFE_NAMES if env is None else env)}
     global_dict: dict[str, Any] = {"__builtins__": {}}
+    # Separate adjacent digits and j/J so Python's tokenizer does not lex it as a complex imaginary literal (16j -> 16*I),
+    # allowing j/J to be bound to a declared Symbol or local variable.
+    cleaned = re.sub(r"(?<=\d)\s*([jJ])\b", r" * \1", cleaned)
     code = stringify_expr(cleaned, local_dict, global_dict, transformations)
     validate_code(code, local_dict)
     try:

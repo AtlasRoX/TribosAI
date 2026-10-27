@@ -739,6 +739,13 @@ class _Auditor:
         self.piecewise: set[str] = set()  # answer functions written branch by branch
         # The problem's unknowns (solve / inequality / extremum): "x = 0" names a case examined, never binds x.
         self.unknowns = {canonical_name(u) for u in unknowns or ()}
+        for d in problem.get("definitions") or []:
+            if isinstance(d, dict) and d.get("parameter"):
+                self.unknowns.add(canonical_name(d["parameter"]))
+        if problem.get("variable"):
+            self.unknowns.add(canonical_name(problem["variable"]))
+        for sym in (problem.get("assumptions") or ()):
+            self.unknowns.add(canonical_name(sym))
         self.functions = functions
         self.claims: list[MathClaim] = []
         self.definitions: list[MathClaim] = []
@@ -756,7 +763,28 @@ class _Auditor:
             unit = ""
         else:
             toks = stripped
-        ctx = ParseContext(functions=set(self.functions), variable=str(self.env.var))
+        symbols = (
+            set(self.unknowns)
+            | {canonical_name(str(self.env.var))}
+            | set(self.env.params)
+            | set(self.env.values)
+            | set(self.case_scoped)
+            | set(self.env.defined)
+        )
+        prob = (self.record.problem if self.record else None) or {}
+        is_symbol_i = (
+            "i" in symbols
+            or str(self.env.var) == "i"
+            or any(canonical_name(s) == "i" for s in self.unknowns)
+            or any(d.get("parameter") == "i" for d in (prob.get("definitions") or ()) if isinstance(d, dict))
+            or "i" in (prob.get("assumptions") or ())
+            or bool(re.search(r"\b(?:non[\s-]?negative\s+integer|positive\s+integer|integer|natural|index)\s+i\b|\bi\s+(?:is|in|a|as|be|to\s+be)\s+(?:an?\s+)?(?:non[\s-]?negative\s+integer|positive\s+integer|integer|natural|index)\b", self.query or "", re.I))
+            or (prob.get("domain") in ("integer", "nonnegative_integer", "positive_integer", "real") and str(self.env.var) in ("i", "t"))
+        )
+        if is_symbol_i:
+            symbols.add("i")
+        imaginary_i = not is_symbol_i
+        ctx = ParseContext(functions=set(self.functions), variable=str(self.env.var), symbols=symbols, imaginary_i=imaginary_i)
         text = _tex(toks)
         ulp = _literal_ulp(toks)
         if unit in ("deg", "degree", "degrees", "°"):
@@ -785,6 +813,7 @@ class _Auditor:
             # "\log" without a base is natural in mathematics and base 10 in much engineering text: read it both ways.
             try:
                 log10_expr = parse_tokens(toks, ParseContext(functions=set(ctx.functions), variable=ctx.variable,
+                                                             symbols=set(ctx.symbols), imaginary_i=ctx.imaginary_i,
                                                              log_base=10))
             except Exception:  # noqa: BLE001 - parsed once already; a failure here only drops the second reading
                 log10_expr = None

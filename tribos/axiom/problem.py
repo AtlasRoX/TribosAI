@@ -368,6 +368,33 @@ def _domain_and_assumptions(low: str, spec: ProblemSpec) -> None:
     for m in re.finditer(r"\bnon[\s-]?negative\s+integers?\s+([a-z])\b", low):
         spec.assumptions[m.group(1)] = "nonnegative"
         spec.domain = "nonnegative_integer"
+    for m in re.finditer(
+        r"\b(?:declare|let|assume|given|for|with)\s+([a-z])\s+(?:to\s+be\s+|be\s+|is\s+|are\s+|as\s+|a\s+|an\s+)*"
+        r"(?:a\s+|an\s+)?(non[\s-]?negative\s+integer|positive\s+integer|integer|natural(?:\s+number)?|real(?:\s+number)?)\b",
+        low,
+    ):
+        var, dom_name = m.group(1), m.group(2)
+        if "non" in dom_name:
+            spec.assumptions[var] = "nonnegative_integer"
+            spec.domain = "nonnegative_integer"
+        elif "positive" in dom_name:
+            spec.assumptions[var] = "positive_integer"
+            spec.domain = "positive_integer"
+        elif "integer" in dom_name or "natural" in dom_name:
+            spec.assumptions[var] = "integer"
+            if spec.domain == "complex":
+                spec.domain = "integer"
+        elif "real" in dom_name:
+            spec.assumptions[var] = "real"
+            if spec.domain == "complex":
+                spec.domain = "real"
+        if not spec.variable:
+            spec.variable = var
+    for m in re.finditer(r"\b([a-z])\s+(?:is|are|be)\s+(?:an?\s+)?non[\s-]?negative\s+integer", low):
+        spec.assumptions[m.group(1)] = "nonnegative_integer"
+        spec.domain = "nonnegative_integer"
+        if not spec.variable:
+            spec.variable = m.group(1)
     for m in re.finditer(r"\bpositive\s+integers?\s+([a-z])\b", low):
         spec.assumptions[m.group(1)] = "positive"
         spec.domain = "positive_integer"

@@ -107,6 +107,9 @@ def given_values(text: str, scoped: set[str] | frozenset[str] = frozenset()) -> 
     seen: dict[str, set[float]] = {}
     for m in _GIVEN_RE.finditer(text or ""):
         raw = m.group("name")
+        tail = (text or "")[m.end():]
+        if re.match(r"\s*,\s*\d+", tail):
+            continue
         unit = (m.group("unit") or "").strip()
         if unit.split(" ")[0].lower() in _NOT_UNITS:
             unit = ""
@@ -188,7 +191,18 @@ def build_result_record(query: str, tool_results: dict[str, Any]) -> ResultRecor
             rec.problem["case_scoped"] = sorted(existing)
     except Exception:  # noqa: BLE001 - an unparsed question still gets a record of its tool outputs
         rec.problem = {"text": (query or "")[:4000], "kind": "unknown"}
-    rec.parameters = given_values(query or "", set(rec.problem.get("case_scoped") or ()))
+    def_params = {d["parameter"] for d in rec.problem.get("definitions") or [] if isinstance(d, dict) and d.get("parameter")}
+    prob_vars = {rec.problem.get("variable")} if rec.problem.get("variable") else set()
+    prob_unknowns = set(rec.problem.get("unknowns") or ())
+    prob_assumptions = set(rec.problem.get("assumptions") or ())
+    scoped_symbols = (
+        set(rec.problem.get("case_scoped") or ())
+        | def_params
+        | prob_vars
+        | prob_unknowns
+        | prob_assumptions
+    )
+    rec.parameters = given_values(query or "", scoped_symbols)
     func_name = re.sub(r"\(.*$", "", str(rec.problem.get("function") or ""))
     var = str(rec.problem.get("variable") or "t")
 
