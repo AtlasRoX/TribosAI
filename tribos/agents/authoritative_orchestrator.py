@@ -1244,7 +1244,7 @@ class AuthoritativeOrchestrator:
         # Stage 0: greeting, query context and memory, agentic pre-evidence phases, source routing.
         result = await plan_stage.start(run)
         if result is None:
-            result = await plan_stage.read_question(run)
+            result = await run.timed("plan", plan_stage.read_question(run))
         if result is not None:
             return result
         # Each pipeline stage's wall time is recorded (run.pipeline_phases -> agent_run.phases, stage "pipeline"), so

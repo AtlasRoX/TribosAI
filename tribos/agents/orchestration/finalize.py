@@ -248,7 +248,7 @@ def apply_deliverables(task_status: dict[str, Any], items: list[dict[str, Any]])
 # Wall time per kind of work, from the pipeline stages and agent phases (phase key -> kind). Planned tool calls
 # (plan_execute) include the planner's own model calls; they are counted as execution.
 _STAGE_KIND = {
-    "route": "planning", "decompose": "planning", "clarify": "planning", "router": "planning",
+    "plan": "planning", "route": "planning", "decompose": "planning", "clarify": "planning", "router": "planning",
     "evidence": "retrieval", "gaps": "retrieval", "counter_evidence": "retrieval",
     "computations": "execution", "plan_execute": "execution", "math_agent": "execution",
     "ode_verification": "execution", "specialists": "execution", "analyst": "execution",

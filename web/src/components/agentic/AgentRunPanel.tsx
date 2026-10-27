@@ -324,10 +324,13 @@ export function AgentRunPanel({ data, routing }: { data: AgentRunArtifact; routi
   const agentTotal = sumOf(agentGroups);
   const runSeconds = isNum(used.seconds) ? used.seconds : null;
   // Agent phases run inside pipeline stages, so the two sums are shown apart and never added up.
+  const totalSec = runSeconds ?? (pipelineTotal > 0 ? pipelineTotal : null);
   const timing = [
-    pipelineGroups.length && pipelineTotal > 0 ? `pipeline ${formatSeconds(pipelineTotal)}` : "",
+    totalSec != null ? `total ${formatSeconds(totalSec)}` : "",
+    pipelineGroups.length && pipelineTotal > 0 && (runSeconds == null || Math.abs(pipelineTotal - runSeconds) >= 1.0)
+      ? `pipeline ${formatSeconds(pipelineTotal)}`
+      : "",
     agentGroups.length && agentTotal > 0 ? `agent phases ${formatSeconds(agentTotal)}` : "",
-    runSeconds != null ? `run time ${formatSeconds(runSeconds)}` : "",
   ]
     .filter(Boolean)
     .join(" · ");

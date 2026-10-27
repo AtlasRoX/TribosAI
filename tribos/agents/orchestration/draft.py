@@ -297,6 +297,12 @@ def _verified_render(run: RunContext) -> str | None:
 
     agent_state = run.agent_state
     art = (getattr(agent_state, "artifacts", None) or {}).get("math_agent") if agent_state is not None else None
+    if art is None and getattr(run, "tool_results", None):
+        for k in ("axiom_solve_problem", "axiom", "axiom_solve"):
+            tr = run.tool_results.get(k)
+            if tr is not None and tr.success and isinstance(tr.data, dict) and tr.data.get("status") == "verified":
+                art = tr.data
+                break
     try:
         return render_verified_answer(run.clean_query or run.query, art, getattr(run, "output_contract", None))
     except Exception as exc:  # noqa: BLE001 - the writer path remains
@@ -332,8 +338,19 @@ async def write_first_draft(run: RunContext) -> None:
         "deep": "\n[EFFORT LEVEL: HIGH / DEEP THINKING]\nEngage in deep, multi-angle deliberation. Check every derivation step and its assumptions, verify dimensional consistency and limiting cases, compare alternative models or regimes, and weigh numerical results (method, step size, convergence) against analytical ones before concluding.",
         "exhaustive": "\n[EFFORT LEVEL: ULTRA / EXHAUSTIVE THINKING]\nEngage in exhaustive, maximal-rigor deliberation. Systematically interrogate every modelling assumption, boundary and initial condition, limiting and edge case, numerical error source (discretization, conditioning, convergence, tolerances), uncertainty propagation and significant figures, and any discordant literature or tool result; stress-test the conclusion against alternative models and regimes.",
     }
+    closed_calc = is_closed_computation(run.ctx)
+    contract = getattr(run, "output_contract", None)
+    has_strict = contract is not None and (contract.strict_form or contract.exact_items or contract.exact_lines or contract.exact_words)
+
     depth = effort_prof.get("deliberation_depth", "standard")
-    delib_text = deliberation_prompts.get(depth, "")
+    if closed_calc:
+        delib_text = (
+            "\n[EFFORT LEVEL: TARGETED / CLOSED COMPUTATION]\n"
+            "State the verified mathematical result directly and follow any formatting instructions precisely. "
+            "Do not deliberate on external regimes, physical units, or literature."
+        )
+    else:
+        delib_text = deliberation_prompts.get(depth, "")
     if delib_text:
         system_prompt = f"{system_prompt}\n{delib_text}"
     from ...utils.output_contract import writer_rule
@@ -386,6 +403,10 @@ async def write_first_draft(run: RunContext) -> None:
         await on_text(delta)
 
     want = first_draft_output_cap()
+    if closed_calc or (has_strict and (getattr(contract, "exact_items", 0) or 0) <= 3):
+        # A simple, self-contained calculation or focused contract does not need a 16,000 output token ceiling;
+        # a focused budget (up to 1,024 tokens) removes unnecessary model latency.
+        want = min(1024, want)
     finish = [""]  # the provider's finish reason of the latest draft call
 
     def on_finish(reason: str) -> None:
@@ -393,19 +414,21 @@ async def write_first_draft(run: RunContext) -> None:
 
     try:
         llm_kwargs: dict[str, Any] = {}
+        min_out = min(512 if closed_calc else 1024, want)
         if budget is not None:
             try:
                 alloc = budget.admit(
-                    "first_draft", len(system_prompt) + len(synthesis_prompt), want, min_output=min(1024, want)
+                    "first_draft", len(system_prompt) + len(synthesis_prompt), want, min_output=min_out
                 )
             except BudgetExhausted as exc:
                 raise DraftBudgetStop(str(exc)) from exc
             llm_kwargs["max_tokens"] = alloc.output_cap
+        reasoning_effort = "low" if (closed_calc or has_strict) else effort_prof.get("reasoning_effort")
         llm = ao.get_llm(
             model_name=synthesis_model,
             api_key=api_key,
             streaming=True,
-            reasoning_effort=effort_prof.get("reasoning_effort"),
+            reasoning_effort=reasoning_effort,
             **llm_kwargs,
         )
         messages = [

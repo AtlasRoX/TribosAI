@@ -40,6 +40,10 @@ def render_verified_answer(question: str, math_artifact: dict[str, Any] | None, 
         lines = [str(r["text"]).strip() for r in results]
     elif answer.get("set_text") and _SET_REQUEST_RE.search(question or ""):
         lines = [str(answer["set_text"])]
+    elif answer.get("factored"):
+        lines = [str(answer["factored"]).strip()]
+    elif answer.get("text") and not _SET_REQUEST_RE.search(question or ""):
+        lines = [str(answer["text"]).strip()]
     else:
         return None
     # The requested line count must be exactly the results' ("on one line" is exact_lines=1 in the contract).

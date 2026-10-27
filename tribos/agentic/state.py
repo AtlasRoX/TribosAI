@@ -139,6 +139,7 @@ class AgentState:
     brief_notes: list[str] = field(default_factory=list)  # lines for the <research_brief> in the synthesis request
     scope_notes: list[str] = field(default_factory=list)
     artifacts: dict[str, Any] = field(default_factory=dict)
+    start_time: float = 0.0
     trace: list[dict[str, Any]] = field(default_factory=list)
     draft: str = ""
     draft_round: int = 0

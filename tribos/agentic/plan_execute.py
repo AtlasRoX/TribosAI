@@ -230,7 +230,22 @@ def needs_specialised_tool(state: Any) -> bool:
         top = retrieve_tools(registry, state.clean_query or state.query, k=3)
     except Exception:  # noqa: BLE001 - retrieval is a routing hint; without it the default rules apply
         return False
-    return any(getattr(e, "name", "") in SPECIALISED_TOOLS and registry.get_entry(e.name) is not None for e in top)
+    hits = [getattr(e, "name", "") for e in top if getattr(e, "name", "") in SPECIALISED_TOOLS and registry.get_entry(e.name) is not None]
+    if not hits:
+        return False
+    if hits == ["physis_engineering_calc"]:
+        # "physis_engineering_calc" contains "safety factor utilisation", which lexically matches the bare word "factor"
+        # in polynomial factoring problems. Guard against this false positive when there are no engineering terms.
+        query_lower = (state.clean_query or state.query or "").lower()
+        eng_keywords = (
+            "beam", "cantilever", "deflection", "bending", "stress", "buckling", "euler", "johnson",
+            "pressure vessel", "hoop stress", "shaft", "torsion", "von mises", "bolt", "preload", "torque",
+            "fatigue", "goodman", "pipe", "pressure drop", "colebrook", "heat exchanger", "lmtd", "ntu",
+            "conduction", "insulation", "safety factor", "utilisation", "utilization"
+        )
+        if not any(k in query_lower for k in eng_keywords):
+            return False
+    return True
 
 class PlanExecutePhase(AgentPhase):
     key = "plan_execute"

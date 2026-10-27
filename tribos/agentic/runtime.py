@@ -199,7 +199,13 @@ class AgenticRuntime:
                     await st.step(f"agent_{phase.key}", f"{_phase_title(phase.key)} did not run", failure, status="error")
             elif left_open:
                 await st.close_steps(left_open, status="done")
-            entry = {"phase": phase.key, "stage": stage, "status": status, "seconds": round(time.perf_counter() - t0, 2)}
+            entry = {
+                "phase": phase.key,
+                "stage": stage,
+                "status": status,
+                "seconds": round(time.perf_counter() - t0, 2),
+                "at": round(max(0.0, t0 - (getattr(st, "start_time", 0.0) or getattr(st.budget, "started", t0))), 2),
+            }
             if reason:
                 entry["reason"] = reason[:240]
             st.bag.setdefault("phases_ran", []).append(entry)
