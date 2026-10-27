@@ -80,7 +80,7 @@ _FOCUS_PATTERNS: list[tuple[str, re.Pattern]] = [
 
 _QWORD = r"(?:what|how|which|whether|is|are|does|do|did|can|could|why|where|when|who|should|will)"
 _CONJ_SPLIT = re.compile(r"\s*(?:,\s*(?:and\s+)?|\s+and\s+(?:also\s+)?|\s+also\s+)(?=" + _QWORD + r"\b)", re.I)
-_ENUM_SPLIT = re.compile(r"(?:^|\s)(?:\(?\d{1,2}[.)]|\([a-hA-H]\)|[a-h]\))\s+")
+_ENUM_SPLIT = re.compile(r"(?<![=<>+\-*/:])(?:\s+|^)(?:\(?(?:[1-9]\d?|0(?!\.))\b[.)]|\([a-hA-H]\)|[a-h]\))\s+")
 _ANAPHORA = re.compile(r"\b(it|its|they|their|them|this|these|that|those|such|the same)\b", re.I)
 _COMPARE = re.compile(r"\b(compare\w*|comparison|versus|vs\.?|differ\w*|difference)\b", re.I)
 _CHAIN = re.compile(r"\b(and then|then|which in turn|downstream|leading to|as a result|consequently|and how (?:does|do) (?:that|this|it))\b", re.I)

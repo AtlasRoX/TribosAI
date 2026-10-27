@@ -343,3 +343,94 @@ def test_f08_contradicted_answer_failing_substitution_check():
     assert outcome["task_status"] == "partial"
     assert any("contradict" in r.lower() for r in outcome["incomplete_reasons"])
 
+
+def test_f08_reproduction_arithmetic_evaluation_claims_4_10_6():
+    """Exact reproduction: Quadratic solve with factorization, roots, and substitution checks
+    where the claims are evaluated as arithmetic chains (e.g. 4 - 10 + 6 = 0 and 9 - 15 + 6 = 0).
+    When all 3 claims are checked and supported, the deliverable must be 'verified' / 'checked',
+    and summary, item rows, sub-question list, and verification panel must agree.
+    """
+    from tribos.verify.verifier import TribosVerifier
+
+    q = (
+        "For integer x, solve x^2 - 5x + 6 = 0. Return exactly one numbered item containing a "
+        "factorization, the complete set of integer roots, and a substitution check for each root. "
+        "Do not search the web or invoke a formal prover."
+    )
+    answer = (
+        "1. Factorization: (x - 2)*(x - 3) = x^2 - 5*x + 6\n"
+        "Integer roots: x = 2 and x = 3\n"
+        "Substitution checks:\n"
+        "- For x = 2: 4 - 10 + 6 = 0\n"
+        "- For x = 3: 9 - 15 + 6 = 0"
+    )
+
+    claims = [
+        {"claim_id": "m1", "text": "(x-2)*(x-3)=x^2-5*x+6", "source_text": "(x - 2)*(x - 3) = x^2 - 5*x + 6", "status": "passed"},
+        {"claim_id": "m2", "text": "4-10+6=0", "source_text": "4 - 10 + 6 = 0", "status": "passed"},
+        {"claim_id": "m3", "text": "9-15+6=0", "source_text": "9 - 15 + 6 = 0", "status": "passed"},
+    ]
+
+    assessed = assess(q, answer, math_audit={"claims": claims})
+    assert len(assessed) == 1
+    it = assessed[0]
+    assert it["item"] == "x^2 - 5x + 6 = 0"
+    assert it["status"] == "verified"
+    assert it["check_state"] == "checked"
+    assert it["answer_state"] == "answered"
+
+    outcome = apply_deliverables({"task_status": "completed"}, assessed)
+    assert outcome["task_status"] == "completed"
+    assert outcome["deliverables"][0]["status"] == "verified"
+    assert outcome["deliverables"][0]["check_state"] == "checked"
+
+    # Verifier report agreement
+    report = TribosVerifier().verify_response(q, answer, {})
+    assert report.passed is True
+    assert len(report.claims) == 3
+    assert all(c.status == "supported" for c in report.claims)
+
+
+def test_f08_partial_answer_omitted_one_substitution_check():
+    """Partial answer case: Factorization and roots provided, but substitution check is provided
+    for root 2 only (omitting root 3). Must NOT be marked checked; it must remain unverified/addressed.
+    """
+    q = (
+        "For integer x, solve x^2 - 5x + 6 = 0. Return exactly one numbered item containing a "
+        "factorization, the complete set of integer roots, and a substitution check for each root. "
+        "Do not search the web or invoke a formal prover."
+    )
+    answer = (
+        "1. Factorization: (x - 2)*(x - 3) = x^2 - 5*x + 6\n"
+        "Integer roots: x = 2 and x = 3\n"
+        "Substitution checks:\n"
+        "- For x = 2: 4 - 10 + 6 = 0"
+    )
+
+    claims = [
+        {"claim_id": "m1", "text": "(x-2)*(x-3)=x^2-5*x+6", "source_text": "(x - 2)*(x - 3) = x^2 - 5*x + 6", "status": "passed"},
+        {"claim_id": "m2", "text": "4-10+6=0", "source_text": "4 - 10 + 6 = 0", "status": "passed"},
+    ]
+
+    assessed = assess(q, answer, math_audit={"claims": claims})
+    assert len(assessed) == 1
+    it = assessed[0]
+    assert it["status"] == "addressed"
+    assert it["check_state"] == "unverified"
+    assert it["answer_state"] == "answered"
+
+
+def test_f08_decomposition_no_spurious_split_on_zero_equation():
+    """Decomposition must not spuriously split equations ending with '= 0.' as list enumerations."""
+    from tribos.agentic.decompose import heuristic_split
+
+    q = (
+        "For integer x, solve x^2 - 5x + 6 = 0. Return exactly one numbered item containing a "
+        "factorization, the complete set of integer roots, and a substitution check for each root. "
+        "Do not search the web or invoke a formal prover."
+    )
+    subs = heuristic_split(q)
+    assert len(subs) == 1
+    assert "x^2 - 5x + 6 = 0" in subs[0]
+
+

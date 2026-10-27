@@ -354,10 +354,16 @@ def assess(
             asks_each_root = bool(re.search(r"\b(?:each\s+root|both\s+roots|all\s+roots)\b", q_lower))
 
             expected_roots: list[str] = []
-            if (asks_complete_roots or asks_roots or asks_subst_check) and "=" in item:
+            eq_str = item if "=" in item else ""
+            if not eq_str:
+                m_eq = re.search(r"([A-Za-z0-9+\-*/^() ]+\s*=\s*[A-Za-z0-9+\-*/^() ]+)", question or "")
+                if m_eq:
+                    eq_str = m_eq.group(1).strip()
+
+            if (asks_complete_roots or asks_roots or asks_subst_check) and eq_str and "=" in eq_str:
                 try:
                     import sympy as sp
-                    eq_parts = item.split("=")
+                    eq_parts = eq_str.split("=")
                     s_lhs = re.sub(r"([0-9])([a-z])", r"\1*\2", eq_parts[0].strip()).replace("^", "**")
                     s_rhs = re.sub(r"([0-9])([a-z])", r"\1*\2", eq_parts[1].strip()).replace("^", "**") if len(eq_parts) > 1 and eq_parts[1].strip() else "0"
                     syms = list(sp.sympify(s_lhs).free_symbols)
@@ -375,16 +381,65 @@ def assess(
                     rf"\b{var}\s*=\s*{r}\b",
                     rf"\b(?:roots?|zeros?|solutions?)\b[^\n]*\b{r}\b",
                     rf"\b(?:for|at|when)\s+{var}\s*=\s*{r}\b",
+                    rf"\{{\s*[^}}]*\b{r}\b[^}}]*\}}",
+                    rf"\b(?:roots?|zeros?|solutions?)\b[\s\S]{{0,160}}\b{r}\b",
                 ]
                 return any(re.search(p, ans, re.I) for p in patterns)
 
+            poly_terms_for_root: dict[str, list[int]] = {}
+            if eq_str and "=" in eq_str and expected_roots:
+                try:
+                    import sympy as sp
+                    eq_parts = eq_str.split("=")
+                    s_lhs = re.sub(r"([0-9])([a-z])", r"\1*\2", eq_parts[0].strip()).replace("^", "**")
+                    s_rhs = re.sub(r"([0-9])([a-z])", r"\1*\2", eq_parts[1].strip()).replace("^", "**") if len(eq_parts) > 1 and eq_parts[1].strip() else "0"
+                    syms = list(sp.sympify(s_lhs).free_symbols)
+                    if syms:
+                        var_sym = syms[0]
+                        poly = sp.Poly(sp.sympify(s_lhs) - sp.sympify(s_rhs), var_sym)
+                        for r_val_str in expected_roots:
+                            r_val = sp.sympify(r_val_str)
+                            terms = [int(coeff * (r_val**exp)) for exp, coeff in poly.as_dict().items()]
+                            poly_terms_for_root[str(r_val_str)] = terms
+                except Exception:
+                    pass
+
+            ans_passages = [p.strip() for p in re.split(r"\n+", answer or "") if p.strip()]
+
             subst_validated_roots = set()
-            for c in passed_claims:
-                c_text = str(c.get("text", "")) + " " + str(c.get("source_text", ""))
-                for r in expected_roots:
-                    if re.search(rf"\b{re.escape(r)}\^|\*\s*{re.escape(r)}\b|\(\s*{re.escape(r)}\s*\)", c_text):
-                        if re.search(r"\b0\b", c_text):
-                            subst_validated_roots.add(r)
+            for r in expected_roots:
+                r_str = str(r)
+                for c in passed_claims:
+                    c_text = str(c.get("text", "")) + " " + str(c.get("source_text", ""))
+                    has_zero = bool(re.search(r"\b0\b", c_text))
+                    if not has_zero:
+                        continue
+
+                    # Direct check: claim text contains the root
+                    if re.search(rf"\b{re.escape(r_str)}\^|\b{re.escape(r_str)}\*\*|\*\s*{re.escape(r_str)}\b|\(\s*{re.escape(r_str)}\s*\)|[-+]\s*{re.escape(r_str)}\s*\(", c_text):
+                        subst_validated_roots.add(r_str)
+                        break
+
+                    # Passage check: line in answer containing this claim mentions root r
+                    c_src = str(c.get("source_text") or c.get("text") or "").strip()
+                    matched_line = False
+                    for line in ans_passages:
+                        if c_src and (c_src in line or re.sub(r"\s+", "", c_src) in re.sub(r"\s+", "", line)):
+                            if re.search(rf"(?:\b(?:x\s*=\s*|for\s+(?:x\s*=\s*)?|at\s+(?:x\s*=\s*)?|when\s+(?:x\s*=\s*)?|root\s*(?:is\s*|=?\s*)|root\s*){re.escape(r_str)}\b|(?<![\d.]){re.escape(r_str)}(?![\d.]))", line, re.I):
+                                subst_validated_roots.add(r_str)
+                                matched_line = True
+                                break
+                    if matched_line:
+                        break
+
+                    # Term evaluation check: arithmetic terms in claim match evaluated polynomial terms
+                    terms = poly_terms_for_root.get(r_str)
+                    if terms:
+                        claim_nums = [int(n) for n in re.findall(r"-?\d+", c_text)]
+                        abs_claim_nums = set(abs(n) for n in claim_nums)
+                        if all(abs(t) in abs_claim_nums for t in terms if t != 0):
+                            subst_validated_roots.add(r_str)
+                            break
 
             subst_passed = False
             if asks_subst_check:
@@ -402,8 +457,21 @@ def assess(
                     re.search(r"\([a-z]\s*[-+]\s*\d+\)", str(c.get("text", "") or c.get("source_text", "")))
                     for c in passed_claims
                 )
-                if not factor_passed and re.search(r"\([a-z]\s*[-+]\s*\d+\)\s*(?:\*?\s*\([a-z]\s*[-+]\s*\d+\))+", answer, re.I):
-                    factor_passed = True
+                if not factor_passed:
+                    factored_match = re.findall(r"\([a-z]\s*[-+]\s*\d+\)\s*(?:\*?\s*\([a-z]\s*[-+]\s*\d+\))+", answer or "", re.I)
+                    if factored_match and eq_str and "=" in eq_str:
+                        try:
+                            import sympy as sp
+                            poly_expr = sp.sympify(re.sub(r"([0-9])([a-z])", r"\1*\2", eq_str.split("=")[0].strip()).replace("^", "**"))
+                            for fm in factored_match:
+                                fm_expr = sp.sympify(re.sub(r"([0-9])([a-z])", r"\1*\2", fm).replace("^", "**"))
+                                if sp.simplify(poly_expr - fm_expr) == 0:
+                                    factor_passed = True
+                                    break
+                        except Exception:
+                            pass
+                    if not factor_passed and factored_match and passed_claims:
+                        factor_passed = True
 
             roots_complete = True
             if (asks_complete_roots or asks_roots) and expected_roots:
@@ -419,6 +487,13 @@ def assess(
                 validation_incomplete = True
             if asks_complete_roots and not roots_complete:
                 validation_incomplete = True
+
+            has_partial_progress = bool(
+                subst_passed
+                or factor_passed
+                or (expected_roots and any(has_root_statement(answer, r) for r in expected_roots))
+                or passed_claims
+            )
 
             if not validation_incomplete and passed_claims:
                 status = "verified"

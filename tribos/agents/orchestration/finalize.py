@@ -215,9 +215,11 @@ def _sync_sub_questions(agent_state: Any, items: list[dict[str, Any]], tool_resu
                 sq.note = "partly answered or unchecked"
             elif it_status == "failed_check":
                 sq.status = "partial"
+                sq.check_state = "failed"
                 sq.note = "contradicted by claim check"
             elif it_status == "missing":
                 sq.status = "missing"
+                sq.check_state = "unverified"
                 sq.note = "not addressed in answer"
 
             for ev in match.get("evidence") or []:
@@ -231,13 +233,16 @@ def apply_deliverables(task_status: dict[str, Any], items: list[dict[str, Any]])
     status["deliverables"] = items
     missing = [i["item"] for i in items if i.get("status") == "missing" and i.get("quantity")]
     failed = [i["item"] for i in items if i.get("status") == "failed_check"]
+    partial_items = [i["item"] for i in items if i.get("status") == "partial"]
     reasons = list(status.get("incomplete_reasons") or [])
     if missing:
         reasons.append(f"Not addressed: {', '.join(missing[:6])}.")
     if failed:
         reasons.append(f"Stated with values the checks contradict: {', '.join(failed[:6])}.")
+    if partial_items:
+        reasons.append(f"Validation incomplete or partially addressed: {', '.join(partial_items[:6])}.")
     status["incomplete_reasons"] = reasons
-    if (missing or failed) and status.get("task_status") == "completed":
+    if (missing or failed or partial_items) and status.get("task_status") == "completed":
         status["task_status"] = "partial"
         lead = " ".join(reasons)
         reason = str(status.get("reason") or "")
@@ -339,10 +344,24 @@ async def assemble_result(run: RunContext) -> Any:
         try:
             from ..deliverables import assess as assess_deliverables
 
+            math_audit_payload = (
+                getattr(verification_report, "math_audit", None)
+                or (verification_report.get("math_audit") if isinstance(verification_report, dict) else None)
+            )
+            if math_audit_payload is None and verification_report is not None:
+                rep_claims = getattr(verification_report, "claims", None) or (verification_report.get("claims") if isinstance(verification_report, dict) else None) or []
+                if rep_claims:
+                    math_audit_payload = {
+                        "claims": [
+                            c.model_dump() if hasattr(c, "model_dump") else c
+                            for c in rep_claims
+                        ]
+                    }
+
             items = assess_deliverables(
                 run.resolved_query or run.query,
                 candidate_response,
-                getattr(verification_report, "math_audit", None),
+                math_audit_payload,
                 tool_results=tool_results,
             )
             if getattr(run, "synthesis_model", "") == "verified_computation":
