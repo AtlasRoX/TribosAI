@@ -239,6 +239,7 @@ async def _agentic_preflight(run: RunContext) -> Any | None:
             project_id=run.project_id,
             options=dict(agent_options or {}),
             memory_summary=run.memory_summary,
+            tool_policy=getattr(run, "tool_policy", None) or getattr(ctx, "tool_policy", None),
         )
         if run.routing is not None:
             agent_state.bag["routing"] = run.routing  # the same dict: escalation is recorded on the run's routing

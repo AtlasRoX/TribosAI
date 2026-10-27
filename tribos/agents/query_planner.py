@@ -1355,7 +1355,12 @@ def decide_builtin_sources(ctx: QueryContext) -> None:
 
     # Literature and web search only when the answer can depend on outside evidence (agents.evidence_need).
     need = ctx.evidence_need
-    if need is not None and need.skip_retrieval:
+    pol = getattr(ctx, "tool_policy", None)
+    if pol is not None and pol.prohibit_search:
+        s_reason = pol.search_reason or "Search disabled by user request"
+        ctx.decisions["archivon"] = SourceDecision(run=False, reason=s_reason)
+        ctx.decisions["websurfer"] = SourceDecision(run=False, reason=s_reason)
+    elif need is not None and need.skip_retrieval:
         ctx.decisions["archivon"] = SourceDecision(run=False, reason=need.reason)
         ctx.decisions["websurfer"] = SourceDecision(run=False, reason=need.reason)
     elif not ctx.enable_web_search:
@@ -1373,8 +1378,10 @@ def decide_builtin_sources(ctx: QueryContext) -> None:
         or re.search(r"\\(?:frac|int|sum|prod|sqrt|partial|nabla)|=", ctx.clean_query)
     )
     ctx.decisions["axiom"] = SourceDecision(
-        run=wants_axiom, reason="symbolic/formal reasoning requested" if wants_axiom else "no symbolic derivation requested"
+        run=wants_axiom, reason="symbolic reasoning requested" if (wants_axiom and pol and pol.prohibit_formal) else ("symbolic/formal reasoning requested" if wants_axiom else "no symbolic derivation requested")
     )
+    if pol is not None and pol.prohibit_formal:
+        ctx.decisions["formal_proof"] = SourceDecision(run=False, reason=pol.formal_reason or "formal prover disabled by user")
     wants_calcula = bool(
         {"compute", "estimate", "data_analysis"} & set(ctx.intents)
         or ctx.quantities
@@ -1786,6 +1793,14 @@ async def _build_query_context(
             budget_s = max(0.1, float(env_budget))
         except ValueError:
             pass
+    from ..tools.policy import active_tool_policy, extract_tool_policy
+
+    tool_policy = active_tool_policy() or extract_tool_policy(
+        clean_query, enable_web_search=enable_web_search, standing_instructions=standing_instructions
+    )
+    if tool_policy.prohibit_search:
+        enable_web_search = False
+
     ctx = QueryContext(
         raw_query=query,
         clean_query=clean_query,
@@ -1794,6 +1809,7 @@ async def _build_query_context(
         attachments=list(attachments or []),
         attachment_errors=list(attachment_errors or []),
         enable_web_search=enable_web_search,
+        tool_policy=tool_policy,
     )
     holder.append(ctx)
     ctx.biomodel_id = extract_biomodel_id(clean_query)

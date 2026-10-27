@@ -1046,6 +1046,12 @@ class AuthoritativeOrchestrator:
         (interactive=True makes approval requests wait for the user). project_id scopes project memory;
         agent_options carries per-request settings (budget limits, require_plan_approval, ...).
         """
+        from ..tools.policy import extract_tool_policy
+
+        policy = extract_tool_policy(query=query, enable_web_search=enable_web_search)
+        if policy.prohibit_search:
+            enable_web_search = False
+
         start_time = time.perf_counter()
         rec = _make_recorder(
             query=query,
@@ -1218,11 +1224,20 @@ class AuthoritativeOrchestrator:
         )
         run.pending["thoughts"] = run.thoughts
         run.show_reasoning = _show_reasoning()
-        # Search off is enforced for the whole inquiry at the tool layer: no networked tool runs from any workflow.
+        # Explicit prohibitions (search, formal proof, code) enforced at dispatch and context layers.
+        from ..tools.policy import enforce_tool_policy, extract_tool_policy
         from ..tools.reliability import external_retrieval_blocked
 
-        blocked = None if enable_web_search else "Search is off for this turn (no literature, web or online database retrieval)"
-        with external_retrieval_blocked(blocked):
+        policy = getattr(run, "tool_policy", None) or extract_tool_policy(
+            query=query, enable_web_search=enable_web_search, standing_instructions=None
+        )
+        if policy.prohibit_search:
+            enable_web_search = False
+            run.enable_web_search = False
+        run.tool_policy = policy
+
+        blocked = None if enable_web_search else (policy.search_reason or "Search is off for this turn (no literature, web or online database retrieval)")
+        with external_retrieval_blocked(blocked), enforce_tool_policy(policy):
             return await self._run_stages(run)
 
     async def _run_stages(self, run: RunContext) -> AuthoritativeOrchestrationResult:

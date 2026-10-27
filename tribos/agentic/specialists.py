@@ -256,6 +256,13 @@ def tool_allowed(ctx: Any, entry: Any) -> tuple[bool, str]:
     """(allowed, reason) for one tool under the turn's hard policy."""
     if entry is None:
         return False, "tool is not registered"
+    from ..tools.policy import active_tool_policy
+
+    policy = getattr(ctx, "tool_policy", None) or active_tool_policy()
+    if policy is not None:
+        prohibited, reason = policy.is_tool_prohibited(getattr(entry, "name", ""), entry)
+        if prohibited:
+            return False, reason
     domain = (getattr(entry, "domain", "") or "").lower()
     if domain in _EXCLUDED_DOMAINS:
         return False, "sandboxed analysis runs only through the analyst phase"

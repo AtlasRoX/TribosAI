@@ -51,6 +51,28 @@ class FormalProofPhase(AgentPhase):
 
     async def run(self, state: AgentState) -> PhaseOutcome | None:
         question = state.clean_query or state.query
+        from ..tools.policy import active_tool_policy
+
+        policy = getattr(state, "tool_policy", None) or getattr(state.ctx, "tool_policy", None) or active_tool_policy()
+        if policy is not None and policy.prohibit_formal:
+            art = {
+                "status": "disabled",
+                "title": "formal prover disabled by user",
+                "question": question[:2000],
+                "statement": "",
+                "lean_code": "",
+                "attempts": [],
+                "error": policy.formal_reason or "Formal prover disabled by user request.",
+            }
+            state.artifacts["formal_proof"] = art
+            state.mark_phase(PHASE_KEY, "skipped", "formal prover disabled by user")
+            if hasattr(state, "step"):
+                res_step = state.step("agent_formal", "Lean: formal prover disabled by user",
+                                      "Skipped: prohibited by user request", status="done", agent=AGENT_NAME)
+                if hasattr(res_step, "__await__"):
+                    await res_step
+            return PhaseOutcome(artifacts={"formal_proof": art})
+
         if find_lean() is None:
             # Lean is optional: record that the formal check could not run, and leave the run otherwise unchanged.
             art = {"status": "unavailable", "title": "formal checker unavailable", "question": question[:2000],
@@ -85,6 +107,8 @@ class FormalProofPhase(AgentPhase):
                 "quote the Lean statement so the reader can check it says what the question asks, and keep the SymPy "
                 "checks as they are."
             )
+        elif art.get("status") == "disabled":
+            pass
         elif art["status"] == "not_formalizable":
             state.scope_notes.append(
                 f"No formal check was possible ({str(art.get('error') or '')[:240]}). Say that no formal check was run; "

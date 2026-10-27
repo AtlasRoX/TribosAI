@@ -492,7 +492,15 @@ def policy_violation(entry: Any, ctx: Any) -> str | None:
     """Why the turn's hard policy forbids this tool, or None."""
     if ctx is None:
         return None
+    from ..tools.policy import active_tool_policy
+
     tool_entry = None if isinstance(entry, str) else entry
+    tool_name = entry if isinstance(entry, str) else getattr(entry, "name", "")
+    policy = getattr(ctx, "tool_policy", None) or active_tool_policy()
+    if policy is not None:
+        prohibited, reason = policy.is_tool_prohibited(tool_name, tool_entry)
+        if prohibited:
+            return reason
     if is_simulation_tool(entry, tool_entry) and simulation_banned(ctx):
         return "simulation was forbidden for this question"
     if executes_code(entry, tool_entry) and (getattr(ctx, "extras", None) or {}).get("code_analysis_forbidden"):

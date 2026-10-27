@@ -76,6 +76,12 @@ Complete = Callable[[str, str], Awaitable[str]]
 
 async def formalise_and_check(question: str, complete: Complete | None, *, mathlib: bool | None = None) -> dict[str, Any]:
     """Formalise, check and repair (see the module docstring). `complete(system, user)` calls the model."""
+    from tribos.tools.policy import active_tool_policy
+
+    pol = active_tool_policy()
+    if pol is not None and pol.prohibit_formal:
+        return {"status": "disabled", "title": STATUS_TITLES["disabled"], "attempts": [], "lean_code": "",
+                "statement": "", "error": pol.formal_reason or "Formal prover disabled by user request."}
     if find_lean() is None:
         return {"status": "unavailable", "title": STATUS_TITLES["unavailable"], "attempts": [], "lean_code": "",
                 "statement": "", "error": "Lean is not installed (set TRIBOS_LEAN_PATH, or put lean on PATH)."}

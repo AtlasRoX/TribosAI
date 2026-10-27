@@ -794,6 +794,22 @@ async def execute_with_policies(
     """
     get_entry = getattr(registry, "get_entry", None)
     entry = get_entry(tool_name) if callable(get_entry) else None
+    from .policy import active_tool_policy
+
+    active_pol = active_tool_policy()
+    if active_pol is not None:
+        prohibited, reason = active_pol.is_tool_prohibited(tool_name, entry)
+        if prohibited:
+            from .registry import ErrorType, ToolResult
+
+            _fill_trace(call, kwargs, entry, None, trace)
+            return ToolResult(
+                success=False,
+                tool_name=tool_name,
+                error=f"Not run: {reason}",
+                error_type=ErrorType.VALIDATION_ERROR,
+                metadata={"skipped_by_policy": "disabled_by_user", "failure_class": "policy"},
+            )
     blocked = _RETRIEVAL_BLOCK.get()
     if blocked and entry is not None and _adapter(entry) in _NETWORKED:
         # Search is off: refused before the cache too, so no earlier result is presented as this turn's research.

@@ -223,6 +223,7 @@ class QueryContext:
     attachments: list[DatasetRef] = field(default_factory=list)
     attachment_errors: list[str] = field(default_factory=list)
     enable_web_search: bool = True
+    tool_policy: Any = None
     decisions: dict[str, SourceDecision] = field(default_factory=dict)
     # Whether the answer needs outside evidence (agents.evidence_need.EvidenceNeed); gates literature and web search.
     evidence_need: Any | None = None

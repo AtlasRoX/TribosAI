@@ -18,6 +18,7 @@ import hashlib
 import os
 import re
 import shutil
+
 # subprocess runs only the configured Lean executable, with a list argv and no shell.
 import subprocess  # nosec B404
 import sys
@@ -33,6 +34,7 @@ STATUS_TITLES = {
     "failed": "formalisation failed",
     "timeout": "formalisation failed",
     "unavailable": "formal checker unavailable",
+    "disabled": "formal prover disabled by user",
     # Audit I33: the written theorem does not state the question (True/False target, assumed conclusion, changed
     # domain), or the question cannot be stated in the installed Lean environment.
     "mismatch": "formal statement does not match the question",

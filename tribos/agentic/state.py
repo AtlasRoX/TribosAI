@@ -139,6 +139,7 @@ class AgentState:
     draft: str = ""
     draft_round: int = 0
     verification: Any = None
+    tool_policy: Any = None
     bag: dict[str, Any] = field(default_factory=dict)
     _counter: int = 0
     _running_steps: dict[str, dict[str, str]] = field(default_factory=dict)  # step id -> {title, agent} still spinning
@@ -179,6 +180,30 @@ class AgentState:
             named = list(getattr(self.ctx, "literature_ids", None) or [])
             if named:
                 kwargs["pinned_ids"] = list(dict.fromkeys([*(kwargs.get("pinned_ids") or []), *named]))
+        from ..tools.policy import active_tool_policy
+
+        pol = self.tool_policy or getattr(self.ctx, "tool_policy", None) or active_tool_policy()
+        if pol is not None:
+            prohibited, reason = pol.is_tool_prohibited(tool_name)
+            if prohibited:
+                res = ToolResult(
+                    success=False,
+                    tool_name=tool_name,
+                    error=f"Not run: {reason}",
+                    error_type=ErrorType.VALIDATION_ERROR,
+                    metadata={"skipped_by_policy": "disabled_by_user", "failure_class": "policy"},
+                )
+                self.trace.append({
+                    "phase": phase,
+                    "tool": tool_name,
+                    "purpose": purpose[:200],
+                    "success": False,
+                    "error_type": "VALIDATION_ERROR",
+                    "seconds": 0.0,
+                })
+                if store:
+                    self.add_result(key or self.next_key(phase, tool_name), res, phase=phase, purpose=purpose)
+                return res
         try:
             self.budget.charge_tool(phase)
         except BudgetExhausted as exc:
