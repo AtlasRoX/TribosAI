@@ -242,11 +242,17 @@ def apply_deliverables(task_status: dict[str, Any], items: list[dict[str, Any]])
     if partial_items:
         reasons.append(f"Validation incomplete or partially addressed: {', '.join(partial_items[:6])}.")
     status["incomplete_reasons"] = reasons
-    if (missing or failed or partial_items) and status.get("task_status") == "completed":
+    if (missing or failed or partial_items) and status.get("task_status") in ("completed", "completed_fallback"):
         status["task_status"] = "partial"
         lead = " ".join(reasons)
         reason = str(status.get("reason") or "")
         status["reason"] = lead if reason in ("", "Evidence gathered and synthesized.") else f"{lead} {reason}"
+    elif (
+        not (missing or failed or partial_items)
+        and status.get("task_status") == "partial"
+        and "fallback" in str(status.get("reason", "")).lower()
+    ):
+        status["task_status"] = "completed_fallback"
     return status
 
 
@@ -257,7 +263,8 @@ _STAGE_KIND = {
     "evidence": "retrieval", "gaps": "retrieval", "counter_evidence": "retrieval",
     "computations": "execution", "plan_execute": "execution", "math_agent": "execution",
     "ode_verification": "execution", "specialists": "execution", "analyst": "execution",
-    "first_draft": "drafting", "verification": "verification", "nli": "verification", "critique": "verification",
+    "first_draft": "drafting", "best_of_n": "drafting", "codeact": "execution",
+    "verification": "verification", "nli": "verification", "critique": "verification",
     "confidence": "verification", "memory": "memory",
 }
 
@@ -383,7 +390,7 @@ async def assemble_result(run: RunContext) -> Any:
     if violations:
         task_status["incomplete_reasons"] = [*task_status.get("incomplete_reasons", []),
                                              f"Requested format not met: {'; '.join(violations)}."]
-        if task_status.get("task_status") == "completed":
+        if task_status.get("task_status") in ("completed", "completed_fallback"):
             task_status["task_status"] = "partial"
     merge_pipeline_phases(run)
     record("note_step", "task_status", {}, task_status)

@@ -313,6 +313,9 @@ def _first(d: dict[str, Any], *names: str) -> Any:
     return None
 
 
+_STAND_IN_RE = re.compile(r"\b(?:placeholder|proxy|stand[\s-]?in|dummy|mock|surrogate|made[\s-]?up|probe\s+value)\b", re.I)
+
+
 def parse_plan(value: Any, *, round_no: int = 0, taken_ids: set[str] | None = None) -> PlanGraph:
     """A PlanGraph from a planner reply ({"rationale", "nodes"|"tasks"|"plan"} or a bare list of nodes).
 
@@ -353,6 +356,11 @@ def parse_plan(value: Any, *, round_no: int = 0, taken_ids: set[str] | None = No
         seen.add(orig)
         if not tool:
             graph.rejected.append({"node": orig, "reason": "node names no tool"})
+            continue
+        if _STAND_IN_RE.search(str(raw.get("purpose") or "")):
+            # A call the planner itself describes as a placeholder or proxy computes a different quantity: its result
+            # would be shown as an answer (an "uncertainty" card of a guessed formula contradicted the real one).
+            graph.rejected.append({"node": orig, "reason": "a placeholder or proxy computation, not the stated quantity"})
             continue
         if args is None:
             args = {}
@@ -504,7 +512,7 @@ def policy_violation(entry: Any, ctx: Any) -> str | None:
     if is_simulation_tool(entry, tool_entry) and simulation_banned(ctx):
         return "simulation was forbidden for this question"
     if executes_code(entry, tool_entry) and (getattr(ctx, "extras", None) or {}).get("code_analysis_forbidden"):
-        return "the researcher asked for no code execution"
+        return "code execution is disabled for this request (the 'Allow code analysis on datasets' option is off)"
     source = tool_source(entry)
     from ..agents.evidence_need import external_retrieval_block
 

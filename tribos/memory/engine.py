@@ -53,6 +53,9 @@ class TribosMemoryEngine:
     ) -> str:
         return self.session.add_turn(thread_id, role, content, metadata)
 
+    def get_thread_project(self, thread_id: str) -> str | None:
+        return self.session.get_thread_project(thread_id)
+
     def get_thread_turns(self, thread_id: str, limit: int = 50) -> list[ConversationTurn]:
         return self.session.get_thread_turns(thread_id, limit)
 

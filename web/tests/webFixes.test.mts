@@ -99,10 +99,12 @@ test("LOG-31: saved messages keep their answer text when read back", () => {
 
 // LOG-33 ------------------------------------------------------------------------------------------------------
 
-test("LOG-33: only retired model ids are migrated; the current Ultra model and the default are kept", () => {
-  assert.equal(migrateSavedModel("nvidia/nemotron-3-ultra-550b-a55b"), "nvidia/nemotron-3-ultra-550b-a55b");
+test("LOG-33: only retired model ids are migrated; the default is kept", () => {
+  // The NVIDIA and OpenAI GPT models were retired (muse-spark-1.3 is the only model): saved choices move to it.
+  assert.equal(migrateSavedModel("nvidia/nemotron-3-ultra-550b-a55b"), DEFAULT_MODEL_ID);
   assert.equal(migrateSavedModel(DEFAULT_MODEL_ID), DEFAULT_MODEL_ID);
-  assert.equal(migrateSavedModel("gpt-4o"), "gpt-4o");
+  assert.equal(migrateSavedModel("gpt-4o"), DEFAULT_MODEL_ID);
+  assert.equal(migrateSavedModel("some-other-model"), "some-other-model");
   assert.equal(migrateSavedModel("nvidia/nemotron-3-super-120b-a12b"), DEFAULT_MODEL_ID);
   assert.equal(migrateSavedModel("nvidia/llama-3.1-nemotron-70b-instruct"), DEFAULT_MODEL_ID);
 });

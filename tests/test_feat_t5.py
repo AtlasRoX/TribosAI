@@ -162,8 +162,11 @@ def _state(question: str, reply: str | None):
     )
 
 
-def test_math_agent_integration_with_a_fake_model(lean):
+def test_math_agent_integration_with_a_fake_model(lean, monkeypatch):
     from tribos.agentic.formal_proof import FormalProofPhase
+
+    monkeypatch.setenv("TRIBOS_FORMAL_MODE", "auto")  # Lean for every proof question (the default asks for "formal")
+    monkeypatch.setenv("TRIBOS_FORMAL_BACKGROUND", "0")  # the phase's own result, awaited here
 
     phase = FormalProofPhase()
     state = _state("Prove that 2 + 2 = 4.", f"```lean\n{GOOD}```")

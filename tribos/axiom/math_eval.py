@@ -740,10 +740,13 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def write_calibration(report: dict[str, Any], path: Path = CALIBRATION_PATH, fitted_on: str = "") -> dict[str, Any]:
+    from .agent import calibrated_code_sha256
+
     payload = {
         "benchmark": report["benchmark"],
         "fitted_on": fitted_on or "benchmark run",
         "fitted_at": report["created_at"],
+        "code_sha256": calibrated_code_sha256(),
         "n": report["n"],
         "statuses": {s: {k: v for k, v in d.items() if k in ("n", "correct", "confidence", "lower_95")} for s, d in report["by_status"].items()},
         "cross_fitted": report["calibration_cross_fitted"],

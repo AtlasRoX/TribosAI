@@ -64,8 +64,18 @@ def _reset_calibration():
 
 
 def test_f10_calibrated_confidence_grounded_fields():
-    """calibrated_confidence returns traceable benchmark provenance for verified status."""
-    conf = calibrated_confidence("verified")
+    """calibrated_confidence returns traceable benchmark provenance for verified status, for a calibration fitted on
+    the current code only (AUDIT-013)."""
+    import json
+    from pathlib import Path
+
+    from tribos.axiom.agent import calibrated_code_sha256
+
+    cal = json.loads(Path("tribos/axiom/calibration.json").read_text(encoding="utf-8"))
+    if cal.get("code_sha256") != calibrated_code_sha256():
+        assert calibrated_confidence("verified") is None  # stale calibration is not shown
+        cal["code_sha256"] = calibrated_code_sha256()
+    conf = calibrated_confidence("verified", cal=cal)
     assert conf is not None
     assert conf["n"] == 43
     assert conf["p_correct"] >= 0.95

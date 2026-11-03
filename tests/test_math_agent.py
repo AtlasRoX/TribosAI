@@ -412,12 +412,18 @@ def test_benchmark_regression_gate():
 
 
 def test_calibrated_confidence_comes_from_the_held_out_fit():
-    v = calibrated_confidence("verified")
+    from tribos.axiom.agent import _calibration, calibrated_code_sha256
+
+    cal = dict(_calibration())
+    assert calibrated_confidence("failed") is None  # no answer, no probability
+    if cal.get("code_sha256") != calibrated_code_sha256():
+        # The calibration was fitted on other code: it is not shown until refitted (AUDIT-013).
+        assert calibrated_confidence("verified") is None
+        assert run(solve_math_problem("Solve x^2 = 9")).to_dict()["confidence"] is None
+        cal["code_sha256"] = calibrated_code_sha256()
+    v = calibrated_confidence("verified", cal=cal)
     assert v is not None and v["p_correct"] >= 0.9 and 0 < v["lower_95"] <= v["p_correct"] and v["n"] >= 30
     assert "holdout" in v["fitted_on"]
-    assert calibrated_confidence("failed") is None  # no answer, no probability
-    result = run(solve_math_problem("Solve x^2 = 9")).to_dict()
-    assert result["confidence"]["p_correct"] == v["p_correct"]
 
 
 def test_grader_is_independent_of_the_verifier():

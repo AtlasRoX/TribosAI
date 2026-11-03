@@ -10,8 +10,10 @@ import {
   acceptAttr,
   extensionList,
   fetchDatasetLimits,
+  kindForFile,
   precheckFile,
   toAttachment,
+  uploadDataset,
   type AuthHeaders,
 } from "@/services/datasetService";
 import styles from "./Datasets.module.css";
@@ -43,6 +45,8 @@ export function ComposerAttachButton({
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // A PDF uploading without the provenance form: "Uploading notes.pdf… 40%".
+  const [uploading, setUploading] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const full = attached.length >= MAX_ATTACHED;
@@ -110,6 +114,20 @@ export function ComposerAttachButton({
       setNotice(`${file.name}: ${problem}`);
       return;
     }
+    // A PDF is a document to read (the paper reader takes up to 40 pages), not measured data: it needs no provenance
+    // form. It is recorded as literature, without the no-personal-data attestation (nobody confirmed it); the library
+    // can add provenance later. Data files still open the form, where provenance matters.
+    if (kindForFile(file.name, limits) === "paper") {
+      setUploading(`Uploading ${file.name}…`);
+      const handle = uploadDataset(backendUrl, headers, file,
+        { source: "literature", domain: null, description: null, attests_no_direct_identifiers: false },
+        (f) => setUploading(f < 1 ? `Uploading ${file.name}… ${Math.round(f * 100)}%` : `Reading ${file.name}…`));
+      handle.promise
+        .then((record) => onAttach(toAttachment(record)))
+        .catch((err: unknown) => setNotice(`${file.name}: ${err instanceof Error ? err.message : "the upload failed"}`))
+        .finally(() => setUploading(null));
+      return;
+    }
     setPendingFile(file);
   };
 
@@ -169,7 +187,12 @@ export function ComposerAttachButton({
         </div>
       )}
 
-      {notice && !menuOpen && (
+      {uploading && !menuOpen && (
+        <div className={styles.notice} role="status">
+          {uploading}
+        </div>
+      )}
+      {notice && !menuOpen && !uploading && (
         <div className={styles.notice} role="alert">
           {notice}
         </div>

@@ -15,6 +15,7 @@ from ..result_keys import (
     ARCHIVON,
     AXIOM,
     CALCULA,
+    COMPUTED_RESULTS,
     DYNAMIS,
     DYNAMIS_EQUILIBRIUM,
     DYNAMIS_SCAN,
@@ -216,7 +217,10 @@ async def run_computations(run: RunContext) -> None:
 
     # 2.1 Axiom: the verified math agent on a question it can parse (an equation, ODE, integral, limit, ...) (LOG-3).
     # Agentic frameworks route mathematics through their own math agent and planned tool calls instead.
-    if classic and ctx.should_run(AXIOM) and registry.get_entry("axiom_solve_problem") is not None:
+    from .presentation import computations_cover_question
+
+    if (classic and ctx.should_run(AXIOM) and registry.get_entry("axiom_solve_problem") is not None
+            and not computations_cover_question(tool_results)):  # already computed and checked by code
         from tribos.axiom.problem import parse_problem
 
         if parse_problem(ctx.clean_query).kind != "unknown":
@@ -265,6 +269,11 @@ async def run_computations(run: RunContext) -> None:
     sim_plan = orch._simulation_plan(ctx) if (ctx.should_run(DYNAMIS) or ctx.should_run("vivarix")) else None
     if sim_plan is not None and getattr(ctx.simulation_constraints, "simulation_forbidden", False):
         sim_plan = None
+    computed_res = tool_results.get(COMPUTED_RESULTS)
+    if sim_plan is not None and computed_res is not None and computed_res.success and \
+            isinstance(computed_res.data, dict) and computed_res.data.get("kind") in ("nbody_gravity", "dynamical_system") \
+            and sim_plan.action == "time_course":  # a steady state or a scan still runs on Dynamis
+        sim_plan = None  # the stated N-body system was already integrated by code (computed_results)
     requested_plan = sim_plan
 
     if sim_plan is not None:
@@ -300,6 +309,15 @@ async def run_computations(run: RunContext) -> None:
         from tribos.dynamis.stated_ode import stated_ode_system
 
         spec = parse_problem(ctx.clean_query)
+        if spec.kind != "ode" or not spec.expression:
+            # Check individual sentences in case the question is a multi-task composite request
+            sentences = re.split(r"(?<!\d)\.(?!\d)|[;\n]", ctx.clean_query)
+            for sentence in sentences:
+                if re.search(r"[A-Za-z]''|d\^?2[A-Za-z]/dt\^?2|d[A-Za-z]/dt", sentence):
+                    s_cand = parse_problem(sentence)
+                    if s_cand.kind == "ode" and s_cand.expression:
+                        spec = s_cand
+                        break
         if spec.kind == "ode" and spec.expression:
             stated = stated_ode_system(spec.expression, spec.func or "", spec.ics)
             if stated is None:
@@ -309,6 +327,19 @@ async def run_computations(run: RunContext) -> None:
 
     preset_key: str | None = None
     if sim_plan is not None and not stated:
+        # Named presets are examples, not substitutes for a user's stated coefficients or initial conditions.
+        # If those values could not be mapped, the numerical planner must construct the actual system.
+        if (re.search(r"\b[A-Za-z]\s*\(\s*0\s*\)\s*=|\b(?:m|c|k|R|C|L)\s*=", ctx.clean_query)
+                and not sim_plan.parameter_overrides):
+            reason = "The stated coefficients/initial conditions were not mapped to an ODE; no preset with different defaults was run."
+            if classic:
+                tool_results[DYNAMIS] = ToolResult(success=False, tool_name="dynamis_simulate_ode", error=reason,
+                                                  error_type=ErrorType.VALIDATION_ERROR,
+                                                  metadata={"reason_code": "MODEL_VALUES_UNMAPPED"})
+            else:
+                notes.append(reason)
+            sim_plan = None
+    if sim_plan is not None and not stated:
         # The user's own words first (an entity's mention, the question), then the resolved labels: a lexicon label
         # can be coarser than the words ("damped oscillator" labelled harmonic_oscillator). A follow-up's system
         # ("Now simulate it for 50 s") comes from the previous turn as an entity and as ctx.system_name.
@@ -317,6 +348,21 @@ async def run_computations(run: RunContext) -> None:
             sim_plan.system_name, *(e.mention for e in systems), ctx.clean_query,
             *(e.label for e in systems), getattr(ctx, "system_name", None),
         )
+        if preset_key == "rc_circuit":
+            # If query is an oscillator, multi-task, or states specific circuit values,
+            # suppress running an unstated 5 V, 60-second default RC preset.
+            has_other_domain = bool(
+                re.search(
+                    r"\b(?:oscillator|spring|mass|damping|cantilever|beam|heat|FTCS|Monte[ -]Carlo)\b",
+                    ctx.clean_query,
+                    re.I,
+                )
+            )
+            has_circuit_values = bool(
+                re.search(r"\b(?:V_s|Vs|source\s+voltage|R|resistance|C|capacitance)\s*=", ctx.clean_query, re.I)
+            )
+            if has_other_domain or has_circuit_values:
+                preset_key = None
         if preset_key is None:
             # Nothing the question names is a system Dynamis can integrate: no simulation runs (never a stand-in).
             presets = ", ".join(k.replace("_", " ") for k in ODE_PRESETS)
@@ -349,6 +395,8 @@ async def run_computations(run: RunContext) -> None:
             # minima and maxima are the trajectory's own, not clipped between coarse samples.
             intervals = max(intervals, min(STATED_ODE_MAX_POINTS, max(1001, round(100 * duration) + 1)))
         label = "stated_ode" if stated else str(preset_key)
+        solver_args = ({"method": sim_plan.solver_method, "step_size": sim_plan.step_size_seconds,
+                        "num_steps": sim_plan.num_steps} if sim_plan.solver_method else {})
         title_ctx["model"] = "the stated ODE" if stated else label
         title_ctx["scan_parameter"] = sim_plan.scan_parameter or "a parameter"
         system: dict[str, Any] = (
@@ -387,6 +435,7 @@ async def run_computations(run: RunContext) -> None:
                         initial_state=stated["initial_state"],
                         t_span=(0.0, duration),
                         num_points=intervals,
+                        **solver_args,
                     )
                     if res.success and isinstance(res.data, dict):
                         from tribos.dynamis.stated_ode import stated_units
@@ -396,7 +445,8 @@ async def run_computations(run: RunContext) -> None:
                             res.data["units"] = units  # from the question's own values; the charts label axes with them
                     return res
                 return await registry.execute(
-                    "dynamis_simulate_ode", model_name=label, t_span=(0.0, duration), num_points=intervals
+                    "dynamis_simulate_ode", model_name=label, t_span=(0.0, duration), num_points=intervals,
+                    parameters=sim_plan.parameter_overrides or None, **solver_args,
                 )
 
             stage2_tasks.append(tracked(DYNAMIS, "Dynamis", run_dynamis()))

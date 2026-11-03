@@ -140,7 +140,12 @@ def normalize_math_text(text: str) -> str:
     # Typeset prose and spacing (a transcribed image or a pasted LaTeX question): "\text{ kg}" -> "kg", "\," -> " ".
     out = re.sub(r"\\(?:text|textrm|mathrm|mathsf|mathit|mbox)\s*\{([^{}]*)\}", r" \1 ", out)
     out = re.sub(r"\\[,;:! ]|~", " ", out)
-    # Newton's dot notation for time derivatives: \ddot{x} -> x'', \dot{x} -> x'.
+    # Newton's dot notation for time derivatives: \ddot{x} -> x'', \dot{x} -> x'; also the Unicode forms (precomposed
+    # x/y with dots, or a letter followed by a combining dot above U+0307 / diaeresis U+0308).
+    for ch, rep in (("ẍ", "x''"), ("ẋ", "x'"), ("ẏ", "y'")):
+        out = out.replace(ch, f" {rep}")
+    out = re.sub("([A-Za-z])̈", r" \1''", out)
+    out = re.sub("([A-Za-z])̇", r" \1'", out)
     out = re.sub(r"\\dddot\s*\{?\s*([A-Za-z])\s*\}?", r" \1'''", out)
     out = re.sub(r"\\ddot\s*\{?\s*([A-Za-z])\s*\}?", r" \1''", out)
     out = re.sub(r"\\dot\s*\{?\s*([A-Za-z])\s*\}?", r" \1'", out)
@@ -251,6 +256,12 @@ def _try_parse(text: str, *, equation: bool) -> str | None:
     try:
         if equation:
             lhs, rhs, _ = safe_parse_equation(text)
+            lhs_is_container = isinstance(lhs, (sp.Tuple, tuple, list))
+            rhs_is_container = isinstance(rhs, (sp.Tuple, tuple, list))
+            if lhs_is_container != rhs_is_container:
+                return None
+            if lhs_is_container and len(lhs) != len(rhs):
+                return None
             ok = _plausible(lhs) and _plausible(rhs)
         else:
             if "=" in text.replace("==", "=").replace("<=", "").replace(">=", ""):
@@ -357,9 +368,36 @@ def _pick_variable(source: str, explicit: str | None, spec: ProblemSpec) -> str 
     return None
 
 
+_BOUND = r"[-+]?(?:\d+(?:\.\d+)?\s*\*?\s*)?(?:pi|π)(?:\s*/\s*\d+)?|[-+]?\d+(?:\.\d+)?(?:\s*/\s*\d+)?"
+_INTERVAL_RES = (
+    # "for x in [0, 2*pi)", "on [0, 2pi]", "x ∈ (0, pi)", "over the interval [a, b]"
+    re.compile(rf"\b(?:for\s+([a-z])\s+in|([a-z])\s*(?:in|∈)|on|over|in)\s+(?:the\s+)?(?:interval\s+)?([\[(])\s*({_BOUND})\s*,\s*({_BOUND})\s*([\])])"),
+    # "0 <= x < 2*pi", "0 ≤ x ≤ π"
+    re.compile(rf"(?P<lo>{_BOUND})\s*(?P<lop><=|≤|<)\s*(?P<v>[a-z])\s*(?P<hop><=|≤|<)\s*(?P<hi>{_BOUND})"),
+)
+
+
+def _interval_domain(low: str) -> str | None:
+    """A stated finite interval for the unknown, as "[a, b)" text the solver reads; None when there is none."""
+    m = _INTERVAL_RES[0].search(low)
+    if m:
+        return f"{m.group(3)}{m.group(4).replace(' ', '')}, {m.group(5).replace(' ', '')}{m.group(6)}"
+    m = _INTERVAL_RES[1].search(low)
+    if m:
+        lb = "(" if m["lop"] == "<" else "["
+        rb = ")" if m["hop"] == "<" else "]"
+        return f"{lb}{m['lo'].replace(' ', '')}, {m['hi'].replace(' ', '')}{rb}"
+    return None
+
+
 def _domain_and_assumptions(low: str, spec: ProblemSpec) -> None:
     if re.search(r"\breals?\b|\bin r\b|\bover r\b|ℝ", low):
         spec.domain = "real"
+    interval = _interval_domain(low)
+    if interval is not None:
+        spec.domain = interval  # type: ignore[assignment]  # a finite real interval, read by axiom_solve
+        spec.handled.add("interval")
+        return
     for m in re.finditer(r"\b([a-z])\s*>\s*0\b", low):
         spec.assumptions[m.group(1)] = "positive"
         spec.domain = "real"
@@ -452,23 +490,31 @@ def _parse_ode(text: str, low: str, spec: ProblemSpec) -> bool:
     leibniz = re.search(r"\bd\^?\d?\s*[a-z]\s*/\s*d([a-z])\b", text)
     t = re.sub(r"\bd\^?2\s*([a-z])\s*/\s*d([a-z])\^?2", r"\1''", text)
     t = re.sub(r"\bd([a-z])\s*/\s*d([a-z])\b", r"\1'", t)
-    fm = re.search(r"\b([a-z])('+)\s*(?:\(\s*([a-z])\s*\))?", t)
+    # "2x''(t)": a coefficient written against the unknown leaves no word boundary before it.
+    # The unknown is one letter or a Greek name ("theta'' + 0.5 theta' + 9.8 sin(theta) = 0", the pendulum); read as
+    # one letter, "theta''" was the unknown "a".
+    fm = re.search(rf"(?<![A-Za-z_])({_GREEK_UNKNOWN}|[a-z])('+)\s*(?:\(\s*([a-z])\s*\))?", t)
     if not fm or ("=" not in t and "differential" not in low):
         return False
     fname = fm.group(1)
     # x(t) is the usual physics notation: an unknown named x with no stated variable depends on t, never on itself.
     var = fm.group(3) or (leibniz.group(1) if leibniz else None) or (
-        "t" if re.search(r"\bt\b", t) or fname == "x" else "x"
+        "t" if re.search(r"\bt\b", t) or fname == "x" or len(fname) > 1 else "x"
     )
-    pieces = re.split(r"[,;]|\band\b|\bwith\b|\bgiven\b|\bwhere\b|\bsubject to\b", t)
+    pieces = re.split(r"[,;\n]|\band\b|\bwith\b|\bgiven\b|\bwhere\b|\bsubject to\b|"
+                      r"(?i:\b(?:initial|boundary)\s+(?:conditions?|values?)\s*:)", t)
     main = None
     params: dict[str, str] = {}
     for piece in pieces:
         p = piece.strip()
+        # "Initial conditions: x(0)=0.1 m" -> "x(0)=0.1 m": a label before a condition is not part of it.
+        p = re.sub(r"^(?:initial|boundary)\s+(?:conditions?|values?)\s*:?\s*", "", p, flags=re.I)
         ic = re.fullmatch(rf"{fname}('*)\s*\(\s*([-+0-9.]+|pi)\s*\)\s*=\s*(.+)", p)
         if ic:
             # "x(0) = 0.1 m": the value, without its unit (a unit read as a symbol would change the condition).
-            number = re.match(rf"\s*({_NUM_VALUE})\b(?:\s*[A-Za-z][A-Za-z/*^\d\s.]*)?\s*\.?\s*$", ic.group(3))
+            number = (re.match(rf"\s*({_NUM_VALUE})\b(?:\s*[A-Za-z][A-Za-z/*^\d\s.]*)?\s*\.?\s*$", ic.group(3))
+                      # "0 m/s. Tasks: ...": a leading number followed by its unit and the next sentence.
+                      or re.match(rf"\s*({_NUM_VALUE})(?=\s*(?:[A-Za-z]+(?:/[A-Za-z]+)*)?\s*(?:[.;]\s|$))", ic.group(3)))
             val = number.group(1) if number else (extract_math(ic.group(3)) or ic.group(3).strip(" ."))
             spec.ics[f"{fname}{ic.group(1)}({ic.group(2)})"] = val
             continue
@@ -477,7 +523,15 @@ def _parse_ode(text: str, low: str, spec: ProblemSpec) -> bool:
         if given and given.group(1) not in (fname, var):
             params[given.group(1)] = given.group(2)
             continue
-        if main is None and re.search(rf"\b{fname}'", p):
+        # "an uncertain damping c ~ Normal(0.4, 0.05)": the nominal value of an uncertain parameter is its mean.
+        # (the "~" may already be gone: normalisation drops it, leaving "damping c Normal(0.4, 0.05)")
+        uncertain = re.search(rf"(?<![A-Za-z0-9_])([A-Za-z][A-Za-z0-9_]{{0,7}})\s*~?\s*(?i:normal|gaussian)\s*\(\s*({_NUM_VALUE})", p)
+        if uncertain and uncertain.group(1) not in (fname, var):
+            params.setdefault(uncertain.group(1), uncertain.group(2))
+            spec.assumptions[f"{uncertain.group(1)} nominal"] = (
+                f"the mean {uncertain.group(2)} of the stated distribution")
+            continue
+        if main is None and re.search(rf"(?<![A-Za-z_]){fname}'", p):
             words = re.sub(r"^.*?\b(?:solve|equation|ode)\b:?", "", p, flags=re.I).strip()
             main = words or p
     if main is None:
@@ -490,9 +544,12 @@ def _parse_ode(text: str, low: str, spec: ProblemSpec) -> bool:
     breaks = [m.end() for m in re.finditer(r"[.:?!]\s+", main[: main.find("=")] if "=" in main else main)]
     if breaks:
         main = main[breaks[-1]:]
-    while re.match(r"^(?:an?|[A-Za-z][A-Za-z\-]+)\s+(?=\S)", main) and not re.match(rf"^{fname}'", main):
+    while re.match(r"^(?:(?i:an?)|[A-Za-z][A-Za-z\-]+)\s+(?=\S)", main) and not re.match(rf"^{fname}'", main):
         lead = re.match(r"^(\S+)\s+", main)
-        if lead is None or lead.group(1) in params or _plausible_coefficient(lead.group(1)):
+        # "a damped harmonic oscillator x'' + ...": "a" before a word is the article, not the coefficient of "a x''".
+        article = lead is not None and lead.group(1).lower() in ("a", "an") and re.match(
+            r"^an?\s+[A-Za-z][A-Za-z\-]{2,}\b(?!\s*['(])", main, flags=re.I)
+        if lead is None or (not article and (lead.group(1) in params or _plausible_coefficient(lead.group(1)))):
             break
         main = main[lead.end():]
     for name, value in params.items():
@@ -510,6 +567,7 @@ def _parse_ode(text: str, low: str, spec: ProblemSpec) -> bool:
 
 
 _NUM_VALUE = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
+_GREEK_UNKNOWN = r"(?:theta|phi|varphi|psi|chi|rho|omega|eta|xi|zeta|alpha|beta|gamma|sigma|tau|mu|nu|lambda)"
 
 
 def _plausible_coefficient(token: str) -> bool:
@@ -670,6 +728,44 @@ def _parse_sum(text: str, low: str, spec: ProblemSpec) -> bool:
     return True
 
 
+def _split_clauses(text: str) -> list[str]:
+    parts: list[str] = []
+    current: list[str] = []
+    depth = 0
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch in "([{":
+            depth += 1
+            current.append(ch)
+            i += 1
+        elif ch in ")]}":
+            depth = max(0, depth - 1)
+            current.append(ch)
+            i += 1
+        elif depth == 0 and ch in ";,":
+            part = "".join(current).strip()
+            if part:
+                parts.append(part)
+            current = []
+            i += 1
+        elif depth == 0 and text[i : i + 5].lower() == " and ":
+            part = "".join(current).strip()
+            if part:
+                parts.append(part)
+            current = []
+            i += 5
+        else:
+            current.append(ch)
+            i += 1
+    if current:
+        part = "".join(current).strip()
+        if part:
+            parts.append(part)
+    return parts
+
+
 def _parse_solve(text: str, low: str, spec: ProblemSpec) -> bool:
     asks = re.search(r"\bsolve\b|\broots?\b|\bzeros?\b|\bsolutions?\b|\bfind (?:all )?(?:real |complex )?(?:values of )?[a-z]\b", low)
     has_eq = "=" in text.replace("<=", "").replace(">=", "").replace("->", "")
@@ -681,7 +777,7 @@ def _parse_solve(text: str, low: str, spec: ProblemSpec) -> bool:
     # inline constraints ("with x > 0 such that ...") are already recorded as assumptions
     body = re.sub(r"(?i)(?:\b(?:with|where|for|and)\s+)?\b[a-z]\s*(?:<=|>=|<|>)\s*[-+]?[\w.]+\s*(?:such that|so that|,)?", " ", body)
     body = re.sub(r"(?i)\b(?:over the reals|in the reals|real|the equation|the system|equations?|system)\b", " ", body)
-    parts = [p for p in re.split(r";|,(?![^()\[\]]*[)\]])|\band\b", body) if p.strip()]
+    parts = _split_clauses(body)
     eqs = [e for e in (extract_math(p, equation=True) for p in parts if "=" in p) if e]
     if len(eqs) >= 2:
         # F02: Never merge separate assignments into a conjunction when the problem is an independent evaluation
@@ -852,7 +948,23 @@ def _parse_tangent(text: str, low: str, spec: ProblemSpec) -> bool:
     return True
 
 
+# "Prove that there exist T and L such that ... for every positive integer n": a statement about all n, not a
+# computation. Digits in it are subscripts and bounds (a_{n+1}, "greater than 1"), not operands.
+_GENERAL_PROOF_RE = re.compile(
+    r"\b(?:prove|show)\b[^.]*?(?:\bfor (?:all|every|each|any)\b|\bthere (?:exist|is|are)\b|\binfinitely many\b|"
+    r"\\forall|∀|\\exists|∃)|\b(?:for (?:all|every|each|any)|there exist)\b[^.]*?\b(?:prove|show)\b", re.I | re.S)
+# gcd/lcm operands written out: "gcd(84, 126)", "gcd of 84, 126 and 210".
+_NT_OPERANDS = r"\s*(?:\(\s*(\d+(?:\s*,\s*\d+)+)\s*\)|\s+of\s+(\d+(?:\s*,\s*\d+)*,?\s+and\s+\d+))"
+
+
+def _nt_operands(name_re: str, low: str) -> list[str] | None:
+    m = re.search(r"\b(?:" + name_re + r")" + _NT_OPERANDS, low)
+    return re.findall(r"\d+", m.group(1) or m.group(2)) if m else None
+
+
 def _parse_number_theory(text: str, low: str, spec: ProblemSpec) -> bool:
+    if _GENERAL_PROOF_RE.search(text):
+        return False
     ints = re.findall(r"(?<![\w.^])-?\d+(?![\w.])", text)
     op: str | None = None
     numbers: list[str] = []
@@ -870,10 +982,10 @@ def _parse_number_theory(text: str, low: str, spec: ProblemSpec) -> bool:
     elif dioph and re.search(r"\binteger", low):
         a, sign, b, c = dioph.groups()
         op, numbers = "diophantine", [a, ("-" if sign == "-" else "") + b, c]
-    elif re.search(r"\b(?:gcd|greatest common divisor|highest common factor|hcf)\b", low) and len(ints) >= 2:
-        op, numbers = "gcd", ints
-    elif re.search(r"\b(?:lcm|least common multiple|lowest common multiple)\b", low) and len(ints) >= 2:
-        op, numbers = "lcm", ints
+    elif (gcd_args := _nt_operands("gcd|greatest common divisor|highest common factor|hcf", low)) is not None:
+        op, numbers = "gcd", gcd_args
+    elif (lcm_args := _nt_operands("lcm|least common multiple|lowest common multiple", low)) is not None:
+        op, numbers = "lcm", lcm_args
     elif re.search(r"\b(?:totient|phi|φ)\b", low) and ints:
         op, numbers = "totient", ints[:1]
     elif re.search(r"\bnext prime\b|\bsmallest prime (?:greater|larger|bigger) than\b|\bfirst prime after\b", low) and ints:
@@ -983,6 +1095,10 @@ _DIST_PATTERNS = (
     ("uniform", rf"\buniform(?:ly distributed)?\b.*?\[\s*({_NUM})\s*,\s*({_NUM})\s*\]"),
     ("geometric", rf"\bgeometric\s*\(\s*({_NUM})\s*\)"),
     ("bernoulli", rf"\bbernoulli\s*\(\s*({_NUM})\s*\)"),
+    # Everyday binomial experiments: "3 heads in 5 fair coin flips", "flip a fair coin 10 times", "roll a fair die 6
+    # times ... sixes". The success probability is fixed by the device (1/2, 1/6), so only n is read.
+    ("binomial_coin", r"\b(\d+)\s+(?:fair\s+)?(?:coin\s+)?(?:flips|tosses)\b|\b(?:flip|toss)(?:ping|ing)?\s+a\s+fair\s+coin\s+(\d+)\s+times"),
+    ("binomial_die", r"\broll(?:ing)?\s+a\s+fair\s+(?:six-sided\s+)?die\s+(\d+)\s+times|\b(\d+)\s+rolls\s+of\s+a\s+fair\s+(?:six-sided\s+)?die"),
 )
 
 
@@ -995,6 +1111,10 @@ def _parse_probability(text: str, low: str, spec: ProblemSpec) -> bool:
             break
     if dist is None:
         return False
+    if dist in ("binomial_coin", "binomial_die"):
+        n = next(g for g in params if g)
+        dist, params = "binomial", [n, "0.5" if dist == "binomial_coin" else "1/6"]
+        spec.handled.add("times")  # "10 times" is the number of trials, read as n
     q: dict[str, Any] = {"distribution": dist, "parameters": params}
     rel = re.search(rf"\bP\s*\(\s*X\s*(<=|>=|<|>|=)\s*({_NUM})\s*\)", text)
     between = re.search(rf"\bP\s*\(\s*({_NUM})\s*(<=|<)\s*X\s*(<=|<)\s*({_NUM})\s*\)", text)
@@ -1125,7 +1245,7 @@ def _fidelity(spec: ProblemSpec, norm: str, low: str) -> list[str]:
     norm = _TIME_SPAN_RE.sub(" ", output_contract.mask_instructions(norm))
     low = _ERROR_REPORT_RE.sub(" ", output_contract.mask_instructions(low))
     parts = [spec.expression or "", *spec.equations, spec.lower or "", spec.upper or "", spec.point or "", spec.func or "",
-             str(spec.order), str(spec.order - 1)]
+             str(spec.order), str(spec.order - 1), str(spec.domain)]  # an interval domain carries its bounds
     parts += [f"{k} {v}" for k, v in spec.ics.items()]
     parts += [" ".join(r) for r in spec.matrix or []] + [" ".join(spec.rhs_vector or [])]
     parts += [json.dumps(spec.params, default=str)]
@@ -1144,15 +1264,68 @@ def _fidelity(spec: ProblemSpec, norm: str, low: str) -> list[str]:
     if spec.kind in ("differentiate", "integrate", "ode", "series", "limit") and spec.variable:
         missing += [f"d{v}" for v in re.findall(r"\bd([a-z])\b", norm) if v not in (spec.variable, fname)]
     missing += [w.strip() for w in _MODIFIERS if w in low and w.strip() not in spec.handled]
+    # "at x = 2" names a point the task is evaluated at: it must reach the parse as a point, a bound or a condition,
+    # not merely appear as some number elsewhere in it (the 2 of x^2 does not account for it).
+    if spec.kind in ("solve", "simplify", "identity", "inequality"):
+        missing += [f"{v} = {n}" for v, n in _AT_POINT_RE.findall(norm)
+                    if n not in (spec.point or "") and f"{v}={n}" not in re.sub(r"\s+", "", spec.expression or "")]
     return list(dict.fromkeys(missing))
+
+
+_EVAL_DEFINITION_RE = re.compile(
+    r"(?i)\b(?:evaluate|compute|calculate|find(?:\s+the\s+value\s+of)?)\s+(?P<f>[a-z])\(\s*(?P<v>[a-z])\s*\)\s*=\s*"
+    r"(?P<body>[^.?;]+?)\s+(?:at|when|for)\s+(?P=v)\s*=\s*(?P<at>[-+]?\d+(?:\.\d+)?(?:/\d+)?)"
+)
+_AT_POINT_RE = re.compile(r"(?i)\b(?:at|when|where)\s+([a-z])\s*=\s*([-+]?\d+(?:\.\d+)?)\b")
+
+
+_DIMENSION_LABEL_RE = re.compile(r"\(?\s*\d\s*\*?\s*D\s*\)?")
+_DIMENSION_WORD_RE = re.compile(r"\b\d\s*-?\s*D\b")
+
+
+# "If $x = 2$ and $y = 5$, then what is the value of $\frac{x^4+2y^2}{6}$?": given values, then one expression to
+# evaluate. Read as equations it was "solve x = 2, y = 5" with the expression's numbers left over, so the mathematics
+# agent searched strategies with model calls (5-27 s) for what is one exact substitution.
+_ASSIGN = r"\$?\s*([A-Za-z])\s*=\s*(-?\d+(?:\.\d+)?)\s*\$?"
+_SUBSTITUTION_RE = re.compile(
+    r"^\s*(?:if|given(?:\s+that)?|suppose(?:\s+that)?|when|let)\s+"
+    rf"(?P<assigns>{_ASSIGN}(?:\s*(?:,\s*(?:and\s+)?|and\s+){_ASSIGN})*)\s*[,.;]?\s*(?:then\s+)?"
+    r"(?:what\s+is|what's|find|evaluate|compute|calculate|determine)\s+(?:the\s+value\s+of\s+)?"
+    r"(?P<expr>.+?)\s*[?.]?\s*$",
+    re.I | re.S,
+)
+
+
+def _substituted_question(text: str) -> str | None:
+    """"What is <expression with the given values substituted>?", or None when the question is not that shape or a
+    letter of the expression has no given value."""
+    m = _SUBSTITUTION_RE.match(text or "")
+    if not m:
+        return None
+    values = dict(re.findall(_ASSIGN, m["assigns"]))
+    expr = m["expr"]
+    for var, val in values.items():
+        expr = re.sub(rf"(?<![\\A-Za-z]){var}(?![A-Za-z])", f"({val})", expr)
+    if re.search(r"(?<![\\A-Za-z])[A-Za-z](?![A-Za-z])", re.sub(r"\\[A-Za-z]+", " ", expr)):
+        return None  # a free variable remains: not a plain evaluation
+    return f"What is {expr}?"
 
 
 def parse_problem(text: str) -> ProblemSpec:
     """Parse a question into a ProblemSpec (kind "unknown" when no parser recognises it)."""
+    substituted = _substituted_question(str(text or ""))
+    if substituted is not None:
+        trial = parse_problem(substituted)
+        if trial.parsed and trial.kind == "evaluate" and not trial.unaccounted:
+            trial.text = str(text)
+            return trial
     spec = ProblemSpec(text=str(text or ""))
     norm = normalize_math_text(strip_question_framing(spec.text))
     if not norm or len(norm) > 2000:  # a concrete math task is stated concisely; essays go to the model
         return spec
+    # "Evaluate f(x) = x^2 + 3x at x = 2" defines f and asks for f(2); read as an equation it would multiply f by x and
+    # "solve" for x. Restated as the definition plus the evaluation, which the structured parser reads exactly.
+    norm = _EVAL_DEFINITION_RE.sub(lambda m: f"Let {m['f']}({m['v']}) = {m['body'].strip()}. Evaluate {m['f']}({m['at']}).", norm)
     low = norm.lower()
     _domain_and_assumptions(low, spec)
     original, notes = norm, []
@@ -1167,6 +1340,8 @@ def parse_problem(text: str) -> ProblemSpec:
                     norm, notes = sub
                     low = norm.lower()
             if parser(norm, low, trial):
+                if _DIMENSION_LABEL_RE.fullmatch(trial.expression or "") and _DIMENSION_WORD_RE.search(original):
+                    continue  # "the 3D Navier-Stokes problem": a dimension label, not the expression 3*D
                 trial.unaccounted = _fidelity(trial, norm, low)
                 trial.ambiguities.extend(notes)
                 misread = [] if trial.kind == "structured" else misread_functions(original, [trial.expression or "", *trial.equations])

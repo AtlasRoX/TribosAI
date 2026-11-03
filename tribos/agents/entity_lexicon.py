@@ -760,6 +760,11 @@ def _is_algebraic_occurrence(text: str, start: int, end: int, unit: str) -> bool
     return False
 
 
+def _in_latex_math(text: str, pos: int) -> bool:
+    """Whether `pos` lies inside $...$ math (an odd number of unescaped dollar signs before it)."""
+    return len(re.findall(r"(?<!\\)\$", text[:pos])) % 2 == 1
+
+
 def _has_physical_context(text: str, start: int, end: int, unit: str) -> bool:
     """Check if the text window around the match contains physical domain keywords for unit."""
     window = text[max(0, start - 50) : min(len(text), end + 50)].lower()
@@ -795,8 +800,10 @@ def find_offline_quantities(text: str, declared_variables: set[str] | None = Non
         start, end = m.start(), m.end()
         phys_type = _infer_physical_type(units, param_name)
 
+        if units in _AMBIGUOUS_UNITS and _in_latex_math(text or "", start):
+            continue  # "$4m$" is four times the variable m; LaTeX writes a unit as "4\,\mathrm{m}"
         if units in _AMBIGUOUS_UNITS:
-            is_declared = units in declared or units.lower() in {d.lower() for d in declared}
+            is_declared =units in declared or units.lower() in {d.lower() for d in declared}
             is_alg = _is_algebraic_occurrence(text or "", start, end, units)
             has_phys = _has_physical_context(text or "", start, end, units)
 

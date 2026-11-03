@@ -1,26 +1,34 @@
 /* Citation chips and the source-passage popover (CITATIONS, feature 4). Uses the global theme variables. */
 
+/* A reference, not code: the body face at a step smaller, a quiet tint that deepens on hover and while its popover is
+   open. Long titles may wrap (cloned padding keeps both line fragments chip-shaped). */
 .chip {
   display: inline;
-  padding: 0 5px;
+  padding: 1px 6px;
   margin: 0 1px;
   border: 0;
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--domain-t2kg) 12%, transparent);
-  color: var(--domain-t2kg);
-  font-family: var(--font-mono);
-  font-size: 0.84em;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--domain-t2kg) 10%, transparent);
+  color: color-mix(in srgb, var(--domain-t2kg) 82%, var(--text-main));
+  font-family: var(--font-sans);
+  font-size: 0.86em;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
   line-height: 1.5;
   text-decoration: none;
-  white-space: nowrap;
   cursor: pointer;
-  transition: border-color 0.15s ease, background-color 0.15s ease;
+  transition: background-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
 
 .chip:hover {
-  background: color-mix(in srgb, var(--domain-t2kg) 22%, transparent);
+  background: color-mix(in srgb, var(--domain-t2kg) 18%, transparent);
+  color: var(--domain-t2kg);
+}
+
+.chip:active {
+  background: color-mix(in srgb, var(--domain-t2kg) 26%, transparent);
 }
 
 .chip:focus-visible {

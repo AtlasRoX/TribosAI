@@ -26,7 +26,7 @@ export interface ExecutionArtifacts extends AgenticArtifacts {
 }
 
 /** Whether the requested operation actually ran; kept separate from evidence grounding (audit F02). */
-export type TaskStatus = "completed" | "partial" | "needs_input" | "failed" | "cancelled";
+export type TaskStatus = "completed" | "completed_fallback" | "partial" | "needs_input" | "failed" | "cancelled";
 
 export interface TaskOutcome {
   task_status: TaskStatus;
@@ -45,6 +45,7 @@ export interface TaskOutcome {
   unresolved_failures?: { step: string; error?: string; effect?: string }[];
   /** What the question asked for and whether the answer provides it. */
   deliverables?: Deliverable[];
+  can_retry?: boolean;
 }
 
 export interface Deliverable {
@@ -137,7 +138,7 @@ export interface Message {
   /** Datasets attached to a user message (ids and display names only). */
   attachments?: MessageAttachment[];
   /** Images attached to a user message: names and small thumbnails (their transcriptions went with the question). */
-  images?: { name: string; thumbUrl?: string }[];
+  images?: { name: string; thumbUrl?: string; viewUrl?: string; text?: string }[];
   query_context?: Record<string, any>;
   /** Agentic run id (from the run_control event), for run-control calls and display. */
   run_id?: string;

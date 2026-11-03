@@ -82,8 +82,9 @@ function ClaimItem({ c }: { c: ClaimCheck }) {
  * This says whether statements match the retrieved sources, not whether the requested task ran (TaskStatusNotice).
  * Every answer gets an explicit state (UI-003): "not checked" (no report, or the placeholder report of direct replies),
  * "checked"/"verified" as a quiet line, or the warning below when claims or citations failed. The warning opens by
- * default: claims that lack support or were miscited and every verifier finding are listed; supported claims sit in a
- * separate compact disclosure. A reader's own Hide/Review choice is kept.
+ * default when a claim is contradicted or a finding is major or critical, else it stays one line: claims that lack
+ * support or were miscited and every verifier finding are listed; supported claims sit in a separate compact
+ * disclosure. A reader's own Hide/Review choice is kept.
  */
 export function VerificationNotice({ report }: VerificationNoticeProps) {
   const [manual, setManual] = useState<boolean | null>(null);
@@ -92,7 +93,7 @@ export function VerificationNotice({ report }: VerificationNoticeProps) {
   const units = unitsSummary(report?.units);
   if (state.kind !== "problems" || !report) {
     const Icon = state.kind === "not_checked" || state.kind === "not_evaluated" ? CircleDashed : CircleCheck;
-    if (state.kind === "not_checked" || state.kind === "not_evaluated") {
+    if (state.kind === "not_checked" || state.kind === "not_evaluated" || Array.isArray(report?.numerical_execution_checks)) {
       return (
         <div className="task-status verify-state" data-verification={state.kind} role="status">
           <Icon style={{ width: 13, height: 13, flexShrink: 0 }} aria-hidden={true} />
@@ -145,7 +146,12 @@ export function VerificationNotice({ report }: VerificationNoticeProps) {
     summary = "Parts of this answer could not be verified against the evidence";
   }
   const expandable = claims.length > 0 || defects.length > 0 || operational.length > 0;
-  const open = expandable && (manual ?? true);
+  // Opens by itself only for a wrong value or a serious finding; statements a source did not confirm are summarised in
+  // one line, a click away, so a long list does not sit between the question and the answer.
+  const serious =
+    claims.some((c) => c.status === "contradicted") ||
+    defects.some((d) => ["CRITICAL", "MAJOR"].includes(String(d?.severity || "").toUpperCase()));
+  const open = expandable && (manual ?? serious);
 
   return (
     <div className="verify-notice" role="note" data-severity={counts.contradicted ? "bad" : "warn"}>
@@ -230,6 +236,7 @@ export function VerificationNotice({ report }: VerificationNoticeProps) {
 
 const TASK_LABEL: Record<TaskStatus, string> = {
   completed: "Requested operation completed",
+  completed_fallback: "Completed with fallback",
   partial: "Requested operation partly completed",
   needs_input: "More input needed",
   failed: "Requested operation did not run",
@@ -238,6 +245,7 @@ const TASK_LABEL: Record<TaskStatus, string> = {
 
 const TASK_ICON: Record<TaskStatus, React.ComponentType<{ style?: React.CSSProperties; "aria-hidden"?: boolean }>> = {
   completed: CircleCheck,
+  completed_fallback: CircleCheck,
   partial: CircleDashed,
   needs_input: Hourglass,
   failed: CircleX,
@@ -328,13 +336,18 @@ export function TaskStatusNotice({ outcome }: { outcome?: TaskOutcome | null }) 
         : opName(outcome.requested_operation || outcome.executed_operation)
       : "";
 
-  if (status === "completed" && !mismatch) {
+  if ((status === "completed" || status === "completed_fallback") && !mismatch) {
+    // "Evidence synthesis" is what every answer is; only a specific operation (a simulation, a fit) is worth naming.
+    const named = operations && operations !== "evidence synthesis" ? operations : "";
     return (
-      <div className="task-status" data-status="completed" role="status">
+      <div className="task-status" data-status={status} role="status">
         <Icon style={{ width: 13, height: 13, flexShrink: 0 }} aria-hidden={true} />
         <div style={{ minWidth: 0 }}>
-          <span>{TASK_LABEL.completed}</span>
-          {operations && <span className="task-status-op">{operations}</span>}
+          <span>{TASK_LABEL[status]}</span>
+          {named && <span className="task-status-op">{named}</span>}
+          {outcome.reason && status === "completed_fallback" && (
+            <span className="task-status-reason"> — {outcome.reason}</span>
+          )}
           <TaskDetails outcome={outcome} />
         </div>
       </div>

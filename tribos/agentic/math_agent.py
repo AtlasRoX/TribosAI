@@ -13,6 +13,7 @@ result; a partially verified one with its stated gaps; anything else may not be 
 from __future__ import annotations
 
 import logging
+import re
 from html import escape
 from typing import Any
 
@@ -37,6 +38,18 @@ _STATUS_TITLE = {
     "invalidated": "Invalidated candidate",
 }
 
+
+
+def _verification_request(passed: list[str]) -> str:
+    """How the answer reports the checks. Concise answers (the default) leave them to the run details shown beside
+    the answer: checker names ("lhs - rhs simplifies to 0") are not something the reader asked for."""
+    from ..agents.prompts import answer_style
+
+    if answer_style() == "concise":
+        return (", and add no Verification section and no list of checks: the checks are shown beside the answer. "
+                "At most, end with one plain sentence such as 'Substituting back confirms it.'")
+    return (", and in the Verification section name the independent checks that "
+            f"passed ({'; '.join(passed)[:300]}).")
 
 def _enabled(state: AgentState) -> bool:
     from ..config.settings import get_bool
@@ -124,6 +137,25 @@ def _evidence_xml(art: dict[str, Any]) -> str:
     return "\n".join(out)
 
 
+def _misread_problem(spec: Any, query: str) -> bool:
+    """A parse that misses the problem: a multiple-choice question read with its given values left out, or an
+    "expression" that is one bare symbol with no equation to solve (an option letter, a variable name)."""
+    from ..agents.question_text import is_multiple_choice
+
+    if spec.unaccounted and is_multiple_choice(query):
+        return True
+    expr = str(spec.expression or "").strip()
+    return spec.kind in ("solve", "simplify") and not spec.equations and bool(re.fullmatch(r"[A-Za-z]", expr))
+
+
+def _unmatched(run: Any) -> bool:
+    """The checker could not tie the agent's call to the question (no alignment check passed): whatever it computed
+    is a sub-result of the agent's own choosing, not an answer to what was asked."""
+    verdict = getattr(run, "verdict", None)
+    checks = list(getattr(verdict, "checks", None) or [])
+    return bool(checks) and not any(c.passed for c in checks if c.level == 1)
+
+
 class MathAgentPhase(AgentPhase):
     key = PHASE_KEY
     stage = "augment"
@@ -134,12 +166,31 @@ class MathAgentPhase(AgentPhase):
     def applies(self, state: AgentState) -> bool:
         if not math_agent_available(state):
             return False
+        from ..agents.orchestration.presentation import (
+            computations_cover_question,
+            facts_cover_question,
+        )
+
+        if facts_cover_question(state.tool_results):
+            # Solved exactly by code and checked by substitution and the initial conditions (computed_results).
+            state.bag["math_agent_skipped"] = "the initial-value problem was solved and checked by code"
+            return False
+        if computations_cover_question(state.tool_results):
+            state.bag["math_agent_skipped"] = "the requested finite computations were run and verified twice by code"
+            return False
         query = state.clean_query or state.query
+        if re.search(r"\bMonte[ -]Carlo\b|\bFTCS\b|heat\s+equation", query, re.I):
+            return False  # symbolic antiderivatives/stability arithmetic do not execute a numerical request
         # A closed computation ("What is 2+3?") is mathematics even without a keyword such as "solve".
-        if not has_math_intent(query) and not is_closed_computation(state.ctx):
+        if not has_math_intent(query) and not is_closed_computation(getattr(state, "ctx", None)):
             return False
         spec = parse_problem(query)
         state.bag["math_problem_spec"] = spec
+        if spec.parsed and _misread_problem(spec, query):
+            # "Solve the problem in the image ... (A) ... (D)" parsed as "solve A": the agent would spend a minute on
+            # a sub-expression that answers nothing asked (and the writer would have to explain it away).
+            state.bag["math_agent_skipped"] = "the question does not reduce to one expression the agent can solve"
+            return False
         return spec.parsed
 
     async def run(self, state: AgentState) -> PhaseOutcome | None:
@@ -211,7 +262,8 @@ class MathAgentPhase(AgentPhase):
             purpose=f"verified mathematics agent ({spec.kind})",
             render=False,
         )
-        if art["status"] in ("verified", "partially_verified") or art.get("invalidated") or art["status"] == "rejected":
+        if (art["status"] in ("verified", "partially_verified") or art.get("invalidated") or art["status"] == "rejected") \
+                and not (run.status == "partially_verified" and _unmatched(run)):
             state.evidence_sections.append(_evidence_xml(art))
         answer = str(run.answer.get("text") or "")
         from ..utils.output_contract import extract as extract_contract
@@ -237,11 +289,16 @@ class MathAgentPhase(AgentPhase):
                 + (" using the checked steps in <math_derivation> in order (each line states which definition or branch "
                    "applies and why, then the exact arithmetic), so every step of the worked solution is one the "
                    "checker confirmed" if any((r or {}).get("steps") for r in run.answer.get("results") or []) else "")
-                + ", and in the Verification section name the independent checks that "
-                f"passed ({'; '.join(passed)[:300]})."
+                + _verification_request(passed)
                 + " Every other quantity you state must be one the evidence computed (for example a <parameter> in "
                   "<ode_verification>), copied exactly; never re-derive a number in the text."
             )
+        elif run.status == "partially_verified" and _unmatched(run):
+            # Q.7 run: "An automated symbolic check returned 3888*sqrt(6)/125 for a sub-expression, but its call could
+            # not be matched ..." opened the answer. A value nobody asked for is not part of the answer.
+            state.scope_notes.append(
+                "The mathematics agent's computation could not be tied to the question, so it is "
+                "not a result for this question: do not mention it or its value; solve the question itself.")
         elif run.status == "partially_verified":
             state.brief_notes.append(
                 "The mathematics agent's answer (see <math_agent>) is only partially verified. Report it, and state "

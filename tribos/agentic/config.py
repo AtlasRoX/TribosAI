@@ -23,9 +23,10 @@ AUTO = "auto"
 AGENTIC_FRAMEWORKS = (AGENTIC, SUPERVISOR, SWARM, DEBATE)
 # Auto routes that run the fixed workflow and skip the tool planner on purpose (router.is_fully_specified and the
 # scored direct approach): the planner not running is the plan, not a failure.
-DIRECT_ROUTES = frozenset({"closed_computation", "fully_specified", "focused", "llm_tie_break_direct"})
+DIRECT_ROUTES = frozenset({"closed_computation", "fully_specified", "focused", "llm_tie_break_direct",
+                           "self_contained"})
 # The direct routes of a parsed math problem: they lean on the mathematics agent.
-MATH_DIRECT_ROUTES = frozenset({"closed_computation", "fully_specified"})
+MATH_DIRECT_ROUTES = frozenset({"closed_computation", "fully_specified", "self_contained"})
 ALL_FRAMEWORKS = (AUTO, CLASSIC, *AGENTIC_FRAMEWORKS)
 
 FRAMEWORK_DESCRIPTIONS: dict[str, str] = {

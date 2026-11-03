@@ -116,6 +116,22 @@ class FactPatch(BaseModel):
     tags: list[str] | None = Field(default=None, max_length=10)
 
 
+class Mem0AddRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    content: str = Field(..., min_length=1, max_length=5000)
+    memory_type: str = Field(default="project_fact", max_length=64)
+    tags: list[str] = Field(default_factory=list)
+
+
+class Mem0PatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    content: str | None = Field(default=None, min_length=1, max_length=5000)
+    invalidate: bool = Field(default=False)
+    invalidation_reason: str = Field(default="", max_length=300)
+
+
 def _check_project(project_id: str) -> None:
     if not PROJECT_ID_RE.match(project_id or ""):
         raise HTTPException(status_code=404, detail="Project not found")
@@ -324,3 +340,104 @@ async def activity(project_id: str = ProjectIdPath, limit: int = Query(default=5
                    user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     _check_project(project_id)
     return {"events": await _call(get_project_store().list_activity, project_id, user_id, limit)}
+
+
+# -- Mem0 Integration ---------------------------------------------------------------------------------------------
+
+
+@router.get("/{project_id}/mem0")
+async def get_project_mem0(
+    project_id: str = ProjectIdPath,
+    query: str = Query(default="", max_length=2000),
+    limit: int = Query(default=20, ge=1, le=100),
+    user_id: str = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Retrieve Mem0 memories for a project: vector search if query is provided, else all memories."""
+    _check_project(project_id)
+    store = get_project_store()
+    if not await asyncio.to_thread(store.is_member, project_id, user_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    from tribos.agentic.mem0_adapter import get_mem0_adapter
+
+    adapter = get_mem0_adapter()
+    if not adapter.enabled:
+        return {"project_id": project_id, "enabled": False, "memories": []}
+    if query.strip():
+        memories = await asyncio.to_thread(adapter.search, query, user_id=user_id, project_id=project_id, limit=limit)
+    else:
+        memories = await asyncio.to_thread(adapter.get_all, user_id=user_id, project_id=project_id)
+    return {"project_id": project_id, "enabled": True, "memories": memories, "count": len(memories)}
+
+
+@router.post("/{project_id}/mem0", status_code=201)
+async def add_project_mem0(
+    req: Mem0AddRequest,
+    project_id: str = ProjectIdPath,
+    user_id: str = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Add a new memory node via Mem0 for this project."""
+    _check_project(project_id)
+    store = get_project_store()
+    if not await asyncio.to_thread(store.is_member, project_id, user_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    from tribos.agentic.mem0_adapter import Mem0Provenance, get_mem0_adapter
+
+    adapter = get_mem0_adapter()
+    prov = Mem0Provenance(
+        memory_type=req.memory_type,
+        origin="api_user",
+        source_task_id="",
+        verification_status="user_verified",
+        tags=req.tags,
+    )
+    result = await asyncio.to_thread(
+        adapter.add, req.content, user_id=user_id, project_id=project_id, provenance=prov
+    )
+    return {"project_id": project_id, "result": result}
+
+
+@router.patch("/{project_id}/mem0/{memory_id}")
+async def patch_project_mem0(
+    req: Mem0PatchRequest,
+    project_id: str = ProjectIdPath,
+    memory_id: str = Path(..., min_length=1, max_length=128),
+    user_id: str = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Update or invalidate a Mem0 memory."""
+    _check_project(project_id)
+    store = get_project_store()
+    if not await asyncio.to_thread(store.is_member, project_id, user_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    from tribos.agentic.mem0_adapter import get_mem0_adapter
+
+    adapter = get_mem0_adapter()
+    if req.invalidate:
+        result = await asyncio.to_thread(
+            adapter.invalidate, memory_id, reason=req.invalidation_reason or "invalidated by user",
+            user_id=user_id, project_id=project_id,
+        )
+    elif req.content is not None:
+        result = await asyncio.to_thread(
+            adapter.update, memory_id, data=req.content, user_id=user_id, project_id=project_id
+        )
+    else:
+        raise HTTPException(status_code=400, detail="Either content or invalidate must be specified")
+    return {"project_id": project_id, "memory_id": memory_id, "result": result}
+
+
+@router.delete("/{project_id}/mem0/{memory_id}")
+async def delete_project_mem0(
+    project_id: str = ProjectIdPath,
+    memory_id: str = Path(..., min_length=1, max_length=128),
+    user_id: str = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Delete a Mem0 memory node by ID."""
+    _check_project(project_id)
+    store = get_project_store()
+    if not await asyncio.to_thread(store.is_member, project_id, user_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    from tribos.agentic.mem0_adapter import get_mem0_adapter
+
+    adapter = get_mem0_adapter()
+    result = await asyncio.to_thread(adapter.delete, memory_id, user_id=user_id, project_id=project_id)
+    return {"project_id": project_id, "memory_id": memory_id, "result": result}

@@ -27,6 +27,7 @@ import sympy as sp
 
 from . import engine as E
 from .problem import ProblemSpec
+from .shapes import UnsupportedShapeError
 
 Status = Literal["verified", "partially_verified", "unverified", "refuted"]
 
@@ -156,7 +157,16 @@ def _proportional(a: sp.Expr, b: sp.Expr) -> bool:
 
 def _residual(eq_text: str, spec: ProblemSpec) -> sp.Expr:
     lhs, rhs, _ = E.safe_parse_equation(eq_text, assumptions=spec.assumptions or None)
-    return lhs - rhs
+    if isinstance(lhs, (sp.Tuple, tuple, list)) or isinstance(rhs, (sp.Tuple, tuple, list)):
+        if not (isinstance(lhs, (sp.Tuple, tuple, list)) and isinstance(rhs, (sp.Tuple, tuple, list))):
+            raise UnsupportedShapeError("Shape mismatch in equation: cannot equate container to scalar")
+        if len(lhs) != len(rhs):
+            raise UnsupportedShapeError(f"Shape length mismatch in equation: {len(lhs)} != {len(rhs)}")
+        return sum((l - r) ** 2 for l, r in zip(lhs, rhs, strict=True))
+    try:
+        return lhs - rhs
+    except TypeError as exc:
+        raise UnsupportedShapeError(f"Cannot form residual: {exc}") from exc
 
 
 def _num_zero(expr: sp.Expr, scale: float = 1.0) -> bool | None:
@@ -177,8 +187,13 @@ def _finish(checks: list[Check], uncertainty: list[str], answer: dict[str, Any],
     level = max(passed_levels, default=-1)
     aligned = any(c.passed for c in checks if c.level == 1)
     independent = any(c.passed for c in checks if c.level == 2)
+    undefined = str((answer or {}).get("text", "")).strip().lower() in ("nan", "zoo", "complex infinity")
     if failed:
         status: Status = "refuted"
+    elif undefined:
+        # An undefined result (e.g. a divergent integral evaluated to NaN) is never partially verified (AUDIT-014).
+        status = "unverified"
+        uncertainty.append("the result is undefined (NaN): the quantity may diverge or not exist as posed")
     elif independent and aligned and complete:
         status = "verified"
     elif independent or (aligned and level >= 1):
@@ -380,6 +395,14 @@ def _domain_set(spec: ProblemSpec, name: str | None) -> sp.Set | None:
         return sp.Interval(0, sp.oo)
     if "integer" in flag:
         return None
+    if str(spec.domain).startswith(("[", "(")):
+        # A stated interval ("for x in [0, 2pi)"): the re-derived solution set is restricted to it, as the question asks.
+        try:
+            interval = E._parse_interval_domain(str(spec.domain))
+        except ValueError:
+            interval = None
+        if interval is not None:
+            return interval
     return sp.S.Reals if spec.domain == "real" else sp.S.Complexes
 
 
@@ -632,6 +655,10 @@ def _verify_ode(spec: ProblemSpec, args: dict[str, Any], data: dict[str, Any]) -
     unc: list[str] = []
     func = spec.func or str(args.get("func") or "y(x)")
     eq, y, var, local = _parse_ode(spec.expression or str(args.get("equation")), func)
+    if eq.has(sp.Float):
+        # A stated decimal ("0.3 x'") is exact, as the solver reads it: a float residual of an exact solution is
+        # rounding, not a failed check.
+        eq = sp.Eq(sp.nsimplify(eq.lhs, rational=True), sp.nsimplify(eq.rhs, rational=True))
     if spec.expression and args.get("equation"):
         try:
             teq, _, _, _ = _parse_ode(str(args["equation"]), str(args.get("func") or func))

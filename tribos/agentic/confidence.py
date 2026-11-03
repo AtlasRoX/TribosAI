@@ -719,6 +719,48 @@ def computation_confidence(math_art: dict[str, Any], verification: Any = None) -
     }
 
 
+def code_computation_confidence(facts: dict[str, Any], verification: Any = None) -> dict[str, Any]:
+    """The claim_confidence artifact of results computed and checked by code (tribos.writer.facts): an exact solution
+    that satisfies the equation and every initial condition, with the requested values evaluated from it. As for a
+    verified mathematics-agent answer, no whole-answer probability is invented (`answer_confidence` is None); the
+    written statements are checked one by one (tribos.verify.math_claims) and reported in `statement_checks`."""
+    coverage = dict(getattr(verification, "coverage", None) or {}) if verification is not None else {}
+    failed = int(coverage.get("failed") or 0)
+    label = (
+        "Computed result verified; some written statements contradicted" if failed
+        else COMPUTED_LABEL if coverage.get("evaluated") else "Computed result verified; written statements not checked"
+    )
+    basis = [str(c.get("name")) for c in facts.get("checks") or [] if c.get("passed")]
+    if facts.get("rk4"):
+        basis.append(f"RK4 comparison, maximum absolute error {facts['rk4'].get('max_abs_error')}")
+    note = ("An exact symbolic solution checked by substitution into the equation and against every initial "
+            "condition; the tabulated and numerical values are evaluated from it. Written statements are "
+            "checked one by one.")
+    if facts.get("kind") == "number_theory_finite":
+        note = ("Finite computations run by code, each confirmed by a second, independent method. They establish "
+                "the stated finite results only; the status of an open problem is reported, not computed. Written "
+                "statements are checked one by one.")
+    return {
+        "answer_confidence": None,
+        "component_confidence": None,
+        "method": "computational_verification",
+        "label": label,
+        "statement_checks": coverage,
+        "calibration": {
+            "source": "exact computation",
+            "status": "exact",
+            "calibrated": False,
+            "label": label,
+            "note": note,
+            "bands": {"high": HIGH_BAND, "medium": MEDIUM_BAND},
+        },
+        "basis": basis[:8],
+        "nli_backend": "none",
+        "supported_fraction": None,
+        "claims": [],
+    }
+
+
 async def compute_claim_confidence(
     state: AgentState, publish: Callable[[dict[str, Any]], None] | None = None
 ) -> dict[str, Any]:
@@ -734,6 +776,16 @@ async def compute_claim_confidence(
     if (is_closed_computation(state.ctx) or numerically_confirmed) and isinstance(math_art, dict) \
             and math_art.get("status") == "verified":
         artifact = computation_confidence(math_art, getattr(state, "verification", None))
+        if publish is not None:
+            publish(artifact)
+        return artifact
+    from ..agents.orchestration.presentation import computations_cover_question
+    from ..agents.result_keys import COMPUTED_RESULTS
+
+    if math_art is None and computations_cover_question(state.tool_results):
+        # Solved exactly by code and checked by substitution and the initial conditions (tribos.writer.facts):
+        # the same computational basis as a verified mathematics-agent answer, not literature support.
+        artifact = code_computation_confidence(state.tool_results[COMPUTED_RESULTS].data, getattr(state, "verification", None))
         if publish is not None:
             publish(artifact)
         return artifact

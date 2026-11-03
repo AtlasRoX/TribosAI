@@ -188,7 +188,7 @@ def check_math_text(text: str) -> str:
     if len(text) > MAX_EXPRESSION_LENGTH:
         raise ValueError(f"Expression exceeds maximum length ({MAX_EXPRESSION_LENGTH} characters).")
     s = normalize_math_text(text)
-    if FORBIDDEN_RE.search(s):
+    if FORBIDDEN_RE.search(s) or re.search(r"\blambda\s*:", s):
         raise ValueError("Expression contains forbidden tokens or dunder attributes.")
     return s.strip()
 
@@ -223,6 +223,14 @@ def _int_literal(node: ast.AST) -> int | None:
             and len(node.args) == 1 and not node.keywords):
         return _int_literal(node.args[0])
     return None
+
+
+# Functions SymPy evaluates eagerly on integer literals, whose cost grows with the argument's value: factorial(10**7)
+# runs for minutes. Arguments above 10**MAX_COMBINATORIAL_DIGITS are refused (the result would have ~10**5 digits).
+_EAGER_COMBINATORIAL = frozenset({"factorial", "factorial2", "binomial", "gamma", "subfactorial", "fibonacci",
+                                  "lucas", "catalan", "bell", "harmonic", "primorial", "RisingFactorial",
+                                  "FallingFactorial", "rf", "ff", "bernoulli", "euler", "partition"})
+MAX_COMBINATORIAL_DIGITS = 4
 
 
 def _power_parts(node: ast.AST) -> tuple[ast.AST, ast.AST] | None:
@@ -289,6 +297,14 @@ def validate_code(code: str, env: dict[str, Any]) -> None:
             if isinstance(func, ast.Name):
                 if not _safe_callable(env.get(func.id)):
                     _reject(node, f"call to {func.id!r} not allowed")
+                if func.id in _EAGER_COMBINATORIAL:
+                    for arg in node.args:
+                        digits = _literal_power_digits(arg)
+                        if digits is not None and digits > MAX_COMBINATORIAL_DIGITS:
+                            raise ValueError(
+                                f"{func.id}() of an integer with more than {MAX_COMBINATORIAL_DIGITS} digits is too large "
+                                "to evaluate exactly; use loggamma or Stirling's approximation (AUDIT-016)."
+                            )
                 pattern = _STRING_ARG.get(func.id) if env.get(func.id) is SAFE_NAMES.get(func.id) else None
                 first = node.args[0] if node.args else None
                 if pattern is not None and isinstance(first, ast.Constant) and isinstance(first.value, str):

@@ -37,6 +37,14 @@ test in a `tests/test_fix_*.py` file or in `web/tests/webFixes.test.mts`. All wo
 - `tribos/agents/stem_evidence.py`: STEM evidence renderers (SUP-9).
 - `tests/test_no_biomedical_leftovers.py`: the leftover-term guard (SUP-11).
 
+**SUP-2 closed (sandbox in a container):** model-written code now runs behind one execution gateway
+(`tribos/agentic/sandbox/gateway.py`) with two backends: a hardened subprocess backend and a container backend
+(`tribos/agentic/sandbox/container.py`, `--network none`, read-only root, size-capped tmpfs work dir,
+`--memory`/`--cpus`/`--pids-limit`, `--cap-drop ALL`, `no-new-privileges`, a non-root uid, read-only inputs).
+SageMath was contained in the same gateway and policy, the per-request "Allow code analysis" option now blocks
+every server-side execution path, and `scripts/verify_sandbox_boundary.py` asserts the boundary from the
+outside. See `docs/agentic/sandbox-security.md` and `docs/agentic/sandbox-operations.md`.
+
 **New bugs found and fixed during the work:**
 - `normalize_literature_id` callers unpacked `(kind, id)` in the wrong order, so pinned-paper lookups searched for the literal string "doi".
 - `evals/scoring.py` parsed model answers with an unrestricted `parse_expr`, which allowed code execution.
@@ -54,7 +62,6 @@ notebook and export fixes, engineering calculators, and shared projects with the
 - `web/src/app/page.tsx` is down from about 4,000 to about 3,300 lines (the sidebar and project logic moved to
   `components/sidebar`, `components/projects` and `hooks/`); the chat stage and settings could be split further.
 - Remaining ESLint warnings: about 130 `any`, about 33 React-hooks, and 7 `<img>`.
-- SUP-2 (sandbox in a container): only the in-process hardening is done (IO guard, SymPy parser guard, `RLIMIT_NPROC`).
 - SUP-6 (generated OpenAPI types): the frontend/backend contracts were aligned by hand, not generated.
 - mypy as a CI gate (about 290 typing errors predate this work).
 - Biomedical citation specs and the synapta/lumicell memory branches are kept, because stored history and tests still read them.
@@ -426,7 +433,7 @@ Most of the bugs above come from a few patterns: names repeated as string litera
 | ID | Supporting change | Fixes |
 | :--- | :--- | :--- |
 | **SUP-1** | **One safe expression parser.** An AST allowlist (names, numbers, operators, whitelisted SymPy functions; no attribute access, no dunders) with NFKC normalisation, used by Axiom, Dynamis, Physis and the verifiers. Add a fuzz test with Unicode and known escape payloads. | SEC-2, LOG-15, part of SEC-1 |
-| **SUP-2** | **Container-isolated sandbox** (Docker, gVisor or nsjail): no network, a read-only root, a tmpfs work directory, a PID limit, and no environment secrets. Inside the child, patch `builtins.open`, `io.open` and the SymPy parser globals. | SEC-1, SEC-3, the Windows disk-cap gap |
+| **SUP-2** | **Container-isolated sandbox** (Docker, gVisor or nsjail): no network, a read-only root, a tmpfs work directory, a PID limit, and no environment secrets. Inside the child, patch `builtins.open`, `io.open` and the SymPy parser globals. — **Done:** one execution gateway with a subprocess and a container backend, `docker/sandbox.Dockerfile`, a hardened compose service and `scripts/verify_sandbox_boundary.py`. | SEC-1, SEC-3, the Windows disk-cap gap |
 | **SUP-3** | **Tool capability tags in the registry** (`executes_code`, `simulation`, `expensive`, `network`, `replay_unsafe`, `domain`). Approval, the simulation ban, MCP exposure and replay refusal all read the tags instead of regexes on names. | SEC-5, SEC-6, LOG-22, LOG-24 |
 | **SUP-4** | **Tool-name and result-key constants** (a `ToolName` enum and a `ResultKey` enum). Ban string literals for tool names outside the registry with a unit test that checks every referenced name is registered. Remove the alias keys from counting. | BRK-3, BRK-10, BRK-11, LOG-29 |
 | **SUP-5** | **One evidence-key and citation module.** `normalize_key()` handles DOI, arXiv, Zbl, MR, ADS, OpenAlex and passage keys, and citations, NLI, the verifier, the debate and confidence code all use it. | LOG-7, LOG-11, debate critique loss |

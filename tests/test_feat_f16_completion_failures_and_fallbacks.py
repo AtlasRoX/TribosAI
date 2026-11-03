@@ -56,6 +56,7 @@ async def test_f16_transient_provider_faults_retried_within_bounds(statuses, fin
 
 
 def test_f16_sdk_retry_disabled_and_application_layers_do_not_multiply_attempts(monkeypatch):
+    monkeypatch.setenv("TRIBOS_ALLOWED_MODELS", "nvidia/nemotron-3.5-super-vl-120b-a12b")  # NVIDIA is off the catalog; the NIM path stays for operators who allow a model
     monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test-dummy-key")
     llm = get_llm(model_name="nvidia/nemotron-3.5-super-vl-120b-a12b")
     # SDK retry must be 0 so the transport's bounded retry governs

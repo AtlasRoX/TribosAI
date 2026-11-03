@@ -331,6 +331,9 @@ class AgentState:
         skipped = [p for p in self.bag.get("skipped_phases") or [] if isinstance(p, dict) and p.get("phase") == key]
         if skipped:
             return {"phase": key, "label": label, "status": "skipped", "reason": str(skipped[-1].get("reason") or "")}
+        not_needed = (self.bag.get("not_needed_phases") or {}).get(key)
+        if not_needed:
+            return {"phase": key, "label": label, "status": "not_needed", "reason": str(not_needed)}
         return {"phase": key, "label": label, "status": "not_run", "reason": ""}
 
     def core_phase_note(self) -> str:
@@ -369,8 +372,10 @@ class AgentState:
     def research_brief(self) -> str:
         lines: list[str] = []
         if self.sub_questions:
-            lines.append("Address each sub-question explicitly; say which ones the evidence cannot answer:")
-            lines.extend(f"- [{q.id}] {q.text}" + (f" (status: {q.status})" if q.status != "open" else "") for q in self.sub_questions)
+            # A checklist for coverage only: the ids stay internal, and the answer follows the user's own structure.
+            lines.append("Points the answer must cover (an internal checklist: do not use it as headings and never print "
+                         "ids; say plainly which points cannot be answered):")
+            lines.extend(f"- {q.text}" + (f" (status: {q.status})" if q.status != "open" else "") for q in self.sub_questions)
         steering = self.bag.get("steering") or []
         if steering:
             lines.append("The researcher added these instructions while the run was in progress (follow them):")
@@ -410,8 +415,8 @@ def core_phase_note(core: dict[str, Any] | None, *, research: bool = True) -> st
         return ""
     status = str(core.get("status") or "ok")
     label = str(core.get("label") or core.get("phase") or "The agent phase")
-    if status == "ok" or (status == "not_run" and not research):
-        return ""
+    if status in ("ok", "not_needed") or (status == "not_run" and not research):
+        return ""  # not_needed: the phase decided the question needs no tool plan (a deliberate choice, not a fallback)
     if status == "fallback":
         reason = str(core.get("reason") or "").strip()
         return f"{label} ran in fallback mode: {reason}" if reason else f"{label} ran in fallback mode (model calls failed)."

@@ -7,6 +7,11 @@
 # this file. All backend state (runs, jobs, memory, projects, caches) lives on the `tribos-data` volume mounted
 # at /data.
 #
+# Model-written code never runs in the API container: the API holds the credentials. The container backend
+# starts the `sandbox-image` below with --network none, --read-only, no capabilities and a non-root user, so the
+# code cannot reach the API, the host or the internet. Set TRIBOS_SANDBOX_BACKEND=container to use it, and
+# TRIBOS_SANDBOX_STRICT_LIMITS=on to refuse to run without it.
+#
 # Both ports are published on 127.0.0.1 only, so the API and the web app are reachable from this machine and not
 # from the network. To expose them (behind a TLS proxy, with TRIBOS_API_TOKENS or TRIBOS_JWT_SECRET set and never
 # with TRIBOS_AUTH_MODE=disabled), set TRIBOS_API_BIND / TRIBOS_WEB_BIND, e.g. TRIBOS_API_BIND=0.0.0.0.
@@ -24,6 +29,10 @@ services:
         required: false
     environment:
       TRIBOS_DATA_DIR: /data
+      # This container holds the API credentials and has no container runtime, so the sandbox's auto mode would
+      # run model-written code here without an OS-level boundary. Strict mode refuses that (AUDIT-008); to enable
+      # code execution, give the sandbox a container runtime it can reach rather than lifting this.
+      TRIBOS_SANDBOX_STRICT_LIMITS: ${TRIBOS_SANDBOX_STRICT_LIMITS:-1}
       # The browser origin of the web service below; extend it if you publish the web app elsewhere.
       TRIBOS_CORS_ORIGINS: ${TRIBOS_CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
     volumes:
@@ -31,6 +40,20 @@ services:
     ports:
       # Loopback only by default (TRIBOS_ALLOW_INSECURE=1 relies on this); see the header for TRIBOS_API_BIND.
       - "${TRIBOS_API_BIND:-127.0.0.1}:${TRIBOS_API_PORT:-8000}:8000"
+    # The API holds the credentials, so it is locked down: a read-only root filesystem, no Linux capabilities,
+    # no way to gain a privilege it does not have, and a process cap. All writable state is on the volume or
+    # on a tmpfs. The API must never execute model-written code: that happens in the sandbox container below.
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=256m
+      - /run:rw,nosuid,nodev,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    mem_limit: ${TRIBOS_API_MEMORY_LIMIT:-4g}
+    cpus: ${TRIBOS_API_CPU_LIMIT:-2.0}
     restart: unless-stopped
 
   web:
@@ -48,7 +71,31 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    # The web app holds no secrets and no state, so it is locked down the same way.
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m
+      - /app/.next:rw,nosuid,nodev,size=256m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: ${TRIBOS_WEB_MEMORY_LIMIT:-2g}
+    cpus: ${TRIBOS_WEB_CPU_LIMIT:-1.0}
     restart: unless-stopped
+
+  # The sandbox image is not a running service: it is the image the backend starts with `docker run` when it
+  # executes model-written code. It is built here so `docker compose up --build` leaves the deployment ready to
+  # use the container backend (TRIBOS_SANDBOX_BACKEND=container).
+  sandbox-image:
+    build:
+      context: ..
+      dockerfile: docker/sandbox.Dockerfile
+    image: tribos-sandbox:local
+    # The image is built and kept; it must never run as a service.
+    command: ["true"]
+    restart: "no"
 
 volumes:
   tribos-data:

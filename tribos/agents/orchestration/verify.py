@@ -3,6 +3,7 @@ reported verification result."""
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -143,6 +144,21 @@ def defect_lines(report: VerificationReport) -> str:
 
     # Human labels ("Contradicted by a source: ...") in step text; categories stay in the structured defects.
     return "; ".join(verifier_mod.defect_display(d, 160) for d in report.defects[:4])
+
+
+_FENCE_RE = re.compile(r"```[^\n`]*\n.*?```", re.S)
+
+
+def preserve_code_blocks(original: str, revised: str) -> str:
+    """`revised` with each fenced code block that matches one of `original` apart from whitespace replaced by the
+    original block, so a model-written revision cannot change code's indentation or spacing."""
+    def key(block: str) -> str:
+        return "".join(block.split())
+
+    originals = {key(b): b for b in _FENCE_RE.findall(original or "")}
+    if not originals:
+        return revised
+    return _FENCE_RE.sub(lambda m: originals.get(key(m.group(0)), m.group(0)), revised or "")
 
 
 async def check_and_correct(run: RunContext) -> None:
@@ -294,6 +310,9 @@ async def check_and_correct(run: RunContext) -> None:
                 revised = prefer_primary_reports(
                     verifier_mod.unescape_entities(orch._sanitize_answer(corrected_text or "".join(revised_parts))), tool_results
                 )
+                # A revision fixes claims, never code: the model re-typed a draft's Python with its indentation
+                # flattened (every indent one space), so the script it produced would not run.
+                revised = preserve_code_blocks(candidate_response, revised)
                 await before_verification(revised)
                 revised_report = orch.verifier.verify_response(
                     query=query,

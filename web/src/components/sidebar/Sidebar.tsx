@@ -7,14 +7,16 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  Brain, ChevronDown, ChevronRight, FolderPlus, MessageSquareText, Moon, PanelLeft, PanelLeftClose, Plus, Search,
-  Settings, SquarePen,
+  Brain, ChevronDown, ChevronRight, FlaskConical, FolderPlus, MessageSquareText, Moon, PanelLeft, PanelLeftClose, Plus,
+  Search, Settings, SquarePen,
 } from "lucide-react";
 import { groupThreads, safeColor, threadsIn } from "@/lib/sidebarData";
 import { useFocusTrap } from "@/lib/useFocusTrap";
 import type { InvestigationItem } from "@/services/localStorageService";
 import type { Project } from "@/types/agentic";
 import { ChatRow, type ChatRowHandlers } from "./ChatRow";
+import { ResizeHandle } from "@/components/ResizeHandle";
+import type { PanelWidth } from "@/hooks/usePanelWidth";
 import styles from "./Sidebar.module.css";
 
 export interface SidebarProps extends ChatRowHandlers {
@@ -36,6 +38,10 @@ export interface SidebarProps extends ChatRowHandlers {
   onOpenSettings: () => void;
   onOpenMemory: () => void;
   onToggleTheme: () => void;
+  /** Opens the long-running research projects window; hidden when absent. */
+  onOpenResearch?: () => void;
+  /** The expanded sidebar's resizable width (hooks/usePanelWidth); fixed when absent. */
+  panel?: PanelWidth;
 }
 
 function ProjectBadge({ project }: { project: Project }) {
@@ -57,6 +63,22 @@ export function Sidebar(props: SidebarProps) {
   const [now, setNow] = useState<Date | null>(null);
   useEffect(() => setNow(new Date()), [threads]);
   const groups = useMemo(() => (now ? groupThreads(threadsIn(threads, null), now) : []), [threads, now]);
+  const railThreads = useMemo(() => {
+    const mainThreads = threadsIn(threads, null);
+    const pinned = mainThreads.filter((t) => t.pinned);
+    const active = mainThreads.find((t) => t.id === activeThreadId && !t.pinned);
+    const items = [...pinned];
+    if (active && !items.some((t) => t.id === active.id)) {
+      items.push(active);
+    }
+    for (const t of mainThreads) {
+      if (items.length >= 5) break;
+      if (!items.some((x) => x.id === t.id)) {
+        items.push(t);
+      }
+    }
+    return items;
+  }, [threads, activeThreadId]);
   const rail = !expanded && !narrow;
   if (narrow && !expanded) return null;
 
@@ -71,6 +93,7 @@ export function Sidebar(props: SidebarProps) {
 
   const aside = (
     <aside ref={trapRef} className={`${styles.sidebar} ${rail ? styles.rail : ""} ${narrow ? styles.drawer : ""}`}
+      style={props.panel && !rail && !narrow ? { width: props.panel.width, minWidth: props.panel.width } : undefined}
       aria-label="Conversations and projects" role={narrow ? "dialog" : undefined} aria-modal={narrow || undefined}>
       <div className={styles.head}>
         {rail ? (
@@ -97,6 +120,13 @@ export function Sidebar(props: SidebarProps) {
           <Search style={{ width: 15, height: 15 }} />
           {!rail && <>Search chats <span className={styles.kbd}>⌘K</span></>}
         </button>
+        {props.onOpenResearch && (
+          <button type="button" className={styles.action} onClick={select(props.onOpenResearch)}
+            title="Research projects: long runs from review to report" aria-label="Research projects">
+            <FlaskConical style={{ width: 15, height: 15 }} />
+            {!rail && <>Research projects</>}
+          </button>
+        )}
         {rail && props.projectsAvailable && (
           <button type="button" className={styles.action} onClick={props.onNewProject} title="New project" aria-label="New project">
             <FolderPlus style={{ width: 15, height: 15 }} />
@@ -113,12 +143,24 @@ export function Sidebar(props: SidebarProps) {
                 <ProjectBadge project={p} />
               </button>
             ))}
-            {threadsIn(threads, null).slice(0, 30).map((inv) => (
-              <button key={inv.id} type="button" className={styles.action} onClick={() => props.onSelect(inv)}
-                title={inv.title} aria-label={inv.title} aria-current={activeThreadId === inv.id ? "page" : undefined}>
+            {railThreads.map((inv) => (
+              <button key={inv.id} type="button"
+                className={`${styles.action} ${activeThreadId === inv.id ? styles.actionActive : ""}`}
+                onClick={() => props.onSelect(inv)}
+                title={`${inv.title}${inv.pinned ? " (Pinned)" : ""}`}
+                aria-label={inv.title}
+                aria-current={activeThreadId === inv.id ? "page" : undefined}>
                 <MessageSquareText style={{ width: 15, height: 15 }} />
               </button>
             ))}
+            {threadsIn(threads, null).length > railThreads.length && (
+              <button type="button" className={styles.action} onClick={props.onToggle}
+                title={`+${threadsIn(threads, null).length - railThreads.length} more chats (Expand sidebar)`}
+                aria-label="Expand sidebar to view all chats"
+                style={{ fontSize: 11, color: "var(--text-faint)", fontWeight: 600 }}>
+                +{threadsIn(threads, null).length - railThreads.length}
+              </button>
+            )}
           </div>
         ) : (
           <>
@@ -203,12 +245,21 @@ export function Sidebar(props: SidebarProps) {
     </aside>
   );
 
-  return narrow ? (
-    <>
-      <button type="button" className={styles.backdrop} aria-label="Close sidebar" onClick={props.onCloseDrawer} />
+  if (narrow) {
+    return (
+      <>
+        <button type="button" className={styles.backdrop} aria-label="Close sidebar" onClick={props.onCloseDrawer} />
+        {aside}
+      </>
+    );
+  }
+  // The handle sits outside the aside, whose overflow would clip it.
+  return (
+    <div className={styles.frame}>
       {aside}
-    </>
-  ) : aside;
+      {props.panel && !rail && <ResizeHandle edge="right" panel={props.panel} label="Sidebar width" className={styles.frameHandle} />}
+    </div>
+  );
 }
 
 export default Sidebar;

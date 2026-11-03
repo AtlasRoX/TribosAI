@@ -1,16 +1,26 @@
-"""CAD & Parametric Geometry Intelligence for Tribos Substrate.
+"""CAD geometry inspection for Tribos Substrate: ASCII STL meshes.
 
-Closes:
-- F-01 / P0.1: STEP/IGES/STL/DWG geometry inspection and feature analysis
-- Bounding box, mass properties, surface area, center of gravity
-- Geometry diffing across revisions ("what changed between Rev A and Rev B")
+- Bounding box from the vertices.
+- Surface area as the sum of the facet areas.
+- Volume and centre of gravity by the divergence theorem (signed tetrahedra from the origin), reported only for a
+  closed (watertight) mesh: for an open mesh they are undefined and are returned as None with the reason.
+- Geometry diffing across revisions ("what changed between Rev A and Rev B").
+
+Nothing is estimated or defaulted: text with no parsable facets is an error, never a stand-in part.
 """
 
 from __future__ import annotations
 
+import math
 import re
+from collections import Counter
 from dataclasses import asdict, dataclass
 from typing import Any
+
+Vec = tuple[float, float, float]
+
+_NUM = r"([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)"
+_VERTEX = re.compile(rf"vertex\s+{_NUM}\s+{_NUM}\s+{_NUM}")
 
 
 @dataclass
@@ -42,116 +52,155 @@ class BoundingBox:
 @dataclass
 class GeometryProperties:
     file_name: str
-    format: str  # step | iges | stl | brep
+    format: str  # stl
     bounding_box: BoundingBox
     surface_area_mm2: float
-    volume_mm3: float
-    center_of_gravity_mm: tuple[float, float, float]
-    material_density_kg_m3: float = 2700.0  # default Al 6061
+    volume_mm3: float | None  # None for an open mesh
+    center_of_gravity_mm: tuple[float, float, float] | None
+    material_density_kg_m3: float = 2700.0
+    facet_count: int = 0
+    watertight: bool = False
+    note: str = ""
 
     @property
-    def mass_kg(self) -> float:
-        # volume mm3 to m3: 1e-9
-        return (self.volume_mm3 * 1e-9) * self.material_density_kg_m3
+    def mass_kg(self) -> float | None:
+        if self.volume_mm3 is None:
+            return None
+        return (self.volume_mm3 * 1e-9) * self.material_density_kg_m3  # mm^3 -> m^3
 
     def to_dict(self) -> dict[str, Any]:
+        mass = self.mass_kg
         return {
             "file_name": self.file_name,
             "format": self.format,
             "bounding_box": asdict(self.bounding_box),
             "dimensions_mm": {
-                "length": round(self.bounding_box.length_mm, 2),
-                "width": round(self.bounding_box.width_mm, 2),
-                "height": round(self.bounding_box.height_mm, 2),
+                "length": round(self.bounding_box.length_mm, 6),
+                "width": round(self.bounding_box.width_mm, 6),
+                "height": round(self.bounding_box.height_mm, 6),
             },
-            "surface_area_mm2": round(self.surface_area_mm2, 2),
-            "volume_mm3": round(self.volume_mm3, 2),
-            "mass_kg": round(self.mass_kg, 4),
-            "center_of_gravity_mm": [round(c, 2) for c in self.center_of_gravity_mm],
+            "facet_count": self.facet_count,
+            "watertight": self.watertight,
+            "surface_area_mm2": self.surface_area_mm2,
+            "volume_mm3": self.volume_mm3,
+            "mass_kg": mass,
+            "material_density_kg_m3": self.material_density_kg_m3,
+            "center_of_gravity_mm": list(self.center_of_gravity_mm) if self.center_of_gravity_mm else None,
+            "method": "facet areas; divergence-theorem volume and centroid (closed meshes only)",
+            "note": self.note,
         }
 
 
+def _sub(a: Vec, b: Vec) -> Vec:
+    return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+
+def _cross(a: Vec, b: Vec) -> Vec:
+    return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+
+
+def _dot(a: Vec, b: Vec) -> float:
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def _norm(a: Vec) -> float:
+    return math.sqrt(_dot(a, a))
+
+
 class GeometryInspector:
-    """Inspects CAD/STL files and diffs geometry across revisions."""
+    """Inspects ASCII STL meshes and diffs geometry across revisions."""
 
     @staticmethod
     def inspect_stl_ascii(
         content: str, file_name: str = "model.stl", density_kg_m3: float = 2700.0
     ) -> GeometryProperties:
-        """Parse ASCII STL to extract vertices, facets, bounding box, and surface area."""
-        vertices: list[tuple[float, float, float]] = []
-        pattern = re.compile(
-            r"vertex\s+([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)\s+([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)\s+([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)"
-        )
+        """Parse ASCII STL text (the file content itself, never a path) into exact mesh properties.
 
-        for m in pattern.finditer(content):
-            vertices.append((float(m.group(1)), float(m.group(2)), float(m.group(3))))
-
-        if not vertices:
-            # Fallback default test geometry if empty
-            bbox = BoundingBox(0.0, 100.0, 0.0, 50.0, 0.0, 20.0)
-            return GeometryProperties(
-                file_name=file_name,
-                format="stl",
-                bounding_box=bbox,
-                surface_area_mm2=16000.0,
-                volume_mm3=100000.0,
-                center_of_gravity_mm=(50.0, 25.0, 10.0),
-                material_density_kg_m3=density_kg_m3,
+        Raises ValueError when no complete triangular facet can be parsed or the density is not positive."""
+        if not math.isfinite(density_kg_m3) or density_kg_m3 <= 0:
+            raise ValueError("material_density_kg_m3 must be a positive number.")
+        vertices: list[Vec] = [
+            (float(m.group(1)), float(m.group(2)), float(m.group(3))) for m in _VERTEX.finditer(content or "")
+        ]
+        if len(vertices) < 3 or len(vertices) % 3:
+            raise ValueError(
+                "No ASCII STL facets could be parsed (expected 'vertex x y z' lines in groups of three). Pass the "
+                "STL text itself; file paths and binary STL are not read."
             )
+        if not all(math.isfinite(c) for v in vertices for c in v):
+            raise ValueError("The STL contains non-finite coordinates.")
+        facets = [tuple(vertices[i:i + 3]) for i in range(0, len(vertices), 3)]
 
-        min_x = min(v[0] for v in vertices)
-        max_x = max(v[0] for v in vertices)
-        min_y = min(v[1] for v in vertices)
-        max_y = max(v[1] for v in vertices)
-        min_z = min(v[2] for v in vertices)
-        max_z = max(v[2] for v in vertices)
+        area = 0.0
+        volume6 = 0.0
+        moment = [0.0, 0.0, 0.0]
+        edges: Counter[tuple[Vec, Vec]] = Counter()
+        for v0, v1, v2 in facets:
+            area += 0.5 * _norm(_cross(_sub(v1, v0), _sub(v2, v0)))
+            d = _dot(v0, _cross(v1, v2))  # 6 x signed volume of the tetrahedron (origin, v0, v1, v2)
+            volume6 += d
+            for k in range(3):
+                moment[k] += d * (v0[k] + v1[k] + v2[k])
+            for a, b in ((v0, v1), (v1, v2), (v2, v0)):
+                edges[(a, b) if a <= b else (b, a)] += 1
+        watertight = bool(edges) and all(n == 2 for n in edges.values())
 
-        bbox = BoundingBox(min_x, max_x, min_y, max_y, min_z, max_z)
-        cog = ((min_x + max_x) / 2.0, (min_y + max_y) / 2.0, (min_z + max_z) / 2.0)
-        # Approximate volume as 70% of bounding box for typical bracket topology
-        est_vol = bbox.bounding_volume_mm3 * 0.70
-        est_area = 2 * (
-            bbox.length_mm * bbox.width_mm
-            + bbox.width_mm * bbox.height_mm
-            + bbox.length_mm * bbox.height_mm
-        )
-
+        xs, ys, zs = zip(*vertices, strict=True)
+        bbox = BoundingBox(min(xs), max(xs), min(ys), max(ys), min(zs), max(zs))
+        volume: float | None = None
+        cog: tuple[float, float, float] | None = None
+        note = ""
+        if watertight and abs(volume6) > 0:
+            volume = abs(volume6) / 6.0
+            cog = (moment[0] / (4.0 * volume6), moment[1] / (4.0 * volume6), moment[2] / (4.0 * volume6))
+        else:
+            note = ("The mesh is not closed (some edges are not shared by exactly two facets), so volume, mass and "
+                    "centre of gravity are undefined and not reported.")
         return GeometryProperties(
             file_name=file_name,
             format="stl",
             bounding_box=bbox,
-            surface_area_mm2=est_area,
-            volume_mm3=est_vol,
+            surface_area_mm2=area,
+            volume_mm3=volume,
             center_of_gravity_mm=cog,
             material_density_kg_m3=density_kg_m3,
+            facet_count=len(facets),
+            watertight=watertight,
+            note=note,
         )
 
     @classmethod
     def diff_geometries(
         cls, geom_a: GeometryProperties, geom_b: GeometryProperties
     ) -> dict[str, Any]:
-        """Compute quantitative geometric diff between Rev A and Rev B."""
-        delta_vol = geom_b.volume_mm3 - geom_a.volume_mm3
-        pct_vol = (delta_vol / geom_a.volume_mm3) * 100.0 if geom_a.volume_mm3 else 0.0
+        """Quantitative diff between Rev A and Rev B; volume, mass and centre-of-gravity deltas need closed meshes."""
+        def delta(a: float | None, b: float | None) -> tuple[float | None, float | None]:
+            if a is None or b is None:
+                return None, None
+            return b - a, ((b - a) / a * 100.0 if a else None)
 
-        delta_mass = geom_b.mass_kg - geom_a.mass_kg
-        pct_mass = (delta_mass / geom_a.mass_kg) * 100.0 if geom_a.mass_kg else 0.0
-
+        delta_vol, pct_vol = delta(geom_a.volume_mm3, geom_b.volume_mm3)
+        delta_mass, pct_mass = delta(geom_a.mass_kg, geom_b.mass_kg)
+        delta_area, pct_area = delta(geom_a.surface_area_mm2, geom_b.surface_area_mm2)
         delta_cog = (
-            geom_b.center_of_gravity_mm[0] - geom_a.center_of_gravity_mm[0],
-            geom_b.center_of_gravity_mm[1] - geom_a.center_of_gravity_mm[1],
-            geom_b.center_of_gravity_mm[2] - geom_a.center_of_gravity_mm[2],
+            [b - a for a, b in zip(geom_a.center_of_gravity_mm, geom_b.center_of_gravity_mm, strict=True)]
+            if geom_a.center_of_gravity_mm and geom_b.center_of_gravity_mm else None
         )
-
+        changes = [abs(p) for p in (pct_vol, pct_mass, pct_area) if p is not None]
         return {
             "rev_a_file": geom_a.file_name,
             "rev_b_file": geom_b.file_name,
-            "delta_volume_mm3": round(delta_vol, 2),
-            "pct_volume_change": round(pct_vol, 2),
-            "delta_mass_kg": round(delta_mass, 4),
-            "pct_mass_change": round(pct_mass, 2),
-            "delta_center_of_gravity_mm": [round(c, 2) for c in delta_cog],
-            "significant_change": abs(pct_vol) > 1.0 or abs(pct_mass) > 1.0,
-            "summary": f"Mass changed by {round(pct_mass, 2)}% ({round(geom_a.mass_kg, 4)} kg -> {round(geom_b.mass_kg, 4)} kg)",
+            "delta_volume_mm3": delta_vol,
+            "pct_volume_change": pct_vol,
+            "delta_mass_kg": delta_mass,
+            "pct_mass_change": pct_mass,
+            "delta_surface_area_mm2": delta_area,
+            "pct_surface_area_change": pct_area,
+            "delta_center_of_gravity_mm": delta_cog,
+            "significant_change": any(p > 1.0 for p in changes),
+            "summary": (
+                f"Mass changed by {pct_mass:.4g}% ({geom_a.mass_kg:.6g} kg -> {geom_b.mass_kg:.6g} kg)"
+                if pct_mass is not None and geom_a.mass_kg is not None and geom_b.mass_kg is not None
+                else "Mass not compared: at least one mesh is not closed."
+            ),
         }

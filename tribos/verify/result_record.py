@@ -110,9 +110,18 @@ def given_values(text: str, scoped: set[str] | frozenset[str] = frozenset()) -> 
         tail = (text or "")[m.end():]
         if re.match(r"\s*,\s*\d+", tail):
             continue
+        if re.search(r"[+\-−*/^·×]\s*$", (text or "")[: m.start()]):
+            continue  # "x + y = 1" is a constraint on x and y, not the given value y = 1
         unit = (m.group("unit") or "").strip()
         if unit.split(" ")[0].lower() in _NOT_UNITS:
             unit = ""
+        if re.match(r"\s*(?:[(*+/^]|-(?=\s*\w)|\*\*)", tail):
+            continue  # z = 2(k+1)n and a = 3*x are expressions, not scalar givens z=2 and a=3
+        if unit:
+            from .latex_math import is_unit_word
+
+            if not is_unit_word(unit):
+                continue  # z = 2n: n is not a physical unit or a scalar value for z
         try:
             value = float(m.group("value").replace("−", "-"))
         except ValueError:

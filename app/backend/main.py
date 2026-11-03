@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable
@@ -80,7 +81,54 @@ async def _lifespan(_app: FastAPI):
         job_manager = get_job_manager()  # marks jobs left running by a previous process as interrupted
     except Exception as exc:  # noqa: BLE001
         logging.getLogger("tribos.backend").warning("Job manager unavailable: %s", exc)
+
+    # Load the OCR models in the background now, so the first image is read without the 2-3 s model load.
+    if get_bool("TRIBOS_VISION"):
+        def _preload_ocr() -> None:
+            try:
+                from tribos.vision import ocr
+
+                if ocr.available():
+                    ocr._load()
+            except Exception as exc:  # noqa: BLE001 - the first image loads it instead
+                logging.getLogger("tribos.backend").info("OCR preload skipped: %s", exc)
+
+        threading.Thread(target=_preload_ocr, name="ocr-preload", daemon=True).start()
+
+    try:
+        from tribos.agentic.campaign import get_campaign_manager
+
+        # Research projects a stopped server interrupted continue on their own (TRIBOS_CAMPAIGN_AUTO_RESUME).
+        get_campaign_manager().autostart()
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger("tribos.backend").warning("Research projects not resumed: %s", exc)
+
+    try:
+        from tribos.agentic.mem0_adapter import get_memory_queue
+
+        queue = get_memory_queue()
+        queue.start_background_dispatcher(interval_s=2.0)
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger("tribos.backend").debug("Mem0 queue dispatcher startup skipped: %s", exc)
+
     yield
+
+    try:
+        from tribos.agentic.mem0_adapter import get_memory_queue
+
+        queue = get_memory_queue()
+        queue.stop_background_dispatcher(timeout_s=3.0)
+    except Exception:  # noqa: BLE001
+        pass
+
+    try:
+        from tribos.scientific.worker import get_python_worker
+
+        worker = get_python_worker()
+        worker.shutdown(wait=False, cancel_futures=True)
+    except Exception:  # noqa: BLE001
+        pass
+
     shutdown = getattr(job_manager, "shutdown", None)
     if callable(shutdown):
         try:
@@ -125,6 +173,9 @@ DISABLED_ROUTERS: dict[str, str] = {}
 for _router_module in (
     "app.backend.routers.agent_runs",
     "app.backend.routers.jobs",
+    "app.backend.routers.campaigns",
+    "app.backend.routers.files",
+    "app.backend.routers.feedback",
     "app.backend.routers.projects",
     "app.backend.routers.mcp",
     "app.backend.routers.a2a",
@@ -216,7 +267,7 @@ class ChatRequest(BaseModel):
     model: str | None = Field(
         DEFAULT_ORCHESTRATOR_MODEL,
         max_length=200,
-        description="Model identifier, e.g. 'nvidia/nemotron-3.5-super-vl-120b-a12b' or 'gpt-4o'",
+        description="Model identifier, e.g. 'muse-spark-1.3' or 'gpt-4o'",
     )
     enable_web_search: bool | None = Field(
         True,
@@ -337,8 +388,11 @@ _LOWER_ACRONYMS = {a.lower(): a for a in _ACRONYMS}
 _MINOR_WORDS = {"a", "an", "the", "and", "but", "or", "for", "nor", "on", "at", "to", "from", "by", "with", "in", "of", "vs", "versus"}
 
 
+from tribos.utils.plain_math import plain_math as _plain_math  # noqa: E402
+
+
 def _heuristic_title(text: str, max_chars: int = 50) -> str:
-    clean = re.sub(r"```[\s\S]*?```", " ", text)
+    clean = re.sub(r"```[\s\S]*?```", " ", _plain_math(text))
     clean = re.sub(r"https?://\S+", " ", clean)
     clean = re.sub(r"\s+", " ", clean).strip()
     if not clean:
@@ -378,6 +432,8 @@ def _heuristic_title(text: str, max_chars: int = 50) -> str:
             formatted.append("-".join(parts))
         elif idx > 0 and lw in _MINOR_WORDS:
             formatted.append(lw)
+        elif (len(w) == 1 and w.isalpha() and lw not in ("a", "i")) or re.search(r"[\^_=+*/()\d]", w):
+            formatted.append(w)
         elif any(c.isupper() for c in w[1:]) and any(c.islower() for c in w):
             formatted.append(w)
         else:
@@ -503,8 +559,47 @@ def _detailed_readiness(readiness: dict[str, Any]) -> dict[str, Any]:
 def _provider_flags() -> dict[str, dict[str, bool]]:
     return {
         "nvidia_nim": {"available": usable_key(os.getenv("NVIDIA_API_KEY")) is not None or usable_key(os.getenv("NVIDIA_NIM_API_KEY")) is not None},
+        "meta": {"available": usable_key(os.getenv("META_API_KEY")) is not None},
         "openai": {"available": usable_key(os.getenv("OPENAI_API_KEY")) is not None},
     }
+
+
+_ROOT_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tribos backend</title>
+<style>
+  :root { color-scheme: light dark; --fg: #1d1f33; --muted: #5d6280; --bg: #f7f8fc; --card: #fff; --ok: #1f9d55; --line: #e3e5ef; }
+  @media (prefers-color-scheme: dark) { :root { --fg: #e6e8f5; --muted: #9aa0c2; --bg: #0d0f1f; --card: #15182c; --line: #262a45; } }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--fg);
+         font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; padding: 16px; box-sizing: border-box; }
+  main { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 24px 28px; max-width: 460px; width: 100%; }
+  h1 { font-size: 18px; margin: 0 0 4px; display: flex; align-items: center; gap: 8px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ok); }
+  p { margin: 0 0 16px; color: var(--muted); }
+  a.app { display: inline-block; background: var(--fg); color: var(--bg); text-decoration: none; padding: 8px 14px; border-radius: 8px; font-weight: 600; }
+  ul { margin: 18px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--line); padding-top: 12px; }
+  li { margin: 4px 0; } li a { color: var(--fg); } code { color: var(--muted); }
+</style></head>
+<body><main>
+  <h1><span class="dot" aria-hidden="true"></span>Tribos backend is running</h1>
+  <p>This is the API server. The application itself runs in the web app.</p>
+  <a class="app" href="__WEB_URL__">Open Tribos</a>
+  <ul>
+    <li><a href="/api/health">Health check</a> <code>/api/health</code></li>
+    <li><a href="/docs">API documentation</a> <code>/docs</code></li>
+  </ul>
+</main></body></html>"""
+
+
+@app.get("/", include_in_schema=False)
+async def root_page() -> Any:
+    """The backend's own address answers with a status page (it used to say "Not Found", which read as "down")."""
+    from fastapi.responses import HTMLResponse
+
+    web_url = os.getenv("TRIBOS_WEB_URL", "http://localhost:3000").strip() or "http://localhost:3000"
+    if not re.match(r"^https?://[\w.\-:\[\]]+(/[\w\-./]*)?$", web_url):
+        web_url = "http://localhost:3000"
+    return HTMLResponse(_ROOT_PAGE.replace("__WEB_URL__", web_url))
 
 
 @app.get("/api/health")
@@ -543,7 +638,15 @@ async def health_details(user_id: str = Depends(get_current_user)) -> dict[str, 
         "service_readiness": _detailed_readiness(observed_readiness),
         "disabled_routers": dict(DISABLED_ROUTERS),
         "config_problems": len(validate_environment()),
+        "sandbox": await asyncio.to_thread(_sandbox_isolation),
     }
+
+
+def _sandbox_isolation() -> dict[str, Any]:
+    from tribos.agentic.sandbox import sandbox_enabled
+    from tribos.agentic.sandbox.gateway import isolation_status
+
+    return {"enabled": False} if not sandbox_enabled() else {"enabled": True, **isolation_status()}
 
 
 @app.get("/api/models")
@@ -792,16 +895,21 @@ async def _ai_or_heuristic_title(req: TitleRequest, query: str) -> TitleResponse
     try:
         from langchain_core.messages import HumanMessage, SystemMessage
 
+        from tribos.agentic.llm import agent_model_kwargs
         from tribos.utils.llm.llm_factory import get_llm
 
         model_id = req.model or DEFAULT_ORCHESTRATOR_MODEL
-        llm = get_llm(model_name=model_id, api_key=req.api_key, temperature=0.0, max_tokens=30)
+        # Reasoning tokens count against max_tokens: without minimal reasoning a reasoning model spends the 30 tokens
+        # thinking and the title comes back empty (the heuristic, a copy of the question, was used every time).
+        llm = get_llm(model_name=model_id, api_key=req.api_key, temperature=0.0, max_tokens=30,
+                      **agent_model_kwargs(model_id))
 
         system_prompt = (
             "You are an engineering, mathematics, and scientific research assistant. Given the user's prompt, generate an ultra-concise, "
             "professional title of 3 to 6 words capturing the core concept, equation, system, or scientific topic. "
             "Do NOT include conversational filler, quotes, punctuation marks, or prefixes like 'Discussion on' or 'Inquiry about'. "
             "Preserve standard capitalization for acronyms and variables (e.g. Navier-Stokes, PDE, ODE, FFT, CODATA). "
+            "Write math as plain text: no LaTeX, no $ signs, no backslash commands. "
             "Return ONLY the plain title text."
         )
 
@@ -813,7 +921,7 @@ async def _ai_or_heuristic_title(req: TitleRequest, query: str) -> TitleResponse
             timeout=4.5,
         )
 
-        raw_title = str(response.content).strip().strip('"\'`')
+        raw_title = _plain_math(str(response.content)).strip().strip('"\'`')
         clean_title = re.sub(r"[\r\n]+.*$", "", raw_title)
         clean_title = re.sub(r"[?!:;.,\"\'`]+$", "", clean_title).strip()
         if clean_title and 3 <= len(clean_title) <= 70:
@@ -870,9 +978,26 @@ async def sse_frames(queue: "asyncio.Queue[dict[str, Any]]", heartbeat_s: float)
         except TimeoutError:
             yield ": ping\n\n"
             continue
-        yield f"data: {json.dumps(ev)}\n\n"
+        yield f"data: {json.dumps(ev, default=_json_safe)}\n\n"
         if ev.get("type") in ("done", "error"):
             return
+
+
+def _json_safe(value: Any) -> Any:
+    """A value plain json cannot encode: a NumPy scalar or array from a tool (a numpy.bool_ in one result made the
+    "done" event fail, so the finished answer never reached the browser), a set, a date; else its text."""
+    item = getattr(value, "item", None)
+    if callable(item) and getattr(value, "shape", None) == ():
+        return item()  # NumPy scalar (bool_, int64, float64) -> Python bool / int / float
+    tolist = getattr(value, "tolist", None)
+    if callable(tolist):
+        return tolist()  # NumPy array
+    if isinstance(value, (set, frozenset, tuple)):
+        return list(value)
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        return isoformat()
+    return str(value)
 
 
 def _release_once(user_id: str, client_request_id: str | None = None) -> Callable[[], None]:

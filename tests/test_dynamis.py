@@ -171,6 +171,7 @@ def test_dynamis_root_find_and_registry():
     dynamis_ext.register_tools(reg)
     names = {t.name for t in reg.list_tools(domain="dynamis")}
     assert names == {
+        "dynamis_monte_carlo_integrate",
         "dynamis_simulate_ode",
         "dynamis_equilibrium",
         "dynamis_parameter_scan",

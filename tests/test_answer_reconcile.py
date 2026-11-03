@@ -27,7 +27,7 @@ ANSWER = (
 
 def test_differing_level_is_rewritten_and_reason_kept():
     out = reconcile_confidence_line(ANSWER, "medium")
-    assert "**Confidence:** moderate (one phase III RCT; OS immature) (computed from claim support)\n" in out
+    assert "**Confidence:** moderate (one phase III RCT; OS immature) (set by the automatic checks)\n" in out
     assert out.replace("moderate", "high", 1).replace(f" {COMPUTED_CONFIDENCE_NOTE}", "") == ANSWER
 
 
@@ -52,13 +52,13 @@ def test_reconcile_is_idempotent():
 @pytest.mark.parametrize(
     "text, band, expected",
     [
-        ("- Confidence: **High** — one RCT.", "low", "- Confidence: **Low** (computed from claim support) — one RCT."),
+        ("- Confidence: **High** — one RCT.", "low", "- Confidence: **Low** (set by the automatic checks) — one RCT."),
         ("Overall confidence: moderate-to-high (pooled data)", "high",
-         "Overall confidence: high (pooled data) (computed from claim support)"),
+         "Overall confidence: high (pooled data) (set by the automatic checks)"),
         ("Benefit is consistent. Confidence: low (case series only).", "medium",
-         "Benefit is consistent. Confidence: moderate (case series only) (computed from claim support)."),
+         "Benefit is consistent. Confidence: moderate (case series only) (set by the automatic checks)."),
         ("**Confidence: high** (phase III (SOLO-1) data)", "medium",
-         "**Confidence: moderate** (phase III (SOLO-1) data) (computed from claim support)"),
+         "**Confidence: moderate** (phase III (SOLO-1) data) (set by the automatic checks)"),
     ],
 )
 def test_rating_forms(text, band, expected):
@@ -69,7 +69,7 @@ def test_only_the_bottom_line_rating_and_not_prose():
     text = "We have high confidence: high doses work.\n\nConfidence: high (RCT)\n\n### Safety\nConfidence: low (FAERS)\n"
     out = reconcile_confidence_line(text, "medium")
     assert out.startswith("We have high confidence: high doses work.")  # mid-sentence prose is not a rating
-    assert "Confidence: moderate (RCT) (computed from claim support)" in out
+    assert "Confidence: moderate (RCT) (set by the automatic checks)" in out
     assert out.endswith("Confidence: low (FAERS)\n")  # a section's own rating is left alone
 
 
@@ -99,7 +99,7 @@ async def test_report_result_reconciles_and_resends_the_answer(monkeypatch):
     monkeypatch.setattr(verify_stage, "build_citations", lambda run: rebuilt.append(run.candidate_response))
     run = _run(ANSWER, {"claim_confidence": {"answer_confidence": 0.66, "claims": []}})
     await verify_stage.report_result(run)
-    assert "**Confidence:** moderate (one phase III RCT; OS immature) (computed from claim support)" in run.candidate_response
+    assert "**Confidence:** moderate (one phase III RCT; OS immature) (set by the automatic checks)" in run.candidate_response
     shown = ""
     for ev in run.events:
         if ev["type"] == "content_reset":

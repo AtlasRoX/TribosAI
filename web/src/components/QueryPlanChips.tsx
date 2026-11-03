@@ -114,9 +114,18 @@ function entityDescription(e: QueryEntity): string {
 function routingLine(sources: SourceDecision[]): string {
   const filtered = sources.filter((s) => !LEGACY_IGNORED_KEYS.has(s.name.toLowerCase()));
   const run = filtered.filter((s) => s.run).map((s) => sourceName(s.name));
-  const skipped = filtered
-    .filter((s) => !s.run && !HIDDEN_REASONS.has(s.reason))
-    .map((s) => `${sourceName(s.name)}${s.reason ? ` (${s.reason})` : ""}`);
+  // Sources skipped for the same reason share it: "Archivon and WebSurfer (no outside evidence needed)".
+  const byReason = new Map<string, string[]>();
+  for (const s of filtered) {
+    if (s.run || HIDDEN_REASONS.has(s.reason)) continue;
+    const names = byReason.get(s.reason || "") ?? [];
+    names.push(sourceName(s.name));
+    byReason.set(s.reason || "", names);
+  }
+  const skipped = [...byReason].map(([reason, names]) => {
+    const who = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0];
+    return `${who}${reason ? ` (${reason})` : ""}`;
+  });
   const parts: string[] = [];
   if (run.length) parts.push(`Will run: ${run.join(", ")}`);
   if (skipped.length) parts.push(`Skipped: ${skipped.join(", ")}`);

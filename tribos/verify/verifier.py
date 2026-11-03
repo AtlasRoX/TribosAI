@@ -438,7 +438,11 @@ _ABSENCE_PATTERN = re.compile(
     r"\bwithout\s+(?P<v4>explaining|describing|identifying|reporting|mentioning|addressing|elucidating|investigating|"
     r"proposing|characteri[sz]ing)\b|"
     r"\b(?:makes?|made)\s+no\s+(?P<v5>mention)\b|\bno\s+(?P<v6>mention)\s+(?:of|is\s+made\s+of)\b|"
-    r"\b(?:there\s+(?:is|are)\s+no|no\s+(?:published\s+)?(?:studies|reports?|literature|publications?|data)\s+"
+    # "there is no" only about the literature ("there are no published studies"), never physics or mathematics
+    # ("there is no damping loss", "there is no real solution").
+    r"\b(?:there\s+(?:is|are)\s+no\s+(?:(?:published|prior|known|direct|experimental|clinical|peer[- ]reviewed)\s+)*"
+    r"(?:studies|study|reports?|literature|publications?|papers?|articles?|data|evidence|records?|mention|research)\b|"
+    r"no\s+(?:published\s+)?(?:studies|reports?|literature|publications?|data)\s+"
     r"(?:have|has|exist|exists|report|reports|describe|describes|show|shows))(?P<v7>)",
     re.IGNORECASE,
 )
@@ -490,10 +494,15 @@ def statement_role(text: str, question: str = "") -> str | None:
         return "instruction"
     if _INSTRUCTION_START_RE.match(t) and question and _echoes(t, question):
         return "instruction"
-    m = _ABSENCE_PATTERN.search(t)
+    # "There is no real solution of x^2 + 1 = 0": a mathematical negation ("there is no" alone is no longer an absence
+    # cue, see _ABSENCE_PATTERN, so it is looked for here directly).
+    m = _ABSENCE_PATTERN.search(t) or _THERE_IS_NO_RE.search(t)
     if m is not None and _MATH_OBJECT_RE.search(t[m.end(): m.end() + 80]) and not _LITERATURE_REFERENT.search(t):
         return "mathematical"
     return None
+
+
+_THERE_IS_NO_RE = re.compile(r"\bthere\s+(?:is|are|exists?)\s+no\b", re.IGNORECASE)
 
 
 _MENTION_VERBS = re.compile(r"^(?:mention\w*|discuss\w*|referenc\w*|nam\w*|includ\w*)$", re.IGNORECASE)
@@ -1338,7 +1347,7 @@ _CONFIDENCE_LEVEL_RE = re.compile(
     re.IGNORECASE,
 )
 _LEVEL_WORDS = {"high": "high", "moderate": "moderate", "medium": "moderate", "low": "low"}
-COMPUTED_CONFIDENCE_NOTE = "(computed from claim support)"
+COMPUTED_CONFIDENCE_NOTE = "(set by the automatic checks)"
 # Words that say how to answer, not what the question is about (the task-completion check ignores them).
 _ANSWER_INSTRUCTION_WORDS = frozenset(
     """
@@ -2013,13 +2022,20 @@ class TribosVerifier:
         # F09: Invalidate stale verification after revisions and contradictory evidence
         # If response asserts that independent domain checks passed, but a tool result or candidate witness
         # was invalidated, rejected, or failed domain checks:
+        def _as_dict(value: Any) -> dict[str, Any]:
+            return value if isinstance(value, dict) else {}
+
+        def _domain_check_failed(t_res: Any) -> bool:
+            # A tool's "verification" may be a dict of checks or a plain status string ("verified"); only the first
+            # carries domain checks. Assuming a dict crashed the whole answer with AttributeError.
+            checks = _as_dict(_as_dict(getattr(t_res, "data", None)).get("verification")).get("checks") or []
+            return any(isinstance(c, dict) and c.get("name") == "domain" and c.get("passed") is False
+                       for c in (checks if isinstance(checks, list) else []))
+
         has_domain_failure = bool(mismatched_tools) or any(
-            getattr(t_res, "metadata", {}).get("invalidated")
-            or getattr(t_res, "metadata", {}).get("verification_status") in ("rejected", "failed")
-            or any(
-                c.get("name") == "domain" and c.get("passed") is False
-                for c in ((getattr(t_res, "data", {}) or {}).get("verification") or {}).get("checks") or []
-            )
+            _as_dict(getattr(t_res, "metadata", None)).get("invalidated")
+            or _as_dict(getattr(t_res, "metadata", None)).get("verification_status") in ("rejected", "failed")
+            or _domain_check_failed(t_res)
             for t_res in (tool_results or {}).values()
             if t_res is not None
         )
@@ -2039,6 +2055,106 @@ class TribosVerifier:
                     claim="independent domain checks passed",
                 )
             )
+
+        # Check for unverified tool checks claimed as passed (e.g. axiom_calculus, calculus check, both checks passed)
+        unverified_tools: set[str] = set()
+        for t_k, t_res in (tool_results or {}).items():
+            if t_res is not None:
+                t_data = getattr(t_res, "data", {}) if isinstance(getattr(t_res, "data", {}), dict) else {}
+                t_name = getattr(t_res, "tool_name", "") or t_k
+                is_unverified = (
+                    t_res.success is False
+                    or t_data.get("verified") is False
+                    or (
+                        isinstance(t_data.get("verification"), dict)
+                        and t_data["verification"].get("level") == "unverified"
+                    )
+                )
+                if is_unverified:
+                    t_lower = str(t_name).lower()
+                    unverified_tools.add(t_lower)
+                    if "calculus" in t_lower:
+                        unverified_tools.add("calculus")
+                    if "identity" in t_lower or "verify_identity" in t_lower:
+                        unverified_tools.add("identity")
+                    if "dynamis" in t_lower or "simulate" in t_lower or "ode" in t_lower:
+                        unverified_tools.add("simulation")
+                    if "calcula" in t_lower or "sandbox" in t_lower:
+                        unverified_tools.add("calcula")
+
+        if unverified_tools:
+            claimed_both = bool(
+                re.search(r"\b(?:both|all)\s+(?:verification\s+)?checks?\s+(?:passed|succeeded|verified)\b", resp_lower)
+            )
+            claimed_calc = "calculus" in unverified_tools and bool(
+                re.search(
+                    r"\b(?:calculus|axiom_calculus)\s+(?:check\s+)?(?:passed|succeeded|verified)\b|\bchecked\s+with\s+axiom_calculus\b",
+                    resp_lower,
+                )
+            )
+            claimed_identity = "identity" in unverified_tools and bool(
+                re.search(
+                    r"\b(?:identity|axiom_verify_identity)\s+(?:check\s+)?(?:passed|succeeded|verified)\b|\bidentity\s+was\s+verified\b|\bverified\s+the\s+identity\b",
+                    resp_lower,
+                )
+            )
+            claimed_sim = "simulation" in unverified_tools and bool(
+                re.search(
+                    r"\b(?:simulation|dynamis)\s+(?:check\s+)?(?:passed|succeeded|verified)\b|\bsimulation\s+was\s+verified\b",
+                    resp_lower,
+                )
+            )
+            claimed_calcula = "calcula" in unverified_tools and bool(
+                re.search(
+                    r"\b(?:calcula|sandbox)\s+(?:check\s+)?(?:passed|succeeded|verified)\b|\bcomputed\s+and\s+verified\s+in\s+calcula\b",
+                    resp_lower,
+                )
+            )
+            if claimed_both or claimed_calc or claimed_identity or claimed_sim or claimed_calcula:
+                matched_sentence = ""
+                for s in self._split_sentences(response_markdown):
+                    s_lower = s.lower()
+                    if claimed_both and re.search(
+                        r"\b(?:both|all)\s+(?:verification\s+)?checks?\s+(?:passed|succeeded|verified)\b", s_lower
+                    ):
+                        matched_sentence = s
+                        break
+                    if claimed_calc and re.search(
+                        r"\b(?:calculus|axiom_calculus)\s+(?:check\s+)?(?:passed|succeeded|verified)\b|\bchecked\s+with\s+axiom_calculus\b",
+                        s_lower,
+                    ):
+                        matched_sentence = s
+                        break
+                    if claimed_identity and re.search(
+                        r"\b(?:identity|axiom_verify_identity)\s+(?:check\s+)?(?:passed|succeeded|verified)\b|\bidentity\s+was\s+verified\b|\bverified\s+the\s+identity\b",
+                        s_lower,
+                    ):
+                        matched_sentence = s
+                        break
+                    if claimed_sim and re.search(
+                        r"\b(?:simulation|dynamis)\s+(?:check\s+)?(?:passed|succeeded|verified)\b|\bsimulation\s+was\s+verified\b",
+                        s_lower,
+                    ):
+                        matched_sentence = s
+                        break
+                    if claimed_calcula and re.search(
+                        r"\b(?:calcula|sandbox)\s+(?:check\s+)?(?:passed|succeeded|verified)\b|\bcomputed\s+and\s+verified\s+in\s+calcula\b",
+                        s_lower,
+                    ):
+                        matched_sentence = s
+                        break
+                defects.append(
+                    DefectItem(
+                        category="CLAIM_CONTRADICTED",
+                        severity=DefectSeverity.CRITICAL,
+                        description=(
+                            "Response claims tool check(s) passed, but tool execution was unverified or failed."
+                        ),
+                        suggested_correction="State that the check was unverified instead of claiming it passed.",
+                        sentence=matched_sentence or None,
+                        claim="verification checks passed",
+                    )
+                )
 
         # -------------------------------------------------------------
         # 4b. REGISTERED FEATURE CHECKS (ODE parameters, evidence grades, dataset consent, ...)
@@ -2798,7 +2914,9 @@ class TribosVerifier:
         accepted status; it does not show that no proof exists. Without such a passage it is unchecked background."""
         status_words = {"remain", "remains", "open", "unsolved", "unproven", "unproved", "unresolved", "accepted",
                         "known", "proof", "proved", "proven", "problem", "conjecture", "question", "still", "been",
-                        "generally", "complete", "valid", "published", "disproof", "solution", "settled", "resolved"}
+                        "generally", "complete", "valid", "published", "disproof", "solution", "settled", "resolved",
+                        # Negation and time words are no subject: "It has not been proven." names nothing to look up.
+                        "not", "yet", "never", "nor", "neither", "fully", "currently", "today"}
         # Audit I41: a statement that cites a page ("... official page: https://www.claymath.org/...") is judged against
         # that page when it was retrieved, never against another record that happens to share its words.
         def addr(u: str) -> str:
@@ -3116,8 +3234,16 @@ class TribosVerifier:
                 passages = [doc] if doc is not None else [d for d in docs if _cites(d, cited)][:3]
                 if passages:
                     judge_calls += 1
+                    items = [{"source_key": d.key, "passage": judge_window(d.text, text)} for d in passages]
+                    if doc is not None and doc.key == "tool:computed_results":  # agents.result_keys.COMPUTED_RESULTS
+                        # The code-computed record is small and split into parts (the status note, each value): a
+                        # sentence that reports the status with the values ("Goldbach to 200,000 and 705 twin pairs
+                        # are verified facts; the conjectures remain open") needs all of it.
+                        whole = "\n".join(d.text for d in docs if d.key == doc.key)
+                        if len(whole) <= 6000:
+                            items = [{"source_key": doc.key, "passage": whole}]
                     try:
-                        verdict = judge(text, [{"source_key": d.key, "passage": judge_window(d.text, text)} for d in passages]) or {}
+                        verdict = judge(text, items) or {}
                     except Exception as exc:  # noqa: BLE001
                         logger.warning("Entailment judge failed: %s", exc)
                         verdict = {}
@@ -3230,7 +3356,8 @@ class TribosVerifier:
                         description=f"Quantitative claim is not supported by any retrieved passage or tool output ({reason}).",
                         suggested_correction=(
                             "Restate the figure exactly as a retrieved source gives it, with its unit and citation; "
-                            "otherwise remove it or mark it as established background not checked in this run."
+                            "otherwise remove it, or present it as a standard textbook value in plain words (no "
+                            "'established background' label)."
                         ),
                         claim=claim,
                         sentence=sentence,

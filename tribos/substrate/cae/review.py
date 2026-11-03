@@ -1,16 +1,19 @@
-"""CAE & FEA Verification Reviewer implementing the 14 Published Verification Gates.
+"""CAE / FEA result screening: five numerical gates on summary values a user or agent supplies.
 
-Closes:
-- F-02 / P0.2: Agentic FEA verification ladder
-- Reaction-force equilibrium balance (sum F_reactions + sum F_applied ~ 0)
-- Mesh convergence study (h-refinement delta sigma <= 5%)
-- Stress singularity screening (re-entrant corners / point loads)
-- Linear-elastic validity check (max von Mises <= yield strength)
-- Hand-calculation cross-check (classical beam / pressure vessel formulas)
+1. Reaction-force equilibrium (|reaction| vs |applied| within 1 %)
+2. Mesh convergence under h-refinement (peak-stress change <= 5 %)
+3. Linear-elastic validity (peak von Mises <= yield strength)
+4. Stress-singularity screen (gradient ratio <= 3; needs the ratio, never assumed)
+5. Hand-calculation cross-check (FEA vs classical formula within 15 %)
+
+A gate whose inputs cannot decide it (zero or negative reference values, a missing ratio) is "not evaluable", never a
+pass, and the audit is verified only when every gate was evaluated and passed. These gates screen supplied summary
+numbers; they are not a substitute for reviewing the model itself.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -19,14 +22,22 @@ from typing import Any
 class CAEGateResult:
     gate_number: int
     gate_name: str
-    passed: bool
+    passed: bool | None  # None: not evaluable from the inputs given
     observed_value: Any
     tolerance_threshold: Any
     detail: str
 
 
+def _finite(*values: float | None) -> bool:
+    return all(v is not None and math.isfinite(v) for v in values)
+
+
+def _not_evaluable(number: int, name: str, threshold: str, detail: str) -> CAEGateResult:
+    return CAEGateResult(number, name, None, None, threshold, f"Not evaluable: {detail}")
+
+
 class CAEReviewer:
-    """Evaluates FEA/CAE simulation results against the canonical verification ladder."""
+    """Screens FEA/CAE summary results against five numerical gates."""
 
     @staticmethod
     def verify_reaction_equilibrium(
@@ -34,17 +45,19 @@ class CAEReviewer:
         reaction_force_n: float,
         tolerance_pct: float = 1.0,
     ) -> CAEGateResult:
-        """Gate 1: Verify static equilibrium balance (applied load vs reaction forces)."""
-        diff = abs(applied_force_n - abs(reaction_force_n))
-        pct_diff = (diff / abs(applied_force_n)) * 100.0 if applied_force_n else 0.0
-        passed = pct_diff <= tolerance_pct
+        """Gate 1: the total reaction balances the total applied load."""
+        name, threshold = "reaction_force_equilibrium", f"<= {tolerance_pct}%"
+        if not _finite(applied_force_n, reaction_force_n) or applied_force_n == 0:
+            return _not_evaluable(1, name, threshold, "the applied load must be a finite, nonzero force.")
+        diff = abs(abs(applied_force_n) - abs(reaction_force_n))
+        pct_diff = diff / abs(applied_force_n) * 100.0
         return CAEGateResult(
             gate_number=1,
-            gate_name="reaction_force_equilibrium",
-            passed=passed,
-            observed_value=f"{round(pct_diff, 2)}% residual",
-            tolerance_threshold=f"<= {tolerance_pct}%",
-            detail=f"Applied: {applied_force_n} N, Reaction: {reaction_force_n} N (residual {round(diff, 2)} N)",
+            gate_name=name,
+            passed=pct_diff <= tolerance_pct,
+            observed_value=f"{pct_diff:.3g}% residual",
+            tolerance_threshold=threshold,
+            detail=f"Applied: {applied_force_n} N, Reaction: {reaction_force_n} N (residual {diff:.4g} N)",
         )
 
     @staticmethod
@@ -53,16 +66,17 @@ class CAEReviewer:
         fine_stress_mpa: float,
         max_delta_pct: float = 5.0,
     ) -> CAEGateResult:
-        """Gate 2: Mesh convergence check under h-refinement."""
-        delta = abs(fine_stress_mpa - coarse_stress_mpa)
-        pct_delta = (delta / fine_stress_mpa) * 100.0 if fine_stress_mpa else 0.0
-        passed = pct_delta <= max_delta_pct
+        """Gate 2: peak stress changes little between the coarse and the refined mesh."""
+        name, threshold = "mesh_convergence_study", f"<= {max_delta_pct}%"
+        if not _finite(coarse_stress_mpa, fine_stress_mpa) or coarse_stress_mpa <= 0 or fine_stress_mpa <= 0:
+            return _not_evaluable(2, name, threshold, "both peak (von Mises) stresses must be positive and finite.")
+        pct_delta = abs(fine_stress_mpa - coarse_stress_mpa) / fine_stress_mpa * 100.0
         return CAEGateResult(
             gate_number=2,
-            gate_name="mesh_convergence_study",
-            passed=passed,
-            observed_value=f"{round(pct_delta, 2)}% delta",
-            tolerance_threshold=f"<= {max_delta_pct}%",
+            gate_name=name,
+            passed=pct_delta <= max_delta_pct,
+            observed_value=f"{pct_delta:.3g}% delta",
+            tolerance_threshold=threshold,
             detail=f"Coarse mesh: {coarse_stress_mpa} MPa -> Fine mesh: {fine_stress_mpa} MPa",
         )
 
@@ -71,36 +85,39 @@ class CAEReviewer:
         max_von_mises_mpa: float,
         yield_strength_mpa: float,
     ) -> CAEGateResult:
-        """Gate 3: Linear elastic validity check (ensuring stress does not exceed yield)."""
+        """Gate 3: a linear-elastic result is only valid below yield."""
+        name, threshold = "linear_elastic_validity", f"<= {yield_strength_mpa} MPa (Yield)"
+        if not _finite(max_von_mises_mpa, yield_strength_mpa) or max_von_mises_mpa <= 0 or yield_strength_mpa <= 0:
+            return _not_evaluable(3, name, threshold, "peak von Mises stress and yield strength must be positive.")
         passed = max_von_mises_mpa <= yield_strength_mpa
-        sf = round(yield_strength_mpa / max_von_mises_mpa, 2) if max_von_mises_mpa else float("inf")
         return CAEGateResult(
             gate_number=3,
-            gate_name="linear_elastic_validity",
+            gate_name=name,
             passed=passed,
-            observed_value=f"Safety Factor {sf} (Peak {max_von_mises_mpa} MPa)",
-            tolerance_threshold=f"<= {yield_strength_mpa} MPa (Yield)",
+            observed_value=f"Yield margin factor {yield_strength_mpa / max_von_mises_mpa:.3g} (Peak {max_von_mises_mpa} MPa)",
+            tolerance_threshold=threshold,
             detail="Stress within elastic limit"
             if passed
-            else f"Plastic yielding occurred: peak {max_von_mises_mpa} MPa > yield {yield_strength_mpa} MPa",
+            else f"Plastic yielding: peak {max_von_mises_mpa} MPa > yield {yield_strength_mpa} MPa",
         )
 
     @staticmethod
     def verify_singularity_screen(
-        stress_gradient_ratio: float,
+        stress_gradient_ratio: float | None,
         max_ratio: float = 3.0,
     ) -> CAEGateResult:
-        """Gate 4: Singularity screening (checks for unphysical sharp re-entrant corner spikes)."""
+        """Gate 4: screen for unphysical stress spikes at re-entrant corners or point loads."""
+        name, threshold = "singularity_screening", f"<= {max_ratio}"
+        if stress_gradient_ratio is None or not _finite(stress_gradient_ratio) or stress_gradient_ratio <= 0:
+            return _not_evaluable(4, name, threshold, "no positive stress-gradient ratio was supplied.")
         passed = stress_gradient_ratio <= max_ratio
         return CAEGateResult(
             gate_number=4,
-            gate_name="singularity_screening",
+            gate_name=name,
             passed=passed,
-            observed_value=f"Gradient ratio {round(stress_gradient_ratio, 2)}",
-            tolerance_threshold=f"<= {max_ratio}",
-            detail="Stress gradient smooth and physical"
-            if passed
-            else "Warning: possible mesh singularity detected at sharp boundary",
+            observed_value=f"Gradient ratio {stress_gradient_ratio:.3g}",
+            tolerance_threshold=threshold,
+            detail="Stress gradient smooth" if passed else "Possible mesh singularity at a sharp boundary",
         )
 
     @staticmethod
@@ -109,16 +126,17 @@ class CAEReviewer:
         analytical_stress_mpa: float,
         max_deviation_pct: float = 15.0,
     ) -> CAEGateResult:
-        """Gate 5: Hand-calculation cross-check against classical beam/shell formula."""
-        dev = abs(fea_stress_mpa - analytical_stress_mpa)
-        pct_dev = (dev / analytical_stress_mpa) * 100.0 if analytical_stress_mpa else 0.0
-        passed = pct_dev <= max_deviation_pct
+        """Gate 5: FEA agrees with a classical beam/shell formula."""
+        name, threshold = "hand_calculation_cross_check", f"<= {max_deviation_pct}%"
+        if not _finite(fea_stress_mpa, analytical_stress_mpa) or analytical_stress_mpa == 0:
+            return _not_evaluable(5, name, threshold, "the analytical stress must be a finite, nonzero value.")
+        pct_dev = abs(fea_stress_mpa - analytical_stress_mpa) / abs(analytical_stress_mpa) * 100.0
         return CAEGateResult(
             gate_number=5,
-            gate_name="hand_calculation_cross_check",
-            passed=passed,
-            observed_value=f"{round(pct_dev, 2)}% deviation",
-            tolerance_threshold=f"<= {max_deviation_pct}%",
+            gate_name=name,
+            passed=pct_dev <= max_deviation_pct,
+            observed_value=f"{pct_dev:.3g}% deviation",
+            tolerance_threshold=threshold,
             detail=f"FEA: {fea_stress_mpa} MPa vs Classical Formula: {analytical_stress_mpa} MPa",
         )
 
@@ -131,9 +149,9 @@ class CAEReviewer:
         fine_stress_mpa: float,
         yield_strength_mpa: float,
         analytical_stress_mpa: float,
-        stress_gradient_ratio: float = 1.8,
+        stress_gradient_ratio: float | None = None,
     ) -> dict[str, Any]:
-        """Execute full CAE verification suite and return consolidated status."""
+        """Run the five gates; verified only when all five were evaluated and passed."""
         gates = [
             cls.verify_reaction_equilibrium(applied_load_n, reaction_force_n),
             cls.verify_mesh_convergence(coarse_stress_mpa, fine_stress_mpa),
@@ -141,10 +159,22 @@ class CAEReviewer:
             cls.verify_singularity_screen(stress_gradient_ratio),
             cls.verify_hand_calc_cross_check(fine_stress_mpa, analytical_stress_mpa),
         ]
-        all_passed = all(g.passed for g in gates)
+        evaluated = [g for g in gates if g.passed is not None]
+        passed = [g for g in evaluated if g.passed]
+        failed = [g for g in evaluated if not g.passed]
+        all_passed = len(passed) == len(gates)
+        if all_passed:
+            verdict = f"All {len(gates)} screening gates passed"
+        elif failed:
+            verdict = f"{len(failed)} of {len(gates)} gates failed: " + ", ".join(g.gate_name for g in failed)
+        else:
+            verdict = (f"Incomplete: {len(gates) - len(evaluated)} of {len(gates)} gates could not be evaluated from "
+                       "the inputs given")
         return {
             "cae_verified": all_passed,
-            "gates_passed": sum(1 for g in gates if g.passed),
+            "gates_passed": len(passed),
+            "gates_failed": len(failed),
+            "gates_not_evaluated": len(gates) - len(evaluated),
             "total_gates": len(gates),
             "gates": [
                 {
@@ -157,7 +187,6 @@ class CAEReviewer:
                 }
                 for g in gates
             ],
-            "verdict": "FEA results fully verified against 14-gate criteria"
-            if all_passed
-            else "CAE verification failed one or more physical gates",
+            "verdict": verdict,
+            "scope": "Screens supplied summary values only; it does not inspect the FEA model.",
         }

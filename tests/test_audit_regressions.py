@@ -74,10 +74,12 @@ async def test_gene_mention_alone_does_not_trigger_simulation(offline_orchestrat
 async def test_explicit_simulation_request_still_runs(offline_orchestrator):
     orch, calls = offline_orchestrator
     res = await orch.execute_inquiry("Simulate the Lorenz system for 100 seconds.", thread_id="t-sim", enable_web_search=False)
-    sims = _called(calls, "dynamis_simulate_ode")
-    assert sims and sims[0].get("model_name") == "lorenz" and tuple(sims[0]["t_span"]) == (0.0, 100.0)
-    assert "Dynamis" in res.selected_agents
-    assert not _called(calls, "dynamis_equilibrium") and not _called(calls, "vivarix_compute_steady_state")
+    # A named system is integrated by code (tribos/writer/system_facts.py, two methods), so Dynamis is not needed.
+    computed = res.execution_artifacts["computed_results"]
+    assert computed["kind"] == "dynamical_system" and computed["span"] == 100.0
+    assert "x(100)" in {p["name"] for p in computed["parameters"]}
+    assert not _called(calls, "dynamis_simulate_ode") and not _called(calls, "dynamis_equilibrium")
+    assert not _called(calls, "vivarix_compute_steady_state")
 
 
 @pytest.mark.asyncio

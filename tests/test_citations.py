@@ -438,7 +438,7 @@ async def test_orchestrator_result_and_stream_carry_citations(monkeypatch, tmp_p
     monkeypatch.setattr(backend_main, "get_authoritative_orchestrator", lambda: orch)
     client = TestClient(backend_main.app)
     with client.stream("POST", "/api/chat/stream", json={"message": "Find KRAS papers only.", "thread_id": "t-cite-sse",
-                                                         "enable_web_search": False}) as resp:
+                                                         "enable_web_search": True}) as resp:
         assert resp.status_code == 200
         events = [json.loads(line[6:]) for line in resp.iter_lines() if line.startswith("data: ")]
     done = next(e for e in events if e["type"] == "done")

@@ -354,9 +354,19 @@ class GapPhase(AgentPhase):
     def applies(self, state: Any) -> bool:
         if getattr(state.ctx, "scope", "research") != "research" or not (state.draft or "").strip():
             return False
+        # When search is explicitly asked to be limited or narrow, skip gap re-retrieval
+        q_text = (getattr(state, "query", "") or getattr(state, "clean_query", "") or "").lower()
+        if re.search(
+            r"\b(?:keep\s+search(?:ing)?\s+limited|limited\s+search|narrow\s+search|brief\s+search|skip\s+deep\s+search|few\s+sources)\b",
+            q_text,
+        ):
+            return False
         # A pure mathematics or physics derivation is answered by computation, not by papers: no gap re-retrieval.
         if is_pure_derivation(state):
             return False
+        need = getattr(state.ctx, "evidence_need", None)
+        if need is not None and need.skip_retrieval:
+            return False  # no outside evidence applies: a gap search would only fetch unrelated pages
         if state.draft_round in (state.bag.get("gap_rounds_done") or []):
             return False
         return self._lit_ok(state) or self._web_ok(state)

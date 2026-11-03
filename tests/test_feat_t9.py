@@ -251,7 +251,7 @@ def test_every_calculator_is_listed_with_a_reference():
     catalog = list_calculators()
     ids = {c["id"] for c in catalog["calculators"]}
     assert ids == {"beam", "column_buckling", "pressure_vessel", "shaft", "bolt_preload", "fatigue",
-                   "pipe_pressure_drop", "heat_exchanger", "layered_wall"}
+                   "pipe_pressure_drop", "heat_exchanger", "layered_wall", "rc_charge"}
     assert all(c["reference"]["source"] and c["reference"]["section"] for c in catalog["calculators"])
     assert len(catalog["materials"]) == 11 and "not design allowables" in catalog["materials_note"]
 

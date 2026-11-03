@@ -784,9 +784,11 @@ class RunRecorder:
         self._biomodels: dict[str, BioModelPin | None] = {}
         self._datasets: list[DatasetPin] = []
         self._tasks: list[asyncio.Task[Any]] = []
-        self._source_versions: dict[str, dict[str, Any]] | None = None
+        self._source_versions: dict[str, dict[str, Any]] | None = {}
         self.full_manifest: dict[str, Any] | None = None
-        self._spawn(self._probe_source_versions())
+        # Recording a run must not contact unrelated upstream APIs. The old eager probe contacted six
+        # biomedical services on every local calculation, even with search disabled. Source versions belong
+        # to the actual retrieved evidence; recording alone does not imply another network operation.
 
     # --- background work -----------------------------------------------------------
     def _spawn(self, coro: Any) -> None:
@@ -800,6 +802,8 @@ class RunRecorder:
     async def _probe_source_versions(self) -> None:
         from .source_versions import get_source_versions
 
+        if not self.enable_web_search:
+            return
         self._source_versions = await get_source_versions()
 
     async def _resolve_biomodel(self, accession: str) -> None:

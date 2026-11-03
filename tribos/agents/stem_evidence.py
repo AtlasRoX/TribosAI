@@ -15,8 +15,11 @@ from typing import Any
 from .result_keys import (
     AXIOM,
     CALCULA,
+    CODEACT,
+    COMPUTED_RESULTS,
     DYNAMIS,
     DYNAMIS_EQUILIBRIUM,
+    DYNAMIS_MONTE_CARLO,
     DYNAMIS_PDE,
     DYNAMIS_SCAN,
     PHYSIS,
@@ -194,6 +197,7 @@ def _dynamis_other(tool: str, d: dict[str, Any]) -> list[str]:
             f'rmse="{_attr(num(d.get("rmse")))}">',
             f"<parameters>{_json(d.get('parameters') or {})}</parameters>",
             f"<standard_errors>{_json(d.get('std_errors') or {})}</standard_errors>",
+            *([f"<fit_issues>{escape('; '.join(map(str, d['issues'])), quote=False)}</fit_issues>"] if d.get("issues") else []),
             "</dynamis_fit>",
         ]
     if "optimal_point" in d:
@@ -212,6 +216,11 @@ def _dynamis_other(tool: str, d: dict[str, Any]) -> list[str]:
 
 def render_dynamis(res: Any) -> list[str]:
     d, tool = _data(res), str(getattr(res, "tool_name", "") or "dynamis")
+    if "num_samples" in d and "estimate" in d and "standard_error" in d:
+        fields = {k: d.get(k) for k in ("expression", "variable", "lower", "upper", "num_samples", "seed", "generator",
+                  "estimate", "sample_std", "standard_error", "ddof", "reference", "standard_errors_from_reference",
+                  "sample_sha256", "numpy_version", "accuracy_note")}
+        return [f'<monte_carlo tool="{_attr(tool)}" status="executed" note="these are sampled numerical results, not an antiderivative or exact proof">{_json(fields)}</monte_carlo>']
     if "parameter_estimates" in d:
         return render_calibration(res)
     if "fixed_point" in d:
@@ -554,6 +563,20 @@ def render_calcula(res: Any) -> list[str]:
     if d.get("result") is not None:
         out.append(f"<result>{_text(json.dumps(_rounded(d['result']), default=str))}</result>")
         body += 1
+    if d.get("validation") is not None:
+        val = d["validation"]
+        v_passed = str(val.get("passed", "")).lower()
+        v_checks = val.get("checks") or []
+        out.append(f'<validation passed="{_attr(v_passed)}">{_text(json.dumps(v_checks, default=str))}</validation>')
+        body += 1
+    if d.get("reproducibility_bundle") is not None:
+        bundle = d["reproducibility_bundle"]
+        if isinstance(bundle, dict):
+            out.append(
+                f'<reproducibility_bundle filename="{_attr(bundle.get("filename"))}" '
+                f'sha256="{_attr(bundle.get("sha256"))}" />'
+            )
+            body += 1
     stdout = d.get("stdout") or d.get("output")
     if stdout:
         out.append(f"<stdout>{_text(stdout)}</stdout>")
@@ -602,11 +625,270 @@ def render_axiom(res: Any) -> list[str]:
     return [f'<axiom tool="{_attr(tool)}">{_json(fields)}</axiom>']
 
 
+def _render_number_facts(d: dict[str, Any]) -> list[str]:
+    """Finite number-theory results (tribos.writer.number_facts), each computed twice by different methods."""
+    out = ['<computed_results note="finite computations run by code for this question and verified a second way; '
+           'use them as given and say they were computed; they are instances, not proofs: write that a range was '
+           'verified, never that it was proved">']
+    for p in d.get("parameters") or []:
+        out.append(f'<result name="{_attr(p.get("name"))}" value="{_attr(p.get("value"))}" unit="{_attr(p.get("unit"))}"/>')
+    for part in d.get("partitions") or []:
+        pairs = ", ".join(f"{a}+{b}" for a, b in part.get("pairs") or [])
+        out.append(f'<goldbach_partitions n="{_attr(part.get("n"))}">{_text(pairs, 1500)}</goldbach_partitions>')
+    for c in d.get("checks") or []:
+        out.append(f'<check passed="{_attr(str(bool(c.get("passed"))).lower())}">{_text(c.get("name"), 240)}</check>')
+    for n in d.get("notes") or []:
+        out.append(f"<note>{_text(n, 700)}</note>")
+    out.append("</computed_results>")
+    return out
+
+
+def _render_nbody_facts(d: dict[str, Any]) -> list[str]:
+    """A gravitational N-body integration (tribos.writer.nbody_facts): equations, methods, measured drifts."""
+    out = ['<computed_results note="this N-body system was integrated by code for this question with the methods '
+           'listed; report these measured values as the simulation results, say which method gave each, and do not '
+           'invent trajectories or values that are not here">',
+           f"<equations_of_motion>{_text(d.get('equation_latex'), 400)}</equations_of_motion>",
+           f'<setup bodies="{_attr(d.get("n_bodies"))}" G="{_attr(d.get("G"))}" masses="{_attr(d.get("masses"))}" '
+           f'period="{_attr(d.get("period"))}" periods="{_attr(d.get("n_periods"))}" t_end="{_attr(d.get("t_end"))}"/>']
+    for meth in d.get("methods") or []:
+        tol = f' rtol="{meth["rtol"]}" atol="{meth["atol"]}"' if meth.get("rtol") else ""
+        out.append(f'<method name="{_attr(meth.get("name"))}"{tol}/>')
+    for p in d.get("parameters") or []:
+        out.append(f'<result name="{_attr(p.get("name"))}" value="{_attr(p.get("value"))}"/>')
+    for r in d.get("returns") or []:
+        out.append(f'<return_after_period k="{r["period"]}" t="{r["t"]:.8g}" position_error="{r["position_error"]:.3e}" '
+                   f'velocity_error="{r["velocity_error"]:.3e}" relative_energy_error="{r["rel_energy_error"]:.3e}"/>')
+    for i, pos in enumerate(d.get("final_positions") or [], start=1):
+        out.append(f'<final_position body="{i}" t="{_attr(d.get("t_end"))}">({", ".join(pos)})</final_position>')
+    for c in d.get("checks") or []:
+        out.append(f'<check passed="{_attr(str(bool(c.get("passed"))).lower())}">{_text(c.get("name"), 240)}</check>')
+    for n in d.get("notes") or []:
+        out.append(f"<note>{_text(n, 900)}</note>")
+    out.append("</computed_results>")
+    return out
+
+
+def _render_poly_facts(d: dict[str, Any]) -> list[str]:
+    """A stated polynomial analysed in Python (tribos.writer.poly_facts): sampling, minimisation, exact checks and the
+    Newton-polytope test, each with the library that ran it."""
+    out = ['<computed_results note="Python code ran for this question (NumPy, SciPy, SymPy) and these are its outputs; '
+           'report them as the code\'s outputs, naming the method of each. Sampling and minimisation are evidence for '
+           'nonnegativity, not a proof; the Newton-polytope certificate, when present, is a proof">',
+           f"<polynomial>{_text(d.get('polynomial_latex'), 400)}</polynomial>"]
+    for p in d.get("parameters") or []:
+        out.append(f'<result name="{_attr(p.get("name"))}" value="{_attr(p.get("value"))}"/>')
+    if d.get("sos_decomposition"):
+        out.append("<sos_decomposition exact=\"true\">" + _text(d["sos_decomposition"].get("latex"), 2000)
+                   + "</sos_decomposition>")
+    for m in d.get("minimisers") or []:
+        out.append(f'<minimiser point="{_attr(m.get("point"))}" exact_value="{_attr(m.get("value"))}" '
+                   f'gradient_zero="{_attr(str(bool(m.get("gradient_zero"))).lower())}"/>')
+    for c in d.get("checks") or []:
+        out.append(f'<check passed="{_attr(str(bool(c.get("passed"))).lower())}">{_text(c.get("name"), 300)}</check>')
+    for n in d.get("notes") or []:
+        out.append(f"<note>{_text(n, 600)}</note>")
+    out.append("</computed_results>")
+    return out
+
+
+def _render_roots_facts(d: dict[str, Any]) -> list[str]:
+    """Real roots of a polynomial isolated in Python (tribos.writer.roots_facts): the exact Sturm count, the rational
+    intervals with their endpoint signs, the decimals and their exact residuals."""
+    out = ['<computed_results note="Python code ran for this question (SymPy exact rational arithmetic, mpmath) and '
+           'these are its outputs; report them as the code\'s outputs. The Sturm count and the endpoint signs are exact '
+           'and prove the count and the isolation">',
+           f"<polynomial>{_text(d.get('polynomial_latex'), 400)}</polynomial>",
+           "<sturm_sequence>" + " ; ".join(_text(s, 200) for s in d.get("sturm_latex") or []) + "</sturm_sequence>",
+           f'<sign_changes at_minus_infinity="{_attr(d.get("signs_minus_inf"))}" '
+           f'at_plus_infinity="{_attr(d.get("signs_plus_inf"))}" real_roots="{_attr(d.get("count"))}"/>']
+    for r in d.get("roots") or []:
+        out.append(f'<root value="{_attr(r["root"])}" interval="[{_attr(r["a"])}, {_attr(r["b"])}]" '
+                   f'interval_decimal="[{_attr(r["a_decimal"])}, {_attr(r["b_decimal"])}]" '
+                   f'sign_at_ends="{r["sign_a"]:+d},{r["sign_b"]:+d}" exact_residual_at_decimal="{_attr(r["residual"])}"/>')
+    for c in d.get("checks") or []:
+        out.append(f'<check passed="{_attr(str(bool(c.get("passed"))).lower())}">{_text(c.get("name"), 300)}</check>')
+    for n in d.get("notes") or []:
+        out.append(f"<note>{_text(n, 600)}</note>")
+    out.append("</computed_results>")
+    return out
+
+
+def _render_system_facts(d: dict[str, Any]) -> list[str]:
+    """A stated or named ODE system integrated by code (tribos.writer.system_facts)."""
+    out = ['<computed_results note="this system was integrated by code exactly as listed in <equations>; report these '
+           'values as the simulation results, name the methods, and do not invent values that are not here">',
+           "<equations>" + " ; ".join(_text(e, 300) for e in d.get("equations_latex") or []) + "</equations>",
+           f'<setup system="{_attr(d.get("label"))}" initial="{_attr(d.get("initial"))}" span="{_attr(d.get("span"))}" '
+           f'stiff="{_attr(str(bool(d.get("stiff"))).lower())}" chaotic="{_attr(str(bool(d.get("chaotic"))).lower())}"/>']
+    out += [f'<method>{_attr(m)}</method>' for m in d.get("methods") or []]
+    for p in d.get("parameters") or []:
+        out.append(f'<result name="{_attr(p.get("name"))}" value="{_attr(p.get("value"))}"/>')
+    for c in d.get("checks") or []:
+        out.append(f'<check passed="{_attr(str(bool(c.get("passed"))).lower())}">{_text(c.get("name"), 300)}</check>')
+    for n in d.get("notes") or []:
+        out.append(f"<note>{_text(n, 900)}</note>")
+    out.append("</computed_results>")
+    return out
+
+
+def _render_pde_facts(d: dict[str, Any]) -> list[str]:
+    """The heat equation solved by code with a refinement study (tribos.writer.pde_facts)."""
+    out = ['<computed_results note="this PDE was solved by code with the schemes and grids listed; report the measured '
+           'errors and observed orders as computed, against the exact manufactured solution">',
+           f"<problem>{_text(d.get('equation_latex'), 300)}</problem>",
+           f"<exact_solution>{_text(d.get('exact_latex'), 300)}</exact_solution>"]
+    for r in d.get("refinement") or []:
+        out.append(f'<grid intervals="{r["n"]}" dx="{r["dx"]:.4g}" cn_error="{r["cn_error"]:.3e}" '
+                   f'cn_order="{r.get("cn_order", float("nan")):.3f}" ftcs_error="{r["ftcs_error"]:.3e}" '
+                   f'ftcs_order="{r.get("ftcs_order", float("nan")):.3f}"/>')
+    for p in d.get("parameters") or []:
+        out.append(f'<result name="{_attr(p.get("name"))}" value="{_attr(p.get("value"))}"/>')
+    for c in d.get("checks") or []:
+        out.append(f'<check passed="{_attr(str(bool(c.get("passed"))).lower())}">{_text(c.get("name"), 300)}</check>')
+    out.append("</computed_results>")
+    return out
+
+
+def _render_construct_facts(d: dict[str, Any]) -> list[str]:
+    """Construct mode (tribos.agentic.construct): the best construction found, scored exactly, against the known."""
+    out = ['<computed_results note="a construction found by evolving programs, each candidate checked exactly by the '
+           'scorer; report the value and the comparison as given; a value beyond the best known is a candidate result '
+           'needing independent confirmation, never a solved problem; finding a construction proves nothing about '
+           'optimality">',
+           f"<problem>{_text(d.get('problem'), 200)}: {_text(d.get('statement'), 600)}</problem>"]
+    for p in d.get("parameters") or []:
+        out.append(f'<result name="{_attr(p.get("name"))}" value="{_attr(p.get("value"))}"/>')
+    out.append(f"<best_candidate>{_text(json.dumps(d.get('candidate'), default=str), 1500)}</best_candidate>")
+    out.append(f"<best_program>{_text(d.get('best_program'), 2500)}</best_program>")
+    for c in d.get("checks") or []:
+        out.append(f'<check passed="{_attr(str(bool(c.get("passed"))).lower())}">{_text(c.get("name"), 300)}</check>')
+    out.append("</computed_results>")
+    return out
+
+
+def _render_poisson_facts(d: dict[str, Any]) -> list[str]:
+    """The 2-D Poisson problem solved by finite elements with a refinement study (tribos.writer.pde_facts)."""
+    out = ['<computed_results note="this PDE was solved by code with the elements and meshes listed; report the measured '
+           'errors and observed orders as computed, against the exact manufactured solution">',
+           f"<problem>{_text(d.get('equation_latex'), 300)}</problem>",
+           f"<exact_solution>{_text(d.get('exact_latex'), 300)}</exact_solution>"]
+    for r in d.get("refinement") or []:
+        out.append(f'<mesh cells_per_side="{r["n"]}" h="{r["h"]:.4g}" l2_error="{r["l2"]:.3e}" '
+                   f'l2_order="{r.get("l2_order", float("nan")):.3f}" h1_error="{r["h1"]:.3e}" '
+                   f'h1_order="{r.get("h1_order", float("nan")):.3f}"/>')
+    for p in d.get("parameters") or []:
+        out.append(f'<result name="{_attr(p.get("name"))}" value="{_attr(p.get("value"))}"/>')
+    for c in d.get("checks") or []:
+        out.append(f'<check passed="{_attr(str(bool(c.get("passed"))).lower())}">{_text(c.get("name"), 300)}</check>')
+    out.append("</computed_results>")
+    return out
+
+
+def render_computed_results(res: Any) -> list[str]:
+    """Values computed by code for the question (tribos.writer.facts): exact, checked, ready to present."""
+    d = _data(res)
+    if d.get("kind") == "construction_search":
+        return _render_construct_facts(d)
+    if d.get("kind") == "pde_poisson":
+        return _render_poisson_facts(d)
+    if d.get("kind") == "pde_heat":
+        return _render_pde_facts(d)
+    if d.get("kind") == "dynamical_system":
+        return _render_system_facts(d)
+    if d.get("kind") == "polynomial_roots":
+        return _render_roots_facts(d)
+    if d.get("kind") == "polynomial_analysis":
+        return _render_poly_facts(d)
+    if d.get("kind") == "number_theory_finite":
+        return _render_number_facts(d)
+    if d.get("kind") == "nbody_gravity":
+        return _render_nbody_facts(d)
+    if d.get("kind") != "ode_initial_value_problem":
+        return []
+    units = d.get("units") or {}
+    t_unit, x_unit = units.get("time") or "", units.get("solution") or ""
+    dep, ind = d.get("dependent", "x"), d.get("independent", "t")
+    out = [
+        '<computed_results note="computed by code for this question; exact values checked as listed; use them as given, '
+        'formatted for the reader, without naming how they were obtained">',
+        f"<equation>{_text(d.get('equation_latex'), 600)}</equation>",
+    ]
+    for ic in d.get("initial_conditions") or []:
+        prime = "'" * int(ic.get("order") or 0)
+        condition = f"{dep}{prime}({ic.get('at')}) = {ic.get('value')}"
+        out.append(f"<initial_condition>{_text(condition, 120)}</initial_condition>")
+    for c in d.get("checks") or []:
+        out.append(f'<check passed="{_attr(str(bool(c.get("passed"))).lower())}">{_text(c.get("name"), 200)}</check>')
+    for key, label in (("exact_solution_latex", "exact_solution"), ("transient_latex", "transient_part"),
+                       ("steady_state_latex", "steady_state_part")):
+        if d.get(key):
+            out.append(f"<{label} latex=\"true\">{_text(d[key], 1500)}</{label}>")
+    for p in d.get("parameters") or []:
+        extra = f' degrees="{_attr(p["value_degrees"])}"' if p.get("value_degrees") else ""
+        out.append(
+            f'<parameter name="{_attr(p.get("name"))}" formula="{_attr(p.get("symbol"))}" exact="{_attr(p.get("exact_latex"))}" '
+            f'value="{_attr(p.get("value"))}" unit="{_attr(p.get("unit"))}"{extra}/>'
+        )
+    if d.get("table"):
+        out.append(f'<values_at_requested_points {ind}_unit="{_attr(t_unit)}" {dep}_unit="{_attr(x_unit)}">'
+                   + _json(d["table"]) + "</values_at_requested_points>")
+    rk = d.get("rk4")
+    if isinstance(rk, dict):
+        step_note = "" if rk.get("step_was_given") else ' step_note="step not given in the question; chosen by the solver"'
+        out.append(
+            f'<rk4_comparison method="{_attr(rk.get("method"))}" step="{_attr(rk.get("step"))}"{step_note} '
+            f'steps="{_attr(rk.get("steps"))}" compared_with="{_attr(rk.get("compared_with"))}" '
+            f'max_abs_error="{_attr(rk.get("max_abs_error"))}" max_error_at="{_attr(rk.get("max_error_at"))}">'
+            + _json(rk.get("at_points") or []) + "</rk4_comparison>"
+        )
+    physics = d.get("physics") or {}
+    for c in physics.get("checks") or []:
+        out.append(f'<physics_check passed="{_attr(str(bool(c.get("passed"))).lower())}">{_text(c.get("name"), 200)}</physics_check>')
+    for qn in physics.get("quantities") or []:
+        exact = f' exact="{_attr(qn["exact_latex"])}"' if qn.get("exact_latex") else ""
+        out.append(f'<derived_quantity name="{_attr(qn.get("name"))}"{exact} value="{_attr(qn.get("value"))}" '
+                   f'unit="{_attr(qn.get("unit"))}"/>')
+    conv = d.get("convergence")
+    if isinstance(conv, dict):
+        rich = conv.get("richardson_at_final_time") or {}
+        out.append(
+            f'<convergence_study observed_order="{_attr(conv.get("observed_order"))}" formal_order="4" '
+            f'predicted_error_at_requested_step="{_attr(conv.get("predicted_error_at_requested_step"))}" '
+            f'richardson="{_attr(rich.get("status"))}" gci_fine="{_attr(rich.get("gci_fine"))}">'
+            + _json(conv.get("runs") or []) + "</convergence_study>")
+        for c in conv.get("checks") or []:
+            out.append(f'<check passed="{_attr(str(bool(c.get("passed"))).lower())}">{_text(c.get("name"), 200)}</check>')
+    for n in d.get("notes") or []:
+        out.append(f"<note>{_text(n, 300)}</note>")
+    out.append("</computed_results>")
+    return out
+
+
+def render_codeact(res: Any) -> list[str]:
+    """The model's Python notebook for the question: printed values are computed; its summary is not checked."""
+    d = _data(res)
+    out = ['<python_session note="cells the model wrote and the sandbox ran for this question; printed outputs are '
+           'computed values you may use; the session summary is the model\'s own reading, not a proof; numerical '
+           'exploration is evidence, not proof">']
+    for n, c in enumerate(d.get("cells") or [], 1):
+        body = c.get("stdout") if c.get("status") == "ok" else c.get("error")
+        out.append(f'<cell n="{n}" status="{_attr(c.get("status"))}"><code>{_text(c.get("code"), 1500)}</code>'
+                   f"<output>{_text(body, 1500)}</output></cell>")
+    if d.get("final"):
+        out.append(f"<session_summary>{_text(d['final'], 2500)}</session_summary>")
+    out.append("</python_session>")
+    return out
+
+
 _RENDERERS = {
+    CODEACT: render_codeact,
+    COMPUTED_RESULTS: render_computed_results,
     DYNAMIS: render_dynamis,
     DYNAMIS_EQUILIBRIUM: render_dynamis,
     DYNAMIS_SCAN: render_dynamis,
     DYNAMIS_PDE: render_dynamis,
+    DYNAMIS_MONTE_CARLO: render_dynamis,
     AXIOM: render_axiom,
     PHYSIS: render_physis,
     CALCULA: render_calcula,
@@ -615,6 +897,9 @@ _RENDERERS = {
 
 # Tools rendered by their own renderer wherever their result appears (see render_tool_result).
 TOOL_RENDERERS = {
+    "calcula_run_python": render_calcula,
+    "analysis_run_python": render_calcula,
+    "dynamis_monte_carlo_integrate": render_dynamis,
     "dynamis_solve_pde": render_dynamis,
     "dynamis_fit_parameters": render_dynamis,
     "physis_propagate_uncertainty": render_physis,
@@ -649,6 +934,7 @@ __all__ = [
     "num",
     "render_axiom",
     "render_calcula",
+    "render_computed_results",
     "render_dynamis",
     "render_engineering_calc",
     "render_paper",

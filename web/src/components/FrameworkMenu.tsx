@@ -4,6 +4,8 @@ import React, { useEffect, useRef } from "react";
 import { Check, X } from "lucide-react";
 import type { FrameworkOption } from "@/types/chat";
 import styles from "./FrameworkMenu.module.css";
+import { ResizeHandle } from "@/components/ResizeHandle";
+import { usePanelWidth } from "@/hooks/usePanelWidth";
 
 type Level = 1 | 2 | 3;
 
@@ -151,6 +153,7 @@ export function FrameworkGuide({
   onSelect: (id: string) => void;
   onClose: () => void;
 }) {
+  const panelWidth = usePanelWidth("framework-guide", { initial: 460, min: 340, max: 900 });
   const panelRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
 
@@ -171,7 +174,8 @@ export function FrameworkGuide({
   if (!open) return null;
   return (
     <div className={styles.overlay} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <aside ref={panelRef} className={styles.panel} role="dialog" aria-modal="true" aria-labelledby="framework-guide-title">
+      <aside ref={panelRef} className={styles.panel} role="dialog" aria-modal="true" aria-labelledby="framework-guide-title" style={{ width: panelWidth.width, position: "relative" }}>
+          <ResizeHandle edge="left" panel={panelWidth} label="Framework guide width" />
         <header className={styles.panelHead}>
           <div>
             <h2 id="framework-guide-title" className={styles.panelTitle}>

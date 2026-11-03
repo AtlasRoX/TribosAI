@@ -10,12 +10,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import fatigue, structural, thermofluid
+from . import electrical, fatigue, structural, thermofluid
 from .core import Calculator, run
 from .materials import MATERIALS_NOTE, find_material, list_materials
 
 CALCULATORS: dict[str, Calculator] = {
-    c.id: c for c in (*structural.CALCULATORS, *fatigue.CALCULATORS, *thermofluid.CALCULATORS)
+    c.id: c for c in (*structural.CALCULATORS, *fatigue.CALCULATORS, *thermofluid.CALCULATORS, *electrical.CALCULATORS)
 }
 ALIASES = {
     "beam_deflection": "beam", "cantilever": "beam", "buckling": "column_buckling", "euler_buckling": "column_buckling",

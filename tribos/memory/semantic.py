@@ -12,6 +12,15 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
+import scipy.constants as _sc
+
+# Catalogue values are typical room-temperature handbook values, not certified design allowables.
+REFERENCE_TEMP_RANGE_C = (15.0, 25.0)
+MATERIAL_DATA_NOTE = (
+    "Typical room-temperature values (15-25 C) for a common temper; not certified design allowables and not valid "
+    "at other temperatures. Use the governing code's allowables or certified mill data for design."
+)
+
 
 @dataclass
 class MaterialRecord:
@@ -30,17 +39,23 @@ class MaterialRecord:
     fatigue_strength_coeff_mpa: float = 0.0
     fatigue_exponent: float = -0.085
 
-    def e_at_temp(self, temp_celsius: float) -> float:
-        """Calculate Young's modulus E in GPa at specified temperature in Celsius."""
-        delta_t = temp_celsius - 20.0
-        e_t = self.e_modulus_gpa_at_20c * (1.0 + self.temp_coefficient_e * delta_t)
-        return max(0.1, e_t)
+    aliases: tuple[str, ...] = ()
 
-    def yield_at_temp(self, temp_celsius: float) -> float:
-        """Yield strength in MPa adjusted for temperature."""
-        delta_t = temp_celsius - 20.0
-        factor = max(0.2, 1.0 - 0.0006 * delta_t) if delta_t > 0 else 1.0
-        return self.yield_strength_mpa * factor
+    def at_reference_temperature(self, temp_celsius: float) -> bool:
+        """The catalogue holds single-point room-temperature values only (REFERENCE_TEMP_RANGE_C)."""
+        lo, hi = REFERENCE_TEMP_RANGE_C
+        return math.isfinite(temp_celsius) and lo <= temp_celsius <= hi
+
+    def e_at_temp(self, temp_celsius: float) -> float | None:
+        """Young's modulus E in GPa, or None outside the room-temperature range the catalogue value applies to.
+
+        No sourced elevated- or low-temperature data is held, so no derating curve is applied (an earlier generic
+        linear derating was unsourced and grossly unconservative for precipitation-hardened alloys)."""
+        return self.e_modulus_gpa_at_20c if self.at_reference_temperature(temp_celsius) else None
+
+    def yield_at_temp(self, temp_celsius: float) -> float | None:
+        """Yield strength in MPa, or None outside the room-temperature range (see e_at_temp)."""
+        return self.yield_strength_mpa if self.at_reference_temperature(temp_celsius) else None
 
     def fatigue_life_cycles(self, stress_amplitude_mpa: float) -> float:
         """Estimate fatigue cycles N_f under cyclic stress amplitude using Basquin's equation."""
@@ -70,6 +85,7 @@ MATERIALS_CATALOG: dict[str, MaterialRecord] = {
         temp_coefficient_e=-0.0005,
         fatigue_strength_coeff_mpa=450.0,
         fatigue_exponent=-0.10,
+        aliases=("6061-t6", "aluminium 6061-t6", "al 6061-t6", "aa6061-t6"),
     ),
     "steel_4140": MaterialRecord(
         name="AISI 4140 Alloy Steel (Quenched & Tempered)",
@@ -84,6 +100,7 @@ MATERIALS_CATALOG: dict[str, MaterialRecord] = {
         temp_coefficient_e=-0.0003,
         fatigue_strength_coeff_mpa=1250.0,
         fatigue_exponent=-0.08,
+        aliases=("4140", "aisi 4140", "4140 q&t"),
     ),
     "ti_6al_4v": MaterialRecord(
         name="Titanium Grade 5 (Ti-6Al-4V)",
@@ -98,6 +115,7 @@ MATERIALS_CATALOG: dict[str, MaterialRecord] = {
         temp_coefficient_e=-0.0004,
         fatigue_strength_coeff_mpa=1400.0,
         fatigue_exponent=-0.09,
+        aliases=("ti-6al-4v", "ti64", "titanium grade 5"),
     ),
     "ss316l": MaterialRecord(
         name="Stainless Steel 316L",
@@ -112,6 +130,7 @@ MATERIALS_CATALOG: dict[str, MaterialRecord] = {
         temp_coefficient_e=-0.00035,
         fatigue_strength_coeff_mpa=890.0,
         fatigue_exponent=-0.085,
+        aliases=("316l", "ss 316l", "stainless steel 316l"),
     ),
     "inconel_718": MaterialRecord(
         name="Inconel 718 Nickel Superalloy",
@@ -126,6 +145,7 @@ MATERIALS_CATALOG: dict[str, MaterialRecord] = {
         temp_coefficient_e=-0.00025,
         fatigue_strength_coeff_mpa=1900.0,
         fatigue_exponent=-0.075,
+        aliases=("inconel 718", "in718", "alloy 718"),
     ),
 }
 
@@ -140,46 +160,97 @@ class StandardClause:
     formula_latex: str
 
     def evaluate_compliance(self, params: dict[str, float]) -> dict[str, Any]:
-        """Evaluate numeric pass/fail against standard requirement."""
-        if self.standard_id == "ASME_VIII_1_UG27_CYL":
-            # t = (P * R) / (S * E - 0.6 * P)
-            p = params.get("pressure_mpa", 0.0)
-            r = params.get("radius_mm", 0.0)
-            s = params.get("allowable_stress_mpa", 0.0)
-            e = params.get("joint_efficiency", 1.0)
-            t_actual = params.get("wall_thickness_mm", 0.0)
+        """Evaluate a UG-27 internal-pressure thickness check (inside radius R, Section VIII Div 1).
 
-            denom = s * e - 0.6 * p
-            if denom <= 0:
-                return {
-                    "compliant": False,
-                    "reason": "Invalid design: S*E <= 0.6*P (allowable stress exceeded by internal pressure)",
-                    "required_thickness_mm": None,
-                }
-            t_req = (p * r) / denom
-            is_compliant = t_actual >= t_req
-            return {
-                "compliant": is_compliant,
-                "required_thickness_mm": round(t_req, 3),
-                "actual_thickness_mm": t_actual,
-                "margin_mm": round(t_actual - t_req, 3),
-                "clause": self.clause_ref,
-                "reason": "Thickness satisfies ASME UG-27(c)(1)"
-                if is_compliant
-                else f"Thickness {t_actual} mm below required {round(t_req, 3)} mm",
-            }
-        return {
-            "compliant": True,
-            "clause": self.clause_ref,
-            "note": "Standard clause evaluation completed",
-        }
+        `compliant` is True or False only when the clause was actually evaluated within its applicability limits;
+        it is None (with `status` "not_evaluated" or "outside_applicability") otherwise, so an unimplemented clause
+        or an invalid input can never read as a pass. `corrosion_allowance_mm`, when given, is subtracted from the
+        actual wall before the comparison.
+        """
+        evaluator = _UG27_EVALUATORS.get(self.standard_id)
+        if evaluator is None:
+            return _not_evaluated(self.clause_ref, f"No evaluator is implemented for clause '{self.standard_id}'.")
+        problem = _ug27_inputs(params)
+        if isinstance(problem, str):
+            return _not_evaluated(self.clause_ref, problem)
+        return evaluator(self.clause_ref, *problem)
+
+
+def _not_evaluated(clause: str, reason: str, status: str = "not_evaluated") -> dict[str, Any]:
+    return {"compliant": None, "status": status, "clause": clause, "reason": reason, "required_thickness_mm": None}
+
+
+def _ug27_inputs(params: dict[str, float]) -> tuple[float, float, float, float, float] | str:
+    """(P, R, S, E, t_net) or the reason the inputs cannot be evaluated."""
+    try:
+        p = float(params["pressure_mpa"])
+        r = float(params["radius_mm"])
+        s = float(params["allowable_stress_mpa"])
+        e = float(params.get("joint_efficiency", 1.0))
+        t = float(params["wall_thickness_mm"]) - float(params.get("corrosion_allowance_mm") or 0.0)
+    except (KeyError, TypeError, ValueError) as exc:
+        return f"Missing or non-numeric input: {exc}"
+    if not all(math.isfinite(v) for v in (p, r, s, e, t)):
+        return "Inputs must be finite numbers."
+    if p <= 0 or r <= 0 or s <= 0:
+        return "pressure_mpa, radius_mm and allowable_stress_mpa must be positive (UG-27 covers internal pressure)."
+    if not 0 < e <= 1:
+        return "joint_efficiency must be in (0, 1]."
+    if t <= 0:
+        return "The wall thickness (net of corrosion allowance) must be positive."
+    return p, r, s, e, t
+
+
+def _ug27_result(clause: str, t_req: float, t: float, checks: list[str]) -> dict[str, Any]:
+    ok = t >= t_req
+    return {
+        "compliant": ok,
+        "status": "evaluated",
+        "required_thickness_mm": round(t_req, 3),
+        "actual_thickness_mm": t,
+        "margin_mm": round(t - t_req, 3),
+        "clause": clause,
+        "checks": checks,
+        "reason": f"Thickness satisfies {clause}" if ok else f"Thickness {t} mm below required {round(t_req, 3)} mm",
+    }
+
+
+def _ug27_cylinder(clause: str, p: float, r: float, s: float, e: float, t: float) -> dict[str, Any]:
+    """UG-27(c)(1) circumferential stress, t = PR/(SE - 0.6P), valid for t <= R/2 and P <= 0.385 SE; and
+    UG-27(c)(2) longitudinal stress, t = PR/(2SE + 0.4P), valid for t <= R/2 and P <= 1.25 SE. The larger governs."""
+    if p > 0.385 * s * e:
+        return _not_evaluated(clause, f"P = {p} MPa exceeds 0.385 S E = {0.385 * s * e:.4g} MPa: UG-27(c)(1) does "
+                              "not apply; use Mandatory Appendix 1-2.", "outside_applicability")
+    t_circ = p * r / (s * e - 0.6 * p)
+    t_long = p * r / (2.0 * s * e + 0.4 * p)
+    t_req = max(t_circ, t_long)
+    if t_req > r / 2.0 or t > r / 2.0:
+        return _not_evaluated(clause, "Thick shell (t > R/2): UG-27(c) does not apply; use Mandatory Appendix 1-2.",
+                              "outside_applicability")
+    return _ug27_result(clause, t_req, t, [f"circumferential (c)(1): t = {t_circ:.4g} mm",
+                                          f"longitudinal (c)(2): t = {t_long:.4g} mm"])
+
+
+def _ug27_sphere(clause: str, p: float, r: float, s: float, e: float, t: float) -> dict[str, Any]:
+    """UG-27(d): t = PR/(2SE - 0.2P), valid for t <= 0.356 R and P <= 0.665 SE."""
+    if p > 0.665 * s * e:
+        return _not_evaluated(clause, f"P = {p} MPa exceeds 0.665 S E = {0.665 * s * e:.4g} MPa: UG-27(d) does not "
+                              "apply; use Mandatory Appendix 1-3.", "outside_applicability")
+    t_req = p * r / (2.0 * s * e - 0.2 * p)
+    if t_req > 0.356 * r or t > 0.356 * r:
+        return _not_evaluated(clause, "Thick sphere (t > 0.356 R): UG-27(d) does not apply; use Mandatory Appendix "
+                              "1-3.", "outside_applicability")
+    return _ug27_result(clause, t_req, t, [f"sphere (d): t = {t_req:.4g} mm"])
+
+
+_UG27_EVALUATORS = {"ASME_VIII_1_UG27_CYL": _ug27_cylinder, "ASME_VIII_1_UG27_SPH": _ug27_sphere}
 
 
 STANDARDS_CATALOG: dict[str, StandardClause] = {
     "ASME_VIII_1_UG27_CYL": StandardClause(
         standard_id="ASME_VIII_1_UG27_CYL",
-        title="ASME Section VIII Div 1 UG-27(c)(1) Cylindrical Shells Under Internal Pressure",
-        clause_ref="ASME BPVC VIII-1 UG-27(c)(1)",
+        title="ASME Section VIII Div 1 UG-27(c) Cylindrical Shells Under Internal Pressure",
+        clause_ref="ASME BPVC VIII-1 UG-27(c)",
         description="Minimum required thickness of cylindrical shells under internal design pressure.",
         required_inputs=[
             "pressure_mpa",
@@ -188,7 +259,7 @@ STANDARDS_CATALOG: dict[str, StandardClause] = {
             "joint_efficiency",
             "wall_thickness_mm",
         ],
-        formula_latex=r"t = \frac{P \cdot R}{S \cdot E - 0.6 P}",
+        formula_latex=r"t = \max\left(\frac{P R}{S E - 0.6 P}, \frac{P R}{2 S E + 0.4 P}\right)",
     ),
     "ASME_VIII_1_UG27_SPH": StandardClause(
         standard_id="ASME_VIII_1_UG27_SPH",
@@ -206,30 +277,40 @@ STANDARDS_CATALOG: dict[str, StandardClause] = {
     ),
 }
 
-# CODATA 2022 Fundamental Physical Constants
+# CODATA fundamental physical constants, read from scipy.constants (the same source as tribos.physis) so the two
+# never diverge; standard gravity is a defined conventional value.
 CODATA_CONSTANTS: dict[str, tuple[float, str]] = {
-    "speed_of_light": (299792458.0, "m/s"),
-    "planck_constant": (6.62607015e-34, "J*s"),
-    "gravitational_constant": (6.67430e-11, "m^3/(kg*s^2)"),
-    "standard_gravity": (9.80665, "m/s^2"),
-    "boltzmann_constant": (1.380649e-23, "J/K"),
-    "elementary_charge": (1.602176634e-19, "C"),
-    "avogadro_constant": (6.02214076e23, "1/mol"),
-    "gas_constant": (8.314462618, "J/(mol*K)"),
+    "speed_of_light": (_sc.c, "m/s"),
+    "planck_constant": (_sc.h, "J*s"),
+    "gravitational_constant": (_sc.G, "m^3/(kg*s^2)"),
+    "standard_gravity": (_sc.g, "m/s^2"),
+    "boltzmann_constant": (_sc.k, "J/K"),
+    "elementary_charge": (_sc.e, "C"),
+    "avogadro_constant": (_sc.N_A, "1/mol"),
+    "gas_constant": (_sc.R, "J/(mol*K)"),
 }
+
+
+def _norm_material(text: str) -> str:
+    return " ".join(text.strip().lower().replace("_", " ").replace("-", " ").split())
+
+
+def find_material(name_or_key: str) -> MaterialRecord | None:
+    """Exact catalogue key, full name or alias (case, '-', '_' and spacing ignored); never a substring guess."""
+    q = _norm_material(name_or_key or "")
+    if not q:
+        return None
+    for key, mat in MATERIALS_CATALOG.items():
+        if q in {_norm_material(key), _norm_material(mat.name), *(_norm_material(a) for a in mat.aliases)}:
+            return mat
+    return None
 
 
 class SemanticMemory:
     """Query interface for materials, standards, and physical constants."""
 
     def get_material(self, name_or_key: str) -> MaterialRecord | None:
-        key = name_or_key.strip().lower().replace("-", "_").replace(" ", "_")
-        if key in MATERIALS_CATALOG:
-            return MATERIALS_CATALOG[key]
-        for mat in MATERIALS_CATALOG.values():
-            if key in mat.name.lower().replace("-", "_").replace(" ", "_"):
-                return mat
-        return None
+        return find_material(name_or_key)
 
     def list_materials(self) -> list[str]:
         return [m.name for m in MATERIALS_CATALOG.values()]

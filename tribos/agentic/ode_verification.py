@@ -33,7 +33,7 @@ _ASKS_FOR_CHECKS_RE = re.compile(
 
 # The answer shape for a worked engineering problem with computed verification (added to the research brief).
 ENGINEERING_REPORT_NOTE = (
-    "ANSWER SHAPE (engineering report). Open with 2-4 sentences: what the system is, what was derived and computed, "
+    "ANSWER SHAPE (engineering report). Open with the few sentences that say what the system is, what was derived and computed, "
     "and the key results with units. Then numbered sections that follow the question's tasks in order, for example: "
     "1. Analytical solution (Step 1 transient part, Step 2 steady-state part, Step 3 initial conditions, then the final "
     "result in display math); 2. Characteristic parameters as a table (Quantity | Formula | Result); 3. Numerical "
@@ -144,7 +144,12 @@ class ODEVerificationPhase(AgentPhase):
         # Also a (non-rendered) result, so the verifier's parameter check can compare the answer with these numbers.
         state.add_result(PHASE_KEY, ToolResult(success=True, tool_name=PHASE_KEY, data=rep), phase=PHASE_KEY,
                          purpose="numerical verification of the solved ODE", render=False)
-        state.brief_notes.append(ENGINEERING_REPORT_NOTE)
+        if re.search(r"engineering\s+report|energy\s+balance|physical\s+interpretation|full\s+report", query, re.I):
+            state.brief_notes.append(ENGINEERING_REPORT_NOTE)
+        else:
+            state.brief_notes.append("Report only the ODE results and checks the user requested, using the executed "
+                                     "values from <ode_verification>. The card holds additional verification details; "
+                                     "do not add unrequested energy, parameter, or reproducibility report sections.")
         conv = rep["convergence"]
         orders = [r["observed_order"] for r in conv if "observed_order" in r]
         text = (

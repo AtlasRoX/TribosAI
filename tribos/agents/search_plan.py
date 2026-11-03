@@ -58,7 +58,7 @@ _TYPE_PATTERNS = [
                 r"validate|culture|clone|isolate|knock)|protocol|assay|workflow|pipeline|experimental\s+design|best\s+practices?)\b"),
     ("target", r"\b(druggab\w*|therapeutic\s+targets?|target\s+(?:validation|assessment)|tractab\w*)\b"),
     ("guideline", r"\b(guidelines?|consensus\s+statements?|standard\s+of\s+care|practice\s+parameters?)\b"),
-    ("regulatory", r"\b(fda|ema|mhra|pmda|approv\w*|labell?(?:ed|ing)|indications?|authori[sz]ed)\b"),
+    ("regulatory", r"\b(fda|ema|mhra|pmda|approv\w*|labell?ing|(?:off|on)[- ]label\w*|indications?|authori[sz]ed)\b"),
     ("trials", r"\b(trials?|phase\s*(?:[1-4]|i{1,3}v?|iv)\b|nct\d{8}|enrol\w*)"),
     ("safety", r"\b(adverse\s+(?:events?|effects?|reactions?)|toxicit\w*|safety|side[\s\-]effects?|contraindicat\w*|"
                r"black\s+box|cardiotoxic\w*|hepatotoxic\w*|interactions?)\b"),

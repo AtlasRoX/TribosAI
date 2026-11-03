@@ -3,14 +3,18 @@
 Exposes REST endpoints for:
 - Server-side conversation sessions (F-17)
 - Answer revision tree & diffing (F-16)
-- Durable execution run resumption (F-18)
-- Artifact-level HITL sign-off & annotation (F-19)
-- OpenTelemetry GenAI tracing & monetary cost tracking (F-14 / F-15)
-- Engineering Substrate: Materials lookup, ASME compliance, CAE 14-gate review
+- Run checkpoints (F-18): stored checkpoints can be read back; this API does not re-execute a run
+- Artifact-level HITL sign-off & annotation (F-19), signed with a server HMAC key
+- Monetary cost records (F-14 / F-15)
+- Engineering Substrate: materials lookup, ASME UG-27 thickness check, five-gate CAE screen
+
+Authorization (AUDIT-004): project-scoped data uses the project store's membership model (a non-member gets 404, a
+viewer may read, owners and editors may write); run-scoped data needs a run the caller owns in the run store.
 """
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -21,12 +25,15 @@ from tribos.harness.cost_ledger import CostLedger
 from tribos.harness.durable import DurableExecutionHarness
 from tribos.harness.hitl import ArtifactHITLManager
 from tribos.memory import get_memory_engine
+from tribos.provenance.run_store import get_run_store, valid_run_id
 from tribos.substrate import (
     CAEReviewer,
     check_asme_compliance,
     get_material,
     list_materials,
 )
+from tribos.substrate.materials import material_properties
+from tribos.utils.memory.project_store import get_project_store
 
 router = APIRouter(prefix="/api/harness", tags=["harness"])
 
@@ -35,6 +42,37 @@ _mem_engine = get_memory_engine()
 _durable_harness = DurableExecutionHarness()
 _cost_ledger = CostLedger()
 _hitl_manager = ArtifactHITLManager()
+
+_WRITE_ROLES = ("owner", "editor")
+
+
+def _require_project(project_id: str, user: str, *, write: bool = False) -> str:
+    """The caller's role in the project; 404 for a non-member (existence is not revealed), 403 for a viewer writing."""
+    role = get_project_store().role(project_id, user)
+    if role is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if write and role not in _WRITE_ROLES:
+        raise HTTPException(status_code=403, detail=f"This needs the owner or editor role; you are a {role}.")
+    return role
+
+
+def _require_thread(thread_id: str, user: str, *, write: bool = False) -> str:
+    project_id = _mem_engine.get_thread_project(thread_id)
+    if project_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    try:
+        _require_project(project_id, user, write=write)
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            raise HTTPException(status_code=404, detail="Thread not found") from exc
+        raise
+    return project_id
+
+
+async def _require_run(run_id: str, user: str) -> None:
+    manifest = await asyncio.to_thread(get_run_store().load, user, run_id) if valid_run_id(run_id) else None
+    if manifest is None:
+        raise HTTPException(status_code=404, detail="Run not found")
 
 
 # Request / Response Schemas ------------------------------------------------------------------
@@ -54,7 +92,6 @@ class AnswerRevisionCreateRequest(BaseModel):
     summary: str = ""
     branch_name: str = "main"
     parent_id: str | None = None
-    author: str = "agent"
     metadata: dict[str, Any] | None = None
 
 
@@ -67,6 +104,9 @@ class ArtifactSignOffRequest(BaseModel):
     project_id: str
     action: str = Field(..., pattern="^(approved|rejected|rework_requested|annotated)$")
     comments: str = ""
+    content_sha256: str | None = Field(
+        default=None, pattern="^[0-9a-f]{64}$", description="sha256 of the exact artifact content being signed off"
+    )
     metadata: dict[str, Any] | None = None
 
 
@@ -82,6 +122,7 @@ class ASMEComplianceRequest(BaseModel):
     allowable_stress_mpa: float
     wall_thickness_mm: float
     joint_efficiency: float = 1.0
+    corrosion_allowance_mm: float = 0.0
 
 
 class CAEReviewRequest(BaseModel):
@@ -91,7 +132,7 @@ class CAEReviewRequest(BaseModel):
     fine_stress_mpa: float
     yield_strength_mpa: float
     analytical_stress_mpa: float
-    stress_gradient_ratio: float = 1.8
+    stress_gradient_ratio: float | None = None
 
 
 # Sessions & Conversations (F-17) -------------------------------------------------------------
@@ -101,7 +142,8 @@ async def create_thread(
     req: ThreadCreateRequest,
     user: str = Depends(get_current_user),
 ) -> dict[str, Any]:
-    tid = _mem_engine.create_thread(project_id, req.title, req.metadata)
+    _require_project(project_id, user, write=True)
+    tid = _mem_engine.create_thread(project_id, req.title, {**(req.metadata or {}), "created_by": user})
     return {"thread_id": tid, "project_id": project_id, "title": req.title}
 
 
@@ -110,6 +152,7 @@ async def list_threads(
     project_id: str,
     user: str = Depends(get_current_user),
 ) -> dict[str, Any]:
+    _require_project(project_id, user)
     threads = _mem_engine.list_project_threads(project_id)
     return {"project_id": project_id, "threads": threads}
 
@@ -120,7 +163,8 @@ async def add_thread_turn(
     req: TurnCreateRequest,
     user: str = Depends(get_current_user),
 ) -> dict[str, Any]:
-    turn_id = _mem_engine.add_turn(thread_id, req.role, req.content, req.metadata)
+    _require_thread(thread_id, user, write=True)
+    turn_id = _mem_engine.add_turn(thread_id, req.role, req.content, {**(req.metadata or {}), "author": user})
     return {"turn_id": turn_id, "thread_id": thread_id}
 
 
@@ -130,6 +174,7 @@ async def get_thread_turns(
     limit: int = Query(default=50, ge=1, le=200),
     user: str = Depends(get_current_user),
 ) -> dict[str, Any]:
+    _require_thread(thread_id, user)
     turns = _mem_engine.get_thread_turns(thread_id, limit=limit)
     return {
         "thread_id": thread_id,
@@ -153,13 +198,18 @@ async def create_revision(
     req: AnswerRevisionCreateRequest,
     user: str = Depends(get_current_user),
 ) -> dict[str, Any]:
+    _require_project(project_id, user, write=True)
+    if req.parent_id is not None:
+        parent = _mem_engine.get_answer_revision(req.parent_id)
+        if parent is None or parent.project_id != project_id:
+            raise HTTPException(status_code=404, detail="Parent revision not found in this project")
     rev = _mem_engine.create_answer_revision(
         project_id=project_id,
         content=req.content,
         summary=req.summary,
         branch_name=req.branch_name,
         parent_id=req.parent_id,
-        author=req.author,
+        author=user,  # the authenticated caller, never a client-supplied name
         metadata=req.metadata,
     )
     return {"revision_id": rev.id, "version_number": rev.version_number, "branch": rev.branch_name}
@@ -171,6 +221,7 @@ async def list_revisions(
     branch: str | None = None,
     user: str = Depends(get_current_user),
 ) -> dict[str, Any]:
+    _require_project(project_id, user)
     revs = _mem_engine.list_answer_revisions(project_id, branch_name=branch)
     return {
         "project_id": project_id,
@@ -195,18 +246,23 @@ async def diff_revisions(
     req: AnswerDiffRequest,
     user: str = Depends(get_current_user),
 ) -> dict[str, Any]:
+    revs = [_mem_engine.get_answer_revision(req.rev_id_a), _mem_engine.get_answer_revision(req.rev_id_b)]
+    for rev in revs:
+        if rev is None or get_project_store().role(rev.project_id, user) is None:
+            raise HTTPException(status_code=404, detail="Revision not found")
     try:
         return _mem_engine.diff_answer_revisions(req.rev_id_a, req.rev_id_b)
     except Exception as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-# Durable Execution & Run Resumption (F-18) ----------------------------------------------------
+# Run checkpoints (F-18) ------------------------------------------------------------------------
 @router.get("/runs/{run_id}/checkpoints")
 async def list_checkpoints(
     run_id: str,
     user: str = Depends(get_current_user),
 ) -> dict[str, Any]:
+    await _require_run(run_id, user)
     chks = _durable_harness.list_checkpoints(run_id)
     return {
         "run_id": run_id,
@@ -228,11 +284,13 @@ async def resume_run(
     run_id: str,
     user: str = Depends(get_current_user),
 ) -> dict[str, Any]:
+    """Return the latest stored checkpoint of the caller's run. Nothing is re-executed by this endpoint."""
+    await _require_run(run_id, user)
     try:
         res = _durable_harness.prepare_resumption(run_id)
-        return {"status": "resumed", **res}
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"status": "checkpoint_loaded", "executed": False, **res}
 
 
 # Artifact-Level HITL Sign-Off (F-19) ---------------------------------------------------------
@@ -242,20 +300,23 @@ async def sign_off_artifact(
     req: ArtifactSignOffRequest,
     user: str = Depends(get_current_user),
 ) -> dict[str, Any]:
-    reviewer_id = str(user or "engineer")
+    _require_project(req.project_id, user, write=True)
     review = _hitl_manager.sign_off_artifact(
         artifact_id=artifact_id,
         project_id=req.project_id,
-        reviewer_id=reviewer_id,
+        reviewer_id=user,
         action=req.action,
         comments=req.comments,
         metadata=req.metadata,
+        content_sha256=req.content_sha256,
     )
     return {
         "review_id": review.id,
         "artifact_id": review.artifact_id,
         "action": review.action,
         "signature_hash": review.signature_hash,
+        "signature": "hmac-sha256",
+        "content_bound": bool(req.content_sha256),
     }
 
 
@@ -264,30 +325,38 @@ async def list_artifact_reviews(
     artifact_id: str,
     user: str = Depends(get_current_user),
 ) -> dict[str, Any]:
-    reviews = _hitl_manager.list_artifact_reviews(artifact_id)
+    store = get_project_store()
+    reviews = [r for r in _hitl_manager.list_artifact_reviews(artifact_id) if store.role(r.project_id, user)]
     return {
         "artifact_id": artifact_id,
         "reviews": [
             {
                 "id": r.id,
+                "project_id": r.project_id,
                 "reviewer_id": r.reviewer_id,
                 "action": r.action,
                 "comments": r.comments,
                 "created_at": r.created_at,
                 "signature_hash": r.signature_hash,
+                "signature_valid": _hitl_manager.verify_signature(r),
+                "content_sha256": (r.metadata or {}).get("content_sha256"),
             }
             for r in reviews
         ],
     }
 
 
-# Monetary Cost & Tracing (F-14 / F-15) -------------------------------------------------------
+# Monetary Cost (F-14 / F-15) -----------------------------------------------------------------
+_COST_NOTE = "Only usage explicitly recorded in the cost ledger is counted; zero calls means nothing was recorded."
+
+
 @router.get("/runs/{run_id}/cost")
 async def get_run_cost(
     run_id: str,
     user: str = Depends(get_current_user),
 ) -> dict[str, Any]:
-    return _cost_ledger.get_run_cost(run_id)
+    await _require_run(run_id, user)
+    return {**_cost_ledger.get_run_cost(run_id), "note": _COST_NOTE}
 
 
 @router.get("/projects/{project_id}/spend")
@@ -295,10 +364,11 @@ async def get_project_spend(
     project_id: str,
     user: str = Depends(get_current_user),
 ) -> dict[str, Any]:
-    return _cost_ledger.get_project_spend(project_id)
+    _require_project(project_id, user)
+    return {**_cost_ledger.get_project_spend(project_id), "note": _COST_NOTE}
 
 
-# Substrate: Materials, Standards, CAD & CAE --------------------------------------------------
+# Substrate: Materials, Standards, CAE --------------------------------------------------------
 @router.get("/substrate/materials")
 async def get_materials_catalog(
     user: str = Depends(get_current_user),
@@ -313,18 +383,8 @@ async def lookup_material(
 ) -> dict[str, Any]:
     mat = get_material(req.material_name)
     if not mat:
-        raise HTTPException(status_code=404, detail=f"Material '{req.material_name}' not found")
-    return {
-        "name": mat.name,
-        "category": mat.category,
-        "density_kg_m3": mat.density_kg_m3,
-        "poisson_ratio": mat.poisson_ratio,
-        "yield_strength_mpa": mat.yield_at_temp(req.temperature_celsius),
-        "ultimate_strength_mpa": mat.ultimate_strength_mpa,
-        "e_modulus_gpa": mat.e_at_temp(req.temperature_celsius),
-        "thermal_conductivity_w_mk": mat.thermal_conductivity_w_mk,
-        "temperature_celsius": req.temperature_celsius,
-    }
+        raise HTTPException(status_code=404, detail=f"Material '{req.material_name}' is not an exact catalogue name or alias")
+    return material_properties(mat, req.temperature_celsius)
 
 
 @router.post("/substrate/standards/check")
@@ -338,6 +398,7 @@ async def evaluate_standard(
         "allowable_stress_mpa": req.allowable_stress_mpa,
         "wall_thickness_mm": req.wall_thickness_mm,
         "joint_efficiency": req.joint_efficiency,
+        "corrosion_allowance_mm": req.corrosion_allowance_mm,
     }
     return check_asme_compliance(params, clause_id=req.clause_id)
 

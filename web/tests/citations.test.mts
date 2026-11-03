@@ -176,3 +176,23 @@ test("identifier grammar matches Tribos STEM identifiers", () => {
     assert.deepEqual(keys, c.keys, c.text);
   }
 });
+
+test("an author-year citation with its identifier becomes one chip named by the authors", () => {
+  // Live answer: "[Bruschi et al., 2023 | arXiv:2309.17452]" showed raw brackets around an identifier chip.
+  const p = el("p", [text("It is as yet unproven [Bruschi et al., 2023 | arXiv:2309.17452], and (arXiv:2309.17452) agrees.")]);
+  run(root(p));
+  const chips = anchors(p);
+  assert.equal(chips.length, 2);
+  assert.equal(chips[0].children![0].value, "Bruschi et al., 2023");
+  assert.equal(chips[0].properties!.dataCiteOccurrence, "0");
+  assert.equal(chips[1].properties!.dataCiteOccurrence, "1");
+  assert.equal(p.children![0].value, "It is as yet unproven ");
+  assert.ok(!JSON.stringify(p).includes("[Bruschi"));
+});
+
+test("an author-year bracket with an unknown identifier is left as written", () => {
+  const p = el("p", [text("See [Someone, 2020 | arXiv:1111.11111] here.")]);
+  run(root(p));
+  assert.equal(anchors(p).length, 0);
+  assert.equal(p.children![0].value, "See [Someone, 2020 | arXiv:1111.11111] here.");
+});

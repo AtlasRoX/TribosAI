@@ -154,9 +154,23 @@ def resolve_spec(spec: Mapping[str, Any]) -> dict[str, Any]:
         raise SpecError(f"The time span may be at most {MAX_DURATION:g} long.")
 
     method = str(spec.get("method") or base.get("method") or "RK45").strip()
-    match = next((m for m in METHODS if m.lower() == method.lower()), None)
+    match = next((m for m in (*METHODS, "RK4") if m.lower() == method.lower()), None)
     if match is None:
         raise SpecError(f"Unknown integration method {method!r}; use one of {', '.join(METHODS)}.")
+    fixed: dict[str, Any] = {}
+    if match == "RK4":
+        if spec.get("step_size") is None and spec.get("num_steps") is None:
+            raise SpecError("Fixed-step RK4 needs the original step_size or num_steps; it was not replaced by RK45.")
+        if spec.get("step_size") is not None:
+            h = _finite(spec["step_size"], "step_size")
+            if h <= 0:
+                raise SpecError("step_size must be positive.")
+            fixed["step_size"] = h
+        if spec.get("num_steps") is not None:
+            count = spec["num_steps"]
+            if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 9999:
+                raise SpecError("num_steps must be an integer from 1 to 9999.")
+            fixed["num_steps"] = count
     return {
         "rhs": rhs,
         "parameters": parameters,
@@ -164,6 +178,7 @@ def resolve_spec(spec: Mapping[str, Any]) -> dict[str, Any]:
         "t_span": [t0, t1],
         "method": match,
         "model_name": model_name,
+        **fixed,
     }
 
 
@@ -217,6 +232,7 @@ def simulate(spec: Mapping[str, Any], num_points: int = 400, deadline: float | N
         method=resolved["method"],
         num_points=n_pts,
         model_name=name if same_model else None,
+        **{k: resolved[k] for k in ("step_size", "num_steps") if k in resolved},
     )
     result["model_name"] = name
     result["spec"] = resolved
@@ -355,6 +371,8 @@ def bifurcation(
     """
     started = time.monotonic()
     resolved = resolve_spec(spec)
+    if resolved["method"] == "RK4":
+        raise SpecError("The bifurcation sweep uses adaptive integration; select that method explicitly for exploration. The original fixed-step result was not changed.")
     param = _name(parameter, "Parameter")
     if param not in resolved["parameters"]:
         raise SpecError(f"{param!r} is not a parameter of this model ({', '.join(resolved['parameters']) or 'none'}).")

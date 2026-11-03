@@ -8,15 +8,23 @@ Engines run in this order and each is optional:
 
 The result names the engines that ran. Numbers in the vision model's transcription that OCR never read are listed in
 `unconfirmed_numbers`: either OCR missed them or the model invented them, and the reader is asked to check them.
+
+Speed: OCR takes well under a second; the vision model, with thinking off, a second or two. A PDF page that carries
+a text layer is not OCR'd: its text is exact and instant, and it is the vision model's draft instead. PDF pages are
+read concurrently (OCR one page at a time, vision calls in parallel). A transcription that drops a large part of the
+draft's words is not trusted: the draft (OCR or text layer) is used instead, so no line is silently lost.
 """
 
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import logging
 import re
+import threading
 import time
+from collections import OrderedDict
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -30,6 +38,14 @@ PDF_TYPE = "application/pdf"
 PDF_SCALE = 2.0  # render scale (144 dpi): small print stays legible for recognition
 MAX_TEXT_CHARS = 8000
 _NUMBER_RE = re.compile(r"(?<![\w.])\d+(?:\.\d+)?(?![\w.])")
+_WORD_RE = re.compile(r"[A-Za-z]{3,}|\d+(?:\.\d+)?")
+MIN_TEXT_LAYER_CHARS = 40  # a PDF page with less embedded text than this is treated as scanned
+MIN_COVERAGE = 0.75  # share of the draft's words a transcription must keep to be trusted
+PAGE_CONCURRENCY = 4
+_ocr_lock = threading.Lock()
+# Finished readings by (content hash, provider): the same image pasted again, or rotated back, is answered at once.
+_CACHE: OrderedDict[tuple[str, str], ImageReading] = OrderedDict()
+_CACHE_SIZE = 64  # one OCR at a time: the engine is CPU-bound and its thread safety is not documented
 
 
 class ImageReadError(ValueError):
@@ -77,7 +93,9 @@ def _decode(data: bytes, content_type: str) -> Any:
     return image
 
 
-def _png(image: Any, max_side: int = 1600) -> bytes:
+# Measured with muse-spark-1.3: the image's size sets the prompt tokens (1200 px: 794, 768 px: 374), and with them the
+# latency; 1280 px keeps small print legible.
+def _png(image: Any, max_side: int = 1280) -> bytes:
     """The image as PNG for a vision model, its long side at most max_side (vision encoders tile larger inputs)."""
     import cv2
 
@@ -101,18 +119,34 @@ def unconfirmed_numbers(transcription: str, ocr_text: str) -> list[str]:
     return out[:12]
 
 
+def coverage(transcription: str, draft: str) -> float:
+    """Share of the draft's words and numbers that the transcription contains (1.0 for a draft with few words)."""
+    words = [w.lower() for w in _WORD_RE.findall(draft)]
+    if len(words) < 8:
+        return 1.0
+    have = {w.lower() for w in _WORD_RE.findall(transcription)}
+    return sum(w in have for w in words) / len(words)
+
+
 def question_text(markdown: str) -> str:
     """OCR markdown as question text: layout headings ("## Problem 3. ...") become plain lines."""
     return re.sub(r"(?m)^#{1,6}\s+", "", markdown).strip()
 
 
+_NO_FIGURE_RE = re.compile(
+    r"(?im)^\s*\**figure:?\**\s*:?\s*(?:none\.?|n/?a\.?|no figure.*|(?:the|this) (?:image|page) (?:contains|has) "
+    r"(?:only text|no (?:figure|diagram|graph|table)).*|there is no (?:figure|diagram|graph|table).*)\s*$\n?")
+
+
 def _strip_fences(text: str) -> str:
     m = re.fullmatch(r"\s*```(?:markdown|md|latex)?\s*\n(.*?)\n```\s*", text, re.DOTALL)
-    return m.group(1) if m else text.strip()
+    text = m.group(1) if m else text.strip()
+    # The prompt asks for a "Figure:" section only when there is one; a "Figure: none" line is noise in the question.
+    return _NO_FIGURE_RE.sub("", text).strip()
 
 
-def _pdf_pages(data: bytes) -> tuple[list[Any], int]:
-    """(the first TRIBOS_VISION_MAX_PAGES pages as BGR images, the page count) of a PDF."""
+def _pdf_pages(data: bytes) -> tuple[list[tuple[Any, str]], int]:
+    """([(page image as BGR, its embedded text layer)] for the first TRIBOS_VISION_MAX_PAGES pages, page count)."""
     import numpy as np
     import pypdfium2 as pdfium
 
@@ -125,8 +159,13 @@ def _pdf_pages(data: bytes) -> tuple[list[Any], int]:
         total = len(doc)
         pages = []
         for i in range(min(total, limit)):
-            bitmap = doc[i].render(scale=PDF_SCALE).to_pil().convert("RGB")
-            pages.append(np.ascontiguousarray(np.asarray(bitmap)[:, :, ::-1]))
+            page = doc[i]
+            try:
+                layer = page.get_textpage().get_text_range() or ""
+            except Exception:  # noqa: BLE001 - no text layer
+                layer = ""
+            bitmap = page.render(scale=PDF_SCALE).to_pil().convert("RGB")
+            pages.append((np.ascontiguousarray(np.asarray(bitmap)[:, :, ::-1]), layer.replace("\r\n", "\n").strip()))
         return pages, total
     finally:
         doc.close()
@@ -134,6 +173,25 @@ def _pdf_pages(data: bytes) -> tuple[list[Any], int]:
 
 async def read_image(data: bytes, content_type: str = "", filename: str = "image") -> ImageReading:
     """Read one image, or each page of a PDF, into question text (see the module docstring)."""
+    started = time.time()
+    key = (hashlib.sha256(data).hexdigest(), vlm.provider())
+    cached = _CACHE.get(key)
+    if cached is not None:
+        _CACHE.move_to_end(key)
+        hit = copy.deepcopy(cached)
+        hit.filename = filename[:120] or hit.filename
+        hit.seconds = round(time.time() - started, 2)
+        return hit
+    reading = await _read_uncached(data, content_type, filename)
+    # Only complete readings are kept: a failed vision check is tried again next time.
+    if reading.vision_checked or vlm.provider() == "ocr":
+        _CACHE[key] = copy.deepcopy(reading)
+        while len(_CACHE) > _CACHE_SIZE:
+            _CACHE.popitem(last=False)
+    return reading
+
+
+async def _read_uncached(data: bytes, content_type: str, filename: str) -> ImageReading:
     if (content_type or "").lower() != PDF_TYPE:
         return await _read_decoded(_decode(data, content_type), data, filename)
     limit = int(get_int("TRIBOS_VISION_MAX_MB")) * 1024 * 1024
@@ -143,7 +201,14 @@ async def read_image(data: bytes, content_type: str = "", filename: str = "image
     pages, total = await asyncio.to_thread(_pdf_pages, data)
     if not pages:
         raise ImageReadError("The PDF has no pages.")
-    readings = [await _read_decoded(img, data + bytes([i]), filename) for i, img in enumerate(pages)]
+    gate = asyncio.Semaphore(PAGE_CONCURRENCY)
+
+    async def one(i: int, img: Any, layer: str) -> ImageReading:
+        async with gate:
+            draft = layer if len(layer) >= MIN_TEXT_LAYER_CHARS else None
+            return await _read_decoded(img, data + bytes([i]), filename, text_layer=draft)
+
+    readings = list(await asyncio.gather(*(one(i, img, layer) for i, (img, layer) in enumerate(pages))))
     first = readings[0]
     merged = ImageReading(id="img_" + hashlib.sha256(data).hexdigest()[:16], filename=first.filename,
                           width=first.width, height=first.height, text="", pages=len(pages))
@@ -163,15 +228,31 @@ async def read_image(data: bytes, content_type: str = "", filename: str = "image
     return merged
 
 
-async def _read_decoded(image: Any, data: bytes, filename: str) -> ImageReading:
+def _ocr_read(image: Any) -> Any:
+    with _ocr_lock:
+        return ocr.read(image)
+
+
+async def _read_decoded(image: Any, data: bytes, filename: str, text_layer: str | None = None) -> ImageReading:
+    """One image or page. `text_layer`: a PDF page's embedded text, which replaces OCR as the draft."""
     started = time.time()
     h, w = image.shape[:2]
     reading = ImageReading(id="img_" + hashlib.sha256(data).hexdigest()[:16], filename=filename[:120] or "image",
                            width=int(w), height=int(h), text="")
 
-    if ocr.available():
+    png = _png(image)
+    chosen = vlm.provider()
+    # The NIM call starts now, alongside OCR, instead of waiting for the OCR draft: OCR takes about 0.4 s and the
+    # call about 1 s, so the reading takes the longer of the two rather than their sum. The OCR text still checks the
+    # result afterwards (coverage and unconfirmed numbers). A PDF text layer is instant and exact, so it stays the draft.
+    remote = asyncio.create_task(vlm.transcribe_remote(png, text_layer or "")) if chosen == "remote" else None
+
+    if text_layer:
+        reading.ocr_text = text_layer
+        reading.engines.append("text layer")
+    elif ocr.available():
         try:
-            result = await asyncio.to_thread(ocr.read, image)
+            result = await asyncio.to_thread(_ocr_read, image)
             reading.ocr_text = question_text(result.markdown)
             reading.ocr_confidence = round(result.mean_conf, 3) if result.lines else None
             reading.engines.append("text recognition")
@@ -183,9 +264,7 @@ async def _read_decoded(image: Any, data: bytes, filename: str) -> ImageReading:
         logger.warning("Text recognition unavailable: pip install indra-ocr")
         reading.warnings.append("Text recognition is not installed on the server.")
 
-    png = _png(image)
     text = ""
-    chosen = vlm.provider()
 
     async def run_local() -> str:
         model = await asyncio.to_thread(vlm.local_model)
@@ -203,9 +282,9 @@ async def _read_decoded(image: Any, data: bytes, filename: str) -> ImageReading:
             logger.info("Image %s checked by local model %s", reading.id, model)
         return out
 
-    if chosen == "nim":
+    if remote is not None:
         try:
-            out, name = await vlm.transcribe_remote(png, reading.ocr_text)
+            out, name = await remote
             text = _strip_fences(out)
             if text:
                 reading.vision_checked = True
@@ -220,7 +299,13 @@ async def _read_decoded(image: Any, data: bytes, filename: str) -> ImageReading:
         text = await run_local()
         if not text:
             logger.warning("No local vision model answered (is Ollama running with a vision model?)")
-    if not reading.vision_checked:
+    if text and reading.ocr_text and coverage(text, reading.ocr_text) < MIN_COVERAGE:
+        logger.warning("Image %s: the vision transcription kept %.0f%% of the draft's words; using the draft",
+                       reading.id, 100 * coverage(text, reading.ocr_text))
+        reading.warnings.append("The vision check left out part of the text, so the text recognition reading is shown.")
+        text = ""
+        reading.vision_checked = False
+    if not reading.vision_checked and not text_layer:
         reading.warnings.append(
             "Only text recognition read this image: check formulas (derivative dots, primes, subscripts) before "
             "sending."
@@ -244,7 +329,7 @@ def vision_status() -> dict[str, Any]:
     return {
         "enabled": bool(get_bool("TRIBOS_VISION")),
         "text_recognition": ocr.available(),
-        "vision_check": vlm.provider() == "nim" or (vlm.provider() == "ollama" and bool(models and vlm.local_model())),
+        "vision_check": vlm.provider() == "remote" or (vlm.provider() == "ollama" and bool(models and vlm.local_model())),
         "accepted_types": sorted(ALLOWED_TYPES),
         "max_mb": int(get_int("TRIBOS_VISION_MAX_MB")),
     }

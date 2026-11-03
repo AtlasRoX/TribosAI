@@ -35,6 +35,8 @@ export interface ComposerImage {
   previewUrl: string;
   /** A small JPEG data URL kept with the sent message (the full image is never stored). */
   thumbUrl: string;
+  /** A larger JPEG (long side 1400 px) for the in-app viewer of a sent message. */
+  viewUrl?: string;
   status: "reading" | "ready" | "error";
   reading?: ImageReading;
   /** The transcription as the user edited it; this is what is sent. */
@@ -42,10 +44,13 @@ export interface ComposerImage {
   error?: string;
 }
 
-/** An image shown on a sent user message: name and thumbnail only. */
+/** An image shown on a sent user message: its name, a thumbnail, a viewer-sized copy and the text read from it. */
 export interface MessageImage {
   name: string;
   thumbUrl?: string;
+  viewUrl?: string;
+  /** The transcription that was sent with the question (what Tribos read from the image). */
+  text?: string;
 }
 
 export const IMAGE_ACCEPT = "image/png,image/jpeg,image/webp,image/bmp,image/tiff,application/pdf";
@@ -81,7 +86,7 @@ export async function makeThumbnail(file: File, side = 160): Promise<string> {
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL("image/jpeg", 0.72);
+    return canvas.toDataURL("image/jpeg", side > 400 ? 0.82 : 0.72);
   } catch {
     return "";
   } finally {
@@ -153,7 +158,12 @@ export const DEFAULT_IMAGE_QUESTION = "Solve the problem in the attached image, 
 
 /** What a sent message keeps of its images: names and small thumbnails. */
 export function sentImages(images: ComposerImage[]): MessageImage[] {
-  return images.filter((i) => i.status === "ready").map((i) => ({ name: i.name, thumbUrl: i.thumbUrl || undefined }));
+  return images.filter((i) => i.status === "ready").map((i) => ({
+    name: i.name,
+    thumbUrl: i.thumbUrl || undefined,
+    viewUrl: i.viewUrl || undefined,
+    text: i.text.trim() ? i.text.trim().slice(0, 8000) : undefined,
+  }));
 }
 
 /** The request field for the chat: the reviewed transcriptions of the images that were read. */

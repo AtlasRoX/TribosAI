@@ -35,7 +35,7 @@ import { SmoothMarkdown } from "@/components/SmoothMarkdown";
 import { ThinkingProcess } from "@/components/ThinkingProcess";
 import { TaskStatusNotice, VerificationNotice, stripVerificationBanner } from "@/components/VerificationNotice";
 import { MessageArtifacts } from "@/components/MessageArtifacts";
-import { MessageActionsExtra } from "@/components/MessageActionsExtra";
+import { AnswerActions, PromptActions, PromptEditor, UnansweredNotice } from "@/components/MessageActions";
 import { FrameworkGuide } from "@/components/FrameworkMenu";
 import { ChatGPTEffortControl } from "@/components/ChatGPTEffortControl";
 import { ComposerAttachButton } from "@/components/ComposerAttachButton";
@@ -75,6 +75,11 @@ import {
 } from "@/services/visionService";
 import { AgentOptionsSettings } from "@/components/agentic/AgentOptionsSettings";
 import { JobsPanel, jobTitle } from "@/components/agentic/JobsPanel";
+import { CodePanel } from "@/components/CodePanel";
+import { ResearchProjects } from "@/components/campaigns/ResearchProjects";
+import { IdChip } from "@/components/IdChip";
+import { FilesStrip, type AnswerFile } from "@/components/FilesStrip";
+import { parseRoute, showRoute, type AppRoute } from "@/lib/appRoute";
 import { jobQuestion } from "@/lib/jobs";
 import { ApprovalCard, ClarificationChips, SteeringNotes, type SteerNote } from "@/components/agentic/LiveRunControls";
 import { ProjectDialog } from "@/components/projects/ProjectDialog";
@@ -82,6 +87,7 @@ import { ProjectView } from "@/components/projects/ProjectView";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { useProjects } from "@/hooks/useProjects";
 import { useSidebarState } from "@/hooks/useSidebarState";
+import { usePanelWidth } from "@/hooks/usePanelWidth";
 import { useThreads } from "@/hooks/useThreads";
 import {
   DEFAULT_HISTORY_PREFS,
@@ -96,11 +102,13 @@ import { ApiContext } from "@/components/ApiContext";
 import { ApiError, apiFetch, errorMessage, errorStatus, jsonInit, readSseEvents, requestJson, type RequestOptions } from "@/services/apiClient";
 import { ArtifactRenderFallback, ErrorBoundary, MessageRenderFallback } from "@/components/ErrorBoundary";
 import { useFocusTrap } from "@/lib/useFocusTrap";
-import { generateDynamicTitle } from "@/lib/dynamicTitle";
+import { generateDynamicTitle, plainMath } from "@/lib/dynamicTitle";
 import { normalizeLegacyAgentName, normalizeThoughtAgents } from "@/lib/legacyNames";
 import { DEFAULT_MODEL_ID, migrateSavedModel } from "@/lib/modelMigration";
 import { finalizeThoughts, mergeThought } from "@/components/agentic/thoughts";
 import { renderableAnswer, resolveAnswer } from "@/lib/assistantAnswer";
+import { parseAnswerUi, type AnswerUi } from "@/lib/genui";
+import { AnswerUiPanel } from "@/components/genui/GenUI";
 import { entitySummary, memoryBadgeCount, memoryStatTiles, memoryTypeLabel, verificationStatusLabel } from "@/lib/memoryVault";
 import { Message, ThoughtStep, FrameworkOption } from "@/types/chat";
 import type { MessageAttachment } from "@/types/datasets";
@@ -199,6 +207,17 @@ const FRAMEWORK_LABEL: Record<string, string> = {
 
 const AUTH_TOKEN_STORAGE_KEY = "tribos-auth-token";
 const BACKEND_URL_STORAGE_KEY = "tribos-backend-url";
+const SHOW_DETAILS_KEY = "tribos-show-research-details";
+
+/** The port of a backend URL, for the "start it with uvicorn --port N" hint (8000 when the URL names none). */
+function backendPort(url: string): string {
+  try {
+    const u = new URL(url);
+    return u.port || (u.protocol === "https:" ? "443" : "80");
+  } catch {
+    return "8000";
+  }
+}
 const DEFAULT_MODEL = process.env.NEXT_PUBLIC_DEFAULT_MODEL || DEFAULT_MODEL_ID;
 
 /** A backend base URL the user typed, normalized, or null when it is not an http(s) URL. */
@@ -313,6 +332,24 @@ export default function TribosAssistant() {
   const [credentialsLoaded, setCredentialsLoaded] = useState(false);
   const [historyPrefs, setHistoryPrefs] = useState<HistoryPrefs>(DEFAULT_HISTORY_PREFS);
   const [notifyOnFinish, setNotifyOnFinish] = useState(true);
+  // Clean answers (like Claude): only the answer, a collapsed "Worked for ..." line, Copy and Retry. The research
+  // details (status notices, result cards, evidence, verification, trace, export) show when this is on.
+  const [showDetails, setShowDetails] = useState(false);
+  useEffect(() => {
+    try {
+      setShowDetails(localStorage.getItem(SHOW_DETAILS_KEY) === "1");
+    } catch {
+      // storage blocked: the clean view
+    }
+  }, []);
+  const toggleShowDetails = (next: boolean) => {
+    setShowDetails(next);
+    try {
+      localStorage.setItem(SHOW_DETAILS_KEY, next ? "1" : "0");
+    } catch {
+      // a convenience
+    }
+  };
   useEffect(() => setNotifyOnFinish(finishNoticeEnabled()), []);
   const [storageNotice, setStorageNotice] = useState<StorageNotice | null>(null);
 
@@ -410,6 +447,9 @@ export default function TribosAssistant() {
 
   // Memory Vault State
   const [showMemoryVault, setShowMemoryVault] = useState(false);
+  // The research view (null: closed; id null: the list and new-project form). Mirrored in the URL: /research[/<id>].
+  const [research, setResearch] = useState<{ id: string | null } | null>(null);
+  const routeReadyRef = useRef(false);
   const [memoryStats, setMemoryStats] = useState<MemoryStats | null>(null);
   const [memoryEntities, setMemoryEntities] = useState<MemoryEntity[]>([]);
   const [memorySearchQuery, setMemorySearchQuery] = useState("");
@@ -533,6 +573,9 @@ export default function TribosAssistant() {
   // Streamed tokens accumulate in refs and are flushed to state at most once per animation frame.
   const [liveReasoning, setLiveReasoning] = useState("");
   const [liveContent, setLiveContent] = useState("");
+  // The results panel computed before drafting (answer_ui event): shown above the live answer, so the final
+  // message, which renders the same panel, does not push the text down when it replaces the live view.
+  const [liveAnswerUi, setLiveAnswerUi] = useState<AnswerUi | null>(null);
   const liveReasoningRef = useRef("");
   const liveContentRef = useRef("");
   const liveFlushRef = useRef<number | null>(null);
@@ -554,7 +597,8 @@ export default function TribosAssistant() {
   const [stoppingRun, setStoppingRun] = useState(false);
   const isNearBottomRef = useRef(true);
   const justStreamedIdRef = useRef<string | null>(null);
-  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const activeRunSessionRef = useRef<number>(0);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
 
   // Local storage usage and investigations state
   const [localStorageStats, setLocalStorageStats] = useState<{
@@ -571,6 +615,7 @@ export default function TribosAssistant() {
   // The thread whose question is running; its live panel shows only while that thread is on screen.
   const [streamingThreadId, setStreamingThreadId] = useState<string | null>(null);
   const sidebar = useSidebarState();
+  const sidebarPanel = usePanelWidth("sidebar", { initial: 260, min: 200, max: 440, maxViewport: 0.4 });
   const projectsApi = useProjects(backendUrl, authHeaders);
   // The project page on screen (instead of the conversation), and the create/edit dialog.
   const [projectViewId, setProjectViewId] = useState<string | null>(null);
@@ -600,14 +645,78 @@ export default function TribosAssistant() {
   };
 
   const handleSelectInvestigation = (inv: InvestigationItem) => {
+    // If the previously active conversation was left completely empty (no messages, no draft, not pinned), prune it
+    if (activeThreadId !== inv.id) {
+      const prevMsgs = localStorageService.getMessages(activeThreadId);
+      const prevDraft = localStorageService.getDraft(activeThreadId);
+      if (prevMsgs.length === 0 && !prevDraft.trim()) {
+        const prevInv = investigations.find((i) => i.id === activeThreadId);
+        if (prevInv && !prevInv.pinned) {
+          localStorageService.deleteInvestigation(activeThreadId);
+        }
+      }
+    }
     activeThreadIdRef.current = inv.id;
     setActiveThreadId(inv.id);
     setThreadId(inv.id);
     localStorageService.setActiveThreadId(inv.id);
     const msgs = localStorageService.getMessages(inv.id);
     setMessages(msgs);
+    setInvestigations(localStorageService.getInvestigations());
     refreshLocalStorageStats();
   };
+
+  // ---- Addressable places (lib/appRoute.ts): /research[/<research id>] and /c/<conversation id> ----
+  const openResearch = (id: string | null, push = true) => {
+    setProjectViewId(null);
+    setResearch({ id });
+    showRoute({ kind: "research", id }, push);
+  };
+  const closeResearch = () => {
+    setResearch(null);
+    showRoute(messages.length ? { kind: "chat", id: activeThreadId } : { kind: "home" }, true);
+  };
+  /** Go to a place; a conversation id this browser does not have leaves the view as it is (false). */
+  const openRoute = (route: AppRoute, push: boolean, quiet = false): boolean => {
+    if (route.kind === "research") {
+      openResearch(route.id, push);
+      return true;
+    }
+    if (route.kind === "chat") {
+      const inv = localStorageService.getInvestigations().find((i) => i.id === route.id);
+      if (!inv) {
+        if (!quiet) window.alert(`No conversation with ID ${route.id} in this browser's history.`);
+        return false;
+      }
+      setResearch(null);
+      setProjectViewId(null);
+      if (inv.id !== activeThreadIdRef.current) handleSelectInvestigation(inv);
+      showRoute(route, push);
+      return true;
+    }
+    setResearch(null);
+    showRoute(route, push);
+    return true;
+  };
+  const openRouteRef = useRef(openRoute);
+  useEffect(() => {
+    openRouteRef.current = openRoute;
+  });
+  // The address follows the open conversation (/c/<id>, or / for an empty chat), so it can be bookmarked or shared
+  // with yourself. A research address is left alone: the research view owns it.
+  useEffect(() => {
+    if (!routeReadyRef.current || research) return;
+    if (parseRoute(window.location.pathname).kind === "research") return;
+    showRoute(messages.length ? { kind: "chat", id: activeThreadId } : { kind: "home" }, false);
+  }, [activeThreadId, messages.length, research]);
+  // Back/Forward between chats and research projects.
+  useEffect(() => {
+    const onPop = () => {
+      openRouteRef.current(parseRoute(window.location.pathname), false, true);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
   const handleDeleteInvestigation = (id: string) => {
     if (streamingThreadId === id) {
@@ -658,16 +767,6 @@ export default function TribosAssistant() {
     refreshLocalStorageStats();
   };
 
-  const handleCopyMessage = async (msgId: string, text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopiedMessageId(msgId);
-      setTimeout(() => setCopiedMessageId(null), 2000);
-    } catch (err) {
-      console.error("Failed to copy message:", err);
-    }
-  };
-
   const chatEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -685,19 +784,40 @@ export default function TribosAssistant() {
 
   // UI-007: saved history belongs to one backend + access token. It is (re)loaded once the stored credentials are
   // known and whenever either changes, so another user's token never shows (or deletes) this user's investigations.
+  // Saved history lives in IndexedDB (no 5 MB localStorage ceiling); it is read only once that store has loaded.
+  const [historyReady, setHistoryReady] = useState(false);
   useEffect(() => {
-    if (!credentialsLoaded) return;
+    let live = true;
+    localStorageService.whenReady().finally(() => {
+      if (live) setHistoryReady(true);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!credentialsLoaded || !historyReady) return;
     localStorageService.configure(backendUrl, authToken);
     setHistoryPrefs(localStorageService.getHistoryPrefs());
+    // The address decides where the app opens: /c/<id> opens that conversation, /research[/<id>] the research view.
+    const route = parseRoute(window.location.pathname);
+    const routedChat = route.kind === "chat" && localStorageService.getInvestigations().some((i) => i.id === route.id)
+      ? route.id : null;
+    const initialActiveId = routedChat ?? localStorageService.getActiveThreadId();
+    if (route.kind === "research") setResearch({ id: route.id });
+    else if (route.kind === "chat" && !routedChat) showRoute({ kind: "home" }, false);
+    if (routedChat) localStorageService.setActiveThreadId(routedChat);
+    routeReadyRef.current = true;
+    localStorageService.pruneEmptyThreads(initialActiveId);
     const savedInvs = localStorageService.getInvestigations();
     setInvestigations(savedInvs);
-    const initialActiveId = localStorageService.getActiveThreadId();
     activeThreadIdRef.current = initialActiveId;
     setActiveThreadId(initialActiveId);
     setThreadId(initialActiveId);
     setMessages(localStorageService.getMessages(initialActiveId));
     refreshLocalStorageStats();
-  }, [credentialsLoaded, backendUrl, authToken]);
+  }, [credentialsLoaded, historyReady, backendUrl, authToken]);
 
   // UI-008: slimming, pruning and expiry of saved history are announced, never silent.
   useEffect(() => localStorageService.subscribe((notice) => setStorageNotice(notice)), []);
@@ -781,6 +901,7 @@ export default function TribosAssistant() {
     setLiveThoughts([]);
     setLiveReasoning("");
     setLiveContent("");
+    setLiveAnswerUi(null);
     liveRunIdRef.current = null;
     liveRevisedRef.current = false;
     setLiveRunId(null);
@@ -802,7 +923,7 @@ export default function TribosAssistant() {
     void fetchConversationTitle(backendUrl, authHeaders, queryText, modelToUse, apiKey)
       .then((res) => {
         if (res?.title) {
-          const updated = localStorageService.updateInvestigationTitle(targetThreadId, res.title, false);
+          const updated = localStorageService.updateInvestigationTitle(targetThreadId, plainMath(res.title).trim(), false);
           if (updated) {
             setInvestigations(localStorageService.getInvestigations());
             refreshLocalStorageStats();
@@ -849,6 +970,44 @@ export default function TribosAssistant() {
       answer_revised: liveRevisedRef.current || undefined,
       timestamp: nowTimestamp(),
     };
+  };
+
+  // Index of the user message an answer replies to (-1 when none).
+  const previousUserIndex = (idx: number): number => {
+    for (let i = idx - 1; i >= 0; i--) {
+      if (messages[i]?.sender === "user") return i;
+    }
+    return -1;
+  };
+
+  // Regenerate: drop this answer (and its question, which is sent again) and ask once more; later turns go too.
+  const regenerateAnswer = (idx: number) => {
+    const at = previousUserIndex(idx);
+    if (at < 0 || isProcessing) return;
+    void handleSendMessage(messages[at].content, messages.slice(0, at));
+  };
+
+  // A question with no answer after it: the page reloaded or the connection dropped mid-run. The live question of a
+  // run still streaming in this thread is not one.
+  const isUnanswered = (idx: number): boolean => {
+    if (messages[idx]?.sender !== "user") return false;
+    const next = messages[idx + 1];
+    if (next) return next.sender === "user";
+    return !(isProcessing && streamingThreadId === threadId);
+  };
+
+  const removeMessage = (msgId: string) => {
+    const kept = messages.filter((m) => m.id !== msgId);
+    setMessages(kept);
+    localStorageService.saveMessages(threadId, kept);
+  };
+
+  // Edit a prompt: everything from that prompt on is replaced by the edited question and its new answer.
+  const submitEditedPrompt = (msgId: string, text: string) => {
+    const at = messages.findIndex((m) => m.id === msgId);
+    setEditingMessageId(null);
+    if (at < 0 || isProcessing) return;
+    void handleSendMessage(text, messages.slice(0, at));
   };
 
   // The question an answer replies to: the nearest earlier user message.
@@ -912,7 +1071,12 @@ export default function TribosAssistant() {
    * Handler for one stream event (chat stream or a background job's event log). Thoughts accumulate in
    * `accumulatedThoughts`; the final result is passed to onDone; an error event throws.
    */
-  const createStreamEventHandler = (accumulatedThoughts: ThoughtStep[], onDone: (result: ChatResult | null | undefined) => void) => (event: unknown) => {
+  const createStreamEventHandler = (
+    accumulatedThoughts: ThoughtStep[],
+    onDone: (result: ChatResult | null | undefined) => void,
+    sessionId?: number
+  ) => (event: unknown) => {
+    if (typeof sessionId === "number" && activeRunSessionRef.current !== sessionId) return;
     const parsed = event as StreamEvent | null;
     switch (parsed?.type) {
       case "thought": {
@@ -932,6 +1096,9 @@ export default function TribosAssistant() {
         liveContentRef.current += parsed.delta || "";
         liveResetPendingRef.current = false;
         scheduleLiveFlush();
+        break;
+      case "answer_ui":
+        setLiveAnswerUi(parseAnswerUi(parsed.ui));
         break;
       case "content_reset":
         liveContentRef.current = "";
@@ -991,7 +1158,7 @@ export default function TribosAssistant() {
     return body;
   };
 
-  const handleSendMessage = async (textToSend?: string) => {
+  const handleSendMessage = async (textToSend?: string, baseOverride?: Message[]) => {
     if (composerImages.some((i) => i.status === "reading")) return; // wait until every image has been read
     const withImages = !textToSend && imageContext(composerImages) !== undefined;
     const text = textToSend || inputMessage || (withImages ? DEFAULT_IMAGE_QUESTION : "");
@@ -1012,7 +1179,7 @@ export default function TribosAssistant() {
       timestamp: nowTimestamp(),
     };
 
-    const currentMessages = [...messages, userMessage];
+    const currentMessages = [...(baseOverride ?? messages), userMessage];
     setMessages(currentMessages);
     const dynamicTitle = conversationTitle(text);
     localStorageService.saveMessages(sendThreadId, currentMessages, dynamicTitle);
@@ -1025,6 +1192,7 @@ export default function TribosAssistant() {
       textareaRef.current.style.height = "28px";
     }
     const startedAt = Date.now();
+    const runSessionId = ++activeRunSessionRef.current;
     setIsProcessing(true);
     setStreamingThreadId(sendThreadId);
     resetLiveState();
@@ -1062,9 +1230,13 @@ export default function TribosAssistant() {
       streamOpened = true;
 
       let finalResult: ChatResult | null = null;
-      const handleEvent = createStreamEventHandler(accumulatedThoughts, (result) => {
-        finalResult = result ?? null;
-      });
+      const handleEvent = createStreamEventHandler(
+        accumulatedThoughts,
+        (result) => {
+          finalResult = result ?? null;
+        },
+        runSessionId
+      );
       // Heartbeat comments (": ping") keep the stall timer alive; a silent connection throws "Connection stalled".
       await readSseEvents(response.body, (ev) => {
         handleEvent(ev);
@@ -1111,7 +1283,8 @@ export default function TribosAssistant() {
               systemMessage(
                 `> ⚠️ **Tribos backend unreachable** at \`${backendUrl}\`.\n>\n` +
                   `> ${errorMessage(jsonErr) || errorMessage(err) || "The server is offline, unreachable, or timed out"}.\n>\n` +
-                  "> Start it with `uvicorn app.backend.main:app --port 8000`, then send your question again."
+                  `> Start it with \`uvicorn app.backend.main:app --port ${backendPort(backendUrl)}\`, or change the ` +
+                  "backend URL in Settings, then send your question again."
               ),
               currentMessages,
               sendThreadId
@@ -1262,6 +1435,7 @@ export default function TribosAssistant() {
     }
 
     const startedAt = Date.now();
+    const runSessionId = ++activeRunSessionRef.current;
     setIsProcessing(true);
     setStreamingThreadId(sendThreadId);
     resetLiveState();
@@ -1274,10 +1448,14 @@ export default function TribosAssistant() {
     let doneSeen = false;
 
     try {
-      const handleEvent = createStreamEventHandler(accumulatedThoughts, (result) => {
-        doneSeen = true;
-        finalResult = result ?? null;
-      });
+      const handleEvent = createStreamEventHandler(
+        accumulatedThoughts,
+        (result) => {
+          doneSeen = true;
+          finalResult = result ?? null;
+        },
+        runSessionId
+      );
       // Replay from the start (the live view was just reset); a dropped connection resumes from the last seq.
       await streamJobEvents(
         backendUrl,
@@ -1345,6 +1523,23 @@ export default function TribosAssistant() {
   };
 
   const handleResetSession = (projectForChat?: string | null) => {
+    // If current conversation is already completely empty, reuse it
+    const currentMsgs = localStorageService.getMessages(activeThreadId);
+    const currentDraft = localStorageService.getDraft(activeThreadId);
+    if (currentMsgs.length === 0 && !currentDraft.trim() && !projectViewId) {
+      if (typeof projectForChat === "string") {
+        localStorageService.setThreadProject(activeThreadId, projectForChat);
+        setInvestigations(localStorageService.getInvestigations());
+      }
+      return;
+    }
+    // If previous conversation was empty and not pinned, clean it up
+    if (currentMsgs.length === 0 && !currentDraft.trim()) {
+      const prevInv = investigations.find((i) => i.id === activeThreadId);
+      if (prevInv && !prevInv.pinned) {
+        localStorageService.deleteInvestigation(activeThreadId);
+      }
+    }
     const newInv = localStorageService.createNewThread(
       "New Investigation",
       selectedFramework,
@@ -1421,6 +1616,7 @@ export default function TribosAssistant() {
       const patch = (p: Partial<ComposerImage>) =>
         setComposerImages((prev) => prev.map((i) => (i.key === key ? { ...i, ...p } : i)));
       void makeThumbnail(file).then((thumbUrl) => patch({ thumbUrl }));
+      if (item.kind === "image") void makeThumbnail(file, 1400).then((viewUrl) => patch({ viewUrl }));
       if (problem) continue;
       readImage(backendUrl, authHeaders, file, { onStatus: noteAuthStatus })
         .then((reading) => patch({ status: "ready", reading, text: reading.text }))
@@ -1439,6 +1635,7 @@ export default function TribosAssistant() {
       setComposerImages((prev) => prev.map((i) => (i.key === key ? { ...i, ...p } : i)));
     patch({ file, previewUrl, status: "reading", reading: undefined, text: "", error: undefined });
     void makeThumbnail(file).then((thumbUrl) => patch({ thumbUrl }));
+    void makeThumbnail(file, 1400).then((viewUrl) => patch({ viewUrl }));
     readImage(backendUrl, authHeaders, file, { onStatus: noteAuthStatus })
       .then((reading) => patch({ status: "ready", reading, text: reading.text }))
       .catch((err: unknown) => patch({ status: "error", error: err instanceof Error ? err.message : String(err) }));
@@ -1685,6 +1882,8 @@ export default function TribosAssistant() {
         onNewChatInProject={(id) => handleResetSession(id)}
         onOpenSettings={() => setShowSettings(true)}
         onOpenMemory={() => setShowMemoryVault(true)}
+        onOpenResearch={() => openResearch(null)}
+        panel={sidebarPanel}
         onToggleTheme={toggleTheme}
         onSelect={(inv) => {
           setProjectViewId(null);
@@ -1750,6 +1949,9 @@ export default function TribosAssistant() {
             >
               {investigations.find((i) => i.id === activeThreadId)?.title || "Investigation"}
             </span>
+            {messages.length > 0 && !projectViewId && (
+              <IdChip label="Conversation ID" id={activeThreadId} />
+            )}
           </div>
 
           {/* Right Header Controls (Clean icons) */}
@@ -2008,8 +2210,11 @@ export default function TribosAssistant() {
                       <span className="settings-status-chip" data-ok={backendHealth.auth?.mode !== "disabled"}>
                         Auth: {backendHealth.auth?.mode === "disabled" ? "disabled (local development)" : "bearer token required"}
                       </span>
-                      <span className="settings-status-chip" data-ok={!!backendHealth.llm_providers?.nvidia_nim?.available}>
-                        NVIDIA key {backendHealth.llm_providers?.nvidia_nim?.available ? "configured" : "missing"}
+                      <span className="settings-status-chip" data-ok={!!backendHealth.llm_providers?.meta?.available}>
+                        Meta key {backendHealth.llm_providers?.meta?.available ? "configured" : "missing"}
+                      </span>
+                      <span className="settings-status-chip" data-ok={!!backendHealth.llm_providers?.meta?.available}>
+                        Meta key {backendHealth.llm_providers?.meta?.available ? "configured" : "missing"}
                       </span>
                       <span className="settings-status-chip" data-ok={!!backendHealth.llm_providers?.openai?.available}>
                         OpenAI key {backendHealth.llm_providers?.openai?.available ? "configured" : "missing"}
@@ -2487,6 +2692,11 @@ export default function TribosAssistant() {
                     Chime and notify me when an answer finishes in a background tab
                   </label>
 
+                  <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px" }}>
+                    <input type="checkbox" checked={showDetails} onChange={(e) => toggleShowDetails(e.target.checked)} />
+                    Show research details under answers (evidence, verification, result cards, trace)
+                  </label>
+
                   {/* UI-007: where conversation history is kept, and for how long. */}
                   <fieldset style={{ border: "none", margin: 0, padding: 0, display: "grid", gap: "6px" }}>
                     <legend style={{ fontSize: "11px", color: "var(--text-muted)", marginBottom: "4px" }}>
@@ -2636,6 +2846,7 @@ export default function TribosAssistant() {
             ) : (
               messages.map((msg, idx) => {
               const isAssistant = msg.sender === "assistant";
+              const answerUi = isAssistant ? parseAnswerUi(msg.execution_artifacts?.answer_ui) : null;
               const hasThoughts = (msg.thoughts && msg.thoughts.length > 0) || !!msg.reasoning;
 
               return (
@@ -2662,7 +2873,7 @@ export default function TribosAssistant() {
                           />
                         </span>
                         <span style={{ fontWeight: 600, color: "var(--text-main)" }}>{normalizeLegacyAgentName(msg.agent || "Tribos Orchestrator")}</span>
-                        {msg.framework_used ? (
+                        {showDetails && msg.framework_used ? (
                           <span
                             style={{ color: "var(--text-faint)" }}
                             title={
@@ -2694,9 +2905,10 @@ export default function TribosAssistant() {
 
                   {/* Message Bubble Container */}
                   <div
+                    className={isAssistant ? undefined : "msg-user-column"}
                     style={{
                       maxWidth: isAssistant ? "100%" : "min(600px, 85%)",
-                      width: isAssistant ? "100%" : "auto",
+                      width: isAssistant ? "100%" : editingMessageId === msg.id ? "min(600px, 85%)" : "auto",
                       display: "flex",
                       flexDirection: "column",
                       gap: "10px",
@@ -2708,6 +2920,7 @@ export default function TribosAssistant() {
                         thoughts={msg.thoughts || []}
                         reasoning={msg.reasoning}
                         durationSeconds={msg.duration_seconds}
+                        compact={!showDetails}
                       />
                     )}
 
@@ -2723,21 +2936,31 @@ export default function TribosAssistant() {
                       {/* Content: Markdown rendering for Assistant, pre-wrap text for User */}
                       {isAssistant ? (
                         <>
-                          <TaskStatusNotice outcome={msg.task_status} />
-                          <VerificationNotice report={msg.verification_report} />
+                          {/* The clean view keeps only notices that change what the reader can do: a failed run or a
+                              question back. Partial-coverage and verification notices are research details. */}
+                          {(showDetails || msg.task_status?.task_status === "failed" ||
+                            msg.task_status?.task_status === "needs_input") && <TaskStatusNotice outcome={msg.task_status} />}
+                          {showDetails && <VerificationNotice report={msg.verification_report} />}
                           <div
                             style={
-                              (msg.verification_report && !msg.verification_report.passed) ||
-                              (msg.task_status && msg.task_status.task_status !== "completed")
+                              showDetails &&
+                              ((msg.verification_report && !msg.verification_report.passed) ||
+                                (msg.task_status && msg.task_status.task_status !== "completed"))
                                 ? { marginTop: 14 }
                                 : undefined
                             }
                           >
-                            {msg.answer_revised && (
+                            {showDetails && msg.answer_revised && (
                               <div className="answer-revised-note" role="note">
                                 <RefreshCw style={{ width: 12, height: 12 }} aria-hidden="true" />
                                 Answer revised after new evidence or critique
                               </div>
+                            )}
+                            {answerUi && (
+                              <ErrorBoundary name={`Results panel ${msg.id}`} resetKey={msg.execution_artifacts} fallback={null}>
+                                {/* The panel was already on screen in the live view: no second entrance. */}
+                                <AnswerUiPanel ui={answerUi} animate={justStreamedIdRef.current !== msg.id} />
+                              </ErrorBoundary>
                             )}
                             <ErrorBoundary name={`Answer ${msg.id}`} resetKey={msg.content} fallback={<MessageRenderFallback content={msg.content} />}>
                             {justStreamedIdRef.current === msg.id ? (
@@ -2756,7 +2979,7 @@ export default function TribosAssistant() {
                               />
                             ) : (
                               <>
-                                <AnswerToc content={msg.content} messageId={msg.id} />
+                                {showDetails && <AnswerToc content={msg.content} messageId={msg.id} />}
                                 <MarkdownRenderer
                                   content={renderableAnswer(stripVerificationBanner(msg.content), msg.execution_artifacts)}
                                   citations={msg.citations}
@@ -2774,6 +2997,15 @@ export default function TribosAssistant() {
                               disabled={isProcessing || idx !== messages.length - 1}
                             />
                           )}
+                          {/* Files the question asked for: shown in every view, they are part of the answer. */}
+                          {(msg.execution_artifacts?.files?.length || msg.execution_artifacts?.files_notes?.length) ? (
+                            <FilesStrip
+                              files={(msg.execution_artifacts.files || []) as AnswerFile[]}
+                              notes={msg.execution_artifacts.files_notes as string[] | undefined}
+                              backendUrl={backendUrl}
+                              authHeaders={authHeaders}
+                            />
+                          ) : null}
                           {msg.storage_slimmed === "plots" && (
                             <p className="message-storage-note" role="note">
                               <Info aria-hidden="true" />
@@ -2782,6 +3014,9 @@ export default function TribosAssistant() {
                           )}
                           {/* Each card has its own boundary inside MessageArtifacts (with a visible fallback); this outer one only
                               catches a failure of the list itself (UI-001, UI-006). */}
+                          {/* The clean view keeps the interactive results (simulations, fields, distributions); the
+                              research details add the evidence, verification, solver and trace cards. */}
+                          {(
                           <ErrorBoundary
                             name={`Artifacts of ${msg.id}`}
                             resetKey={msg.execution_artifacts}
@@ -2792,44 +3027,59 @@ export default function TribosAssistant() {
                                 artifacts={msg.execution_artifacts}
                                 question={idx > 0 && messages[idx - 1].sender === "user" ? messages[idx - 1].content : undefined}
                                 taskStatus={msg.task_status}
+                                visualOnly={!showDetails}
                               />
                             </ApiContext.Provider>
                           </ErrorBoundary>
+                          )}
                         </>
                       ) : (
                         <>
-                          <div style={{ whiteSpace: "pre-wrap" }}>{msg.content}</div>
+                          {editingMessageId === msg.id ? (
+                            <PromptEditor
+                              initial={msg.content}
+                              onCancel={() => setEditingMessageId(null)}
+                              onSubmit={(text) => submitEditedPrompt(msg.id, text)}
+                            />
+                          ) : (
+                            <div style={{ whiteSpace: "pre-wrap" }}>{msg.content}</div>
+                          )}
                           {msg.attachments?.length ? <MessageAttachmentChips attachments={msg.attachments} /> : null}
                           {msg.images?.length ? <MessageImages images={msg.images} /> : null}
                         </>
                       )}
                     </div>
 
+                    {!isAssistant && editingMessageId !== msg.id && isUnanswered(idx) && (
+                      <UnansweredNotice
+                        isLast={idx === messages.length - 1}
+                        busy={isProcessing}
+                        onRetry={() => void handleSendMessage(msg.content, messages.slice(0, idx))}
+                        onRemove={() => removeMessage(msg.id)}
+                      />
+                    )}
+
+                    {!isAssistant && editingMessageId !== msg.id && (
+                      <PromptActions
+                        text={msg.content}
+                        busy={isProcessing}
+                        onEdit={() => setEditingMessageId(msg.id)}
+                        onResend={() => void handleSendMessage(msg.content)}
+                      />
+                    )}
+
                     {isAssistant && (
-                      <div className="msg-actions">
-                        <button
-                          type="button"
-                          className="msg-action-btn"
-                          onClick={() => handleCopyMessage(msg.id, stripVerificationBanner(msg.content))}
-                          aria-label="Copy answer"
-                        >
-                          {copiedMessageId === msg.id ? (
-                            <>
-                              <Check style={{ width: 13, height: 13, color: "var(--nvidia-green)" }} /> Copied
-                            </>
-                          ) : (
-                            <>
-                              <Copy style={{ width: 13, height: 13 }} /> Copy
-                            </>
-                          )}
-                        </button>
-                        <MessageActionsExtra
-                          message={msg}
-                          question={previousUserContent(idx)}
-                          backendUrl={backendUrl}
-                          authHeaders={authHeaders}
-                        />
-                      </div>
+                      <AnswerActions
+                        message={msg}
+                        question={previousUserContent(idx)}
+                        text={stripVerificationBanner(msg.content)}
+                        threadId={activeThreadId || threadId}
+                        backendUrl={backendUrl}
+                        authHeaders={authHeaders}
+                        busy={isProcessing}
+                        showDetails={showDetails}
+                        onRegenerate={() => regenerateAnswer(idx)}
+                      />
                     )}
                   </div>
                 </div>
@@ -2906,6 +3156,22 @@ export default function TribosAssistant() {
                     />
                   )}
 
+                  {liveAnswerUi && (
+                    <ErrorBoundary name="Live results panel" fallback={null}>
+                      <AnswerUiPanel ui={liveAnswerUi} />
+                    </ErrorBoundary>
+                  )}
+                  {!liveContent.trim() && !liveApproval && liveAnswerUi && (() => {
+                    // The results panel pushes the step list out of view: the step under way is named here, where the
+                    // reader is looking, and cross-fades as the run moves on.
+                    const current = [...liveThoughts].reverse().find((t) => t.status === "running") || liveThoughts[liveThoughts.length - 1];
+                    return current ? (
+                      <div className="answer-wait-status" role="status" aria-live="polite">
+                        <span className="answer-wait-dot" aria-hidden="true" />
+                        <span key={current.id || current.title} className="answer-wait-title">{current.title}</span>
+                      </div>
+                    ) : null;
+                  })()}
                   {!liveContent.trim() && !liveApproval && (
                     // Where the answer will appear: a quiet skeleton that the first streamed words replace.
                     <div className="answer-skeleton" aria-hidden="true">
@@ -3238,8 +3504,23 @@ export default function TribosAssistant() {
             )}
           </div>
         </main>
+        <CodePanel />
+        {research && (
+          <div style={{ position: "fixed", inset: 0, left: sidebar.narrow ? 0 : sidebar.expanded ? sidebarPanel.width : 60, top: 0,
+            background: "var(--bg-primary)", zIndex: 36, display: "flex" }}>
+            <ResearchProjects
+              backendUrl={backendUrl}
+              authHeaders={authHeaders}
+              model={selectedModel}
+              projectId={research.id}
+              onOpenProject={(id) => openResearch(id)}
+              onOpenRoute={(route) => openRoute(route, true)}
+              onClose={() => closeResearch()}
+            />
+          </div>
+        )}
         {projectView && (
-          <div style={{ position: "fixed", inset: 0, left: sidebar.narrow ? 0 : sidebar.expanded ? 260 : 60, top: 0,
+          <div style={{ position: "fixed", inset: 0, left: sidebar.narrow ? 0 : sidebar.expanded ? sidebarPanel.width : 60, top: 0,
             background: "var(--bg-main)", zIndex: 35, overflowY: "auto", display: "flex" }}>
             <ProjectView
               project={projectView}

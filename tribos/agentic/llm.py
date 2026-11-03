@@ -58,6 +58,13 @@ def _clean_and_load(s: str) -> Any:
         return json.loads(cleaned, strict=False)
     except (TypeError, ValueError):
         pass
+    # LaTeX inside JSON strings ("\omega", "\sqrt") is an invalid JSON escape: keep the backslash literally.
+    escaped = _INVALID_ESCAPE_RE.sub(r"\\\\", cleaned)
+    if escaped != cleaned:
+        try:
+            return json.loads(escaped, strict=False)
+        except (TypeError, ValueError):
+            pass
     try:
         import ast
 
@@ -67,6 +74,48 @@ def _clean_and_load(s: str) -> Any:
     except Exception:
         pass
     raise ValueError("not valid json")
+
+
+# A backslash not starting a JSON escape (\" \\ \/ \b \f \n \r \t \uXXXX).
+_INVALID_ESCAPE_RE = re.compile(r'(?<!\\)\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})')
+
+
+def _close_truncated(text: str) -> str | None:
+    """A reply cut off by the output limit, closed after its last complete element: '{"a": [1, {"b": 2}, {"c"'
+    -> '{"a": [1, {"b": 2}]}'. None when nothing complete precedes the cut."""
+    start = min((i for i in (text.find("{"), text.find("[")) if i >= 0), default=-1)
+    if start < 0:
+        return None
+    stack: list[str] = []
+    in_str = esc = False
+    last_cut: tuple[int, list[str]] | None = None
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch in "{[":
+            stack.append("}" if ch == "{" else "]")
+        elif ch in "}]":
+            if not stack:
+                return None
+            stack.pop()
+            if not stack:
+                return None  # complete: not truncated
+            last_cut = (i + 1, list(stack))
+        elif ch == "," and stack:
+            last_cut = (i, list(stack))
+    if last_cut is None:
+        return None
+    pos, open_stack = last_cut
+    return text[start:pos].rstrip().rstrip(",") + "".join(reversed(open_stack))
 
 
 def extract_json(text: str) -> Any:
@@ -106,6 +155,15 @@ def extract_json(text: str) -> Any:
                         except ValueError:
                             # Continue looking instead of aborting the entire search
                             pass
+    for cand in candidates:
+        closed = _close_truncated(cand)
+        if closed is not None:
+            try:
+                value = _clean_and_load(closed)
+            except ValueError:
+                continue
+            logger.info("Model reply was cut off; parsed the complete part (%d of %d chars)", len(closed), len(cand))
+            return value
     raise ValueError("no JSON value found in the model reply")
 
 
@@ -122,6 +180,10 @@ def agent_model_kwargs(model_name: str) -> dict:
     name = (model_name or "").lower()
     if "nemotron" in name:
         return {"extra_body": {"chat_template_kwargs": {"enable_thinking": False}}}
+    if "muse" in name:
+        # Meta's models reason by default and their reasoning counts against max_tokens: a math-agent JSON call came
+        # back empty (0 chars, the allocation spent thinking), so the agent fell back to a wrong tool.
+        return {"reasoning_effort": "minimal"}
     return {}
 
 
@@ -317,6 +379,7 @@ class AgentLLM:
         """A parsed JSON reply, validated against schema when given; one repair retry on a malformed reply."""
         prompt = user
         last_err: Exception | None = None
+        text = ""
         for _ in range(retries + 1):
             text = await self.complete(system, prompt, phase=phase)
             try:
@@ -326,8 +389,11 @@ class AgentLLM:
                 last_err = exc
                 prompt = (
                     f"{user}\n\nYour previous reply could not be parsed ({str(exc)[:300]}). "
-                    "Reply again with only the JSON value, no prose."
+                    "Reply again with only the JSON value, no prose. Write mathematics in plain text (sqrt(391)/4, "
+                    "x''(t)) or escape every backslash as \\\\, and keep the reply short enough to finish."
                 )
+        # The reply itself is what explains an unusable answer (prose, truncation, escapes): keep an excerpt.
+        logger.warning("Phase %s: unusable JSON reply (%d chars): %r ... %r", phase, len(text), text[:300], text[-200:])
         raise ValueError(f"model reply was not valid JSON after {retries + 1} attempts: {last_err}")
 
 

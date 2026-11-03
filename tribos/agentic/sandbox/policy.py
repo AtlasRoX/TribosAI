@@ -39,6 +39,7 @@ _BASE_ALLOWED = (
     "scipy",
     "sklearn",
     "matplotlib",
+    "mpl_toolkits",
     "sympy",
     "mpmath",
     "networkx",
@@ -68,6 +69,15 @@ def _optional(name: str) -> bool:
 
 ALLOWED_MODULE_ROOTS: frozenset = frozenset(_BASE_ALLOWED + (("statsmodels",) if _optional("statsmodels") else ()))
 ALLOWED_MODULES: frozenset = ALLOWED_MODULE_ROOTS
+
+# SageMath code legitimately does `from sage.all import *`, which the analysis allowlist rejects. The sage profile
+# widens only the module roots: every banned name, banned attribute, banned call, dunder ban and write restriction
+# is identical to the analysis profile, so the escape surface does not widen with the import surface.
+SAGE_MODULE_ROOTS: frozenset = frozenset(("sage", "sagemath"))
+PROFILE_MODULE_ROOTS: dict[str, frozenset] = {
+    "analysis": ALLOWED_MODULE_ROOTS,
+    "sage": ALLOWED_MODULE_ROOTS | SAGE_MODULE_ROOTS,
+}
 
 BANNED_NAMES: frozenset = frozenset(
     {"os", "sys", "subprocess", "socket", "shutil", "ctypes", "importlib", "builtins", "pickle", "marshal", "pathlib"}
@@ -148,8 +158,9 @@ def _is_input_files_item(node: ast.AST) -> bool:
 
 
 class _Checker(ast.NodeVisitor):
-    def __init__(self, input_names: set[str]) -> None:
+    def __init__(self, input_names: set[str], allowed_roots: frozenset = ALLOWED_MODULE_ROOTS) -> None:
         self.input_names = input_names
+        self.allowed_roots = allowed_roots
         self.violations: list[str] = []
 
     def flag(self, node: ast.AST, message: str) -> None:
@@ -162,7 +173,7 @@ class _Checker(ast.NodeVisitor):
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
             root = _root(alias.name)
-            if root not in ALLOWED_MODULE_ROOTS:
+            if root not in self.allowed_roots:
                 self.flag(node, f"import of '{alias.name}' is not allowed")
         self.generic_visit(node)
 
@@ -170,7 +181,7 @@ class _Checker(ast.NodeVisitor):
         root = _root(node.module)
         if node.level:
             self.flag(node, "relative imports are not allowed")
-        elif root not in ALLOWED_MODULE_ROOTS:
+        elif root not in self.allowed_roots:
             self.flag(node, f"import from '{node.module}' is not allowed")
         for alias in node.names:
             if alias.name.startswith("__") or alias.name in BANNED_NAMES or alias.name in BANNED_ATTRIBUTES:
@@ -308,8 +319,17 @@ class _Checker(ast.NodeVisitor):
             self.flag(node, f".{attr}() may not overwrite the input file '{path_node.value}'")
 
 
-def check_code(code: str, input_names: Iterable[str] | None = None) -> list[str]:
-    """Policy violations of one code cell (empty = allowed). Syntax errors are reported as violations."""
+def check_code(
+    code: str,
+    input_names: Iterable[str] | None = None,
+    *,
+    profile: str = "analysis",
+) -> list[str]:
+    """Policy violations of one code cell (empty = allowed). Syntax errors are reported as violations.
+
+    `profile` selects the allowed module roots: "analysis" for the scientific stack, "sage" for SageMath code
+    (the analysis roots plus sage/sagemath). Every other rule is identical in both profiles.
+    """
     if not isinstance(code, str) or not code.strip():
         return ["no code"]
     if "\x00" in code:
@@ -318,7 +338,8 @@ def check_code(code: str, input_names: Iterable[str] | None = None) -> list[str]
         tree = ast.parse(code, mode="exec")
     except SyntaxError as exc:
         return [f"syntax error at line {exc.lineno}: {exc.msg}"]
-    checker = _Checker({str(n) for n in (input_names or [])})
+    allowed_roots = PROFILE_MODULE_ROOTS.get(profile, ALLOWED_MODULE_ROOTS)
+    checker = _Checker({str(n) for n in (input_names or [])}, allowed_roots)
     checker.visit(tree)
     return checker.violations
 
@@ -326,6 +347,8 @@ def check_code(code: str, input_names: Iterable[str] | None = None) -> list[str]
 __all__ = [
     "ALLOWED_MODULES",
     "ALLOWED_MODULE_ROOTS",
+    "PROFILE_MODULE_ROOTS",
+    "SAGE_MODULE_ROOTS",
     "BANNED_ATTRIBUTES",
     "BANNED_CALLS",
     "BANNED_NAMES",

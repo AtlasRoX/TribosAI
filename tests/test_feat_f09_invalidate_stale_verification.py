@@ -204,7 +204,7 @@ def test_f09_math_agent_phase_invalidates_and_marks_rejected(monkeypatch: pytest
 
 
 def test_f09_reuse_control_wording_only_change() -> None:
-    """Requirement 4 & Acceptance check 1: Wording-only change reuses cached evaluation (reused=True)."""
+    """Prose contributes domain/case scope, so an edited answer must be audited again even with identical $math$."""
     math_claims._AUDIT_CACHE.clear()
 
     query = "Evaluate n^2 + 1 for n = 3."
@@ -217,9 +217,10 @@ def test_f09_reuse_control_wording_only_change() -> None:
     assert not audit_v1.failed
 
     audit_v2 = math_claims.audit_answer(text_v2, query)
-    # Wording only changed -> math segments are identical -> cache hit and reused
-    assert audit_v2.reused is True
+    # The cache covers the entire document, including values in tables and assumptions in prose.
+    assert audit_v2.reused is False
     assert audit_v2.counts() == audit_v1.counts()
+    assert math_claims.audit_answer(text_v2, query).reused is True
 
 
 def test_f09_answer_revision_reversal_and_domain_changes() -> None:

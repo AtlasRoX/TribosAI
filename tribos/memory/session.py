@@ -145,6 +145,12 @@ class SessionMemory:
             conn.execute("UPDATE threads SET updated_at = ? WHERE id = ?", (now, thread_id))
         return turn_id
 
+    def get_thread_project(self, thread_id: str) -> str | None:
+        """The project a thread belongs to, or None when the thread does not exist."""
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT project_id FROM threads WHERE id = ?", (thread_id,)).fetchone()
+            return row["project_id"] if row is not None else None
+
     def get_thread_turns(self, thread_id: str, limit: int = 50) -> list[ConversationTurn]:
         with self._get_conn() as conn:
             rows = conn.execute(

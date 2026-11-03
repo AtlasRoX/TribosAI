@@ -153,3 +153,21 @@ test("storage recovery: a fresh session reloads all intact investigations after 
   assert.equal(loadedBeta.length, 2);
   assert.equal(loadedBeta[1].content, "answer");
 });
+
+test("pruneEmptyThreads removes abandoned empty threads but keeps the active or pinned ones", () => {
+  const { svc } = setup(100_000);
+  const active = svc.createNewThread("active").id;
+  const emptyOld = svc.createNewThread("emptyOld").id;
+  const pinnedEmpty = svc.createNewThread("pinnedEmpty").id;
+  svc.setPinned(pinnedEmpty, true);
+  const withMsg = svc.createNewThread("withMsg").id;
+  svc.saveMessages(withMsg, answer("hello"));
+
+  svc.pruneEmptyThreads(active);
+
+  const remaining = svc.getInvestigations().map((i) => i.id);
+  assert.ok(remaining.includes(active));
+  assert.ok(remaining.includes(pinnedEmpty));
+  assert.ok(remaining.includes(withMsg));
+  assert.ok(!remaining.includes(emptyOld));
+});

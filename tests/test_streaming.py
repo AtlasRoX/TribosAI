@@ -81,6 +81,27 @@ async def test_chat_openai_stream_surfaces_reasoning_content():
     assert text == "KRAS drives MAPK."
     assert seen[0] == ("r", "Need to check ") and seen[-1] == ("t", "drives MAPK.")
     assert captured["stream"] is True and captured["messages"] == [{"role": "user", "content": "q"}]
+    assert "reasoning_effort" not in captured  # none was asked for
+
+
+@pytest.mark.asyncio
+async def test_the_raw_stream_sends_the_requested_reasoning_effort():
+    """Q.7: an empty draft at "medium" was retried "without extended reasoning", but the raw request dropped the
+    effort, so the retry reasoned exactly as long and came back empty again."""
+    llm = ChatOpenAI(model="muse-spark-1.3", api_key="k", base_url="http://unused", reasoning_effort="low")
+    captured: dict[str, Any] = {}
+
+    class FakeCompletions:
+        async def create(self, **params):
+            captured.update(params)
+            return _FakeStream([(None, "answer")])
+
+    fake_client = SimpleNamespace(
+        with_options=lambda **_: SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    )
+    object.__setattr__(llm, "root_async_client", fake_client)
+    text, _ = await astream_with_reasoning(llm, [HumanMessage(content="q")])
+    assert text == "answer" and captured["reasoning_effort"] == "low"
 
 
 @pytest.mark.asyncio

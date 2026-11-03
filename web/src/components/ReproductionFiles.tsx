@@ -47,6 +47,8 @@ function download(item: FileItem) {
  */
 export function ReproductionFiles({ artifacts }: { artifacts: ExecutionArtifacts }) {
   const items: FileItem[] = [];
+  const seenNames = new Set<string>();
+
   const script = artifacts.ode_verification?.script;
   if (typeof script === "string" && script.trim()) {
     items.push({
@@ -57,10 +59,37 @@ export function ReproductionFiles({ artifacts }: { artifacts: ExecutionArtifacts
       icon: <FileCode2 style={{ width: 16, height: 16 }} aria-hidden="true" />,
       content: script,
     });
+    seenNames.add("verify_solution.py");
   }
-  const sim = artifacts.dynamis ?? artifacts.vivarix;
-  const csv = sim ? trajectoryCsv(sim) : null;
-  if (csv) {
+
+  // Direct downloadable artifacts (CSV / JSON / Python / datasets)
+  const rawDownloads = (artifacts as Record<string, unknown>).downloads ?? (artifacts as Record<string, unknown>).files;
+  if (Array.isArray(rawDownloads)) {
+    for (const f of rawDownloads) {
+      if (f && typeof f === "object" && typeof f.name === "string" && typeof f.content === "string") {
+        if (!seenNames.has(f.name)) {
+          const isCsv = f.name.endsWith(".csv");
+          items.push({
+            name: f.name,
+            description: typeof f.description === "string" ? f.description : "Downloaded reproduction artifact",
+            meta: typeof f.meta === "string" ? f.meta : sizeText(f.content),
+            mime: typeof f.mime === "string" ? f.mime : isCsv ? "text/csv" : "application/json",
+            icon: isCsv ? (
+              <FileSpreadsheet style={{ width: 16, height: 16 }} aria-hidden="true" />
+            ) : (
+              <FileCode2 style={{ width: 16, height: 16 }} aria-hidden="true" />
+            ),
+            content: f.content,
+          });
+          seenNames.add(f.name);
+        }
+      }
+    }
+  }
+
+  const sim = (artifacts as Record<string, unknown>).oscillator_simulation ?? artifacts.dynamis ?? artifacts.vivarix;
+  const csv = sim && typeof sim === "object" ? trajectoryCsv(sim as Record<string, unknown>) : null;
+  if (csv && !seenNames.has("trajectory.csv") && !seenNames.has("oscillator_rk4_trajectory.csv")) {
     items.push({
       name: "trajectory.csv",
       description: "Simulated state variables over time",
@@ -69,6 +98,7 @@ export function ReproductionFiles({ artifacts }: { artifacts: ExecutionArtifacts
       icon: <FileSpreadsheet style={{ width: 16, height: 16 }} aria-hidden="true" />,
       content: csv,
     });
+    seenNames.add("trajectory.csv");
   }
   if (!items.length) return null;
   return (

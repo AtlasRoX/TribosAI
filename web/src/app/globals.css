@@ -1137,10 +1137,16 @@ html.light .welcome-emblem {
 /* Task completion (task_status), shown apart from evidence grounding */
 .task-status {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  line-height: 18px;
   gap: 6px;
   font-size: 12px;
   color: var(--text-faint);
+}
+
+/* The icon centres on the first line of a status that wraps or carries details below it. */
+.task-status > svg {
+  margin-top: 2.5px;
 }
 
 .task-status[data-status="completed"] > svg {
@@ -1192,7 +1198,7 @@ html.light .welcome-emblem {
 }
 
 .task-status[data-status="completed"] .task-status-op::before {
-  content: "· ";
+  content: " · ";
 }
 
 /* Backend status banner (auth not configured, unreachable) */
@@ -1298,6 +1304,27 @@ html.light .welcome-emblem {
   font-size: var(--text-xs);
   cursor: pointer;
   transition: color 0.15s ease, background 0.15s ease;
+}
+
+/* Under the user's own prompt: right-aligned, shown on hover or keyboard focus (always on touch screens), and kept
+   visible while "Copied" confirms. */
+.msg-user-actions {
+  justify-content: flex-end;
+  margin-top: -6px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.msg-user-column:hover > .msg-user-actions,
+.msg-user-actions:focus-within,
+.msg-user-actions:has([aria-label="Prompt copied"]) {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .msg-user-actions {
+    opacity: 1;
+  }
 }
 
 .msg-action-btn:hover {
@@ -1445,6 +1472,29 @@ html.light .welcome-emblem {
   white-space: pre-line; /* list-like details (sub-questions, plan steps) keep one item per line */
 }
 
+.thinking-step-detail-clamped {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+}
+
+.thinking-step-more {
+  margin-top: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.thinking-step-more:hover {
+  color: var(--text-main);
+  text-decoration: underline;
+}
+
 .thinking-reasoning {
   margin-top: 6px;
   max-height: 340px;
@@ -1505,6 +1555,47 @@ html.light .welcome-emblem {
   100% { opacity: 0.7; }
 }
 
+/* Each new block of a streaming answer (paragraph, heading, list item, table, display equation) settles in with a
+   short fade-and-rise when it first mounts; the growing block keeps its element, so it never re-animates. */
+.markdown-streaming > .markdown-content > *,
+.markdown-streaming > .markdown-content li {
+  animation: streamBlockIn 260ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes streamBlockIn {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+
+/* Thinking: a new step slides in, and its icon pops when it changes (running -> done). */
+.thinking-step {
+  animation: thinkingStepIn 240ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.thinking-step-icon > svg:not(.spin) {
+  animation: thinkingIconIn 220ms cubic-bezier(0.3, 1.4, 0.5, 1) both;
+}
+
+.thinking-step-detail {
+  animation: streamBlockIn 220ms ease-out both;
+}
+
+@keyframes thinkingStepIn {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+}
+
+@keyframes thinkingIconIn {
+  from {
+    opacity: 0.2;
+    transform: scale(0.6);
+  }
+}
+
 /* A full rewrite of a streaming answer (revision) fades in instead of being retyped. */
 .smooth-crossfade {
   animation: smoothCrossfade 200ms ease-out;
@@ -1521,7 +1612,12 @@ html.light .welcome-emblem {
   .markdown-streaming > .markdown-content > :is(ul, ol):last-child > li:last-child:not(:has(> p, > ul, > ol))::after,
   .markdown-streaming > .markdown-content > :is(ul, ol):last-child > li:last-child > p:last-child::after,
   .thinking-reasoning-live::after,
-  .smooth-crossfade {
+  .smooth-crossfade,
+  .markdown-streaming > .markdown-content > *,
+  .markdown-streaming > .markdown-content li,
+  .thinking-step,
+  .thinking-step-icon > svg:not(.spin),
+  .thinking-step-detail {
     animation: none !important;
   }
 }
@@ -2038,6 +2134,45 @@ kbd {
   display: none;
 }
 
+/* The step under way, above the answer's skeleton once the results panel has pushed the step list out of view. */
+.answer-wait-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 10px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.answer-wait-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--domain-t2kg);
+  animation: answer-wait-pulse 1.4s ease-in-out infinite;
+}
+
+.answer-wait-title {
+  animation: answer-wait-swap 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes answer-wait-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes answer-wait-swap {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .answer-wait-dot,
+  .answer-wait-title {
+    animation: none;
+  }
+}
+
 /* The answer's place while the run works: skeleton lines with a slow shimmer, replaced by the first words. */
 .answer-skeleton {
   display: flex;
@@ -2337,16 +2472,33 @@ kbd {
 
 /* The "Checked: ..." line as a link to the answer's Verification tab. */
 .verify-state-link {
+  padding: 0;
   border: none;
   background: none;
-  font: inherit;
+  /* Not the `font` shorthand: it would reset the 12px of .task-status to the answer's body size. */
+  font-family: inherit;
+  line-height: inherit;
+  color: var(--text-faint);
   text-align: left;
   cursor: pointer;
+  transition: color 160ms ease;
+}
+
+.verify-state-link:hover {
+  color: var(--text-muted);
 }
 
 .verify-state-link:hover span {
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+.verify-state-link > svg:last-child {
+  transition: transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.verify-state-link:hover > svg:last-child {
+  transform: translateX(2px);
 }
 
 /* First-run tour: a spotlight on the step's control and a small card beside it. */
@@ -2444,4 +2596,200 @@ kbd {
     transition: none;
     animation: none;
   }
+}
+
+/* ---------------------------------------------------------------------------------------------------------------------
+   Micro-interactions: one press response, one easing, one timing scale for every small control.
+   Press: a 4% dip with a quick spring back. Hover colour changes stay at 150 ms. All of it is off under reduced motion.
+   --------------------------------------------------------------------------------------------------------------------- */
+:root {
+  --ease-spring: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --press-scale: 0.96;
+}
+
+.msg-action-btn,
+.thinking-toggle,
+button.composer-pill,
+.skip-search-btn,
+.code-copy-btn,
+.thinking-step-more,
+.answer-toc-toggle,
+.verify-toggle {
+  transition: color 150ms ease, background-color 150ms ease, box-shadow 150ms ease, transform 160ms var(--ease-spring);
+}
+
+.msg-action-btn:active:not(:disabled),
+.thinking-toggle:active,
+button.composer-pill:active:not(:disabled),
+.skip-search-btn:active:not(:disabled),
+.code-copy-btn:active,
+.answer-toc-toggle:active,
+.verify-toggle:active {
+  transform: scale(var(--press-scale));
+  transition-duration: 60ms;
+}
+
+/* The chevron of the activity log turns on the same spring as everything else. */
+.thinking-chevron {
+  transition: transform 220ms var(--ease-spring);
+}
+
+/* "Copied": the check pops in rather than appearing. */
+.copied-check {
+  animation: copied-pop 320ms var(--ease-spring) both;
+}
+
+@keyframes copied-pop {
+  0% { transform: scale(0.4); opacity: 0; }
+  60% { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+/* A long step detail unfolds instead of jumping open. */
+.thinking-step-detail {
+  transition: max-height 240ms var(--ease-spring);
+}
+
+/* Keyboard focus is always visible and the same everywhere. */
+button.composer-pill:focus-visible,
+.skip-search-btn:focus-visible,
+.thinking-step-more:focus-visible,
+.verify-state-link:focus-visible {
+  outline: none;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--focus-ring);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .msg-action-btn,
+  .thinking-toggle,
+  button.composer-pill,
+  .skip-search-btn,
+  .code-copy-btn,
+  .thinking-step-more,
+  .answer-toc-toggle,
+  .verify-toggle,
+  .thinking-chevron,
+  .thinking-step-detail {
+    transition: none;
+  }
+
+  .msg-action-btn:active:not(:disabled),
+  .thinking-toggle:active,
+  button.composer-pill:active:not(:disabled),
+  .skip-search-btn:active:not(:disabled),
+  .code-copy-btn:active,
+  .answer-toc-toggle:active,
+  .verify-toggle:active {
+    transform: none;
+  }
+
+  .copied-check {
+    animation: none;
+  }
+}
+
+/* Resizing a panel (components/ResizeHandle.tsx): no width animation lagging behind the pointer, no text selection,
+   and the resize cursor everywhere while the pointer is held. */
+html[data-resizing],
+html[data-resizing] * {
+  cursor: col-resize !important;
+  user-select: none !important;
+  transition: none !important;
+}
+
+/* Answer and prompt micro-actions: icon buttons with tooltips; a pressed rating or "reading" stays highlighted. */
+.msg-icon-btn {
+  padding: 5px;
+  min-width: 26px;
+  min-height: 26px;
+  justify-content: center;
+}
+
+.msg-icon-btn.is-on {
+  color: var(--text-main);
+  background: var(--bg-surface-hover);
+}
+
+.msg-action-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+  background: transparent;
+}
+
+/* Inline prompt editor (replaces the user bubble while editing). */
+.prompt-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.prompt-editor textarea {
+  width: 100%;
+  min-height: 60px;
+  resize: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input-card);
+  color: var(--text-main);
+  font: inherit;
+  line-height: 1.5;
+  padding: 8px 10px;
+}
+
+.prompt-editor textarea:focus {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.prompt-editor-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.prompt-editor-hint {
+  margin-right: auto;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+.prompt-editor-btn {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-main);
+  font-size: var(--text-xs);
+  padding: 5px 12px;
+  cursor: pointer;
+}
+
+.prompt-editor-btn:hover {
+  background: var(--bg-surface-hover);
+}
+
+.prompt-editor-btn.is-primary {
+  background: var(--text-main);
+  border-color: var(--text-main);
+  color: var(--bg-primary);
+}
+
+.prompt-editor-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* A question with no answer after it (page reload or dropped connection mid-run). */
+.msg-unanswered {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px 8px;
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  text-align: right;
 }

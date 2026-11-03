@@ -76,7 +76,7 @@ class SourceDecision(BaseModel):
 
 
 SimulationAction = Literal["time_course", "steady_state", "parameter_scan"]
-TaskStatus = Literal["completed", "partial", "needs_input", "failed", "cancelled"]
+TaskStatus = Literal["completed", "completed_fallback", "partial", "needs_input", "failed", "cancelled"]
 
 SIM_DURATION_MIN_SECONDS = 1.0
 SIM_DURATION_MAX_SECONDS = 5000.0
@@ -103,6 +103,9 @@ class SimulationPlan(BaseModel):
     duration_seconds: float = 60.0
     duration_explicit: bool = False
     intervals: int = 100
+    solver_method: str | None = None
+    step_size_seconds: float | None = None
+    num_steps: int | None = None
     parameter_overrides: dict[str, float] = Field(default_factory=dict)
     scan_parameter: str | None = None
     scan_start: float | None = None
@@ -133,6 +136,7 @@ class TaskOutcome(BaseModel):
     unresolved_failures: list[dict[str, str]] = Field(default_factory=list)
     # Requested deliverables and whether the answer provides them (tribos.agents.deliverables).
     deliverables: list[dict[str, Any]] = Field(default_factory=list)
+    can_retry: bool = False
 
 
 @dataclass

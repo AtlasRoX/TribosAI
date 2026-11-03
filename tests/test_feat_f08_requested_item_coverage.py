@@ -234,18 +234,17 @@ def test_f08_reproduction_solve_factorization_roots_subst_checks():
     assert all(c.status == "passed" for c in audit.claims)
 
     assessed = assess(q, answer, math_audit=audit.to_dict())
-    assert len(assessed) == 1
-    it = assessed[0]
-    assert it["item"] == "x^2 - 5x + 6 = 0"
-    assert it["status"] == "verified"
-    assert it["check_state"] == "checked"
-    assert it["answer_state"] == "answered"
-    assert it["where"] != ""
+    assert len(assessed) == 3
+    for it in assessed:
+        assert it["status"] == "verified"
+        assert it["check_state"] == "checked"
+        assert it["answer_state"] == "answered"
+        assert it["where"] != ""
 
-    # Task status reflects verified deliverable
+    # Task status reflects verified deliverables
     outcome = apply_deliverables({"task_status": "completed"}, assessed)
     assert outcome["task_status"] == "completed"
-    assert outcome["deliverables"][0]["status"] == "verified"
+    assert all(d["status"] == "verified" for d in outcome["deliverables"])
 
     # End-to-end verifier agreement
     report = TribosVerifier().verify_response(q, answer, {})
@@ -275,11 +274,12 @@ def test_f08_partial_answer_omitted_substitution_check():
 
     audit = audit_answer(answer, query=q)
     assessed = assess(q, answer, math_audit=audit.to_dict())
-    assert len(assessed) == 1
-    it = assessed[0]
-    assert it["status"] == "addressed"
-    assert it["check_state"] == "unverified"
-    assert it["answer_state"] == "answered"
+    assert len(assessed) == 3
+    by_item = {it["item"]: it for it in assessed}
+    assert by_item["factorization"]["status"] == "verified"
+    assert by_item["complete set of integer roots"]["status"] == "verified"
+    assert by_item["substitution check for each root"]["status"] == "missing"
+    assert by_item["substitution check for each root"]["answer_state"] == "missing"
 
 
 def test_f08_partial_answer_incomplete_roots():
@@ -303,10 +303,11 @@ def test_f08_partial_answer_incomplete_roots():
 
     audit = audit_answer(answer, query=q)
     assessed = assess(q, answer, math_audit=audit.to_dict())
-    assert len(assessed) == 1
-    it = assessed[0]
-    assert it["status"] == "addressed"
-    assert it["check_state"] == "unverified"
+    assert len(assessed) == 3
+    by_item = {it["item"]: it for it in assessed}
+    assert by_item["factorization"]["status"] == "verified"
+    assert by_item["complete set of integer roots"]["status"] == "addressed"
+    assert by_item["complete set of integer roots"]["check_state"] == "unverified"
 
 
 def test_f08_contradicted_answer_failing_substitution_check():
@@ -334,10 +335,10 @@ def test_f08_contradicted_answer_failing_substitution_check():
     assert any(c.status == "failed" for c in audit.claims)
 
     assessed = assess(q, answer, math_audit=audit.to_dict())
-    assert len(assessed) == 1
-    it = assessed[0]
-    assert it["status"] == "failed_check"
-    assert it["check_state"] == "failed"
+    assert len(assessed) == 3
+    by_item = {it["item"]: it for it in assessed}
+    assert by_item["substitution check for each root"]["status"] == "failed_check"
+    assert by_item["substitution check for each root"]["check_state"] == "failed"
 
     outcome = apply_deliverables({"task_status": "completed"}, assessed)
     assert outcome["task_status"] == "partial"
@@ -372,17 +373,16 @@ def test_f08_reproduction_arithmetic_evaluation_claims_4_10_6():
     ]
 
     assessed = assess(q, answer, math_audit={"claims": claims})
-    assert len(assessed) == 1
-    it = assessed[0]
-    assert it["item"] == "x^2 - 5x + 6 = 0"
-    assert it["status"] == "verified"
-    assert it["check_state"] == "checked"
-    assert it["answer_state"] == "answered"
+    assert len(assessed) == 3
+    for it in assessed:
+        assert it["status"] == "verified"
+        assert it["check_state"] == "checked"
+        assert it["answer_state"] == "answered"
 
     outcome = apply_deliverables({"task_status": "completed"}, assessed)
     assert outcome["task_status"] == "completed"
-    assert outcome["deliverables"][0]["status"] == "verified"
-    assert outcome["deliverables"][0]["check_state"] == "checked"
+    assert all(d["status"] == "verified" for d in outcome["deliverables"])
+    assert all(d["check_state"] == "checked" for d in outcome["deliverables"])
 
     # Verifier report agreement
     report = TribosVerifier().verify_response(q, answer, {})
@@ -413,11 +413,12 @@ def test_f08_partial_answer_omitted_one_substitution_check():
     ]
 
     assessed = assess(q, answer, math_audit={"claims": claims})
-    assert len(assessed) == 1
-    it = assessed[0]
-    assert it["status"] == "addressed"
-    assert it["check_state"] == "unverified"
-    assert it["answer_state"] == "answered"
+    assert len(assessed) == 3
+    by_item = {it["item"]: it for it in assessed}
+    assert by_item["factorization"]["status"] == "verified"
+    assert by_item["complete set of integer roots"]["status"] == "verified"
+    assert by_item["substitution check for each root"]["status"] == "addressed"
+    assert by_item["substitution check for each root"]["check_state"] == "unverified"
 
 
 def test_f08_decomposition_no_spurious_split_on_zero_equation():

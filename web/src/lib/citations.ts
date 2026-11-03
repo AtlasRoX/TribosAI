@@ -32,6 +32,9 @@ type HastNode = {
 export const CITE_PATTERN =
   /\b[Aa]r[Xx]iv:\s*(\d{4}\.\d{4,5}(?:v\d+)?|[a-z-]+(?:\.[a-z]{2})?\/\d{7}(?:v\d+)?)\b|(\b10\.\d{4,9}\/[-._;()\/:A-Za-z0-9]+\b)|\b[Zz]bl\s*:?\s*(\d{4}\.\d{5}|\d{7,8})\b|\b[Mm][Rr]\s*:?\s*(\d{6,8})\b|\b(?:[Oo][Ee][Ii][Ss]:\s*)?(A\d{6})\b|\b(?:[Aa][Dd][Ss]:\s*)?(\d{4}[A-Za-z&.\d]{14}[A-Z])\b|\b(?:[Mm][Pp]:\s*)?(mp-\d{1,8})\b|\b[Ii][Ss][Bb][Nn](?:-1[03])?:?\s*([0-9Xx-]{10,17})\b|\b(?:[Oo]pen[Aa]lex:\s*)?(W\d{7,12})\b|\b[Pp][Mm][Ii][Dd]:?\s*(\d{1,9})\b|\b[Cc][Oo][Mm][Pp]:([a-zA-Z0-9_:-]+)\b|\b(ds_[0-9a-fA-F]{12})\b/g;
 
+/** "[Getachew et al., 2025 | DOI:10.1109/x]": the writer's author-year citation; group 1 the label, group 2 the id. */
+export const AUTHOR_CITE_PATTERN = /\[([^[\]|\n]{2,120}?)\s*\|\s*([^[\]\n]{3,240}?)\]/g;
+
 const GROUP_PREFIX = [
   "",
   "ARXIV",
@@ -339,7 +342,34 @@ export function rehypeCitations(options: { map: CitationMap }) {
       return n;
     };
 
+    // "[Getachew et al., 2025 | DOI:10.1109/x]": one chip named by its authors and year; the identifier is in the
+    // popover. A bracket whose identifier is not a known entry is left to the per-identifier pass below.
     const splitText = (value: string): HastNode[] => {
+      const out: HastNode[] = [];
+      let last = 0;
+      for (const b of value.matchAll(AUTHOR_CITE_PATTERN)) {
+        const idMatch = new RegExp(CITE_PATTERN.source).exec(b[2]);
+        const raw = idMatch ? keyFromMatch(idMatch) : null;
+        const key = raw ? resolveKey(map, raw) : null;
+        const entry = key ? map.entries[key] : undefined;
+        const chipHref = entry ? safeChipHref(entry) : undefined;
+        if (!key || !entry || !chipHref) continue;
+        const start = b.index ?? 0;
+        if (start > last) out.push(...splitIds(value.slice(last, start)));
+        out.push({
+          type: "element",
+          tagName: "a",
+          properties: { href: chipHref, className: ["cite-ref"], dataCiteKey: key, dataCiteOccurrence: String(next(key)) },
+          children: [{ type: "text", value: b[1].trim() }],
+        });
+        last = start + b[0].length;
+      }
+      if (!last) return splitIds(value);
+      if (last < value.length) out.push(...splitIds(value.slice(last)));
+      return out;
+    };
+
+    const splitIds = (value: string): HastNode[] => {
       const out: HastNode[] = [];
       let last = 0;
       for (const m of value.matchAll(CITE_PATTERN)) {

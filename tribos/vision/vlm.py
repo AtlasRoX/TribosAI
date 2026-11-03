@@ -7,6 +7,7 @@ matrices, and the content of figures.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import re
@@ -22,13 +23,12 @@ logger = logging.getLogger(__name__)
 VISION_FAMILIES = ("qwen3-vl", "qwen2.5vl", "qwen2.5-vl", "gemma3", "llama3.2-vision", "minicpm-v", "granite3.2-vision",
                    "llava")
 
-TRANSCRIBE_PROMPT = """Transcribe the question in this image exactly, as Markdown with LaTeX math ($...$ inline, $$...$$ for display equations).
-
-Rules:
-- Copy every word, number, unit, variable and condition exactly as printed. Do not solve, simplify, rephrase or add anything.
-- Keep derivative notation as written: dots (\\dot{x}, \\ddot{x}), primes (x'), d/dt. Keep subscripts, superscripts, Greek letters, fractions and matrices.
-- If the image has a figure, diagram, graph or table, add a final section "Figure:" describing exactly what it shows (labels, values, axes, arrows, connections) without interpreting it.
-- If something is unreadable, write [unreadable] in its place instead of guessing.
+TRANSCRIBE_PROMPT = """Transcribe all text in this image exactly, as Markdown with LaTeX math ($...$ inline, $$...$$ display).
+- Every line in reading order (headings, questions, sub-parts, options); never skip, merge or shorten.
+- Copy words, numbers, units and conditions exactly; do not solve, rephrase or add anything.
+- Keep notation: dots (\\dot{x}), primes (x'), subscripts, superscripts, Greek letters, fractions, matrices.
+- Only if there is a figure, diagram, graph or table: end with "Figure:" describing exactly what it shows.
+- Write [unreadable] for anything you cannot read.
 Reply with the transcription only.
 """
 
@@ -85,8 +85,9 @@ async def transcribe_local(image_png: bytes, draft: str, model: str) -> str:
 
 
 def provider() -> str:
-    """nim | ollama | ocr (TRIBOS_VISION_PROVIDER)."""
-    return str(get_str("TRIBOS_VISION_PROVIDER") or "nim")
+    """remote | ollama | ocr (TRIBOS_VISION_PROVIDER; "nim", its older name, means remote)."""
+    value = str(get_str("TRIBOS_VISION_PROVIDER") or "remote")
+    return "remote" if value == "nim" else value
 
 
 def nim_model() -> str:
@@ -95,14 +96,42 @@ def nim_model() -> str:
     return str(get_str("TRIBOS_VISION_MODEL") or DEFAULT_ORCHESTRATOR_MODEL)
 
 
+def output_budget(draft: str) -> int:
+    """Output tokens for a transcription: room for the draft rewritten in LaTeX, plus a figure description."""
+    return max(1024, min(4096, len(draft) + 768))
+
+
+# One client per (model, output budget, event loop): get_llm opens a new HTTP client each time, so every image paid a
+# fresh TLS connection to NIM (the first read of a process took 3.4 s, later ones about 1.1 s). Keyed by the loop
+# object, since an async HTTP client cannot be shared across event loops (tests run one loop each).
+_CLIENTS: dict[tuple[str, int, Any], Any] = {}
+MAX_CLIENTS = 16
+
+
+def _client(name: str, budget: int) -> Any:
+    from ..utils.llm.llm_factory import get_llm
+
+    key = (name, budget, asyncio.get_running_loop())
+    llm = _CLIENTS.get(key)
+    if llm is None:
+        if len(_CLIENTS) >= MAX_CLIENTS:
+            _CLIENTS.clear()
+        llm = get_llm(model_name=name, temperature=0.0, max_tokens=budget, reasoning_effort="minimal",
+                      timeout=float(get_int("TRIBOS_VISION_TIMEOUT_S")))
+        _CLIENTS[key] = llm
+    return llm
+
+
 async def transcribe_remote(image_png: bytes, draft: str, model_name: str | None = None) -> tuple[str, str]:
     """(text, model) from an NVIDIA NIM vision model (TRIBOS_VISION_MODEL; it must be in the allowed model list)."""
     from langchain_core.messages import HumanMessage
 
-    from ..utils.llm.llm_factory import get_llm
-
     name = model_name or nim_model()
-    llm = get_llm(model_name=name, temperature=0.0, max_tokens=4096, timeout=float(get_int("TRIBOS_VISION_TIMEOUT_S")))
+    # Thinking off (reasoning_effort="low"): transcription is copying, not reasoning. With thinking on, the model spent
+    # 75 s and its whole 4096-token budget reasoning and returned nothing; with it off the same image took about 1 s.
+    # Budgets are rounded to 1024 so a handful of clients cover every draft length.
+    budget = -(-output_budget(draft) // 1024) * 1024
+    llm = _client(name, budget)
     url = "data:image/png;base64," + base64.b64encode(image_png).decode()
     msg = HumanMessage(content=[{"type": "text", "text": _prompt(draft)}, {"type": "image_url", "image_url": {"url": url}}])
     reply = await llm.ainvoke([msg])

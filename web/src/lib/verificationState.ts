@@ -65,6 +65,12 @@ export function verificationState(report: VerificationLike | null | undefined): 
     if (s in counts) counts[s as keyof typeof counts] += 1;
   }
   const defects = Array.isArray(report.defects) ? report.defects : [];
+  const executionChecks = Array.isArray(report.numerical_execution_checks)
+    ? report.numerical_execution_checks.filter((c: unknown): c is { name: string; passed: boolean } => Boolean(c && typeof c === "object" && "name" in c && "passed" in c && typeof c.passed === "boolean"))
+    : [];
+  if (executionChecks.length && report.passed !== false && executionChecks.every((c) => c.passed) && defects.length === 0) {
+    return { kind: "checked", text: `${executionChecks.length} numerical execution checks passed; this does not certify every answer claim`, counts };
+  }
   if (isPlaceholderReport(report)) {
     return { kind: "not_checked", text: "No evidence check ran for this reply", counts };
   }
@@ -170,6 +176,7 @@ export interface TaskOutcomeLike {
   reason?: string;
   incomplete_reasons?: unknown;
   unresolved?: unknown;
+  can_retry?: boolean;
 }
 
 export interface TaskHeadline {
@@ -195,6 +202,15 @@ export function taskHeadline(outcome: TaskOutcomeLike | null | undefined): TaskH
   if (!raw) return null;
   const reasons = stringList(outcome.incomplete_reasons);
   const unresolved = stringList(outcome.unresolved);
+  if (raw === "completed_fallback") {
+    return {
+      status: "completed_fallback",
+      partial: false,
+      title: "Completed with fallback",
+      reasons,
+      unresolved,
+    };
+  }
   const partial = raw === "partial" || (raw === "completed" && (reasons.length > 0 || unresolved.length > 0));
   const status = partial ? "partial" : raw;
   return { status, partial, title: partial ? "Partial answer" : "", reasons, unresolved };

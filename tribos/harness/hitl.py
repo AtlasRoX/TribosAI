@@ -7,7 +7,11 @@ Closes:
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
+import os
+import secrets
 import sqlite3
 import time
 import uuid
@@ -41,7 +45,43 @@ class ArtifactHITLManager:
             self.db_path = str(db_dir / "hitl_reviews.sqlite3")
         else:
             self.db_path = str(db_path)
+        self._key_path = Path(self.db_path).with_name("hitl_signing.key")
         self._init_db()
+
+    def _signing_key(self) -> bytes:
+        """A per-installation HMAC key kept beside the database (created once, owner-readable only)."""
+        try:
+            return self._key_path.read_bytes()
+        except FileNotFoundError:
+            key = secrets.token_bytes(32)
+            fd = os.open(self._key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(key)
+            return key
+        except FileExistsError:  # pragma: no cover - lost a creation race
+            return self._key_path.read_bytes()
+
+    def _signature(self, rev: ArtifactReview) -> str:
+        """HMAC-SHA256 over every field of the review, including the signed artifact content hash, so a stored
+        review cannot be edited or forged without the server key."""
+        payload = json.dumps(
+            {
+                "id": rev.id,
+                "artifact_id": rev.artifact_id,
+                "project_id": rev.project_id,
+                "reviewer_id": rev.reviewer_id,
+                "action": rev.action,
+                "comments": rev.comments,
+                "created_at": rev.created_at,
+                "content_sha256": (rev.metadata or {}).get("content_sha256"),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hmac.new(self._signing_key(), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    def verify_signature(self, rev: ArtifactReview) -> bool:
+        return hmac.compare_digest(self._signature(rev), rev.signature_hash)
 
     @contextmanager
     def _get_conn(self) -> Generator[sqlite3.Connection, None, None]:
@@ -82,14 +122,15 @@ class ArtifactHITLManager:
         action: str,  # approved | rejected | rework_requested | annotated
         comments: str = "",
         metadata: dict[str, Any] | None = None,
+        content_sha256: str | None = None,
     ) -> ArtifactReview:
-        """Record certified engineer sign-off or rework request for a specific artifact."""
+        """Record a sign-off or rework request. `content_sha256` binds the review to the exact artifact content
+        that was reviewed; without it the review names the artifact id only (recorded as unbound)."""
         review_id = f"hitl_{uuid.uuid4().hex[:12]}"
         now = time.time()
-        import hashlib
-
-        sig_payload = f"{artifact_id}:{reviewer_id}:{action}:{now}"
-        sig_hash = hashlib.sha256(sig_payload.encode("utf-8")).hexdigest()
+        meta = dict(metadata or {})
+        meta["content_sha256"] = content_sha256
+        meta["content_bound"] = bool(content_sha256)
 
         rev = ArtifactReview(
             id=review_id,
@@ -99,9 +140,10 @@ class ArtifactHITLManager:
             action=action,
             comments=comments,
             created_at=now,
-            signature_hash=sig_hash,
-            metadata=metadata or {},
+            signature_hash="",
+            metadata=meta,
         )
+        rev.signature_hash = self._signature(rev)
         with self._get_conn() as conn:
             conn.execute(
                 """

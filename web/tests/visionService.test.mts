@@ -14,6 +14,12 @@ test("only images that were read and have text go with the question", () => {
   assert.equal(imageContext([img({ status: "error" })]), undefined);
 });
 
-test("a sent message keeps names and thumbnails, never the full image", () => {
-  assert.deepEqual(sentImages([img({}), img({ key: "b", status: "error" })]), [{ name: "q.png", thumbUrl: "data:image/jpeg;base64,AA" }]);
+test("a sent message keeps the thumbnail, a viewer copy and the text read from it, never the original file", () => {
+  const sent = sentImages([img({ viewUrl: "data:image/jpeg;base64,BB" }), img({ key: "b", status: "error" })]);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].name, "q.png");
+  assert.equal(sent[0].thumbUrl, "data:image/jpeg;base64,AA");
+  assert.equal(sent[0].viewUrl, "data:image/jpeg;base64,BB"); // shown in the in-app viewer
+  assert.equal(sent[0].text, "y'' + y = 0"); // what Tribos read, shown beside the image
+  assert.ok(!("file" in sent[0]) && !("previewUrl" in sent[0])); // the original file is never stored
 });

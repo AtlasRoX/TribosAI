@@ -1,0 +1,19 @@
+# The scientific stack the sandbox bootstrap may import, pinned to the versions in uv.lock.
+#
+# This file is deliberately NOT the project's full dependency set: the container that runs model-written code
+# holds no credentials, so it needs no API client, no web framework, no model runtime and no document
+# parsers. Everything listed here is a package the AST policy already allows the code to import
+# (tribos/agentic/sandbox/policy.py ALLOWED_MODULE_ROOTS), so the image and the policy agree.
+#
+# Keep it in sync with pyproject.toml: the versions below are the ones uv.lock resolves.
+
+h5py==3.14.0
+matplotlib==3.10.6
+mpmath==1.3.0
+networkx==3.5
+numpy==1.26.4
+pandas==2.3.3
+pint==0.26.2
+pyarrow==21.0.0
+scipy==1.16.2
+sympy==1.14.0

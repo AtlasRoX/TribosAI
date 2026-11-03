@@ -6,9 +6,13 @@
 // A feature adds one line here and one entry in registry.tsx.
 
 export const FEATURE_ARTIFACT_KEYS: readonly string[] = [
+  "scientific_execution",
+  "monte_carlo",
   "uncertainty",
   "pde",
   "engineering_calc",
   "paper_reproduction",
   "formal_proof",
+  "codeact",
+  "computed_results",
 ];

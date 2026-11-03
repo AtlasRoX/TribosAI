@@ -569,8 +569,15 @@ class SupervisorPhase(AgentPhase):
                 continue
             instruction = neutralise(reply.instruction.strip() or f"Find evidence for: {state.clean_query or state.query}")[:500]
             if any(h.get("specialist") == sp.name and h.get("instruction") == instruction for h in history):
-                dialogue.add("Supervisor", "stop", None, "terminated unproductive repair loop: repeated identical delegation")
-                break
+                replans += 1
+                if replans > MAX_REPLANS:
+                    dialogue.add("Supervisor", "stop", None, "terminated unproductive repair loop: repeated identical delegation")
+                    break
+                self._replan(ledger, history, replans)
+                stall = 0
+                dialogue.add("Supervisor", "replan", None, ledger["notes"][-1])
+                await state.step(dialogue.step_id("supervisor"), "Supervisor: replanning", ledger["notes"][-1], agent="Supervisor")
+                continue
             delegations += 1
             dialogue.add("Supervisor", "delegate", None, f"{sp.label}: {instruction}")
             await state.step(dialogue.step_id("supervisor"), f"Supervisor → {sp.label}", instruction, agent="Supervisor")

@@ -53,6 +53,11 @@ Never commit `.env`. Tests must not need the network: use the fakes in `tests/fa
 
 - **Parsing user or model maths.** Always use `tribos/axiom/safe_expr.py` (`parse_math`) or `tribos.axiom.engine.safe_parse_expr`. Never call `eval`, `sympify` or `parse_expr` directly on untrusted strings.
 - **Evidence for the answer-writing model.** `tribos/agents/stem_evidence.py` renders STEM tool results into the evidence block, and `tribos/agents/prompts.py` builds the prompts. A new tool needs a renderer here, or the model never sees its result.
+- **Response layer.** `tribos/writer/` turns checked results into a readable answer (wired in `tribos/agents/orchestration/presentation.py`):
+  - `facts.py` computes requested values by code before drafting (initial-value problems: exact solution checked by substitution, oscillator parameters, values at requested points, RK4 comparison), rendered as `<computed_results>`;
+  - `outline.py` reads the user's own numbered tasks, so answers follow the user's numbering;
+  - `lint.py` and `editor.py` keep internal ids (q1, req-2), pipeline jargon and raw computer-algebra syntax out of answers. The copy edit is accepted only if it adds no number and drops no citation.
+  - Never put internal ids or tool names into writer-facing instructions as heading examples.
 - **Result keys.** Result-key constants live in `tribos/agents/result_keys.py`. Evidence keys (arXiv, DOI, zbMATH, MR, ADS) are normalised only through `tribos/sources/keys.py`.
 - **Result cards in the UI.**
   - A tool result reaches the browser as `execution_artifacts[<key>]`.
@@ -67,6 +72,7 @@ Never commit `.env`. Tests must not need the network: use the fakes in `tests/fa
   - refused for replay in `tribos/provenance/rerun.py` (`UNSAFE_TOOL_RE`).
 - **Settings.** Every `TRIBOS_*` env var must be a `Setting(...)` in `tribos/config/settings.py`. Then regenerate the docs with `gen_env_reference.py`; CI checks that they match.
 - **API routers.** Optional routers go in the router list in `app/backend/main.py` (around line 125). Use `get_current_user` for auth and the per-user limits in `app/backend/limits.py`.
+- **Research projects.** `tribos/agentic/campaign.py` stores and drives them. Loop mode (the default in the app) is `tribos/agentic/research/`: charter, parallel tests with independent replication, findings ledger, a judge with deterministic evidence rules, adaptive stopping, time estimate and a thesis. Thesis exports (Chromium PDF, DOCX, bundle) are `tribos/export/thesis.py`; the web view is `web/src/components/campaigns/ResearchLab.tsx`. See [docs/agentic/research-loop.md](docs/agentic/research-loop.md).
 - **Projects.** The store is `tribos/utils/memory/project_store.py` (SQLite) and the API is `app/backend/routers/projects.py`. Facts extracted from runs come from `tribos/agentic/project_memory.py`. In the browser, chats live in localStorage (`web/src/services/localStorageService.ts`).
 
 ## Conventions

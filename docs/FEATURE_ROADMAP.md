@@ -436,3 +436,24 @@ Members may use project files owned by other members, with read-only access chec
 **Accept when:**
 - Backend: tests cover migration from the old schema, the role rules (403/404), members, files, review, history, activity, and the run integration (instructions in the context, files attached).
 - Web: tests cover recency grouping across day boundaries, pin ordering, moving chats and the migration, API error handling, and search.
+
+---
+
+## T11: Adaptive research loop, accuracy tools and thesis exports
+
+**Status (2026-11-02): DONE.** See [agentic/research-loop.md](agentic/research-loop.md).
+
+- **Loop.** Research projects (loop mode) review the literature, write a charter, run rounds of parallel tests
+  (CodeAct with independent replication, Lean proofs, cited literature), judge them with deterministic evidence rules,
+  and stop when concluded or stagnant. They then write a chapter-by-chapter thesis whose numbers are checked against
+  the ledger.
+- **Accuracy tools.** `axiom_interval_verify`, `axiom_precision_check`, `axiom_counterexample_search`,
+  `calcula_cross_validate`, `calcula_distribution_tests`.
+- **Exports.** Typeset PDF (Chromium, Google Sans, KaTeX, Tribos cover), DOCX, Markdown, HTML and a reproducibility
+  bundle.
+- **Web.** The research lab (`ResearchLab.tsx`): loop orbit, estimate, plan board, findings wall with generated UI
+  blocks, proofs, thesis reader with exports.
+
+Open follow-ups:
+- Certified-tier findings (interval or exhaustive checks wired into the test runner automatically).
+- A per-project choice of the sandbox time ceiling in the app.

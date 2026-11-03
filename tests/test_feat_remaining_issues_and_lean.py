@@ -14,21 +14,16 @@ Covers:
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 import pytest
 import sympy as sp
 
-from tribos.agentic.formal_proof import FormalProofPhase
-from tribos.agentic.state import AgentState, RunBudget, RunControl
 from tribos.agents.deliverables import assess, requested_items
-from tribos.axiom.correspondence import check_task_correspondence, is_tautology_claim
+from tribos.axiom.correspondence import check_task_correspondence
 from tribos.axiom.definitions import (
     check_structured,
     in_domain,
-    parse_definitions,
-    parse_quantifier,
     parse_structured,
     run_structured,
 )
@@ -222,10 +217,9 @@ def test_phase_b_cache_key_isolation_across_domains():
 async def test_phase_c_disabled_formal_prover_policy_and_badge():
     """Explicitly disabled formal prover returns status='disabled' with zero compiler attempts."""
     policy = ToolPolicy(prohibit_formal=True, formal_reason="Formal prover disabled by user request")
-    from tribos.tools.policy import active_tool_policy
 
     # Direct formalise_and_check
-    res = await formalise_and_check(PROMPT_NUMBERED, None)
+    _ = await formalise_and_check(PROMPT_NUMBERED, None)
     # When Lean is not installed locally and no policy is active, it returns unavailable.
     # When policy is active:
     from tribos.tools import policy as P

@@ -117,6 +117,12 @@
   justify-content: center;
 }
 
+.rail .actionActive,
+.rail .action[aria-current="page"] {
+  background: var(--bg-surface-active);
+  color: var(--text-heading);
+}
+
 .kbd {
   margin-left: auto;
   font-size: 11px;
@@ -330,4 +336,17 @@
   font-size: 11px;
   font-weight: 700;
   flex-shrink: 0;
+}
+
+/* Holds the sidebar and its resize handle (the aside clips its own overflow). */
+.frame {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+  z-index: 40;
+}
+
+/* Above the aside (z-index 40), which would otherwise cover the handle's inner half. */
+.frameHandle {
+  z-index: 45;
 }

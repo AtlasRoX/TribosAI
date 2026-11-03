@@ -115,10 +115,23 @@ def tokenize(src: str) -> list[Tok]:
                         if name in ("vec", "hat", "bar", "tilde", "boldsymbol", "bm", "mathbf", "mathit", "mathcal",
                                     "mathsf", "boxed", "fbox", "framebox"):
                             out.extend(tokenize(content))  # decoration/box: the content itself
+                        elif name in ("operatorname", "mathrm") and (content in FUNCTIONS or content in TWO_ARG_FUNCTIONS):
+                            # A function written as an operator name (\operatorname{atan}, SymPy's own LaTeX) is the
+                            # function, not a word: as a word it would split the statement and lose its left side.
+                            out.append(Tok("cmd", content))
                         else:
                             out.append(Tok("word", content))
                         continue
                     if name == "rm":
+                        # Old-style "{\rm m/s}": the letters after \rm are an upright unit word, like \mathrm{m/s}.
+                        m_unit = re.match(r"\s*([A-Za-zΩμ°]+(?:\s*[/·^]\s*[A-Za-zΩμ°0-9\-]+)*)", s[i:])
+                        if m_unit:
+                            out.append(Tok("word", re.sub(r"\s+", "", m_unit.group(1))))
+                            i += len(m_unit.group(0))
+                        continue
+                    if name in ("mathrm", "textrm", "mathsf") and j < n and s[j].isalpha():
+                        out.append(Tok("word", s[j]))  # TeX also allows a single unbraced unit: \mathrm m
+                        i = j + 1
                         continue
                     out.append(Tok("word", ""))
                     continue
@@ -181,6 +194,15 @@ def tokenize(src: str) -> list[Tok]:
             if word is not None and (i == 0 or not s[i - 1].isalpha()):
                 out.append(Tok("word", word))
                 i += len(word)
+                continue
+            # A coefficient written against a function the same formula applies on its own ("\frac12 kx(t)^2" beside
+            # "8x(t)^2") is a product, k x(t), not an identifier "kx".
+            product = (len(run) in (2, 3) and run.islower()
+                       and re.search(rf"(?<![A-Za-z]){re.escape(run[-1])}'*\s*\(", s) is not None)
+            # Multi-letter identifier followed by an opening parenthesis or primes (e.g. Vc(0), v0(t))
+            if not product and len(run) > 1 and re.match(rf"^{re.escape(run)}'*_*\s*[\(]", s[i:]):
+                out.append(Tok("word", run))
+                i += len(run)
                 continue
             out.append(Tok("letter", c))
             i += 1
@@ -454,15 +476,23 @@ class _Parser:
             name = f"{name}_{text}"
         return name
 
+    def _value_application(self) -> bool:
+        """The next tokens are "(" + one number or the variable (t) + ")"."""
+        if not (self.at("sym", "(") and self.at("sym", ")", 2)):
+            return False
+        inner = self.peek(1)
+        return inner is not None and (inner.kind == "num" or (inner.kind == "letter" and inner.value == self.ctx.variable))
+
     def name_atom(self, name: str, order: int = 0) -> sp.Expr:
         """A symbol or function name, with subscript, primes and an optional application."""
         name = self.identifier_suffix(name)
         while self.at("sym", "'"):
             self.next()
             order += 1
-        is_fn = name in self.ctx.functions
-        if order and not is_fn:
-            raise Unsupported(f"derivative of unknown function {name}")
+        is_fn = name in self.ctx.functions or order > 0
+        if not is_fn and len(name) == 1 and name.isalpha() and self._value_application():
+            # "x(0)", "v(t)": a function value (initial conditions, evaluations), never the product x*0.
+            is_fn = True
         if is_fn:
             fname = deriv_name(name, order) if order else name
             if self.at("sym", "("):
@@ -564,7 +594,7 @@ class _Parser:
                 return TWO_ARG_FUNCTIONS[w](*a)
             if w in FUNCTIONS:
                 return self.function_call(FUNCTIONS[w], w)
-            if re.fullmatch(r"[A-Za-z]", w):
+            if re.fullmatch(r"[A-Za-z]\w*", w):
                 return self.name_atom(w)
             raise Unsupported(f"text {w!r}")
         if tok.kind == "cmd":

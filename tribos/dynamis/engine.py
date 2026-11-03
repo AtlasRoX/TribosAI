@@ -126,20 +126,46 @@ def _build_ode_exprs(
     return t_sym, state_syms, exprs
 
 
+class FiniteTimeBlowUp(RuntimeError):
+    """The adaptive solver stalled while the solution grew without bound: a finite-time singularity near t_last."""
+
+    def __init__(self, t_last: float, growth: float, message: str) -> None:
+        super().__init__(f"solution blows up near t = {t_last:.6g} (grew by a factor {growth:.3g}; {message})")
+        self.t_last, self.growth = t_last, growth
+
+
 def integrate_system(
     rhs: dict[str, str], initial_state: dict[str, float], t_span: tuple[float, float],
     parameters: dict[str, float] | None, method: str, times: np.ndarray, *, dense_output: bool = False,
+    step_size: float | None = None, num_steps: int | None = None,
 ) -> tuple[Any, list[sp.Expr], list[sp.Symbol]]:
     """Shared safe integrator for trajectories and parameter estimation."""
     names = list(rhs)
     t_sym, syms, exprs = _build_ode_exprs(rhs, names, parameters)
     function = sp.lambdify((t_sym, syms), exprs, modules="numpy")
+    if method.upper() == "RK4":
+        from .fixed_step import rk4_integrate
+
+        solution = rk4_integrate(
+            lambda t, y: np.asarray(function(t, y), dtype=float).ravel(),
+            [float(initial_state[n]) for n in names], t_span, step_size=step_size, num_steps=num_steps,
+        )
+        return solution, exprs, syms
     solution = integrate.solve_ivp(
         lambda t, y: np.asarray(function(t, y), dtype=float).ravel(), t_span,
         [float(initial_state[n]) for n in names], t_eval=times, method=method,
         rtol=1e-8, atol=1e-10, dense_output=dense_output,
     )
     if not solution.success or solution.y.shape[1] != len(times) or not np.isfinite(solution.y).all():
+        # The step size collapsing while |y| has grown by many orders of magnitude is a singularity, not a solver
+        # fault: y' = y^3 from y(0) = 1 stops at t = 1/2 whatever the tolerance.
+        y0 = max(1.0, float(np.max(np.abs([float(initial_state[n]) for n in names]))))
+        dense = solution.sol if dense_output else None
+        t_last = float(dense.ts[-1]) if dense is not None and len(dense.ts) > 1 else None
+        if solution.status == -1 and t_last is not None and t_last > t_span[0]:
+            peak = float(np.max(np.abs(dense(t_last))))
+            if not np.isfinite(peak) or peak > 1e6 * y0:
+                raise FiniteTimeBlowUp(t_last, peak / y0, solution.message)
         raise RuntimeError(f"ODE integration failed ({solution.message})")
     return solution, exprs, syms
 
@@ -152,8 +178,12 @@ def dynamis_simulate_ode(
     method: str = "RK45",
     num_points: int = 200,
     model_name: str | None = None,
+    step_size: float | None = None,
+    num_steps: int | None = None,
+    analytic_reference: bool = False,
+    units: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Integrate a system of ODEs dx_i/dt = rhs[x_i] over t_span using scipy.integrate.solve_ivp."""
+    """Integrate a stated ODE system, using fixed-step RK4 or SciPy's adaptive solvers as requested."""
     invariant_expr_str: str | None = None
     if model_name:
         key = str(model_name).strip().lower()
@@ -169,8 +199,7 @@ def dynamis_simulate_ode(
         if parameters:
             base_params.update(parameters)
         parameters = base_params
-        if t_span == (0.0, 10.0) and "t_span" in preset:
-            t_span = tuple(preset["t_span"])  # type: ignore[assignment]
+        # t_span is an execution contract. An explicit (0, 10) must not become a preset's (0, 15).
         invariant_expr_str = preset.get("invariant")
 
     if not rhs or not isinstance(rhs, dict):
@@ -189,23 +218,41 @@ def dynamis_simulate_ode(
 
     n_pts = max(2, min(10000, int(num_points)))
     t_eval = np.linspace(t0, tf, n_pts)
-    sol, exprs, state_syms = integrate_system(rhs, initial_state, (t0, tf), parameters, str(method), t_eval,
-                                             dense_output=True)
+    fixed = str(method).upper() == "RK4"
+    if not fixed and (step_size is not None or num_steps is not None):
+        raise ValueError("A fixed step/count requires method='RK4'; adaptive output samples are not solver steps.")
+    blow_up: dict[str, Any] | None = None
+    try:
+        sol, exprs, state_syms = integrate_system(rhs, initial_state, (t0, tf), parameters, str(method), t_eval,
+                                                 dense_output=not fixed, step_size=step_size, num_steps=num_steps)
+    except FiniteTimeBlowUp as exc:
+        # Report the singularity and the trajectory up to just before it, rather than a failed run.
+        t_stop = t0 + (exc.t_last - t0) * 0.99
+        blow_up = {"t_blow_up_estimate": exc.t_last, "requested_t_end": tf, "integrated_to": t_stop,
+                   "growth_factor": exc.growth,
+                   "note": f"The solution grows without bound as t approaches about {exc.t_last:.6g}; the trajectory "
+                           f"is reported up to t = {t_stop:.6g}. This is numerical evidence of a singularity, not a "
+                           "proof of one."}
+        tf = t_stop
+        t_eval = np.linspace(t0, tf, n_pts)
+        sol, exprs, state_syms = integrate_system(rhs, initial_state, (t0, tf), parameters, str(method), t_eval,
+                                                 dense_output=True)
+    n_pts = len(sol.t)
     # The output samples are where the solution is reported, not where the solver stepped: extremes between samples
     # are found on the solver's dense (interpolating) output over a fine grid, and both are reported.
     n_dense = int(min(200_000, max(20 * n_pts, 20_001)))
     t_dense = np.linspace(t0, tf, n_dense)
     y_dense = sol.sol(t_dense) if sol.sol is not None else None
-    internal_steps = int(len(sol.sol.ts) - 1) if sol.sol is not None and hasattr(sol.sol, "ts") else None
+    internal_steps = n_pts - 1 if fixed else (int(len(sol.sol.ts) - 1) if sol.sol is not None and hasattr(sol.sol, "ts") else None)
 
-    t_list = [round(float(x), 8) for x in sol.t]
+    t_list = sol.t.tolist()
     trajectories: dict[str, list[float]] = {}
     summary: dict[str, dict[str, float]] = {}
 
     extrema: dict[str, dict[str, float | int]] = {}
     for idx, name in enumerate(state_names):
         series = sol.y[idx]
-        trajectories[name] = [round(float(v), 8) for v in series]
+        trajectories[name] = series.tolist()
         summary[name] = {
             "initial": float(series[0]),
             "final": float(series[-1]),
@@ -254,32 +301,47 @@ def dynamis_simulate_ode(
 
     cid = _canonical_id(
         "dynamis_simulate_ode",
-        {"rhs": rhs, "initial_state": initial_state, "t_span": [t0, tf], "parameters": parameters or {}, "method": method},
+        {"rhs": rhs, "initial_state": initial_state, "t_span": [t0, tf], "parameters": parameters or {},
+         "method": method, "step_size": step_size, "num_steps": num_steps, "num_points": n_pts},
     )
-    return {
+    result = {
+        "units": dict(units or {}),
         "model_name": model_name,
         "spec": {"rhs": dict(rhs), "parameters": dict(parameters or {}), "initial_state": dict(initial_state),
-                 "t_span": [t0, tf], "method": str(method), "model_name": model_name},
+                 "t_span": [t0, tf], "method": str(method), "model_name": model_name,
+                 **({"step_size": (tf - t0) / (n_pts - 1), "num_steps": n_pts - 1} if fixed else {})},
         "state_variables": state_names,
         "t_span": [t0, tf],
         "method": method,
-        "rtol": 1e-8,
-        "atol": 1e-10,
+        "rtol": None if fixed else 1e-8,
+        "atol": None if fixed else 1e-10,
         "t": t_list,
         "trajectories": trajectories,
         "summary": summary,
         "extrema": extrema,
         "solver": {
-            "method": str(method), "rtol": 1e-8, "atol": 1e-10, "t_span": [t0, tf],
+            "method": str(method), "rtol": None if fixed else 1e-8, "atol": None if fixed else 1e-10, "t_span": [t0, tf],
             "output_samples": n_pts, "output_spacing": (tf - t0) / (n_pts - 1),
             "internal_steps": internal_steps, "function_evaluations": int(sol.nfev),
-            "step_control": "adaptive (error-controlled); output times are interpolated, not solver steps",
-            "extrema_note": "sampled_* are over the output samples; dense_* over the solver's dense output on a fine grid",
+            "step_control": "fixed; output times are the actual RK4 steps" if fixed else "adaptive (error-controlled); output times are interpolated, not solver steps",
+            "extrema_note": "sampled_* are over the actual RK4 steps; no dense interpolant" if fixed else "sampled_* are over the output samples; dense_* over the solver's dense output on a fine grid",
         },
         "conserved_check": conserved_check,
         "verified": bool(sol.success and conserved_check.get("conserved", True)),
         "canonical_id": cid,
     }
+    if blow_up is not None:
+        result["blow_up"] = blow_up
+    if analytic_reference:
+        from .fixed_step import linear_endpoint_reference
+
+        reference = linear_endpoint_reference(exprs, state_syms, [float(initial_state[n]) for n in state_names], (t0, tf))
+        if reference is not None:
+            reference["absolute_errors"] = {
+                n: abs(summary[n]["final"] - reference["endpoint"][n]) for n in state_names
+            }
+        result["analytical_reference"] = reference
+    return result
 
 
 def _classify_stability(eigenvalues: np.ndarray, tol: float = 1e-7) -> str:
@@ -560,8 +622,14 @@ def dynamis_fit_parameters(
     time_column: str | None = None, column_mapping: dict[str, str] | None = None,
     bounds: dict[str, tuple[float, float]] | None = None, n_starts: int = 1, loss: str = "linear",
     fit_initial_state: bool | list[str] = False, seed: int = 0, max_nfev: int = 200, method: str = "RK45",
+    y_sigma: list[float] | None = None,
 ) -> dict[str, Any]:
-    """Fit a safe expression or ODE system to measurements, with covariance and identifiability diagnostics."""
+    """Fit a safe expression or ODE system to measurements, with covariance and identifiability diagnostics.
+
+    For an expression model, `y_sigma` (one standard uncertainty per y value) weights the fit and makes the
+    parameter standard errors absolute; without it they are scaled by the residual variance. A standard error is None
+    when it is not estimable (no degrees of freedom, or a singular covariance from unidentifiable parameters), never 0.
+    """
     if rhs or model_name:
         from .fitting import fit_ode
 
@@ -589,22 +657,51 @@ def dynamis_fit_parameters(
     def _curve_fn(x_in: np.ndarray, *params: float) -> np.ndarray:
         return np.asarray(f_model(x_in, *params), dtype=float)
 
-    popt, pcov = optimize.curve_fit(_curve_fn, x_arr, y_arr, p0=p0, maxfev=10000)
+    sigma_arr = None
+    if y_sigma is not None:
+        sigma_arr = np.asarray(y_sigma, dtype=float)
+        if sigma_arr.shape != y_arr.shape or not np.all(np.isfinite(sigma_arr)) or np.any(sigma_arr <= 0):
+            raise ValueError("y_sigma must give one positive, finite uncertainty per y value.")
+    popt, pcov, _info, mesg, ier = optimize.curve_fit(
+        _curve_fn, x_arr, y_arr, p0=p0, maxfev=10000, sigma=sigma_arr, absolute_sigma=sigma_arr is not None,
+        full_output=True,
+    )
+    converged = ier in (1, 2, 3, 4)
     y_pred = _curve_fn(x_arr, *popt)
     residuals = y_arr - y_pred
     ss_res = float(np.sum(residuals ** 2))
     ss_tot = float(np.sum((y_arr - np.mean(y_arr)) ** 2))
     rmse = float(np.sqrt(np.mean(residuals ** 2)))
     r_squared = 1.0 - (ss_res / ss_tot) if ss_tot > 1e-15 else (1.0 if ss_res < 1e-15 else 0.0)
+    dof = len(x_arr) - len(p_syms)
 
-    std_errs: dict[str, float] = {}
+    std_errs: dict[str, float | None] = {}
     for idx, p in enumerate(p_syms):
-        if pcov is not None and np.isfinite(pcov[idx, idx]) and pcov[idx, idx] >= 0:
-            std_errs[p.name] = float(np.sqrt(pcov[idx, idx]))
-        else:
-            std_errs[p.name] = 0.0
+        var = pcov[idx, idx] if pcov is not None else np.inf
+        std_errs[p.name] = float(np.sqrt(var)) if dof > 0 and np.isfinite(var) and var >= 0 else None
 
     fitted_params = {p.name: float(val) for p, val in zip(p_syms, popt, strict=False)}
+    # Parameters whose estimates are almost perfectly correlated cannot be separated by the data (e.g. a*b*x).
+    max_corr = None
+    if len(p_syms) > 1 and all(v is not None and v > 0 for v in std_errs.values()):
+        sd = np.sqrt(np.diag(pcov))
+        corr = pcov / np.outer(sd, sd)
+        max_corr = float(np.max(np.abs(corr[~np.eye(len(p_syms), dtype=bool)])))
+    estimable = all(v is not None for v in std_errs.values()) and (max_corr is None or max_corr < 0.999)
+    # Verified means: the optimiser converged, the uncertainties are estimable, and the model explains the data
+    # better than its mean (R^2 > 0). It does not certify that the model form is right.
+    verified = bool(converged and estimable and math.isfinite(rmse) and r_squared > 0.0)
+    issues = []
+    if not converged:
+        issues.append(f"the optimiser did not converge: {mesg}")
+    if dof <= 0:
+        issues.append("no degrees of freedom (as many parameters as points): standard errors are not estimable")
+    elif not estimable:
+        issues.append("at least one parameter is not identifiable from these data (singular covariance or parameter "
+                      f"correlation {max_corr:.4f})" if max_corr is not None else
+                      "singular covariance: at least one parameter is not identifiable from these data")
+    if r_squared <= 0.0:
+        issues.append(f"R^2 = {r_squared:.3g}: the model does not explain the data better than its mean")
     cid = _canonical_id(
         "dynamis_fit_parameters",
         {"model_expr": model_expr, "param_names": param_names, "parameters": fitted_params},
@@ -614,12 +711,16 @@ def dynamis_fit_parameters(
         "independent_var": independent_var,
         "parameters": fitted_params,
         "std_errors": std_errs,
+        "std_error_basis": "absolute (from y_sigma)" if sigma_arr is not None else "scaled by residual variance",
+        "degrees_of_freedom": dof,
+        "max_parameter_correlation": max_corr,
         "rmse": rmse,
         "r_squared": r_squared,
         "residuals": [float(r) for r in residuals],
         "predictions": [float(y) for y in y_pred],
-        "converged": True,
-        "verified": bool(math.isfinite(rmse)),
+        "converged": converged,
+        "verified": verified,
+        "issues": issues,
         "canonical_id": cid,
     }
 
@@ -648,7 +749,24 @@ def dynamis_root_find(
     res_exprs: list[sp.Expr] = []
     for eq_str in eq_list:
         lhs, rhs, _ = safe_parse_equation(eq_str, local_dict=local_env)
-        expr = lhs - rhs
+        if isinstance(lhs, (sp.Tuple, tuple, list)) or isinstance(rhs, (sp.Tuple, tuple, list)):
+            if not (isinstance(lhs, (sp.Tuple, tuple, list)) and isinstance(rhs, (sp.Tuple, tuple, list))):
+                raise ValueError("Shape mismatch in equation: cannot equate container to scalar")
+            if len(lhs) != len(rhs):
+                raise ValueError(f"Shape length mismatch in equation: {len(lhs)} != {len(rhs)}")
+            for l_item, r_item in zip(lhs, rhs, strict=True):
+                try:
+                    expr = l_item - r_item
+                except TypeError as exc:
+                    raise ValueError(f"Cannot equate incompatible types in equation: {exc}") from exc
+                if param_subs:
+                    expr = expr.subs(param_subs)
+                res_exprs.append(expr)
+            continue
+        try:
+            expr = lhs - rhs
+        except TypeError as exc:
+            raise ValueError(f"Cannot equate incompatible types in equation: {exc}") from exc
         if param_subs:
             expr = expr.subs(param_subs)
         res_exprs.append(expr)

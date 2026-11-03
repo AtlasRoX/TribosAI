@@ -199,8 +199,9 @@ CHOICE_ALIASES: dict[str, dict[str, str]] = {
     "support": {"cantilevered": "cantilever", "fixed_free": "cantilever", "simply": "simply_supported",
                 "pinned_pinned": "simply_supported", "simple": "simply_supported", "simply_supported_beam": "simply_supported"},
     "load": {"point_load": "point", "end_point_load": "point", "end_load": "point", "tip_load": "point",
-             "concentrated": "point", "concentrated_load": "point", "uniform": "udl", "uniform_load": "udl",
-             "distributed": "udl", "uniformly_distributed": "udl", "uniformly_distributed_load": "udl"},
+             "tip_point_load": "point", "concentrated": "point", "concentrated_load": "point", "uniform": "udl",
+             "uniform_load": "udl", "distributed": "udl", "uniformly_distributed": "udl",
+             "uniformly_distributed_load": "udl"},
 }
 
 
@@ -250,6 +251,18 @@ def _resolve_inputs(calc: Calculator, inputs: dict[str, Any], material: str | No
         if p.is_choice:
             choice = str(raw).strip().lower().replace(" ", "_").replace("-", "_")
             choice = CHOICE_ALIASES.get(p.name, {}).get(choice, choice)
+            if choice not in p.choices:
+                # Safe normalization of unambiguous descriptions
+                if p.name == "load":
+                    if "point" in choice or "tip" in choice or "concentrat" in choice:
+                        choice = "point"
+                    elif "udl" in choice or "distribut" in choice or "uniform" in choice:
+                        choice = "udl"
+                elif p.name == "support":
+                    if "cantilever" in choice or "fixed" in choice:
+                        choice = "cantilever"
+                    elif "simply" in choice or "pin" in choice:
+                        choice = "simply_supported"
             if choice not in p.choices:
                 raise ValueError(f"Input {p.name!r} must be one of {', '.join(p.choices)}, got {raw!r}.")
             values[p.name] = choice

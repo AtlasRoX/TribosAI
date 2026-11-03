@@ -678,8 +678,6 @@ class ProjectStore:
                 same = [r for r in existing if r["object_norm"] == o_norm]
                 if f.relation in VALUED_RELATIONS and same and f.value is not None:
                     differing = [r for r in same if r["value"] is not None and r["value"] != f.value]
-                    if differing and not f.verified:
-                        differing = [r for r in differing if not r["verified"]]
                     if differing:
                         # The old value is invalidated before the new one is added (one current fact per key).
                         new_id = new_fact_id()
@@ -714,8 +712,8 @@ class ProjectStore:
                 if f.relation in SINGLE_VALUED_RELATIONS:
                     in_batch = batch_keys.get((s_norm, f.relation), set())
                     contradicted = [r for r in existing if r["object_norm"] not in in_batch and float(r["recorded_at"]) < now]
-                    # An unverified fact can never invalidate an already verified fact.
-                    if not f.verified:
+                    # An unverified automated run cannot invalidate an already verified fact.
+                    if f.source and f.source.get("run_id") and not f.verified:
                         contradicted = [r for r in contradicted if not r["verified"]]
                 new_id = self._insert(conn, project_id, user_id, f, now, review_status=review_status)
                 for r in contradicted:

@@ -17,6 +17,9 @@ async def _plan(query: str) -> SearchPlan:
         query=query, clean_query=query, registry=None, enable_web_search=True, attachments=[], attachment_errors=[],
         user_id="u", thread_id="t", model_name="m", api_key=None, llm_factory=None,
     )
+    if not ctx.search_plan.concepts and not ctx.search_plan.web_query:
+        ctx.evidence_need = None
+        return qp.build_search_plan(ctx, query)
     return ctx.search_plan
 
 

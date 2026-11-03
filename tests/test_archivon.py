@@ -179,9 +179,11 @@ async def test_archivon_engine_search_deduplication_and_integrity() -> None:
                             "publicationTypes": ["Conference"],
                         },
                         {
+                            # On the question's subject: an off-topic retraction is not reported at all (a retracted
+                            # breast-cancer paper matched by "classify" and "task" is no warning the reader needs).
                             "paperId": "s2_retracted",
-                            "title": "Retracted Superconductivity Claim",
-                            "abstract": "Room temperature superconductivity claim.",
+                            "title": "Retracted Transformer Attention Approximation Claim",
+                            "abstract": "A transformer attention approximation claim.",
                             "year": 2023,
                             "venue": "Nature",
                             "citationCount": 100,

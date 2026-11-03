@@ -126,7 +126,13 @@ def names_dynamical_system(ctx: Any, query: str) -> bool:
     signal = str(getattr(getattr(ctx, "evidence_need", None), "signal", "") or "")
     if signal.startswith(("ode:", "ode_system:", "system:")):
         return True
-    return bool(_ODE_TEXT_RE.search(query or ""))
+    if _ODE_TEXT_RE.search(query or ""):
+        return True
+    # Bodies, masses and G given in full ("three equal point masses under Newtonian gravity, r1 = (...), v1 = ...").
+    from ..writer.nbody_facts import parse_nbody
+    from ..writer.system_facts import parse_system
+
+    return parse_nbody(query or "") is not None or parse_system(query or "") is not None
 
 
 def missing_initial_conditions(query: str) -> list[str]:

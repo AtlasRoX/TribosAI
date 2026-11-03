@@ -18,7 +18,10 @@ import re
 _NEEDS_LIBRARY = (
     (re.compile(r"\bcomplex\b|ℂ|\bRe\s*\(|\bIm\s*\(|\bimaginary\b", re.I), "complex numbers"),
     (re.compile(r"\bzeta\b|ζ|\banalytic(?:ally)?\b|\bholomorphic\b|\bmeromorphic\b", re.I), "complex analysis (the zeta function)"),
-    (re.compile(r"\breal\s+numbers?\b|\bover\s+the\s+reals\b|ℝ|\birrational\b|\bsqrt\b|√|\bπ\b|\bpi\b", re.I), "real numbers"),
+    (re.compile(r"\breal\s+numbers?\b|\bover\s+the\s+reals\b|ℝ|\birrational\b|\bsqrt\b|√|\bπ\b|\bpi\b"
+                # "for all real x,y", "real polynomials", "real roots": variables or objects over the reals
+                r"|\breal\s+(?:[a-z]\b|variables?\b|polynomials?\b|coefficients?\b|roots?\b|solutions?\b|valued\b)",
+                re.I), "real numbers"),
     (re.compile(r"\b(?:derivative|differentiab\w*|integral|integrat\w*|limit|continuous|converge\w*|series)\b", re.I), "analysis"),
     (re.compile(r"\b(?:sin|cos|tan|exp|log|ln)\s*\(", re.I), "transcendental functions"),
 )

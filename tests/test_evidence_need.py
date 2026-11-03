@@ -136,3 +136,64 @@ def test_a_verified_calculation_is_scored_by_its_measured_accuracy_not_literatur
     assert art["claims"] == [] and art["basis"] == ["independent re-evaluation"]
     # No calibration: no number is made up from the status.
     assert computation_confidence({"status": "verified"})["answer_confidence"] is None
+
+
+# A word problem carries all its values in the story: searching its words ("Sam", "hired", "20-day period") found
+# unrelated papers and a news story and took most of a 58 s run.
+SAM = (r"Sam is hired for a 20-day period. On days that he works, he earns $\$$60. For each day that he does not work, "
+       r"$\$$30 is subtracted from his earnings. At the end of the 20-day period, he received $\$$660. How many days "
+       "did he not work?")
+
+
+@pytest.mark.parametrize("question", [
+    SAM,
+    "A store sells pens at $2 each and notebooks at $5 each. Maria bought 7 items for $26. How many notebooks did she buy?",
+])
+def test_an_arithmetic_word_problem_skips_retrieval(question):
+    need = assess_evidence_need(question)
+    assert need.skip_retrieval and need.kind == "self_contained"
+
+
+@pytest.mark.parametrize("question", [
+    "How many people lived in Tokyo in 2020?",
+    "What is the yield strength of 304 stainless steel at 500 C and 3 MPa?",
+    "How much does a Boeing 747 weigh with 400 passengers and 20 crew and 3 tons of cargo?",
+    "How many papers on graphene were published between 2010 and 2015 with more than 100 citations?",
+])
+def test_numbers_in_a_real_world_question_still_search(question):
+    assert not assess_evidence_need(question).skip_retrieval
+
+
+def test_latex_math_delimiters_are_not_dollar_amounts():
+    from tribos.agents.evidence_need import is_word_problem
+
+    q = r"If $x = 2$ and $y = 5$, then what is the value of $\frac{x^4+2y^2}{6}$ ?"
+    assert not is_word_problem(q)
+    assert assess_evidence_need(q).skip_retrieval  # still self-contained, for the right reason
+
+
+def test_given_values_then_one_expression_is_an_exact_evaluation():
+    from tribos.axiom.problem import parse_problem
+
+    q = r"If $x = 2$ and $y = 5$, then what is the value of $\frac{x^4+2y^2}{6}$ ?"
+    spec = parse_problem(q)
+    assert spec.parsed and spec.kind == "evaluate" and not spec.unaccounted and spec.text == q
+    assert assess_evidence_need(q).kind == "closed_computation"
+    # A letter without a value is not a plain evaluation.
+    assert parse_problem("If x = 3, solve x^2 - y = 0 for y").kind != "evaluate"
+
+
+def test_an_article_before_a_named_system_is_not_part_of_the_ode():
+    from tribos.axiom.problem import parse_problem
+
+    q = "Simulate a damped harmonic oscillator x'' + 0.4x' + 4x = 0 with x(0)=1, x'(0)=0 for 20 seconds"
+    assert parse_problem(q).expression == "x'' + 0.4x' + 4x = 0"
+    assert parse_problem("Solve a x'' + b x' + c x = 0").expression.startswith("a x''")  # "a" as a coefficient stays
+
+
+def test_a_greek_unknown_is_the_function_of_time():
+    from tribos.axiom.problem import parse_problem
+
+    s = parse_problem("Model a pendulum with theta'' + 0.5 theta' + 9.8 sin(theta) = 0, theta(0)=0.5, theta'(0)=0")
+    assert (s.kind, s.func) == ("ode", "theta(t)")
+    assert s.expression == "theta'' + 0.5 theta' + 9.8 sin(theta) = 0" and s.ics == {"theta(0)": "0.5", "theta'(0)": "0"}

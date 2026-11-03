@@ -218,17 +218,11 @@ def test_semantic_materials_temperature_dependence_and_standards():
     assert al is not None
     assert al.density_kg_m3 == 2700.0
 
-    # Young's modulus E(T)
-    e_20 = al.e_at_temp(20.0)
-    e_200 = al.e_at_temp(200.0)
-    assert e_20 == pytest.approx(68.9, abs=0.1)
-    assert e_200 < e_20  # modulus degrades with heat
-
-    # Yield strength Sy(T)
-    sy_20 = al.yield_at_temp(20.0)
-    sy_200 = al.yield_at_temp(200.0)
-    assert sy_20 == pytest.approx(276.0, abs=0.1)
-    assert sy_200 < sy_20
+    # Room-temperature values only: no unsourced derating curve outside 15-25 C (AUDIT-010)
+    assert al.e_at_temp(20.0) == pytest.approx(68.9, abs=0.1)
+    assert al.yield_at_temp(20.0) == pytest.approx(276.0, abs=0.1)
+    assert al.e_at_temp(200.0) is None
+    assert al.yield_at_temp(200.0) is None
 
     # Basquin S-N fatigue curve
     cycles_high = al.fatigue_life_cycles(150.0)
@@ -478,7 +472,10 @@ def test_cad_geometry_inspection_and_diff():
     assert geom_a.bounding_box.length_mm == 100.0
     assert geom_a.bounding_box.width_mm == 50.0
     assert geom_a.bounding_box.height_mm == 20.0
-    assert geom_a.mass_kg > 0.0
+    # Two loose triangles are not a closed solid: no volume or mass is invented (AUDIT-002)
+    assert geom_a.watertight is False
+    assert geom_a.mass_kg is None
+    assert geom_a.surface_area_mm2 == pytest.approx(2 * 0.5 * 100 * 50)
 
     # Revision B: length widened to 120mm
     stl_rev_b = """solid part_rev_b
@@ -502,8 +499,9 @@ def test_cad_geometry_inspection_and_diff():
         stl_rev_b, file_name="part_rev_b.stl", density_kg_m3=2700.0
     )
     diff = GeometryInspector.diff_geometries(geom_a, geom_b)
-    assert diff["delta_volume_mm3"] > 0
-    assert diff["pct_mass_change"] > 0
+    assert diff["delta_volume_mm3"] is None
+    assert diff["pct_mass_change"] is None
+    assert diff["delta_surface_area_mm2"] == pytest.approx(2 * 0.5 * 20 * 50)
     assert diff["significant_change"] is True
 
 
@@ -521,6 +519,7 @@ def test_cae_14_gate_review():
     assert audit["cae_verified"] is True
     assert audit["gates_passed"] == 5
     assert all(g["passed"] for g in audit["gates"])
+    assert "14" not in audit["verdict"]
 
 
 # --------------------------------------------------------------------------------------------------
@@ -541,13 +540,17 @@ def test_tool_registry_substrate_tools():
     assert executor is not None
     res = executor(material_name="steel_4140", temperature_celsius=150.0)
     assert "AISI 4140" in res["name"]
-    assert res["e_modulus_gpa"] < 205.0  # degraded at 150C
+    assert res["e_modulus_gpa"] is None and "limitation" in res  # no sourced data at 150 C
+    assert executor(material_name="steel_4140", temperature_celsius=20.0)["e_modulus_gpa"] == 205.0
 
 
 def test_fastapi_harness_endpoints(monkeypatch):
     monkeypatch.setenv("TRIBOS_AUTH_MODE", "disabled")
     with TestClient(app, base_url="http://localhost") as client:
-        project_id = "proj_cryo_01"
+        # Harness data is scoped by project membership (AUDIT-004): create a real project first.
+        created = client.post("/api/projects", json={"name": "Cryogenic tank"})
+        assert created.status_code == 201
+        project_id = created.json()["id"]
 
         # 1. Create thread
         resp = client.post(

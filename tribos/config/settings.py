@@ -79,6 +79,7 @@ GROUPS: dict[str, str] = {
     "Background jobs": "TRIBOS_JOB",
     "Models and LLM providers": "",
     "Agentic runtime": "TRIBOS_AGENT",
+    "Research memory (Mem0)": "TRIBOS_MEM0",
     "Claim verification (NLI)": "TRIBOS_NLI",
     "Confidence calibration": "TRIBOS_CONFIDENCE",
     "Query planning and synthesis": "",
@@ -103,6 +104,7 @@ _MCP = "MCP and A2A endpoints"
 _JOBS = "Background jobs"
 _LLM = "Models and LLM providers"
 _AGENT = "Agentic runtime"
+_MEM0 = "Research memory (Mem0)"
 _NLI = "Claim verification (NLI)"
 _CONF = "Confidence calibration"
 _PLAN = "Query planning and synthesis"
@@ -126,9 +128,13 @@ _SETTINGS: Sequence[Setting] = (
     Setting("TRIBOS_RUNS_DIR", "path", None, "Run-manifest store (wins over TRIBOS_DATA_DIR; also hosts jobs/ and tool_cache/).", _DIRS),
     Setting("TRIBOS_UPLOAD_ROOT", "path", None, "Uploaded datasets directory (wins over TRIBOS_DATA_DIR).", _DIRS),
     Setting("TRIBOS_JOBS_DIR", "path", None, "Background-job SQLite store directory (wins over TRIBOS_RUNS_DIR/jobs).", _DIRS),
+    Setting("TRIBOS_FEEDBACK_DIR", "path", None, "Where answer ratings (thumbs up/down) are recorded as JSON lines (default <data>/feedback).", _DIRS),
+    Setting("TRIBOS_FILES_DIR", "path", None, "Where files an answer produced on request (Word, PDF, Python, CSV, Excel, ...) are kept (default <data>/files).", _DIRS),
+    Setting("TRIBOS_CAMPAIGNS_DIR", "path", None, "Research-project (campaign) store directory (default <jobs dir>/campaigns).", _DIRS),
     Setting("TRIBOS_TOOL_CACHE_DIR", "path", None, "Tool-result SQLite cache directory (wins over TRIBOS_RUNS_DIR/tool_cache).", _DIRS),
     Setting("TRIBOS_DATASET_ROOTS", "list", None, "Directories (os.pathsep-separated) that typed dataset paths may point into; <cwd>/data when unset.", _DIRS, sep=os.pathsep),
     # --- Retention and maintenance -------------------------------------------------------------------------------
+    Setting("TRIBOS_FILES_TTL_DAYS", "float", 30.0, "Files answers produced are deleted after this many days (0 keeps them).", _RET, min=0.0, max=36500.0),
     Setting("TRIBOS_JOB_TTL_DAYS", "float", 30.0, "Finished jobs older than this many days are purged (0 keeps them).", _RET, min=0.0, max=36500.0),
     Setting("TRIBOS_MAX_RUNS", "int", 500, "Newest run manifests kept across users (0 = unlimited).", _RET, min=0),
     Setting("TRIBOS_MAX_RUNS_PER_USER", "int", 500, "Maximum stored run manifests kept per user (0 = unlimited).", _RET, min=0),
@@ -144,6 +150,7 @@ _SETTINGS: Sequence[Setting] = (
     Setting("TRIBOS_ALLOW_INSECURE", "bool", False, "Allow non-loopback connections when authentication is disabled (unsafe).", _AUTH),
     # --- API server ----------------------------------------------------------------------------------------------
     Setting("TRIBOS_ALLOWED_HOSTS", "list", None, "Allowed HTTP Host header values (comma-separated; defaults to loopback when auth is disabled).", _API),
+    Setting("TRIBOS_WEB_URL", "str", "http://localhost:3000", "Address of the web app, linked from the backend's own status page at /.", _API),
     Setting("TRIBOS_CORS_ORIGINS", "list", "http://localhost:3000,http://127.0.0.1:3000", "Comma-separated browser origins allowed by CORS (also allowed by the MCP endpoint).", _API),
     Setting("TRIBOS_SSE_HEARTBEAT_S", "float", 15.0, "Seconds between keep-alive comments on chat and job event streams.", _API, min=0.05),
     Setting("TRIBOS_HEALTH_CACHE_S", "float", 60.0, "Seconds the upstream readiness probes of /api/health are cached.", _API, min=0.0),
@@ -155,6 +162,8 @@ _SETTINGS: Sequence[Setting] = (
     Setting("TRIBOS_MAX_EXPORT_BODY_MB", "float", 16.0, "Largest request body in MB for the export and report endpoints.", _API, min=0.01),
     Setting("TRIBOS_PUBLIC_URL", "str", None, "Public base URL of the API (e.g. https://tribos.example.org) used in the A2A Agent Card; default: the request's own base URL.", _API),
     # --- MCP and A2A -----------------------------------------------------------------------------------------------
+    Setting("TRIBOS_MCP_CLIENT_SERVERS", "str", "", "External MCP tool servers Tribos may call, as JSON "
+            '{"name": {"command": [...], "tools": [...]}} (stdio transport; tools list optional).', _MCP),
     Setting("TRIBOS_MCP_ALLOWED_ORIGINS", "list", None, "Extra comma-separated origins the MCP endpoint accepts besides TRIBOS_CORS_ORIGINS.", _MCP),
     Setting("TRIBOS_MCP_MAX_CONCURRENT", "int", 2, "Concurrent MCP research calls per user.", _MCP, min=1),
     Setting("TRIBOS_MCP_RESEARCH_TIMEOUT_S", "float", 900.0, "Seconds an MCP research call may run before it is cancelled.", _MCP, min=0.0),
@@ -164,18 +173,38 @@ _SETTINGS: Sequence[Setting] = (
     Setting("TRIBOS_JOB_WORKERS", "int", 2, "Background-job worker tasks.", _JOBS, min=1, max=16),
     Setting("TRIBOS_MAX_JOBS_PER_USER", "int", 3, "Queued + running background jobs per user.", _JOBS, min=1, max=100),
     Setting("TRIBOS_JOB_MAX_EVENTS", "int", 20_000, "Progress events kept per job; older ones are dropped.", _JOBS, min=100, max=1_000_000),
+    Setting("TRIBOS_CAMPAIGN_AUTO_RESUME", "bool", True, "Research projects interrupted by a server stop continue on their own when the server starts again (at most 3 times each).", _JOBS),
+    Setting("TRIBOS_CAMPAIGN_STAGE_RETRIES", "int", 1, "Times a failed research-project stage is run again before the project stops.", _JOBS, min=0, max=5),
+    Setting("TRIBOS_CAMPAIGN_MAX_ACTIVE", "int", 1, "Research projects run at once per server process; further ones wait in a queue.", _JOBS, min=1, max=8),
+    Setting("TRIBOS_RESEARCH_SANDBOX_TIMEOUT_S", "int", 300, "Seconds one sandboxed cell of a research-project experiment may run (chat cells keep TRIBOS_SANDBOX_TIMEOUT_S).", _JOBS, min=30, max=1800),
+    Setting("TRIBOS_RESEARCH_MAX_ROUNDS", "int", 12, "Safety ceiling on research-loop rounds; a project normally stops earlier, when it reaches a conclusion or stops making progress.", _JOBS, min=1, max=40),
+    Setting("TRIBOS_RESEARCH_MAX_HOURS", "int", 8, "Safety ceiling on a research project's wall-clock hours before it writes its thesis with what it has.", _JOBS, min=1, max=72),
+    Setting("TRIBOS_RESEARCH_MAX_TEST_RUNS", "int", 120, "Safety ceiling on test runs (experiments, proofs, literature checks) in one research project.", _JOBS, min=5, max=1000),
+    Setting("TRIBOS_RESEARCH_PARALLEL_TESTS", "int", 2, "Research-project tests run at once.", _JOBS, min=1, max=8),
+    Setting("TRIBOS_RESEARCH_CODEACT_STEPS", "int", 10, "Python cells one research experiment may run.", _JOBS, min=2, max=30),
+    Setting("TRIBOS_RESEARCH_TEST_RETRIES", "int", 2, "Times a failed research test is retried with a different method before it is marked blocked.", _JOBS, min=0, max=5),
+    Setting("TRIBOS_RESEARCH_STAGNATION_ROUNDS", "int", 2, "Consecutive research rounds without progress after which the project stops and writes its thesis.", _JOBS, min=1, max=6),
+    Setting("TRIBOS_RESEARCH_CROSS_CHECK", "bool", True, "Re-implement each numeric research result independently and compare (the 'replicated' verification tier).", _JOBS),
+    Setting("TRIBOS_THESIS_PDF_ENGINE", "str", "auto", "Thesis PDF renderer: chromium (typeset HTML with KaTeX, via Playwright), fpdf (built-in fallback) or auto.", _JOBS, choices=("auto", "chromium", "fpdf")),
+    Setting("TRIBOS_CAMPAIGN_CONTEXT_CHARS", "int", 3500, "Characters of each earlier stage a research-project stage is given (twice this for the report).", _JOBS, min=500, max=40_000),
     Setting("TRIBOS_JOB_CANCEL_GRACE_S", "float", 20.0, "Seconds a cancelled job may take to stop before it is marked cancelled anyway.", _JOBS, min=0.0, max=600.0),
     # --- Models and LLM providers ----------------------------------------------------------------------------------
     Setting("NVIDIA_API_KEY", "str", None, "NVIDIA NIM models (default LLM provider) and the NIM structure tools.", _LLM, secret=True),
     Setting("NVIDIA_NIM_API_KEY", "str", None, "Alternative name for NVIDIA_API_KEY (used when that one is unset).", _LLM, secret=True),
+    Setting("META_API_KEY", "str", None, "Meta Model API models (such as Muse Spark).", _LLM, secret=True),
+    Setting("META_API_BASE", "str", "https://api.meta.ai/v1", "Base URL for the Meta Model API.", _LLM),
     Setting("OPENAI_API_KEY", "str", None, "OpenAI models; also the fallback when no NVIDIA key is set.", _LLM, secret=True),
     Setting("TRIBOS_LLM_MODEL", "str", None, "Default model id when a request names none (the orchestrator default when unset; gpt-4o-mini for the Lumicell SCP agent).", _LLM),
     Setting("TRIBOS_ALLOWED_MODELS", "list", None, "Extra comma-separated model ids callers may select besides the built-in catalog.", _LLM),
+    Setting("TRIBOS_ANSWER_STYLE", "str", "concise", "Answer length: `concise` answers only what was asked (direct answer first, no unrequested sections); `full` is the longer report format.", _PLAN, choices=("concise", "full")),
+    Setting("TRIBOS_CONTEXT_GATE", "bool", True, "Context gate: only query-relevant sentences with Kappa context K >= 1 (source-weighted, corroborated) reach the answer model.", _PLAN),
+    Setting("TRIBOS_CONTEXT_GATE_CHARS", "int", 6000, "Characters of literature evidence the context gate admits (the most relevant sentences first).", _PLAN, min=1000, max=60000),
     Setting("TRIBOS_SYNTHESIS_MODEL", "str", None, "Model that writes the final answer (default: the turn's model).", _LLM),
     Setting("LLM_TIMEOUT", "float", 60.0, "Per-request LLM client timeout in seconds.", _LLM),
     Setting("LLM_STREAM_TIMEOUT", "float", 120.0, "Read timeout in seconds between streamed completion chunks.", _LLM),
+    Setting("LLM_DEEP_REASONING_TIMEOUT", "float", 900.0, "Seconds of silence allowed between bytes when a model reasons deeply (high effort or above) before answering; LLM_TIMEOUT applies otherwise.", _LLM, min=60.0),
     Setting("LLM_STREAM_TOTAL_TIMEOUT", "float", 1800.0, "Wall-clock cap in seconds on one streamed completion.", _LLM),
-    Setting("TRIBOS_LLM_FALLBACK", "bool", True, "Allow fallback to an available provider when the requested model key is unset.", _LLM),
+    Setting("TRIBOS_LLM_FALLBACK", "bool", False, "Allow fallback to an available provider when the requested model key is unset (off: only Meta models are offered).", _LLM),
     Setting("TRIBOS_LLM_RETRY_ATTEMPTS", "int", 3, "Attempts per NVIDIA NIM model request on a transient provider failure (408/409/429/5xx or no connection); replaces the SDK's own retry, so attempts are not multiplied.", _LLM, min=1, max=5),
     Setting("TRIBOS_LLM_RETRY_DEADLINE_S", "float", 20.0, "Seconds from a model request's first attempt after which no further transient-failure retry starts.", _LLM, min=0.0, max=120.0),
     # --- Agentic runtime -------------------------------------------------------------------------------------------
@@ -185,6 +214,7 @@ _SETTINGS: Sequence[Setting] = (
     Setting("TRIBOS_ROUTER_LEARNING", "str", "auto", "Auto routing outcome learning: off, auto (off under pytest) or on.", _AGENT, choices=SWITCH, aliases=SWITCH_ALIASES),
     Setting("TRIBOS_ROUTER_DIR", "path", None, "Auto routing outcome store (default <TRIBOS_RUNS_DIR>/router, else <TRIBOS_DATA_DIR>/router, else data/router).", _AGENT),
     Setting("TRIBOS_AGENT_MODEL", "str", None, "Model for agentic planning/critique calls (default: the turn's model).", _AGENT),
+    Setting("TRIBOS_ESCALATE_ON_WEAK_SIGNALS", "bool", False, "Auto runs: also escalate to the critic debate on an uncertain route, a fallen-back core step or open sub-questions (off: only contradicting evidence or safety-critical questions do).", _AGENT),
     Setting("TRIBOS_AGENT_THINKING", "bool", False, "Keep model reasoning on for short agent calls (plans, critiques, JSON verdicts).", _AGENT),
     Setting("TRIBOS_AGENT_CALL_TIMEOUT", "float", 180.0, "Seconds one agent model call (plan, critique, verdict) may take.", _AGENT),
     Setting("TRIBOS_AGENT_PLAN", "str", "auto", "Plan-and-execute phase: off disables it.", _AGENT, choices=FLAG),
@@ -193,6 +223,7 @@ _SETTINGS: Sequence[Setting] = (
     Setting("TRIBOS_AGENT_REACT_STEPS", "int", 4, "Maximum tool rounds in react plan mode.", _AGENT, min=1, max=12),
     Setting("TRIBOS_AGENT_DECOMPOSE", "str", "auto", "Sub-question decomposition: off, auto (complex questions only) or on (always).", _AGENT, choices=FLAG),
     Setting("TRIBOS_AGENT_APPROVAL_TIMEOUT", "float", 300.0, "Seconds a plan waits for the user's approval before running as proposed.", _AGENT, min=5.0, max=3600.0),
+    Setting("TRIBOS_APPROVE_EXPENSIVE", "bool", False, "Ask before a simulation, parameter scan, calibration or sandboxed code run starts (interactive chats). Off: it runs at once; agent_options.require_plan_approval still asks.", _AGENT),
     Setting("TRIBOS_APPROVAL_TIMEOUT_S", "float", 300.0, "Seconds a tool-approval request waits for the user before it is denied.", _AGENT, min=5.0, max=3600.0),
     Setting("TRIBOS_APPROVAL_ON_TIMEOUT", "str", "withhold_expensive", "Action on approval timeout: withhold_expensive (default) or reject.", _AGENT, choices=("withhold_expensive", "reject")),
     Setting("TRIBOS_COUNTER_EVIDENCE", "str", "auto", "Counter-evidence search for research answers: off disables it.", _AGENT, choices=FLAG),
@@ -212,6 +243,13 @@ _SETTINGS: Sequence[Setting] = (
     Setting("TRIBOS_CANCEL_GRACE_S", "float", 2.0, "Seconds a cancelled or deadline-expired model call is waited for before it is abandoned.", _AGENT, min=0.0),
     Setting("TRIBOS_PROGRESS_HEARTBEAT_S", "float", 5.0, "Seconds between liveness re-emits of a step waiting on a long model call (0 disables).", _AGENT, min=0.0),
     Setting("TRIBOS_TOOL_EMBEDDINGS", "str", None, "Local sentence-transformers model id for embedding-based tool retrieval (unset = lexical only).", _AGENT),
+    # --- Research memory (Mem0) ----------------------------------------------------------------------------------
+    Setting("TRIBOS_MEM0_ENABLED", "bool", True, "Enable persistent Mem0 memory integration for factual recall.", _MEM0),
+    Setting("TRIBOS_MEM0_DIR", "path", None, "Persistent directory for Mem0 Qdrant vector DB and SQLite history.", _MEM0),
+    Setting("TRIBOS_MEM0_EMBEDDER_PROVIDER", "str", "mock", "Embedder provider for Mem0 vector store.", _MEM0,
+            choices=("mock", "huggingface", "openai", "gemini", "langchain")),
+    Setting("TRIBOS_MEM0_LLM_PROVIDER", "str", "mock", "LLM provider for Mem0 extraction and consolidation.", _MEM0,
+            choices=("mock", "openai", "gemini", "anthropic", "langchain")),
     # --- Claim verification (NLI) ----------------------------------------------------------------------------------
     Setting("TRIBOS_NLI", "str", "auto", "Claim-vs-evidence NLI: off, auto (cross-encoder, else LLM), model (cross-encoder only) or llm.", _NLI, choices=("off", "auto", "model", "llm"), aliases={"on": "auto"}),
     Setting("TRIBOS_NLI_MODEL", "str", "cross-encoder/nli-deberta-v3-base", "Hugging Face cross-encoder used for NLI.", _NLI),
@@ -247,6 +285,9 @@ _SETTINGS: Sequence[Setting] = (
     # --- Data sources ----------------------------------------------------------------------------------------------
     Setting("TRIBOS_S2_API_KEY", "str", None, "Optional Semantic Scholar API key for higher rate limits in Archivon.", _SRC, secret=True),
     Setting("TRIBOS_OPENALEX_API_KEY", "str", None, "Optional OpenAlex API key for polite/premium pool requests in Archivon.", _SRC, secret=True),
+    Setting("TRIBOS_ARCHIVON_FULLTEXT", "bool", True, "Archivon: add body paragraphs of the top arXiv papers (arxiv.org/html) so claims are checked against full text, not abstracts only.", _SRC),
+    Setting("TRIBOS_ARCHIVON_PDF_FULLTEXT", "bool", True, "Archivon: for top papers without arXiv HTML, read open-access PDFs (size-capped) for full-text passages.", _SRC),
+    Setting("TRIBOS_SKILLS_DIR", "str", "", "Folder of SKILL.md files (procedures added to the drafting prompt when a question matches); empty means the built-in skills.", _AGENT),
     Setting("TRIBOS_ADS_API_TOKEN", "str", None, "Optional NASA ADS Bearer API token for astrophysics literature search in Archivon.", _SRC, secret=True),
     Setting("TRIBOS_WOLFRAM_APPID", "str", None, "Optional Wolfram|Alpha LLM API AppID for Physis external reference queries.", _SRC, secret=True),
     Setting("TRIBOS_MP_API_KEY", "str", None, "Optional Materials Project API v2 key for live crystalline/electronic material queries in Physis.", _SRC, secret=True),
@@ -281,18 +322,60 @@ _SETTINGS: Sequence[Setting] = (
     Setting("TRIBOS_SIMULATE_MAX_CONCURRENT", "int", 2, "Interactive simulation calls one user may have running at "
             "once.", _SIM, min=1, max=32),
     # --- Formal proof checking with Lean 4 (tribos/verify/formal) ------------------------------------------------
+    Setting("TRIBOS_FORMAL_MODE", "str", "explicit", "When Lean runs: `explicit` only when a formal (machine-checked, Lean) proof is asked for; `auto` for every 'prove ...' question.", _MATH, choices=("explicit", "auto")),
     Setting("TRIBOS_FORMAL", "bool", True, "Formal Lean 4 checking of 'prove ...' questions (used only when Lean is "
             "installed).", _MATH),
     Setting("TRIBOS_LEAN_PATH", "str", "", "Path of the lean (or lake) executable; empty means lean on PATH.", _MATH),
     Setting("TRIBOS_LEAN_PROJECT", "str", "", "A Lean project with Mathlib; proofs are checked with lake env lean there.",
             _MATH),
     Setting("TRIBOS_FORMAL_TIMEOUT_S", "float", 60.0, "Seconds one Lean check may run.", _MATH, min=1.0, max=600.0),
+    Setting("TRIBOS_FORMAL_BACKGROUND", "bool", True, "Run the Lean formal proof beside the rest of the run; the answer waits for it only when it is written.", _MATH),
+    Setting("TRIBOS_FORMAL_BUDGET_S", "float", 150.0, "Seconds the Lean formal-proof stage may take in all (attempts, repairs, lemma blueprint); then the answer says it did not finish.", _MATH, min=20.0, max=3600.0),
     Setting("TRIBOS_FORMAL_MAX_REPAIRS", "int", 2, "Repairs of a Lean formalisation after compiler errors.", _MATH,
             min=0, max=10),
+    Setting("TRIBOS_LEAN_FULL_MATHLIB", "bool", False, "Allow a bare `import Mathlib` (several GB of memory); off "
+            "replaces it with a default set of Mathlib modules.", _MATH),
+    Setting("TRIBOS_FORMAL_BLUEPRINT", "bool", True, "When a direct Lean proof fails (Mathlib projects): split it into "
+            "lemmas, prove each, and check the assembled file.", _MATH),
+    Setting("TRIBOS_LEAN_PREMISE_SEARCH", "bool", True, "Lean repairs: look up Mathlib lemmas for the failing names "
+            "with Loogle (loogle.lean-lang.org) and show them to the model.", _MATH),
+    Setting("TRIBOS_LEAN_PROVER_MODEL", "str", "", "Model for Lean proof attempts (e.g. a served Goedel-Prover); empty "
+            "means the synthesis model.", _MATH),
+    Setting("TRIBOS_LEMMA_LIBRARY", "str", "", "JSON file of kernel-checked lemmas reused as premises in later proofs; "
+            "empty means data/lemma_library.json.", _MATH),
+    Setting("TRIBOS_CODEACT", "bool", True, "Work computational questions in a persistent Python session, the model "
+            "writing and fixing code step by step (CodeAct).", _MATH),
+    Setting("TRIBOS_CODEACT_MAX_STEPS", "int", 6, "Python cells one CodeAct session may run.", _MATH, min=1, max=20),
+    Setting("TRIBOS_CONSTRUCT", "bool", True, "Construct mode: evolutionary search for constructions that beat a "
+            "known bound, scored exactly by code.", _MATH),
+    Setting("TRIBOS_CONSTRUCT_GENERATIONS", "int", 10, "Programs one construct-mode search writes (each is one model "
+            "call and one sandbox run; two at a time).", _MATH, min=1, max=200),
     # --- Code sandbox ----------------------------------------------------------------------------------------------
     Setting("TRIBOS_SANDBOX", "bool", True, "Code-execution sandbox tool; on by default, off/0/false/no disables it.", _SBX),
     Setting("TRIBOS_SANDBOX_TIMEOUT_S", "int", 60, "Seconds one sandboxed execution may run.", _SBX, min=5, max=110),
     Setting("TRIBOS_SANDBOX_MEMORY_MB", "int", 2048, "Memory limit of one sandboxed execution in MB.", _SBX, min=256, max=16384),
+    Setting("TRIBOS_SANDBOX_MAX_FIGURES", "int", 6, "Maximum number of Matplotlib figures captured from one sandboxed run.", _SBX, min=1, max=20),
+    Setting("TRIBOS_SANDBOX_FIGURE_DPI", "int", 120, "DPI for captured sandbox Matplotlib figures.", _SBX, min=72, max=300),
+    Setting("TRIBOS_SANDBOX_MAX_FIGURE_BYTES", "int", 3500000, "Maximum byte size of a captured figure PNG.", _SBX, min=100000, max=20000000),
+    Setting("TRIBOS_SANDBOX_MAX_ARRAY_ITEMS", "int", 25000, "Maximum array items in sandbox JSON output before truncation.", _SBX, min=200, max=100000),
+    Setting("TRIBOS_PYTHON_WORKER_CONCURRENCY", "int", 4, "Maximum concurrent scientific Python worker jobs.", _SBX, min=1, max=32),
+    Setting("TRIBOS_PYTHON_WORKER_TIMEOUT_S", "float", 60.0, "Timeout for scientific Python worker jobs in seconds.", _SBX, min=5.0, max=300.0),
+    Setting("TRIBOS_PYTHON_WORKER_MEMORY_MB", "int", 2048, "Memory limit for scientific Python worker in MB.", _SBX, min=256, max=16384),
+    Setting("TRIBOS_PYTHON_WORKER_CONTAINER_ENGINE", "str", "auto", "Execution isolation engine for Python worker: auto, subprocess, docker, podman.", _SBX, choices=("auto", "subprocess", "docker", "podman")),
+    # --- Sandbox isolation and limits ---------------------------------------------------------------------------
+    Setting("TRIBOS_SANDBOX_BACKEND", "str", "auto", "Isolation backend for model-written code: auto (container when available, else subprocess), subprocess (defence in depth only), container (OS-level boundary).", _SBX, choices=("auto", "subprocess", "container")),
+    Setting("TRIBOS_SANDBOX_IMAGE", "str", "tribos-sandbox:local", "Container image the container backend runs model-written code in; pin it by digest in production.", _SBX),
+    Setting("TRIBOS_SANDBOX_CONTAINER_ENGINE", "str", "auto", "Container CLI the sandbox backend uses: auto (docker or podman, whichever is on PATH), docker, podman.", _SBX, choices=("auto", "docker", "podman")),
+    Setting("TRIBOS_SANDBOX_MAX_CONCURRENCY", "int", 2, "How many sandboxed executions may run at the same time.", _SBX, min=1, max=32),
+    Setting("TRIBOS_SANDBOX_MAX_OUTPUT_KB", "int", 256, "Cap on the stdout and stderr of one sandboxed execution, in KB.", _SBX, min=16, max=4096),
+    Setting("TRIBOS_SANDBOX_MAX_DISK_MB", "int", 256, "Write budget of one sandboxed execution, in MB.", _SBX, min=16, max=4096),
+    Setting("TRIBOS_SANDBOX_MAX_PROCESSES", "int", 64, "Process-count cap of one sandboxed execution.", _SBX, min=1, max=512),
+    Setting("TRIBOS_SANDBOX_MAX_RESULT_BYTES", "int", 3000000, "Aggregate cap of one execution's result payload (result, tables and figures together), in bytes.", _SBX, min=100000, max=50000000),
+    Setting("TRIBOS_SANDBOX_STRICT_LIMITS", "bool", False, "Fail a sandboxed execution whose resource limits could not be applied instead of running it degraded.", _SBX),
+    Setting("TRIBOS_SANDBOX_ALLOW_UNISOLATED", "bool", False, "In strict mode, still allow the subprocess backend (no OS-level isolation boundary). Development only. Without strict mode, auto mode falls back to it whenever no container runtime is available.", _SBX),
+    Setting("TRIBOS_SANDBOX_SAGE_ENABLED", "bool", True, "Offer the SageMath tools. TRIBOS_SANDBOX=off overrides this.", _SBX),
+    Setting("TRIBOS_SANDBOX_SAGE_TIMEOUT_S", "int", 120, "Wall-clock limit of one SageMath execution, in seconds.", _SBX, min=10, max=600),
+    Setting("TRIBOS_SANDBOX_SAGE_ALLOW_WSL", "bool", False, "Allow SageMath to run inside WSL, where the Python-level sandbox guards do not apply.", _SBX),
     # --- Mathematics agent -----------------------------------------------------------------------------------------
     Setting("TRIBOS_MATH_AGENT", "bool", True, "Run the verified mathematics agent (bounded ReAct loop over the Axiom tools with an independent verifier) on mathematical questions.", _MATH),
     Setting("TRIBOS_MATH_AGENT_MAX_STEPS", "int", 12, "Tool calls one mathematics-agent run may make.", _MATH, min=2, max=40),
@@ -302,8 +385,8 @@ _SETTINGS: Sequence[Setting] = (
     # --- Image input (OCR and vision) --------------------------------------------------------------------------------
     Setting("TRIBOS_VISION", "bool", True, "Accept images attached to questions (POST /api/vision/read); they are read into text before the question is solved.", _VIS),
     Setting("TRIBOS_VISION_OCR_MATH", "bool", True, "Load Indra OCR's math models so formulas are read as LaTeX (about 60% slower OCR on math lines).", _VIS),
-    Setting("TRIBOS_VISION_PROVIDER", "str", "nim", "Vision model that corrects the OCR draft: `nim` (NVIDIA NIM, TRIBOS_VISION_MODEL), `ollama` (a local model through Ollama), or `ocr` (Indra OCR only; the image never leaves this machine).", _VIS, choices=("nim", "ollama", "ocr")),
-    Setting("TRIBOS_VISION_MODEL", "str", "nvidia/nemotron-3.5-super-vl-120b-a12b", "NVIDIA NIM vision model for `nim` (must be in the allowed model list).", _VIS),
+    Setting("TRIBOS_VISION_PROVIDER", "str", "remote", "Model that corrects the OCR draft: `remote` (cloud, TRIBOS_VISION_MODEL; `nim` is its old name), `ollama` (local), or `ocr` (OCR only; the image stays on this machine).", _VIS, choices=("remote", "nim", "ollama", "ocr")),
+    Setting("TRIBOS_VISION_MODEL", "str", "muse-spark-1.3", "Cloud vision model for `remote` (must be in the allowed model list).", _VIS),
     Setting("TRIBOS_VISION_OLLAMA_MODEL", "str", None, "Ollama vision model for `ollama` (e.g. qwen2.5vl:7b); the first installed vision-family model when unset.", _VIS),
     Setting("TRIBOS_VISION_OLLAMA_URL", "str", "http://127.0.0.1:11434", "Base URL of the local Ollama server.", _VIS),
     Setting("TRIBOS_VISION_TIMEOUT_S", "int", 300, "Seconds one vision-model transcription may take (CPU inference of a 7B model can need minutes).", _VIS, min=10, max=1800),

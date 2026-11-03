@@ -26,6 +26,18 @@ test("a budget-stopped run is a partial answer, never 'completed', even when its
   assert.equal(taskHeadline({ task_status: "completed", incomplete_reasons: "not a list" })?.partial, false);
 });
 
+test("completed_fallback headline indicates completed with fallback rather than partial", () => {
+  const h = taskHeadline({
+    task_status: "completed_fallback",
+    incomplete_reasons: ["Agent planner timed out; answer completed by fallback pipeline."],
+  });
+  assert.ok(h);
+  assert.equal(h.partial, false);
+  assert.equal(h.status, "completed_fallback");
+  assert.equal(h.title, "Completed with fallback");
+  assert.equal(h.reasons[0], "Agent planner timed out; answer completed by fallback pipeline.");
+});
+
 test("claim counts name checked claims and explain a different finding count instead of contradicting it", () => {
   const c = { supported: 22, contradicted: 0, unsupported: 8, not_checked: 0 };
   const { summary, note } = claimSummary(c, 30, 9);

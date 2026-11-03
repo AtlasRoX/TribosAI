@@ -18,7 +18,9 @@ Tribos can run each question through one of five orchestration frameworks. Choos
 - Verified references, agent loop and reasoning: [`references-agent-loop.md`](references-agent-loop.md)
 - Verified references, verification, memory, tools and data sources: [`references-verification-tools-data.md`](references-verification-tools-data.md)
 - Platform API (run control, jobs, projects, MCP, A2A): [`platform-api.md`](platform-api.md)
+- Adaptive research loop, verification tiers, accuracy tools and thesis exports: [`research-loop.md`](research-loop.md)
 - Code sandbox threat model: [`sandbox-security.md`](sandbox-security.md)
+- Code sandbox operations runbook: [`sandbox-operations.md`](sandbox-operations.md)
 
 ## Feature to paper index
 

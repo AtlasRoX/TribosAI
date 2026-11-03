@@ -14,7 +14,8 @@ def check_asme_compliance(
 ) -> dict[str, Any]:
     clause = get_standard_clause(clause_id)
     if not clause:
-        return {"compliant": False, "error": f"Unknown standard clause '{clause_id}'"}
+        return {"compliant": None, "status": "not_evaluated", "error": f"Unknown standard clause '{clause_id}'",
+                "known_clauses": sorted(STANDARDS_CATALOG)}
     return clause.evaluate_compliance(params)
 
 

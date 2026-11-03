@@ -56,6 +56,36 @@ def _statements(text: str) -> list[list[str]]:
     return [[p.strip(" .:") for p in re.split(r"(?<![<>!])=(?!=)", s)] for s in segments if "=" in s][:400]
 
 
+def _unitless_number(text: str) -> bool:
+    """A side that is a pure number however it is typeset ("25", "\\sqrt{\\frac{50}{2}}", "3/(2*sqrt(100))"): a number
+    written without its unit may follow an unstated convention, so it is never compared dimensionally."""
+    cleaned = _clean(text)
+    if re.fullmatch(r"[+\-\d.\s*/^{}()]+", cleaned):
+        return True
+    if not re.search(r"\d", cleaned) or re.search(r"[A-Za-zµ°Ω]", re.sub(r"\\[A-Za-z]+|\b(?:sqrt|pi)\b", "", cleaned)):
+        return False
+    try:
+        expr = parse_latex(cleaned) if "\\" in cleaned else safe_parse_expr(cleaned)
+    except (ValueError, TypeError, SyntaxError):
+        return False
+    return not getattr(expr, "free_symbols", {1})
+
+
+def _unit_symbol_clash(text: str, bindings: dict[str, Any]) -> bool:
+    """A bound variable name that is also written as a unit after a number ("m = 2 kg" and "0.1 m"): which one is
+    meant cannot be decided, so the statement is not evaluated rather than read with the wrong meaning."""
+    cleaned = _clean(text)
+    ureg = get_unit_registry()
+    for name in bindings:
+        if re.search(rf"(?:\d|\))\s*{re.escape(name)}\b(?!\s*[(=])", cleaned):
+            try:
+                ureg.parse_units(name)
+                return True
+            except (pint.PintError, ValueError, TypeError, AttributeError):
+                continue
+    return False
+
+
 def _first(text: str, bindings: dict[str, Any]) -> str:
     text = _clean(text)
     words = text.split()
@@ -164,8 +194,9 @@ def audit_units(answer: str, question: str = "") -> dict[str, Any]:
         for left, right in zip(parts, parts[1:], strict=False):
             statement = f"{left} = {right}"
             try:
-                if any(re.fullmatch(r"[+\-\d.\s*/^{}()]+", _clean(side)) for side in (left, right)):
-                    # A number without a unit may use an unstated convention; do not infer dimensionlessness.
+                if any(_unitless_number(side) for side in (left, right)) or _unit_symbol_clash(statement, bindings):
+                    # A number without a unit may use an unstated convention; do not infer dimensionlessness. A
+                    # name that is both a bound variable and a unit (m) is ambiguous.
                     report["not_evaluated"] += 1
                     continue
                 lhs, rhs = _expression(left, bindings, ambiguous), _expression(right, bindings, ambiguous)

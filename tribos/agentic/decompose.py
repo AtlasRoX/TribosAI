@@ -80,7 +80,7 @@ _FOCUS_PATTERNS: list[tuple[str, re.Pattern]] = [
 
 _QWORD = r"(?:what|how|which|whether|is|are|does|do|did|can|could|why|where|when|who|should|will)"
 _CONJ_SPLIT = re.compile(r"\s*(?:,\s*(?:and\s+)?|\s+and\s+(?:also\s+)?|\s+also\s+)(?=" + _QWORD + r"\b)", re.I)
-_ENUM_SPLIT = re.compile(r"(?<![=<>+\-*/:])(?:\s+|^)(?:\(?(?:[1-9]\d?|0(?!\.))\b[.)]|\([a-hA-H]\)|[a-h]\))\s+")
+_ENUM_SPLIT = re.compile(r"(?<![=<>+\-*/])(?:\s+|^)(?:\(?(?:[1-9]\d?|0(?!\.))\b[.)]|\([a-hA-H]\)|[a-h]\))\s+")
 _ANAPHORA = re.compile(r"\b(it|its|they|their|them|this|these|that|those|such|the same)\b", re.I)
 _COMPARE = re.compile(r"\b(compare\w*|comparison|versus|vs\.?|differ\w*|difference)\b", re.I)
 _CHAIN = re.compile(r"\b(and then|then|which in turn|downstream|leading to|as a result|consequently|and how (?:does|do) (?:that|this|it))\b", re.I)
@@ -175,15 +175,19 @@ def _word_set(query: str) -> set:
 
 def complexity_signals(query: str, ctx: Any = None) -> list[str]:
     """Adaptive-RAG-style complexity cues; an empty list means a simple question."""
+    from ..agents.question_text import is_multiple_choice
+
     q = (query or "").strip()
     signals: list[str] = []
-    questions = [p for p in re.split(r"\?", q) if len(p.split()) >= 2]
-    if len(questions) >= 2:
-        signals.append("several questions")
-    if len(_ENUM_SPLIT.findall(" " + q)) >= 2 or q.count(";") >= 1:
-        signals.append("enumeration")
-    if _CONJ_SPLIT.search(q):
-        signals.append("conjoined question clauses")
+    # "(A) ... (B) ... (C) ... (D) ..." are candidate answers to one problem, not parts to plan separately.
+    if not is_multiple_choice(q):
+        questions = [p for p in re.split(r"\?", q) if len(p.split()) >= 2]
+        if len(questions) >= 2:
+            signals.append("several questions")
+        if len(_ENUM_SPLIT.findall(" " + q)) >= 2 or q.count(";") >= 1:
+            signals.append("enumeration")
+        if _CONJ_SPLIT.search(q):
+            signals.append("conjoined question clauses")
     if _COMPARE.search(q):
         signals.append("comparison")
     if _CHAIN.search(q):
@@ -235,6 +239,34 @@ def _titled_enumeration(text: str, max_sub_questions: int) -> list[str] | None:
             if sub.lower() not in {o.lower() for o in out}:
                 out.append(sub)
     return out[:max_sub_questions]
+
+
+# One ask: "What is the largest number ...?", "How many ...?", "Find ...", "Solve ...".
+_SINGLE_ASK_RE = re.compile(r"\b(?:what is|what are|how many|how much|find|solve|compute|calculate|determine|evaluate)\b",
+                            re.I)
+# Signals of a mathematics word problem the math-intent check (solve, derivative, ...) does not look for.
+_WORD_PROBLEM_RE = re.compile(r"\$|\bintegers?\b|\bnumber of\b|\b(?:largest|smallest|greatest|least|maximum|minimum)\b|"
+                              r"\bremainder\b|\bdigits?\b|\bsum of\b|\bproduct of\b|\bprobability\b", re.I)
+_PROOF_TASK_RE = re.compile(r"\b(?:prove|show that|show there|demonstrate that|determine all|find all)\b", re.I)
+
+
+def is_single_proof_problem(query: str) -> bool:
+    """One mathematical problem (a proof, a "determine all", or a word problem asking one thing), however many setup
+    sentences it has. Split, a word problem lost its conditions: one sub-question held the setup, another the ask,
+    and the answer was reported "1 of 3 sub-questions answered" although it was complete."""
+    q = query or ""
+    from ..agents.question_text import is_multiple_choice
+
+    if is_multiple_choice(q):
+        return True  # "(a) 60 m (b) 55 m (c) 25 m": the options are candidate answers, not sub-questions
+    if q.count("?") > 1:
+        return False
+    if _PROOF_TASK_RE.search(q):
+        return True
+    from ..axiom.problem import has_math_intent
+
+    word_problem = bool(_WORD_PROBLEM_RE.search(q)) and bool(re.search(r"\d", q))
+    return bool(_SINGLE_ASK_RE.search(q)) and (has_math_intent(q) or word_problem)
 
 
 def heuristic_split(query: str, max_sub_questions: int = MAX_SUB_QUESTIONS) -> list[str]:
@@ -413,7 +445,28 @@ class DecomposePhase(AgentPhase):
         subs: list[SubQuestion] = []
         complex_flag: bool | None = None
         used_model = False
-        if state.llm.available:
+        from ..writer.outline import task_outline
+
+        user_tasks = task_outline(query)
+        from ..agents.question_text import is_multiple_choice
+
+        if is_multiple_choice(query):
+            # "(a) 60 m (b) 55 m (c) 25 m (d) 30 m": candidate answers of one problem, never four sub-questions.
+            info["method"] = "multiple_choice"
+            state.bag["decomposition"] = info
+            return None
+        if len(user_tasks) < 2 and is_single_proof_problem(query):
+            # "Let ... Suppose ... Prove that ...": its sentences are the setup of one problem, not sub-questions.
+            # Split, the proof lost its hypotheses (one sub-question held the definition, another the claim).
+            info["method"] = "single_problem"
+            state.bag["decomposition"] = info
+            return None
+        if len(user_tasks) >= 2:
+            # The researcher already numbered the tasks: they are the sub-questions, in the researcher's order,
+            # with no model call (a re-worded, re-ordered split only made the answer harder to follow).
+            info["method"] = "user_tasks"
+            subs = _from_texts([body for _, body in user_tasks], max_sub_questions=max(max_sub, len(user_tasks)))
+        elif state.llm.available:
             from ..agents.prompts import utc_date_line
 
             user = (f"{utc_date_line()}\n<question>{query}</question>\n"
@@ -429,7 +482,9 @@ class DecomposePhase(AgentPhase):
                 logger.warning("Decomposition model call failed: %s", exc)
                 info["model_error"] = f"{type(exc).__name__}: {str(exc)[:160]}"
 
-        if used_model:
+        if info["method"] == "user_tasks":
+            pass
+        elif used_model:
             info["method"] = "llm"
             if complex_flag is False or len(subs) < 2:
                 subs = []

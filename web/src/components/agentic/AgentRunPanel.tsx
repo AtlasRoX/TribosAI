@@ -86,7 +86,7 @@ export function groupPhases(phases: any[]): PhaseGroup[] {
 export interface CorePhaseStatus {
   phase?: string;
   label?: string;
-  status?: string; // ok | fallback | llm_unavailable | budget | error | skipped | not_run
+  status?: string; // ok | not_needed | fallback | llm_unavailable | budget | error | skipped | not_run
   reason?: string;
 }
 
@@ -94,7 +94,8 @@ export interface CorePhaseStatus {
 export function corePhaseChip(core: CorePhaseStatus | null | undefined): { text: string; tone: "warn" | "bad"; title: string } | null {
   if (!core || typeof core !== "object") return null;
   const status = str(core.status) || "ok";
-  if (status === "ok" || status === "not_run") return null;
+  // not_needed: the phase judged the question needs no tool plan (a deliberate choice, not a failure).
+  if (status === "ok" || status === "not_run" || status === "not_needed") return null;
   const reason = str(core.reason);
   if (status === "fallback") return { text: "fallback plan", tone: "warn", title: reason || "The model gave no usable reply; a fixed plan ran." };
   const why: Record<string, string> = {

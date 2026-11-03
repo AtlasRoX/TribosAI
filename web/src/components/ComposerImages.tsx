@@ -1,8 +1,10 @@
 "use client";
 
 import React, { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { AlertTriangle, Crop, FileText, Loader2, RotateCw, X } from "lucide-react";
 import type { ComposerImage } from "@/services/visionService";
+import { useFocusTrap } from "@/lib/useFocusTrap";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import styles from "./ComposerImages.module.css";
 
@@ -227,21 +229,113 @@ export function ComposerImages({ images, onChangeText, onRemove, onEdit }: Compo
   );
 }
 
-/** Image thumbnails on a sent user message. */
-export function MessageImages({ images }: { images: { name: string; thumbUrl?: string }[] }) {
+type SentImage = { name: string; thumbUrl?: string; viewUrl?: string; text?: string };
+
+/** Image thumbnails on a sent user message; a click opens the image beside the text Tribos read from it. */
+export function MessageImages({ images }: { images: SentImage[] }) {
+  const [open, setOpen] = useState<number | null>(null);
   if (!images.length) return null;
   return (
-    <ul className={styles.sent} aria-label="Attached images">
-      {images.map((img, i) => (
-        <li key={i} className={styles.sentItem} title={img.name}>
-          {img.thumbUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element -- a stored data URL thumbnail
-            <img src={img.thumbUrl} alt={img.name} className={styles.sentThumb} />
-          ) : (
-            <span className={styles.sentName}>{img.name}</span>
-          )}
-        </li>
-      ))}
-    </ul>
+    <>
+      <ul className={styles.sent} aria-label="Attached images">
+        {images.map((img, i) => (
+          <li key={i} className={styles.sentItem}>
+            <button
+              type="button"
+              className={styles.sentButton}
+              onClick={() => setOpen(i)}
+              title={`${img.name}: open the image and what was read from it`}
+              aria-label={`Open ${img.name} and the text read from it`}
+            >
+              {img.thumbUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element -- a stored data URL thumbnail
+                <img src={img.thumbUrl} alt={img.name} className={styles.sentThumb} />
+              ) : (
+                <span className={styles.sentName}>{img.name}</span>
+              )}
+            </button>
+          </li>
+        ))}
+      </ul>
+      {open !== null && images[open] && typeof document !== "undefined" &&
+        // Rendered into <body>: inside the message column a transformed ancestor trapped the fixed overlay.
+        createPortal(<ImageViewer image={images[open]} onClose={() => setOpen(null)} />, document.body)}
+    </>
+  );
+}
+
+function ImageViewer({ image, onClose }: { image: SentImage; onClose: () => void }) {
+  const ref = useFocusTrap<HTMLDivElement>(true);
+  const [copied, setCopied] = useState(false);
+  const src = image.viewUrl || image.thumbUrl;
+
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(image.text || "");
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard unavailable */
+    }
+  };
+
+  return (
+    <div className={styles.viewerBackdrop} onClick={onClose} role="presentation">
+      <div
+        ref={ref}
+        className={styles.viewer}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${image.name} and the text read from it`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className={styles.viewerHead}>
+          <span className={styles.viewerTitle}>{image.name}</span>
+          <button type="button" className={styles.viewerClose} onClick={onClose} aria-label="Close">
+            <X style={{ width: 16, height: 16 }} aria-hidden="true" />
+          </button>
+        </header>
+        <div className={styles.viewerBody}>
+          <div className={styles.viewerImage}>
+            {src ? (
+              // eslint-disable-next-line @next/next/no-img-element -- a stored data URL copy of the image
+              <img src={src} alt={image.name} />
+            ) : (
+              <span className={styles.sentName}>No preview was kept for this image.</span>
+            )}
+            {!image.viewUrl && image.thumbUrl && (
+              <p className={styles.viewerNote}>Only a small preview was kept for this older message.</p>
+            )}
+          </div>
+          <section className={styles.viewerText} aria-label="What Tribos read from the image">
+            <div className={styles.viewerTextHead}>
+              <span>What Tribos read</span>
+              {image.text && (
+                <button type="button" className="msg-action-btn" onClick={copy}>
+                  {copied ? "Copied" : "Copy text"}
+                </button>
+              )}
+            </div>
+            {image.text ? (
+              <div className={styles.viewerTranscript}>
+                <MarkdownRenderer content={image.text} />
+              </div>
+            ) : (
+              <p className={styles.viewerNote}>
+                The text read from this image was not kept with this message (it was sent before this view existed).
+              </p>
+            )}
+          </section>
+        </div>
+      </div>
+    </div>
   );
 }

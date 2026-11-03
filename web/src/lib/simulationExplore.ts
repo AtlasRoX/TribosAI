@@ -8,6 +8,8 @@ export type SimSpec = {
   initial_state?: Record<string, number>;
   t_span?: number[];
   method?: string;
+  step_size?: number;
+  num_steps?: number;
   model_name?: string | null;
 };
 
@@ -50,6 +52,8 @@ export function exploredSpec(base: SimSpec, parameters: Record<string, number>, 
     parameters: { ...(base.parameters ?? {}), ...parameters },
     initial_state: { ...(base.initial_state ?? {}), ...initial },
     t_span: [t0, tEnd > t0 ? tEnd : (base.t_span?.[1] ?? t0 + 1)],
+    ...(base.method === "RK4" && typeof base.step_size === "number" && base.step_size > 0
+      ? { num_steps: Math.round((tEnd - t0) / base.step_size) } : {}),
   };
 }
 

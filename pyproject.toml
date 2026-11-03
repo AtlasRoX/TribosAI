@@ -22,6 +22,7 @@ dependencies = [
   "langchain-core==0.3.40",
   "langchain-openai==0.3.0",
   "matplotlib==3.10.6",
+  "cvxpy==1.7.5",
   "mpmath==1.3.0",
   "networkx==3.5",
   "numpy==1.26.4",
@@ -30,9 +31,11 @@ dependencies = [
   "pandas==2.3.3",
   "pint==0.26.2",
   "pydantic==2.11.9",
-  "PyJWT==2.10.1",
-  "pypdf==6.1.1",
-  "requests==2.32.5",
+  "PyJWT==2.15.0",
+  "pypdf==6.21.2",
+  "python-flint==0.9.0",
+  "scikit-fem==10.0.2",
+  "requests==2.33.0",
   "scipy==1.16.2",
   "sentence_transformers==3.3.1",
   "sympy==1.14.0",
@@ -41,13 +44,15 @@ dependencies = [
   "tqdm==4.67.1",
   "transformers==4.55.2",
   "xlsxwriter==3.2.9",
-  "pyarrow==21.0.0",
+  "pyarrow==23.0.1",
   "beautifulsoup4==4.14.2",
   "python-dotenv>=1.0.0",
   "python-multipart==0.0.32",
   "python-docx==1.2.0",
   "fpdf2==2.8.9",
   "markdown-it-py==4.0.0",
+  "mem0ai>=0.1.0",
+  "playwright==1.60.0",
 ]
 version = "1.49.1"
 
@@ -62,7 +67,7 @@ dev = [
   "pylint==3.3.8",
   "pytest==8.4.2",
   "pytest-asyncio==0.25.2",
-  "setuptools==80.9.0",
+  "setuptools==84.1.0",
   "ruff==0.13.2",
   "mypy==1.18.2",
   "bandit==1.8.6",
@@ -84,6 +89,34 @@ docs = [
   "mkdocs-material==9.6.21",
   "mkdocstrings==0.30.1",
   "mkdocstrings-python==1.18.2",
+]
+
+[tool.uv]
+# Minimum versions for transitive dependencies with published security advisories (AUDIT-009). Remaining advisories
+# (langchain 0.3, transformers 4.x, sentence-transformers 3.x, torch 2.8, mem0ai 0.1, nltk, marshmallow 3) need
+# major upgrades that change APIs Tribos uses or the numpy 1.26 pin; they are tracked in AUDIT_REPORT.md.
+# filelock and virtualenv (dev tools only) stay below their fixed versions: safety 3.6 caps filelock < 4 and
+# virtualenv 21.14 needs packaging >= 26, which langchain-core 0.3 forbids.
+constraint-dependencies = [
+  "aiohttp>=3.14.4",
+  "anyio>=4.14.2",
+  "authlib>=1.9.1",
+  "certifi>=2026.10.19",
+  "cryptography>=50.0.0",
+  "fonttools>=4.60.2",
+  "fsspec>=2026.6.0",
+  "gitpython>=3.2.1",
+  "idna>=3.15",
+  "jaraco-context>=6.1.0",
+  "lxml>=6.1.0",
+  "msgpack>=1.2.3",
+  "orjson>=3.11.5",
+  "pillow>=13.0.0",
+  "pip>=26.2",
+  "pygments>=2.20.0",
+  "soupsieve>=2.9.0",
+  "tornado>=6.6",
+  "urllib3>=2.8.0",
 ]
 
 [tool.semantic_release]

@@ -14,6 +14,7 @@ Results are cached by the hash of (code, checker command), so the same proof is 
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import re
@@ -24,10 +25,11 @@ import subprocess  # nosec B404
 import sys
 import tempfile
 import threading
+import time
 from collections import OrderedDict
 from typing import Any
 
-from tribos.config.settings import get_float, get_str
+from tribos.config.settings import get_bool, get_float, get_str
 
 STATUS_TITLES = {
     "verified": "formally verified (Lean)",
@@ -43,6 +45,12 @@ STATUS_TITLES = {
 }
 MEMORY_LIMIT_MB = 4096
 MAX_CODE_CHARS = 50_000
+# One Lean process at a time (each loads Mathlib), and a check whose library could not be loaded is retried, then
+# reported as unavailable: it is never a verdict on the proof.
+_LEAN_SLOTS = threading.BoundedSemaphore(1)
+ENVIRONMENT_RETRIES = 2
+_ENVIRONMENT_ERROR_RE = re.compile(r"failed to read file '[^']*\.(?:olean|ilean|ir)\w*'|could not find native implementation"
+                                   r"|unknown package '[^']+'|object file .{0,200} does not exist", re.I)
 _CACHE: OrderedDict[str, dict[str, Any]] = OrderedDict()
 _CACHE_SIZE = 256
 _CACHE_LOCK = threading.Lock()
@@ -109,6 +117,13 @@ def uses_unproved(code: str) -> list[str]:
             ax_type = tail[colon + 1:end_line if end_line != -1 else len(tail)].strip()
             if re.search(r"\bFalse\b", ax_type):
                 found.append(f"axiom {ax_name} (asserts False)")
+    # Escape hatches that make the kernel trust compiled code instead of checking a proof term (reward hacking in
+    # proof search; docs/plans/tribos-research-upgrade-plan.md 2.1): not a kernel-checked proof.
+    for pattern, label in ((r"\bnative_decide\b", "native_decide"), (r"\bimplemented_by\b", "implemented_by"),
+                           (r"@\[\s*extern\b", "@[extern]"), (r"(?m)^\s*(?:private\s+|protected\s+)?unsafe\b", "unsafe"),
+                           (r"\bLean\.ofReduceBool\b", "Lean.ofReduceBool")):
+        if re.search(pattern, body):
+            found.append(label)
     return sorted(found)
 
 
@@ -117,6 +132,87 @@ def _limit_memory() -> None:  # pragma: no cover - runs in the child on POSIX
 
     limit = MEMORY_LIMIT_MB * 1024 * 1024
     resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+
+
+# Loading all of Mathlib (`import Mathlib`) takes several GB of memory; this set covers most competition and textbook
+# statements (tactics, real powers, logs, trigonometry, primes, square roots, classical inequalities) in about 20 s.
+DEFAULT_MATHLIB_IMPORTS = (
+    "Mathlib.Tactic.Linarith", "Mathlib.Tactic.Positivity", "Mathlib.Tactic.Ring", "Mathlib.Tactic.FieldSimp",
+    "Mathlib.Tactic.NormNum", "Mathlib.Tactic.NormNum.Prime", "Mathlib.Tactic.IntervalCases",
+    "Mathlib.Analysis.SpecialFunctions.Pow.Real", "Mathlib.Analysis.SpecialFunctions.Log.Basic",
+    "Mathlib.Analysis.SpecialFunctions.Trigonometric.Basic", "Mathlib.Data.Nat.Prime.Basic",
+    "Mathlib.Analysis.Real.Sqrt", "Mathlib.Algebra.Order.Chebyshev",
+)
+_BARE_MATHLIB_RE = re.compile(r"^\s*import\s+Mathlib\s*$", re.M)
+
+
+def with_default_imports(code: str) -> str:
+    """A bare `import Mathlib` replaced by DEFAULT_MATHLIB_IMPORTS, unless TRIBOS_LEAN_FULL_MATHLIB is set."""
+    if get_bool("TRIBOS_LEAN_FULL_MATHLIB") or not _BARE_MATHLIB_RE.search(code):
+        return code
+    return _BARE_MATHLIB_RE.sub("\n".join(f"import {m}" for m in DEFAULT_MATHLIB_IMPORTS), code, count=1)
+
+
+_IMPORT_LINE_RE = re.compile(r"^[ \t]*import[ \t]+(Mathlib(?:\.[A-Za-z0-9_']+)+)[ \t]*$", re.M)
+
+
+def drop_missing_imports(code: str, project_dir: str | None) -> tuple[str, list[str]]:
+    """Remove `import Mathlib.X.Y` lines naming modules the installed Mathlib does not have.
+
+    Models write imports of modules that were moved or retired (Mathlib.Tactic.Omega: `omega` is part of Lean core
+    now). Lean then fails to load a library file that does not exist, which reads like a broken installation and is
+    never repaired. Without the import the proof usually compiles; if a lemma really is missing, Lean says so in an
+    ordinary error the repair loop can act on. Returns (code, dropped module names)."""
+    if not project_dir:
+        return code, []
+    lib = os.path.join(project_dir, ".lake", "packages", "mathlib", ".lake", "build", "lib", "lean")
+    if not os.path.isdir(os.path.join(lib, "Mathlib")):
+        return code, []
+    dropped: list[str] = []
+
+    def keep(m: re.Match[str]) -> str:
+        module = m.group(1)
+        if os.path.exists(os.path.join(lib, *module.split(".")) + ".olean"):
+            return m.group(0)
+        dropped.append(module)
+        return f"-- import {module}  (not in this Mathlib; removed)"
+
+    return _IMPORT_LINE_RE.sub(keep, code), dropped
+
+
+def _kill_tree(pid: int) -> None:
+    """Kill a process and every descendant. `lake env lean` starts lean as a child: killing only lake leaves lean
+    running (several GB with Mathlib loaded) and holding the output pipes open, so the caller would wait forever."""
+    try:
+        import psutil
+
+        parent = psutil.Process(pid)
+        procs = [*parent.children(recursive=True), parent]
+    except Exception:  # noqa: BLE001 - psutil missing or the process already gone
+        procs = []
+    for p in procs:
+        with contextlib.suppress(Exception):
+            p.kill()
+    # No "taskkill /T" when the process is gone: /T would kill every process whose recorded parent id equals the
+    # (possibly recycled) pid, which is how unrelated servers were killed.
+
+
+def _run_tree(argv: list[str], cwd: str, timeout: float) -> subprocess.CompletedProcess[str]:
+    """subprocess.run with capture, except that a timeout kills the whole process tree before reading the pipes."""
+    # A fixed argv of the configured checker, no shell.
+    with subprocess.Popen(  # nosec B603
+        # Lean writes UTF-8; the platform default (cp1252 on Windows) would garble "ℕ" in its messages.
+        argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
+        errors="replace", preexec_fn=_limit_memory if os.name == "posix" else None,  # noqa: PLW1509
+    ) as proc:
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _kill_tree(proc.pid)
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                proc.communicate(timeout=10)
+            raise
+        return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
 
 
 def check_lean(code: str, timeout_s: float | None = None) -> dict[str, Any]:
@@ -135,26 +231,38 @@ def check_lean(code: str, timeout_s: float | None = None) -> dict[str, Any]:
             _CACHE.move_to_end(key)
             return {**_CACHE[key], "cached": True}
 
+    dropped: list[str] = []
+    if command["kind"] == "lake":
+        code = with_default_imports(code)
+        code, dropped = drop_missing_imports(code, command.get("cwd"))
     unproved = uses_unproved(code)
     with tempfile.TemporaryDirectory(prefix="tribos-lean-") as work:
         path = os.path.join(work, "Proof.lean")
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(code)
-        try:
-            # A fixed argv of the configured checker, no shell.
-            proc = subprocess.run(  # nosec B603
-                # Lean writes UTF-8; the platform default (cp1252 on Windows) would garble "ℕ" in its messages.
-                [*command["argv"], path], cwd=command["cwd"] or work, capture_output=True, text=True,
-                encoding="utf-8", errors="replace",
-                timeout=timeout, preexec_fn=_limit_memory if os.name == "posix" else None,  # noqa: PLW1509
-            )
-        except subprocess.TimeoutExpired:
-            result = {"status": "timeout", "title": STATUS_TITLES["timeout"], "messages": [],
-                      "error": f"Lean did not finish within {timeout:g} s."}
-            return {**result, "cached": False}
-        except OSError as exc:
-            return {"status": "unavailable", "title": STATUS_TITLES["unavailable"], "messages": [], "cached": False,
-                    "error": f"Lean could not be started ({type(exc).__name__})."}
+        for attempt in range(ENVIRONMENT_RETRIES + 1):
+            try:
+                # One Lean at a time: each loads Mathlib (GBs); several at once ran the machine out of memory, and
+                # Lean then reported "failed to read file" for library files, which the repair loop took for a proof
+                # error.
+                with _LEAN_SLOTS:
+                    proc = _run_tree([*command["argv"], path], command["cwd"] or work, timeout)
+            except subprocess.TimeoutExpired:
+                result = {"status": "timeout", "title": STATUS_TITLES["timeout"], "messages": [],
+                          "error": f"Lean did not finish within {timeout:g} s."}
+                return {**result, "cached": False}
+            except OSError as exc:
+                return {"status": "unavailable", "title": STATUS_TITLES["unavailable"], "messages": [], "cached": False,
+                        "error": f"Lean could not be started ({type(exc).__name__})."}
+            output = (proc.stdout or "") + (proc.stderr or "")
+            if not _ENVIRONMENT_ERROR_RE.search(output):
+                break
+            if attempt == ENVIRONMENT_RETRIES:
+                # Never a verdict on the proof: the library could not be loaded.
+                return {"status": "unavailable", "title": STATUS_TITLES["unavailable"], "messages": [], "cached": False,
+                        "error": "Lean could not load its library (" + _ENVIRONMENT_ERROR_RE.search(output).group(0)[:160]
+                                 + "); likely too little free memory. This says nothing about the proof."}
+            time.sleep(2.0 * (attempt + 1))
     output = (proc.stdout or "") + (proc.stderr or "")
     messages = parse_messages(output.replace(path, "Proof.lean"))
     errors = [m for m in messages if m["severity"] == "error"]
@@ -166,7 +274,8 @@ def check_lean(code: str, timeout_s: float | None = None) -> dict[str, Any]:
     else:
         status, error = "verified", None
     result = {"status": status, "title": STATUS_TITLES[status], "messages": messages[:50], "error": error,
-              "unproved": unproved, "output": output.replace(path, "Proof.lean")[-4000:], "checker": command["kind"]}
+              "unproved": unproved, "output": output.replace(path, "Proof.lean")[-4000:], "checker": command["kind"],
+              "dropped_imports": dropped}
     with _CACHE_LOCK:
         _CACHE[key] = result
         while len(_CACHE) > _CACHE_SIZE:

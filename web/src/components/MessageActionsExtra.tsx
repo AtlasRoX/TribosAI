@@ -13,23 +13,25 @@ export interface MessageActionsExtraProps {
   question: string;
   backendUrl: string;
   authHeaders: (extra?: Record<string, string>) => Record<string, string>;
+  /** Only Re-run & compare (the answer row already shows Export). */
+  rerunOnly?: boolean;
 }
 
 /** Extra answer actions after Copy: Export, and Re-run & compare for answers that carry a stored run. */
-export function MessageActionsExtra({ message, question, backendUrl, authHeaders }: MessageActionsExtraProps) {
+export function MessageActionsExtra({ message, question, backendUrl, authHeaders, rerunOnly = false }: MessageActionsExtraProps) {
   const [rerunOpen, setRerunOpen] = useState(false);
   const isSystem = message.agent === "System" || !message.content?.trim();
   const runId = message.run_manifest?.run_id;
 
   return (
     <>
-      <ExportMenu
+      {!rerunOnly && <ExportMenu
         message={message}
         question={question}
         backendUrl={backendUrl}
         authHeaders={authHeaders}
         disabled={isSystem}
-      />
+      />}
       {runId && !isSystem && (
         <button
           type="button"

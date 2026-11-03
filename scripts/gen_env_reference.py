@@ -50,6 +50,13 @@ HELPER_DEFAULTS = {"_switch": "auto", "env_flag": "auto"}
 REQUIRED = ("TAVILY_API_KEY", "NVIDIA_API_KEY", "TRIBOS_DATA_DIR",
             "TRIBOS_AUTH_MODE")
 
+# Operating-system variables the code reads directly. They are not Tribos settings and must never appear in
+# .env.example: the registry owns the application's configuration, not the platform's. Each one needs a reason
+# here, so a new direct read of an unrelated variable is still reported.
+SYSTEM_VARS = {
+    "PATH": "the executable search path, needed to launch the container runtime and the sandbox child",
+}
+
 SETTINGS_PATH = ROOT / "tribos" / "config" / "settings.py"
 
 
@@ -167,6 +174,9 @@ def scan() -> Dict[str, Var]:
 
     def add(name: Optional[str], default: Optional[str], where: str) -> None:
         if not name or not NAME_RE.match(name):
+            return
+        if name in SYSTEM_VARS:
+            # A platform variable, not an application setting: it is not documented in .env.example.
             return
         var = found.setdefault(name, Var(name))
         if default not in (None, ""):
