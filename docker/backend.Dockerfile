@@ -47,8 +47,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # ---------------------------------------------------------------------------------------------------------
 FROM python:${PYTHON_VERSION}-slim AS runtime
 
+# tesseract-ocr: the second text recognizer of image input (tribos/vision/tesseract.py; about 10 MB with English).
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl libgomp1 \
+     tesseract-ocr tesseract-ocr-eng \
   && rm -rf /var/lib/apt/lists/* \
   && groupadd --system --gid 10001 tribos \
   && useradd --system --uid 10001 --gid tribos --home-dir /home/tribos --create-home tribos \

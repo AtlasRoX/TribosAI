@@ -1,18 +1,19 @@
-"""Read one question image: Indra OCR first, then a vision-language model that corrects the draft against the image.
+"""Read one question image with an ensemble: two OCR engines and two independent vision readings that must agree.
 
-Engines run in this order and each is optional:
-1. Indra OCR (local CPU). Always tried; its lines and confidences ground everything after it.
-2. The vision model of TRIBOS_VISION_PROVIDER: `nim` (default; an NVIDIA NIM vision model, TRIBOS_VISION_MODEL) or
-   `ollama` (a local model). `ocr` stops after step 1, so the image never leaves this machine.
-3. If the NIM call fails and a local Ollama vision model is installed, that model; otherwise the OCR text stands.
+1. Indra OCR (local CPU; text and LaTeX math) and Tesseract (local; plain words with per-word confidence) read the
+   image at the same time. Both garble mathematics, but where they agree on a word, the word is in the image.
+2. The vision model of TRIBOS_VISION_PROVIDER (`remote`, the default: TRIBOS_VISION_MODEL) reads the image twice:
+   once from the image alone, started at once alongside OCR, and once with both OCR drafts. Their errors are largely
+   independent. Compared in canonical form (vision/consensus.py: \\ne equals \\neq, a_{i} equals a_i, ∀ equals
+   \\forall), readings that agree are accepted; where they differ (a_i against a_1), the model looks at the image
+   again, told exactly where the readings differ, and settles each place.
+3. The result must keep the words both OCR engines read. One that drops lines is re-read once, told which words are
+   missing; if it still drops them, the OCR text is shown, with a warning, so no line is lost silently.
+4. `ollama` uses one local model reading instead; `ocr` stops after step 1, so the image never leaves this machine.
 
-The result names the engines that ran. Numbers in the vision model's transcription that OCR never read are listed in
-`unconfirmed_numbers`: either OCR missed them or the model invented them, and the reader is asked to check them.
-
-Speed: OCR takes well under a second; the vision model, with thinking off, a second or two. A PDF page that carries
-a text layer is not OCR'd: its text is exact and instant, and it is the vision model's draft instead. PDF pages are
-read concurrently (OCR one page at a time, vision calls in parallel). A transcription that drops a large part of the
-draft's words is not trusted: the draft (OCR or text layer) is used instead, so no line is silently lost.
+Numbers in the transcription that no OCR engine read are listed in `unconfirmed_numbers` for the reader to check.
+A PDF page with a text layer is not OCR'd: its text is exact, it is the draft, and the second reading is from the
+image alone. PDF pages are read concurrently. A reading takes about two seconds, three when a difference is settled.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from ..config.settings import get_bool, get_int
-from . import ocr, vlm
+from . import consensus, ocr, tesseract, vlm
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,6 @@ PDF_TYPE = "application/pdf"
 PDF_SCALE = 2.0  # render scale (144 dpi): small print stays legible for recognition
 MAX_TEXT_CHARS = 8000
 _NUMBER_RE = re.compile(r"(?<![\w.])\d+(?:\.\d+)?(?![\w.])")
-_WORD_RE = re.compile(r"[A-Za-z]{3,}|\d+(?:\.\d+)?")
 MIN_TEXT_LAYER_CHARS = 40  # a PDF page with less embedded text than this is treated as scanned
 MIN_COVERAGE = 0.75  # share of the draft's words a transcription must keep to be trusted
 PAGE_CONCURRENCY = 4
@@ -65,6 +65,10 @@ class ImageReading:
     # the server log, never in what a reader sees.
     engines: list[str] = field(default_factory=list)
     vision_checked: bool = False
+    # How the vision readings ended: "agreed" (two independent readings matched), "settled" (they differed and a
+    # look at the image decided each place), "unsettled", "single" (one reading), or "" (no vision reading).
+    consensus: str = ""
+    differences: list[str] = field(default_factory=list)  # where the two readings differed, as "reading 1 | reading 2"
     unconfirmed_numbers: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     seconds: float = 0.0
@@ -95,14 +99,25 @@ def _decode(data: bytes, content_type: str) -> Any:
 
 # Measured with muse-spark-1.3: the image's size sets the prompt tokens (1200 px: 794, 768 px: 374), and with them the
 # latency; 1280 px keeps small print legible.
+MIN_VISION_SIDE = 1000  # smaller images are enlarged for the vision model (at most 3x)
+
+
 def _png(image: Any, max_side: int = 1280) -> bytes:
-    """The image as PNG for a vision model, its long side at most max_side (vision encoders tile larger inputs)."""
+    """The image as PNG for a vision model, its long side at most max_side (vision encoders tile larger inputs).
+
+    A small image is enlarged: an encoder samples it at a fixed resolution, so the glyphs of a 464x50 screenshot got
+    a few pixels each, and two readings misread different symbols (x_i^n for x_i, +\\infty for \\infty). The OCR
+    engines upscale small images for the same reason.
+    """
     import cv2
 
     h, w = image.shape[:2]
     if max(h, w) > max_side:
         f = max_side / max(h, w)
         image = cv2.resize(image, (int(w * f), int(h * f)), interpolation=cv2.INTER_AREA)
+    elif max(h, w) < MIN_VISION_SIDE:
+        f = min(3.0, max_side / max(h, w))
+        image = cv2.resize(image, (int(w * f), int(h * f)), interpolation=cv2.INTER_CUBIC)
     ok, buf = cv2.imencode(".png", image)
     if not ok:
         raise ImageReadError("The image could not be re-encoded.")
@@ -119,13 +134,9 @@ def unconfirmed_numbers(transcription: str, ocr_text: str) -> list[str]:
     return out[:12]
 
 
-def coverage(transcription: str, draft: str) -> float:
-    """Share of the draft's words and numbers that the transcription contains (1.0 for a draft with few words)."""
-    words = [w.lower() for w in _WORD_RE.findall(draft)]
-    if len(words) < 8:
-        return 1.0
-    have = {w.lower() for w in _WORD_RE.findall(transcription)}
-    return sum(w in have for w in words) / len(words)
+def coverage(transcription: str, draft: str | list[str]) -> float:
+    """Share of the draft's words and numbers the transcription contains (see consensus.coverage)."""
+    return consensus.coverage(transcription, draft)
 
 
 def question_text(markdown: str) -> str:
@@ -233,6 +244,104 @@ def _ocr_read(image: Any) -> Any:
         return ocr.read(image)
 
 
+async def _ocr(image: Any, reading: ImageReading, words_too: bool) -> tesseract.TessResult | None:
+    """Indra OCR and (when `words_too`) Tesseract, at the same time; returns Tesseract's reading."""
+
+    async def indra() -> Any:
+        if not ocr.available():
+            logger.warning("Text recognition unavailable: pip install indra-ocr")
+            reading.warnings.append("Text recognition is not installed on the server.")
+            return None
+        try:
+            return await asyncio.to_thread(_ocr_read, image)
+        except Exception as exc:  # noqa: BLE001 - the vision model can still read the image
+            logger.warning("Indra OCR failed: %s", exc)
+            reading.warnings.append("Text recognition failed on this image.")
+            return None
+
+    async def words() -> tesseract.TessResult | None:
+        if not words_too:
+            return None
+        try:
+            return await asyncio.to_thread(tesseract.read, image)
+        except Exception as exc:  # noqa: BLE001 - optional engine
+            logger.warning("Tesseract failed: %s", exc)
+            return None
+
+    result, tess = await asyncio.gather(indra(), words())
+    if result is not None:
+        reading.ocr_text = question_text(result.markdown)
+        reading.ocr_confidence = round(result.mean_conf, 3) if result.lines else None
+        reading.engines.append("text recognition")
+        logger.info("Image %s read by %s in %.0f ms", reading.id, getattr(result, "engine", "OCR"),
+                    float(getattr(result, "ms", 0.0) or 0.0))
+    if tess is not None:
+        reading.engines.append("word recognition")
+        logger.info("Image %s read by %s in %.0f ms (%d words, %d confident)", reading.id, tess.engine, tess.ms,
+                    len(tess.words), len(tess.confident_words()))
+        if not reading.ocr_text:
+            reading.ocr_text = tess.text
+    return tess
+
+
+async def _vision(png: bytes, draft: str, reading: ImageReading, label: str) -> str:
+    """One reading by the cloud vision model; "" when the call fails (logged, and one warning for the reader)."""
+    try:
+        out, name = await vlm.transcribe_remote(png, draft)
+    except Exception as exc:  # noqa: BLE001 - the other reading, a local model or the OCR text can still answer
+        logger.warning("Vision reading (%s) of %s failed: %s", label, reading.id, exc)
+        if "The vision check could not be completed." not in reading.warnings:
+            reading.warnings.append("The vision check could not be completed.")
+        return ""
+    text = _strip_fences(out)
+    if text:
+        logger.info("Image %s read (%s) by %s", reading.id, label, name)
+    return text
+
+
+async def _settle(png: bytes, guided: str, blind: str, reference: list[str], reading: ImageReading) -> str:
+    """One transcription from the vision readings: kept when they agree, settled by a look at the image when not."""
+    candidates = [t for t in (guided, blind) if t]
+    if not candidates:
+        return ""
+    reading.vision_checked = True
+    reading.engines.append("vision check")
+    if len(candidates) == 1:
+        reading.consensus = "single"
+        return candidates[0]
+    reading.engines.append("vision cross-check")
+    # A reading that left out the image's words is no candidate when the other one kept them.
+    kept = [t for t in candidates if consensus.coverage(t, reference) >= MIN_COVERAGE]
+    if len(kept) == 1:
+        reading.consensus = "single"
+        logger.info("Image %s: one vision reading left out words; the other is used", reading.id)
+        return kept[0]
+    agreement = consensus.compare(guided, blind)
+    reading.differences = [f"{a}  |  {b}" for a, b in agreement.differences[:12]]
+    if agreement.agree:
+        reading.consensus = "agreed"
+        logger.info("Image %s: the two vision readings agree (ratio %.3f)", reading.id, agreement.ratio)
+        return guided
+    logger.info("Image %s: the two vision readings differ in %d places (ratio %.3f); settling", reading.id,
+                len(agreement.differences), agreement.ratio)
+    settled = ""
+    try:
+        out, name = await vlm.review_remote(png, guided, blind, agreement.differences, list(dict.fromkeys(reference)))
+        settled = _strip_fences(out)
+        logger.info("Image %s: differences settled by %s", reading.id, name)
+    except Exception as exc:  # noqa: BLE001 - the guided reading still stands, with a warning
+        logger.warning("Vision review of %s failed: %s", reading.id, exc)
+    # The review must stay a transcription of this image: close to one of the readings it was given.
+    if settled and max(consensus.compare(settled, guided).ratio, consensus.compare(settled, blind).ratio) >= 0.8:
+        reading.consensus = "settled"
+        reading.engines.append("vision review")
+        return settled
+    reading.consensus = "unsettled"
+    reading.warnings.append("Two readings of this image differ in places that could not be settled; check the "
+                            "transcription against the image.")
+    return guided
+
+
 async def _read_decoded(image: Any, data: bytes, filename: str, text_layer: str | None = None) -> ImageReading:
     """One image or page. `text_layer`: a PDF page's embedded text, which replaces OCR as the draft."""
     started = time.time()
@@ -242,36 +351,36 @@ async def _read_decoded(image: Any, data: bytes, filename: str, text_layer: str 
 
     png = _png(image)
     chosen = vlm.provider()
-    # The NIM call starts now, alongside OCR, instead of waiting for the OCR draft: OCR takes about 0.4 s and the
-    # call about 1 s, so the reading takes the longer of the two rather than their sum. The OCR text still checks the
-    # result afterwards (coverage and unconfirmed numbers). A PDF text layer is instant and exact, so it stays the draft.
-    remote = asyncio.create_task(vlm.transcribe_remote(png, text_layer or "")) if chosen == "remote" else None
+    remote = chosen == "remote"
+    cross = remote and bool(get_bool("TRIBOS_VISION_CROSSCHECK"))
+    # The first vision reading starts now, alongside OCR, from the image alone (or with a PDF page's exact text
+    # layer): OCR takes about half a second and a reading one to two, so the two overlap instead of adding up.
+    first = asyncio.create_task(_vision(png, text_layer or "", reading, "text layer" if text_layer else "image only")) \
+        if remote else None
+    # A page with a text layer gets its independent second reading at once too: from the image alone.
+    second = asyncio.create_task(_vision(png, "", reading, "image only")) if cross and text_layer else None
 
+    tess: tesseract.TessResult | None = None
     if text_layer:
         reading.ocr_text = text_layer
         reading.engines.append("text layer")
-    elif ocr.available():
-        try:
-            result = await asyncio.to_thread(_ocr_read, image)
-            reading.ocr_text = question_text(result.markdown)
-            reading.ocr_confidence = round(result.mean_conf, 3) if result.lines else None
-            reading.engines.append("text recognition")
-            logger.info("Image %s read by %s in %.0f ms", reading.id, result.engine, result.ms)
-        except Exception as exc:  # noqa: BLE001 - the vision model can still read the image
-            logger.warning("Indra OCR failed: %s", exc)
-            reading.warnings.append("Text recognition failed on this image.")
     else:
-        logger.warning("Text recognition unavailable: pip install indra-ocr")
-        reading.warnings.append("Text recognition is not installed on the server.")
-
-    text = ""
+        tess = await _ocr(image, reading, words_too=chosen != "ocr" or not ocr.available())
+    # The words a transcription must keep: a text layer's are exact; OCR's only where both engines read them.
+    reference = (consensus.plain_tokens(text_layer) if text_layer
+                 else consensus.reliable_tokens(reading.ocr_text, tess))
+    draft = text_layer or vlm.combined_draft(reading.ocr_text, tess.text if tess else "")
+    # An image's second reading has the OCR drafts: its errors are independent of the first's (image only).
+    if cross and second is None and draft.strip():
+        second = asyncio.create_task(_vision(png, draft, reading, "with OCR drafts"))
+    guided, blind = (first, second) if text_layer else (second, first)
 
     async def run_local() -> str:
         model = await asyncio.to_thread(vlm.local_model)
         if not model:
             return ""
         try:
-            out = _strip_fences(await vlm.transcribe_local(png, reading.ocr_text, model))
+            out = _strip_fences(await vlm.transcribe_local(png, draft, model))
         except Exception as exc:  # noqa: BLE001
             logger.warning("Local vision model %s failed: %s", model, exc)
             reading.warnings.append("The vision check failed on this image.")
@@ -279,32 +388,40 @@ async def _read_decoded(image: Any, data: bytes, filename: str, text_layer: str 
         if out:
             reading.vision_checked = True
             reading.engines.append("vision check")
+            reading.consensus = "single"
             logger.info("Image %s checked by local model %s", reading.id, model)
         return out
 
-    if remote is not None:
-        try:
-            out, name = await remote
-            text = _strip_fences(out)
-            if text:
-                reading.vision_checked = True
-                reading.engines.append("vision check")
-                logger.info("Image %s checked by %s", reading.id, name)
-        except Exception as exc:  # noqa: BLE001 - a local model or the OCR text can still answer
-            logger.warning("NIM vision model failed: %s", exc)
-            reading.warnings.append("The vision check could not be completed.")
+    text = ""
+    if remote:
+        text = await _settle(png, await guided if guided else "", await blind if blind else "", reference, reading)
         if not text:
             text = await run_local()
     elif chosen == "ollama":
         text = await run_local()
         if not text:
             logger.warning("No local vision model answered (is Ollama running with a vision model?)")
-    if text and reading.ocr_text and coverage(text, reading.ocr_text) < MIN_COVERAGE:
-        logger.warning("Image %s: the vision transcription kept %.0f%% of the draft's words; using the draft",
-                       reading.id, 100 * coverage(text, reading.ocr_text))
-        reading.warnings.append("The vision check left out part of the text, so the text recognition reading is shown.")
-        text = ""
-        reading.vision_checked = False
+
+    if text and reading.ocr_text and consensus.coverage(text, reference) < MIN_COVERAGE:
+        lost = consensus.missing(text, reference)
+        logger.warning("Image %s: the vision transcription kept %.0f%% of the surely-read words (missing: %s)",
+                       reading.id, 100 * consensus.coverage(text, reference), ", ".join(lost[:12]))
+        repaired = ""
+        if remote:
+            try:
+                out, _name = await vlm.repair_remote(png, text, lost, draft)
+                repaired = _strip_fences(out)
+            except Exception as exc:  # noqa: BLE001 - the OCR reading stands in
+                logger.warning("Vision repair of %s failed: %s", reading.id, exc)
+        if repaired and consensus.coverage(repaired, reference) >= MIN_COVERAGE:
+            text = repaired
+            reading.engines.append("vision repair")
+        else:
+            reading.warnings.append("The vision check left out part of the text, so the text recognition reading is "
+                                    "shown.")
+            text = ""
+            reading.vision_checked = False
+            reading.consensus = ""
     if not reading.vision_checked and not text_layer:
         reading.warnings.append(
             "Only text recognition read this image: check formulas (derivative dots, primes, subscripts) before "
@@ -314,7 +431,8 @@ async def _read_decoded(image: Any, data: bytes, filename: str, text_layer: str 
     if text:
         reading.text = text[:MAX_TEXT_CHARS]
         if reading.ocr_text:
-            reading.unconfirmed_numbers = unconfirmed_numbers(reading.text, reading.ocr_text)
+            seen = reading.ocr_text + ("\n" + tess.text if tess else "")
+            reading.unconfirmed_numbers = unconfirmed_numbers(reading.text, seen)
     else:
         reading.text = reading.ocr_text[:MAX_TEXT_CHARS]
     if not reading.text.strip():
@@ -329,7 +447,9 @@ def vision_status() -> dict[str, Any]:
     return {
         "enabled": bool(get_bool("TRIBOS_VISION")),
         "text_recognition": ocr.available(),
+        "word_recognition": tesseract.available(),
         "vision_check": vlm.provider() == "remote" or (vlm.provider() == "ollama" and bool(models and vlm.local_model())),
+        "cross_check": vlm.provider() == "remote" and bool(get_bool("TRIBOS_VISION_CROSSCHECK")),
         "accepted_types": sorted(ALLOWED_TYPES),
         "max_mb": int(get_int("TRIBOS_VISION_MAX_MB")),
     }

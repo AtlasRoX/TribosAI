@@ -17,7 +17,7 @@ Precedence for state directories: a specific variable (`TRIBOS_MEMORY_DIR`, `TRI
 `TRIBOS_UPLOAD_ROOT`, `TRIBOS_JOBS_DIR`, `TRIBOS_TOOL_CACHE_DIR`) wins over `TRIBOS_DATA_DIR`; with
 neither set, every store keeps its historical location under the workspace.
 
-235 variables.
+238 variables.
 
 ## State directories
 
@@ -337,6 +337,7 @@ neither set, every store keeps its historical location under the workspace.
 | Variable | Type | Default | Read at | Description |
 | --- | --- | --- | --- | --- |
 | `TRIBOS_VISION` | bool | `true` | `tribos/vision/reader.py`<br>`app/backend/main.py`<br>`app/backend/routers/vision.py` | Accept images attached to questions (POST /api/vision/read); they are read into text before the question is solved. |
+| `TRIBOS_VISION_CROSSCHECK` | bool | `true` | `tribos/vision/reader.py` | Read each image twice with the vision model (once from the image alone, once with the OCR drafts); readings that differ are settled by a third look at the image. |
 | `TRIBOS_VISION_MAX_IMAGES` | int (1 to 10) | `4` | `app/backend/main.py` | Images one question may carry. |
 | `TRIBOS_VISION_MAX_MB` | int (1 to 50) | `10` | `tribos/vision/reader.py`<br>`app/backend/routers/vision.py` | Largest image upload in MB. |
 | `TRIBOS_VISION_MAX_PAGES` | int (1 to 20) | `4` | `tribos/vision/reader.py` | Pages of an attached PDF that are read (each like one image). |
@@ -345,6 +346,8 @@ neither set, every store keeps its historical location under the workspace.
 | `TRIBOS_VISION_OLLAMA_MODEL` | str | unset | `tribos/vision/vlm.py` | Ollama vision model for `ollama` (e.g. qwen2.5vl:7b); the first installed vision-family model when unset. |
 | `TRIBOS_VISION_OLLAMA_URL` | str | `http://127.0.0.1:11434` | `tribos/vision/vlm.py` | Base URL of the local Ollama server. |
 | `TRIBOS_VISION_PROVIDER` | remote \| nim \| ollama \| ocr | `remote` | `tribos/vision/vlm.py` | Model that corrects the OCR draft: `remote` (cloud, TRIBOS_VISION_MODEL; `nim` is its old name), `ollama` (local), or `ocr` (OCR only; the image stays on this machine). |
+| `TRIBOS_VISION_TESSERACT` | str | unset | `tribos/vision/tesseract.py` | Tesseract executable, the second text recognizer (its confident words are what a transcription is checked against); found on PATH, in Scoop or in Program Files when unset; `off` disables it. |
+| `TRIBOS_VISION_TESSERACT_LANG` | str | `eng` | `tribos/vision/tesseract.py` | Tesseract language models to read with (e.g. `eng+deu`); each must be installed. |
 | `TRIBOS_VISION_TIMEOUT_S` | int (10 to 1800) | `300` | `tribos/vision/vlm.py` | Seconds one vision-model transcription may take (CPU inference of a 7B model can need minutes). |
 
 ## TRIBOS_EVAL_*: Evaluations

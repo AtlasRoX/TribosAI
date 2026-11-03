@@ -3,7 +3,7 @@
 import React, { useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, Crop, FileText, Loader2, RotateCw, X } from "lucide-react";
-import type { ComposerImage } from "@/services/visionService";
+import { readingSummary, type ComposerImage } from "@/services/visionService";
 import { useFocusTrap } from "@/lib/useFocusTrap";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import styles from "./ComposerImages.module.css";
@@ -214,7 +214,7 @@ export function ComposerImages({ images, onChangeText, onRemove, onEdit }: Compo
                 ))}
                 <p className={styles.meta}>
                   {[
-                    open.reading?.vision_checked ? "Read and checked against the image" : "Read by text recognition",
+                    readingSummary(open.reading) || (open.reading?.vision_checked ? "Read and checked against the image" : "Read by text recognition"),
                     open.reading ? `${open.reading.seconds.toFixed(1)} s` : "",
                   ]
                     .filter(Boolean)

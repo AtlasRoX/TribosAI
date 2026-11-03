@@ -16,6 +16,10 @@ export interface ImageReading {
   /** Reading steps that ran, in plain words ("text recognition", "vision check"). */
   engines: string[];
   vision_checked: boolean;
+  /** How the two vision readings ended: agreed, settled (differed; decided against the image), unsettled, single, "". */
+  consensus?: "agreed" | "settled" | "unsettled" | "single" | "";
+  /** Where the two readings differed, "reading 1 | reading 2" in normalised tokens. */
+  differences?: string[];
   /** Numbers in the transcription that OCR never read: check them against the image. */
   unconfirmed_numbers: string[];
   warnings: string[];
@@ -51,6 +55,34 @@ export interface MessageImage {
   viewUrl?: string;
   /** The transcription that was sent with the question (what Tribos read from the image). */
   text?: string;
+}
+
+/** One plain line on how a reading was checked (engine and model names stay on the server). */
+export function readingSummary(reading: Pick<ImageReading, "engines" | "vision_checked" | "consensus" | "differences"> | null | undefined): string {
+  if (!reading) return "";
+  const ocr = reading.engines.filter((e) => e === "text recognition" || e === "word recognition").length;
+  const recognizers = ocr >= 2 ? "two text recognizers" : ocr === 1 ? "text recognition" : "";
+  const places = reading.differences?.length ?? 0;
+  let vision = "";
+  if (reading.vision_checked) {
+    switch (reading.consensus) {
+      case "agreed":
+        vision = "two independent vision readings agreed";
+        break;
+      case "settled":
+        vision = `two vision readings differed in ${places || "some"} ${places === 1 ? "place" : "places"}, settled against the image`;
+        break;
+      case "unsettled":
+        vision = "two vision readings differ; check against the image";
+        break;
+      default:
+        vision = "checked against the image";
+    }
+    if (reading.engines.includes("vision repair")) vision += " (read again for missing lines)";
+  }
+  if (!vision) return recognizers ? `Read by ${recognizers}` : "";
+  const text = recognizers ? `Read by ${recognizers}; ${vision}` : `Read by the vision model; ${vision}`;
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 export const IMAGE_ACCEPT = "image/png,image/jpeg,image/webp,image/bmp,image/tiff,application/pdf";

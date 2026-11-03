@@ -11,8 +11,10 @@ from tribos.vision import reader
 
 
 @pytest.fixture(autouse=True)
-def _fresh_reading_cache():
-    """Readings are cached by the file's bytes; each test reads its image afresh."""
+def _fresh_reading_cache(monkeypatch):
+    """Readings are cached by the file's bytes; each test reads its image afresh. Tesseract is off here (its own
+    tests are in test_feat_vision_ensemble.py), so these tests do not depend on it being installed."""
+    monkeypatch.setenv("TRIBOS_VISION_TESSERACT", "off")
     reader._CACHE.clear()
     yield
     reader._CACHE.clear()
@@ -91,10 +93,11 @@ def test_the_nim_vision_model_corrects_the_ocr_draft_and_unconfirmed_numbers_are
 
     monkeypatch.setattr(reader.vlm, "transcribe_remote", fake_nim)
     reading = asyncio.run(reader.read_image(_question_png(), "image/png", "q.png"))
-    # The model is called alongside OCR (no draft for an image); the OCR text then checks its numbers.
-    assert drafts == [""]
+    # One reading starts alongside OCR (no draft), the second has the OCR draft; the OCR text checks the numbers.
+    assert drafts == ["", "A spring: mx + kx = 0 with k = 50"]
     assert reading.text.startswith(r"$m\ddot{x}") and reading.unconfirmed_numbers == ["3"]
-    assert reading.engines == ["text recognition", "vision check"] and reading.vision_checked
+    assert reading.engines == ["text recognition", "vision check", "vision cross-check"] and reading.vision_checked
+    assert reading.consensus == "agreed"
 
 
 def test_a_failed_nim_call_falls_back_to_a_local_vision_model(monkeypatch):
@@ -231,8 +234,16 @@ def test_a_transcription_that_drops_lines_is_replaced_by_the_ocr_reading(monkeyp
     async def dropping_nim(png: bytes, draft: str, model_name=None):
         return "Problem 3. A ball is thrown upward at 20 m/s.", "nim"
 
+    repairs: list[list[str]] = []
+
+    async def dropping_repair(png: bytes, previous: str, missing: list[str], draft: str, model_name=None):
+        repairs.append(missing)
+        return previous, "nim"  # read again, and still the first line only
+
     monkeypatch.setattr(reader.vlm, "transcribe_remote", dropping_nim)
+    monkeypatch.setattr(reader.vlm, "repair_remote", dropping_repair)
     reading = asyncio.run(reader.read_image(_question_png(), "image/png", "q.png"))
+    assert len(repairs) == 1 and "solve" in repairs[0]
     assert "Solve x^2 - 5x + 6 = 0" in reading.text and not reading.vision_checked
     assert any("left out part of the text" in w for w in reading.warnings)
     # A faithful LaTeX transcription (the model's real output for this image) keeps the draft's words and numbers.
@@ -271,7 +282,8 @@ def test_a_pdf_with_a_text_layer_skips_ocr_and_uses_the_layer_as_the_draft(monke
             pdf.savefig(fig)
             plt.close(fig)
     reading = asyncio.run(reader.read_image(buf.getvalue(), "application/pdf", "sheet.pdf"))
-    assert reading.pages == 2 and len(drafts) == 2
+    # Each page: one reading with its text layer, and the cross-check from the image alone.
+    assert reading.pages == 2 and len([d for d in drafts if d]) == 2 and drafts.count("") == 2
     assert any("stiffness" in d for d in drafts) and "$k = 50$" in reading.text
     assert "text layer" in reading.engines and "text recognition" not in reading.engines
 
@@ -346,5 +358,6 @@ def test_ocr_and_the_vision_model_run_at_the_same_time(monkeypatch):
     monkeypatch.setattr(reader.vlm, "transcribe_remote", slow_nim)
     t0 = _time.perf_counter()
     reading = asyncio.run(reader.read_image(_question_png(), "image/png", "q.png"))
-    assert _time.perf_counter() - t0 < 0.75  # about 0.4 s, not 0.8 s
-    assert reading.vision_checked and reading.text == "A spring has $k = 50$ N/m."
+    # The image-only reading overlaps OCR; the second needs the OCR draft. About 0.8 s, not 1.2 s (all in series).
+    assert _time.perf_counter() - t0 < 1.1
+    assert reading.vision_checked and reading.text == "A spring has $k = 50$ N/m." and reading.consensus == "agreed"

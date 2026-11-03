@@ -92,7 +92,7 @@ Tribos/
 │   ├── dynamis/              # Numerical simulation and optimization
 │   ├── physis/               # Constants, units, materials and reference data
 │   ├── datasets/             # Uploaded datasets (tables, HDF5, MAT)
-│   ├── vision/               # Image input (OCR and vision models)
+│   ├── vision/               # Image input (Indra + Tesseract OCR, cross-checked vision readings)
 │   ├── verify/               # Claim verification
 │   ├── export/, provenance/  # Report export, run manifests and re-runs
 │   ├── config/               # Settings registry (TRIBOS_*)
