@@ -70,6 +70,35 @@ def active_seconds(loop: dict[str, Any], now: float | None = None) -> float:
     return float(loop.get("active_s") or 0.0) + max(0.0, current)
 
 
+def round_seconds(campaign: dict[str, Any], rnd: dict[str, Any]) -> float:
+    """How long a round actually ran. A round that recorded the active clock at its start uses it (pauses excluded).
+    Older records use the merged busy time of the round's test runs and its judgement: the union of their intervals,
+    so an overnight pause between two attempts is not counted."""
+    loop = campaign.get("loop") or {}
+    if "active_at_start" in rnd:
+        return max(0.0, active_seconds(loop) - float(rnd["active_at_start"]))
+    intervals: list[tuple[float, float]] = []
+    for f in campaign.get("ledger") or []:
+        if f.get("round") == rnd.get("round") and f.get("finished_at") and f.get("seconds"):
+            end = float(f["finished_at"])
+            intervals.append((end - float(f["seconds"]), end))
+    for s in campaign.get("stages") or []:
+        if s.get("key") == f"analysis@{rnd.get('round')}" and s.get("started_at") and s.get("finished_at"):
+            intervals.append((float(s["started_at"]), float(s["finished_at"])))
+    total, cur_start, cur_end = 0.0, None, None
+    for a, b in sorted(intervals):
+        if cur_end is None or a > cur_end:
+            if cur_end is not None:
+                total += cur_end - cur_start
+            cur_start, cur_end = a, b
+        else:
+            cur_end = max(cur_end, b)
+    if cur_end is not None:
+        total += cur_end - cur_start
+    wall = float(rnd.get("finished_at") or 0) - float(rnd.get("started_at") or 0)
+    return min(total, wall) if wall > 0 and total > 0 else (total or max(0.0, wall))
+
+
 def is_provider_outage(error: Any) -> bool:
     """A failure caused by the model service (unreachable, timed out, overloaded), not by the research itself."""
     return bool(error) and bool(_OUTAGE_RE.search(str(error)))
@@ -388,7 +417,7 @@ class ResearchLoop:
         rnd.update(judgement={k: v for k, v in accepted.items() if k != "new_tests"}, added_tests=added,
                    progress=made_progress(before, after), concluded=accepted["concluded"],
                    headline=accepted["headline"], finished_at=time.time())
-        rnd["seconds"] = rnd["finished_at"] - float(rnd.get("started_at") or rnd["finished_at"])
+        rnd["seconds"] = round_seconds(self.c, rnd)
         rec["response"] = rnd["analysis"]
         self.end_stage(rec, "succeeded")
         self.c["dashboard"] = build_dashboard(self.c)
@@ -439,7 +468,8 @@ class ResearchLoop:
                 if not ready:
                     loop["stop_reason"] = "nothing left to run"
                     return
-                rnd = {"round": len(self.c["rounds"]) + 1, "started_at": time.time(), "tests": [t["id"] for t in ready]}
+                rnd = {"round": len(self.c["rounds"]) + 1, "started_at": time.time(), "tests": [t["id"] for t in ready],
+                       "active_at_start": active_seconds(loop)}
                 self.c["rounds"].append(rnd)
                 self.activity(f"Round {rnd['round']}: running {len(ready)} test(s)")
                 self.save()

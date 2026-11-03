@@ -17,6 +17,7 @@ import asyncio
 import datetime as _dt
 import logging
 import os
+import re
 from typing import Any
 
 from .charter import charter_text
@@ -219,16 +220,49 @@ def _results_md(tables: list[dict], figures: list[dict]) -> str:
     return "\n".join(out)
 
 
+_PROVE_PREFIX_RE = re.compile(r"^\s*(?:prove|show|establish)\s+(?:that\s+)?", re.I)
+
+
+def _statement(text: str) -> str:
+    """A theorem's statement without the test's instruction verb ("Prove that ..." -> "...")."""
+    s = _PROVE_PREFIX_RE.sub("", (text or "").strip(), count=1)
+    return s[:1].upper() + s[1:] if s else s
+
+
+def best_proofs(campaign: dict[str, Any]) -> list[dict[str, Any]]:
+    """One finding per prove test: its strongest attempt (Lean-verified first, then the latest written proof).
+    Attempts that produced no proof (a failed or cut-off run) are not theorems."""
+    from .ledger import rank
+
+    best: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for f in campaign.get("ledger") or []:
+        p = f.get("proof") or {}
+        if not p or f.get("status") not in ("passed", "refuted") or not (p.get("text") or p.get("lean_code")):
+            continue
+        tid = str(f.get("test_id"))
+        if tid not in best:
+            order.append(tid)
+            best[tid] = f
+        elif rank(f.get("tier")) >= rank(best[tid].get("tier")):
+            best[tid] = f
+    return [best[t] for t in order]
+
+
 def _proofs_md(campaign: dict[str, Any]) -> str:
-    proofs = [f for f in campaign.get("ledger") or [] if f.get("proof")]
+    proofs = best_proofs(campaign)
     if not proofs:
-        return "No statement in this project called for a proof."
+        return "No statement in this project reached a written or formal proof."
     out = []
     for i, f in enumerate(proofs, 1):
         p = f["proof"]
-        level = "Lean-verified" if p.get("lean_status") == "verified" else (
-            "written proof, not formally verified" + (f" (Lean: {p.get('lean_status')})" if p.get("lean_status") else ""))
-        out += [f"**Theorem {i}** ({level}; finding {f['id']}). {p['statement']}", ""]
+        if p.get("lean_status") == "verified":
+            level = "Lean-verified"
+        else:
+            lean = {"failed": "Lean check failed", "unavailable": "Lean check unavailable"}.get(
+                str(p.get("lean_status") or ""), "not checked in Lean")
+            level = f"written proof; {lean}"
+        out += [f"**Theorem {i}** ({level}; finding {f['id']}). {_statement(p['statement'])}", ""]
         if p.get("text"):
             out += [p["text"].strip(), ""]
         if p.get("lean_code"):

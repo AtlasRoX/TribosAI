@@ -23,7 +23,8 @@ TIER_RANK = {"formal": 6, "certified": 5, "replicated": 4, "computed": 3, "sourc
 TIER_LABEL = {"formal": "Lean-verified", "certified": "Certified", "replicated": "Replicated", "computed": "Computed",
               "sourced": "Sourced", "reasoned": "Argued", "none": "Unverified"}
 MAX_FIGURES_PER_FINDING = 4
-_NUMBER_RE = re.compile(r"(?<![\w.])-?\d[\d,]*(?:\.\d+)?(?:[eE][-+]?\d+)?")
+# A comma is a thousands separator only in groups of three digits ("1,000,000"); "27,97,871" is a list of three numbers.
+_NUMBER_RE = re.compile(r"(?:(?<![\w.,])-?\d{1,3}(?:,\d{3})+(?![\d,])|(?<![\w.])-?\d+)(?:\.\d+)?(?:[eE][-+]?\d+)?")
 
 
 def rank(tier: str | None) -> int:

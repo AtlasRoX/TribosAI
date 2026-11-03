@@ -408,3 +408,35 @@ def test_imports_of_modules_missing_from_mathlib_are_removed_before_checking(tmp
     assert dropped == ["Mathlib.Tactic.Omega"]
     assert "import Mathlib.Data.Nat.Basic" in out and "\nimport Mathlib.Tactic.Omega" not in "\n" + out
     assert drop_missing_imports(code, None) == (code, [])  # no project: nothing is touched
+
+
+def test_a_comma_separated_list_is_several_numbers_and_thousands_separators_still_work():
+    ev = evidence_numbers(ledger=[{"quantities": [{"name": "spots", "value": [27, 97, 871, 1000000]}]}])
+    assert unsupported_numbers("spot checks at n = 27,97,871 and up to 1,000,000", ev) == []
+    assert unsupported_numbers("a list 27,98", ev) == ["98"]
+
+
+def test_round_durations_exclude_pauses_and_theorems_show_each_proof_once():
+    from tribos.agentic.research.loop import round_seconds
+    from tribos.agentic.research.thesis import _proofs_md, best_proofs
+
+    t0 = 1_000_000.0
+    camp = {"loop": {}, "stages": [{"key": "analysis@1", "started_at": t0 + 900, "finished_at": t0 + 1000}],
+            "ledger": [{"round": 1, "finished_at": t0 + 300, "seconds": 300},           # before an overnight pause
+                       {"round": 1, "finished_at": t0 + 600, "seconds": 400},           # overlaps the first
+                       {"round": 1, "finished_at": t0 + 80_000, "seconds": 200}]}       # after the pause
+    rnd = {"round": 1, "started_at": t0, "finished_at": t0 + 80_100}
+    assert round_seconds(camp, rnd) == 600 + 100 + 200  # merged busy time; the pause and idle gaps are not counted
+    assert round_seconds({"loop": {"active_s": 500.0}}, {"active_at_start": 200.0}) == 300.0
+
+    ledger = [{"id": "F1", "test_id": "T1", "status": "failed", "tier": "none", "proof": {"statement": "x", "text": ""}},
+              {"id": "F2", "test_id": "T1", "status": "passed", "tier": "reasoned",
+               "proof": {"statement": "Prove that 1 + 1 = 2", "text": "Clear.", "lean_status": "failed"}},
+              {"id": "F3", "test_id": "T1", "status": "passed", "tier": "formal",
+               "proof": {"statement": "Prove that 1 + 1 = 2", "text": "Clear.", "lean_status": "verified",
+                         "lean_code": "example : 1 + 1 = 2 := rfl"}},
+              {"id": "F4", "test_id": "T2", "status": "failed", "tier": "none",
+               "proof": {"statement": "y", "text": "", "lean_status": "failed"}}]
+    assert [f["id"] for f in best_proofs({"ledger": ledger})] == ["F3"]
+    md = _proofs_md({"ledger": ledger})
+    assert md.count("**Theorem") == 1 and "(Lean-verified; finding F3). 1 + 1 = 2" in md
