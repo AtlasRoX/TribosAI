@@ -343,8 +343,23 @@ function Findings({ c, focus, backendUrl, authHeaders }: { c: Campaign; focus: s
   );
 }
 
+const TIER_RANK: Record<string, number> = { formal: 6, certified: 5, replicated: 4, computed: 3, sourced: 2, reasoned: 1 };
+
+/** One theorem per prove test, as in the thesis: its strongest attempt (Lean-verified first, then the latest written
+ *  proof). Attempts that produced no proof (a failed or cut-off run) are not theorems. */
+export function bestProofs(ledger: Finding[]): Finding[] {
+  const best = new Map<string, Finding>();
+  for (const f of ledger) {
+    const p = f.proof;
+    if (!p || !["passed", "refuted"].includes(f.status) || !(p.text || p.lean_code)) continue;
+    const cur = best.get(f.test_id);
+    if (!cur || (TIER_RANK[f.tier] ?? 0) >= (TIER_RANK[cur.tier] ?? 0)) best.set(f.test_id, f);
+  }
+  return [...best.values()];
+}
+
 function Proofs({ c }: { c: Campaign }) {
-  const proofs = (c.ledger ?? []).filter((f) => f.proof);
+  const proofs = bestProofs(c.ledger ?? []);
   if (!proofs.length) return <div className={styles.emptyNote}><Sigma aria-hidden="true" /><p>No proofs yet. Statements the plan marks for proof are written out and checked in Lean 4 here.</p></div>;
   return (
     <div className={styles.proofs}>
@@ -477,7 +492,7 @@ export function ResearchLab(props: ResearchLabProps) {
   }, [thesisReady]);
   const ledger = c.ledger ?? [];
   const nFindings = ledger.filter((f) => !f.proof).length;
-  const nProofs = ledger.filter((f) => f.proof).length;
+  const nProofs = bestProofs(ledger).length;
   const goFinding = (id: string) => {
     const f = ledger.find((x) => x.id === id);
     setTab(f?.proof ? "proofs" : "findings");
