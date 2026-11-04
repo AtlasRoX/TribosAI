@@ -49,7 +49,7 @@ dependencies = [
   "fpdf2==2.8.9",
   "markdown-it-py==4.0.0",
 ]
-version = "1.49.1"
+version = "1.0.0"
 
 [project.scripts]
 tribos-eval = "tribos.evals.cli:main"
