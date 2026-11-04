@@ -9,3 +9,7 @@ test("T4: the unit summary reports actual coverage, including zero", () => {
   assert.equal(unitsSummary({ checked: 4, consistent: 3, inconsistent: [{ statement: "pressure = 2 N" }], not_evaluated: 1 }),
     "Units: 4 checked, 1 inconsistent");
 });
+
+test("T4: an answer with no quantities in units gets no unit line", () => {
+  assert.equal(unitsSummary({ checked: 0, consistent: 0, inconsistent: [], not_evaluated: 0 }), "");
+});

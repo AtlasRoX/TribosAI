@@ -68,7 +68,7 @@ _STOPWORDS = frozenset({
     # cases, "proof" and "integer" match any number-theory paper), so they never count as subject terms.
     "answer", "answers", "words", "word", "lines", "line", "exactly", "following", "return", "give", "given", "write",
     "state", "explain", "describe", "compute", "calculate", "evaluate", "determine", "prove", "proof", "disprove",
-    "rigorous", "justification", "show", "every", "each", "all", "any", "some", "case", "cases", "independent", "local",
+    "rigorous", "justification", "every", "each", "all", "any", "some", "case", "cases", "independent", "local",
     "keep", "value", "values", "number", "numbers", "integer", "integers", "positive", "negative", "real", "function",
     "functions", "result", "results", "problem", "question", "example", "examples", "most", "least", "only", "also",
     "then", "than", "does", "not", "your", "you", "please", "brief", "briefly", "short", "plain", "text", "format",
@@ -368,6 +368,30 @@ def _citation_label(rec: dict[str, Any], authors_str: str) -> str:
     return f"[{head} | {ident}]" if head else f"[{ident}]"
 
 
+PDF_MAX_BYTES = 15 * 1024 * 1024
+PDF_MAX_PAGES = 30
+
+
+def _pdf_paragraphs(data: bytes) -> list[str]:
+    """Paragraph-sized chunks (200-1500 characters) of a PDF's text, first PDF_MAX_PAGES pages."""
+    import io
+
+    from pypdf import PdfReader
+
+    reader = PdfReader(io.BytesIO(data))
+    text = "\n".join((page.extract_text() or "") for page in reader.pages[:PDF_MAX_PAGES])
+    text = re.sub(r"-\n(?=[a-z])", "", text)  # words hyphenated across lines
+    blocks = [" ".join(b.split()) for b in re.split(r"\n\s*\n|(?<=[.!?])\n(?=[A-Z])", text)]
+    out: list[str] = []
+    buf = ""
+    for b in blocks:
+        buf = f"{buf} {b}".strip()
+        if len(buf) >= 200:
+            out.append(buf[:1500])
+            buf = ""
+    return out
+
+
 class ArchivonEngine:
     """Multi-source scholarly literature search, paper details, and recommendation engine."""
 
@@ -384,6 +408,85 @@ class ArchivonEngine:
         self.check_integrity = check_integrity
         self.clients = clients or ArchivonClients(transport=self.transport, timeout_s=timeout_s)
         self.integrity_client = integrity_client or CrossrefIntegrityClient(transport=self.transport, timeout_s=min(6.0, timeout_s))
+
+    async def _full_text_passages(self, passages: list[dict[str, Any]], terms: list[str] | set[str],
+                                  max_papers: int = 3, per_paper: int = 3) -> list[dict[str, Any]]:
+        """Body paragraphs of the top arXiv papers (arxiv.org/html), most relevant first, as extra passages.
+
+        Abstracts rarely state the values and status claims an answer cites, so a claim checked only against them is
+        "unsupported" although the paper says it (docs/plans/tribos-research-upgrade-plan.md 2.8). A paper without an
+        HTML version, or a failed fetch, adds nothing."""
+        from ..config.settings import get_bool
+
+        if not get_bool("TRIBOS_ARCHIVON_FULLTEXT"):
+            return []
+        targets = [p for p in passages if p.get("arxiv_id")][:max_papers]
+        if not targets or not terms:
+            return []
+        words = {t.lower() for t in terms if len(t) > 2}
+
+        async def fetch(p: dict[str, Any]) -> list[dict[str, Any]]:
+            url = f"https://arxiv.org/html/{p['arxiv_id']}"
+            try:
+                async with httpx.AsyncClient(transport=self.transport, timeout=min(8.0, self.timeout_s),
+                                             follow_redirects=True) as client:
+                    resp = await client.get(url, headers={"User-Agent": "Tribos/1.0 (research assistant)"})
+                if resp.status_code != 200 or "html" not in resp.headers.get("content-type", ""):
+                    return []
+                from bs4 import BeautifulSoup
+
+                soup = BeautifulSoup(resp.text, "html.parser")
+                paras = [" ".join(el.get_text(" ", strip=True).split()) for el in soup.select("div.ltx_para p, section p")]
+            except Exception:  # noqa: BLE001 - full text is an addition; the abstract passage stands without it
+                return []
+            scored = sorted(((sum(1 for w in words if w in para.lower()), para) for para in paras if len(para) > 200),
+                            key=lambda s: -s[0])
+            out = []
+            for n, (score, para) in enumerate(scored[:per_paper], 1):
+                if score == 0:
+                    break
+                out.append({**p, "passage_id": f"{p.get('passage_id')}-ft{n}", "passage_text": para[:1500],
+                            "section": "Full text", "url": url, "score": float(p.get("score") or 0) * 0.9})
+            return out
+
+        results = await asyncio.gather(*(fetch(p) for p in targets))
+        return [x for group in results for x in group]
+
+    async def _pdf_passages(self, passages: list[dict[str, Any]], terms: list[str] | set[str],
+                            pdf_by_title: dict[str, str], max_papers: int = 2, per_paper: int = 3) -> list[dict[str, Any]]:
+        """Paragraphs of open-access PDFs (Semantic Scholar / OpenAlex links) for top papers with no arXiv HTML.
+
+        Downloads are capped at PDF_MAX_BYTES and parsing at PDF_MAX_PAGES; a failure adds nothing."""
+        from ..config.settings import get_bool
+
+        if not get_bool("TRIBOS_ARCHIVON_PDF_FULLTEXT") or not terms:
+            return []
+        targets = [p for p in passages if not p.get("arxiv_id") and pdf_by_title.get(p.get("title", ""))][:max_papers]
+        words = {t.lower() for t in terms if len(t) > 2}
+
+        async def fetch(p: dict[str, Any]) -> list[dict[str, Any]]:
+            url = pdf_by_title[p["title"]]
+            try:
+                async with httpx.AsyncClient(transport=self.transport, timeout=min(12.0, self.timeout_s),
+                                             follow_redirects=True) as client:
+                    async with client.stream("GET", url, headers={"User-Agent": "Tribos/1.0 (research assistant)"}) as resp:
+                        if resp.status_code != 200 or "pdf" not in resp.headers.get("content-type", "pdf"):
+                            return []
+                        body = bytearray()
+                        async for chunk in resp.aiter_bytes():
+                            body += chunk
+                            if len(body) > PDF_MAX_BYTES:
+                                return []
+                paras = await asyncio.to_thread(_pdf_paragraphs, bytes(body))
+            except Exception:  # noqa: BLE001 - full text is an addition; the abstract passage stands without it
+                return []
+            scored = sorted(((sum(1 for w in words if w in para.lower()), para) for para in paras), key=lambda s: -s[0])
+            return [{**p, "passage_id": f"{p.get('passage_id')}-pdf{n}", "passage_text": para[:1500],
+                     "section": "Full text (PDF)", "url": url, "score": float(p.get("score") or 0) * 0.9}
+                    for n, (score, para) in enumerate(scored[:per_paper], 1) if score > 0]
+
+        results = await asyncio.gather(*(fetch(p) for p in targets))
+        return [x for group in results for x in group]
 
     async def literature_search(
         self,
@@ -546,7 +649,12 @@ class ArchivonEngine:
                 excluded_reason=excluded_reason,
             )
             if excluded_reason:
-                excluded_articles.append(graded_obj.model_dump())
+                # An excluded work is reported (integrity notice, retraction) only when it is about the question's
+                # subject: a retracted breast-cancer paper matched by "classify" and "task" is neither evidence nor a
+                # warning the reader needs.
+                relevant = rec.get("_pinned_keep") or (terms and term_coverage(rec, terms) >= RELEVANCE_FLOOR)
+                if relevant:
+                    excluded_articles.append(graded_obj.model_dump())
                 continue
 
             graded_by_rec[id(rec)] = graded_obj.model_dump()
@@ -696,6 +804,9 @@ class ArchivonEngine:
                 "score": score,
             })
 
+        pdf_by_title = {a["title"]: a["pdf_url"] for a in articles_out if a.get("pdf_url") and not a.get("arxiv_id")}
+        ranked_passages += await self._full_text_passages(ranked_passages, terms)
+        ranked_passages += await self._pdf_passages(ranked_passages, terms, pdf_by_title)
         grade_summary = summarize_grades(g for _, _, g, _ in top_records)
         source_status = [status[src] for src in requested_sources]
 

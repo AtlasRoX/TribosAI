@@ -263,9 +263,19 @@ def _simulation_ban(query: str) -> str | None:
 
 
 # A word or phrase that puts what follows it out of scope: "without running simulations", "rather than a simulation".
+# "For numerical work, run real Python and report its outputs": code must actually run (Calcula), not be described.
+PYTHON_REQUEST_RE = re.compile(
+    r"\b(?:run|execute|use|write\s+and\s+run)\s+(?:real\s+|actual\s+|some\s+)?(?:python|code|a\s+(?:python\s+)?script)\b"
+    r"|\bpython\s+(?:code|script)\s+(?:to|that)\b",
+    re.I,
+)
 _NEGATION_SCOPE_RE = re.compile(
     r"\b(?:without|rather\s+than|instead\s+of|not\s+by|other\s+than|apart\s+from|no|not|nor|neither|never)\s+"
-    r"(?:[\w\-]+\s+){0,2}$",
+    r"(?:[\w\-]+\s+){0,2}$"
+    # "Do not claim a proof or imply that a numerical simulation settles it": the mention is the content of a
+    # forbidden assertion, not a request to run one.
+    r"|\b(?:do\s+not|don't|never|nor)\b[^.;:]*\b(?:claim|imply|implies|say|suggest|assert|state|pretend|present)\w*"
+    r"\b[^.;:]*$",
     re.I,
 )
 # A negated or evaluative predicate after the mention: "running simulations does not establish ...".
@@ -285,6 +295,15 @@ _DIRECTIVE_RE = re.compile(
     re.I,
 )
 _CONDITIONAL_OPENER_RE = re.compile(r"\b(?:if|even\s+if|although|though|whether|unless|suppose|imagine)\b", re.I)
+# A use permitted, not required: "use numerical simulation only to explore examples", "simulate if helpful". The
+# answer may run one, but none running is not a failed request. "Simulate it only for 10 s" is still a request.
+_PERMISSIVE_SUFFIX_RE = re.compile(
+    r"^\W*(?:[\w\-]+\W+){0,2}?(?:only\s+(?:to|as)\b|only\s+for\s+(?:illustrat|explor|test|check|sanity|intuition)"
+    r"|if\s+(?:needed|necessary|helpful|useful|appropriate|you\s+(?:want|like|wish))\b"
+    r"|(?:where|when)\s+(?:needed|helpful|useful|appropriate)\b|as\s+needed\b)",
+    re.I,
+)
+_PERMISSIVE_PREFIX_RE = re.compile(r"\b(?:optionally|you\s+may|feel\s+free\s+to|if\s+useful,?)\s+(?:[\w\-]+\s+){0,4}$", re.I)
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?;])\s+|\n+")
 
 
@@ -308,6 +327,8 @@ def _requests_simulation(text: str) -> bool:
             if _CONDITIONAL_OPENER_RE.search(clause):
                 continue
             if _NEGATED_PREDICATE_RE.search(suffix) and not _DIRECTIVE_RE.search(prefix + m.group(0)):
+                continue
+            if _PERMISSIVE_SUFFIX_RE.search(suffix) or _PERMISSIVE_PREFIX_RE.search(prefix):
                 continue
             return True
     return False
@@ -419,8 +440,9 @@ _DURATION_RANGE_RE = re.compile(
     rf"\b(?P<lead>over|for|during|from|between)\s+\[?\s*(?P<start>{_NUMBER})\s*(?:–|—|-|to|until|through|and|\.\.)\s*"
     rf"(?P<end>{_NUMBER})\s*\]?\s*(?P<unit>{_DURATION_UNITS})(?![\w\-/])"
     rf"|\bt\s*(?:=|∈|\bin\b)\s*\[?\s*(?P<start2>{_NUMBER})\s*(?:,|–|—|-|to|\.\.)\s*(?P<end2>{_NUMBER})\s*\]?\s*"
-    rf"(?P<unit2>{_DURATION_UNITS})(?![\w\-/])"
-    rf"|(?P<start3>{_NUMBER})\s*(?:≤|<=|<)\s*t\s*(?:≤|<=|<)\s*(?P<end3>{_NUMBER})\s*(?P<unit3>{_DURATION_UNITS})(?![\w\-/])",
+    rf"(?P<unit2>{_DURATION_UNITS})?(?![\w\-/])"
+    # On t itself the range is a time span even without a unit ("plot x(t) for 0 <= t <= 20": model time units).
+    rf"|(?P<start3>{_NUMBER})\s*(?:≤|<=|<)\s*t\s*(?:≤|<=|<)\s*(?P<end3>{_NUMBER})\s*(?P<unit3>{_DURATION_UNITS})?(?![\w\-/.])",
     re.I,
 )
 _UNSUPPORTED_DURATION_RE = re.compile(_DURATION_PREFIX + rf"(?P<value>{_NUMBER})\s*(?P<unit>{_UNSUPPORTED_UNITS})(?![\w\-/])", re.I)
@@ -459,7 +481,7 @@ def parse_duration(query: str) -> DurationParse:
             if i == "" and m.group("lead").lower() in ("over", "for", "during") and float(start) != 0:
                 break
             try:
-                seconds = (float(end) - float(start)) * _UNIT_SECONDS[unit.lower()]
+                seconds = (float(end) - float(start)) * (_UNIT_SECONDS[unit.lower()] if unit else 1.0)
             except (OverflowError, ValueError):
                 seconds = float("inf")
             found.append((seconds, m.group(0).strip()))
@@ -471,6 +493,13 @@ def parse_duration(query: str) -> DurationParse:
             seconds = float("inf")
         found.append((seconds, m.group(0).strip()))
     if not found:
+        # A numerical endpoint such as "report x at t = 1 s" supplies the requested horizon even when the
+        # preceding duration is written as "exactly 100 steps". Do not replace it with a 60-second default.
+        if re.search(r"simulat|\bRK4\b|Runge[–-]Kutta", query, re.I):
+            endpoints = list(re.finditer(rf"\b(?:at|until|to)\s+t\s*=\s*({_NUMBER})\s*({_DURATION_UNITS})(?![\w/])", query, re.I))
+            values = {float(m[1]) * _UNIT_SECONDS[m[2].lower()] for m in endpoints}
+            if len(values) == 1 and next(iter(values)) > 0:
+                return DurationParse(seconds=next(iter(values)), explicit=True, text=endpoints[0].group(0))
         unitless = _UNITLESS_DURATION_RE.search(query)
         if unitless:
             return DurationParse(
@@ -606,6 +635,17 @@ def build_simulation_plan(query: str, *, biomodel_id: str | None, wants_steady_s
     """The exact simulation the user asked for. Problems become validation_errors; nothing is clamped."""
     errors: list[dict[str, str]] = []
     duration = parse_duration(query)
+    rk4 = bool(re.search(r"\bRK4\b|fourth[ -]order\s+Runge[–-]Kutta|classical\s+Runge[–-]Kutta", query, re.I))
+    step = re.search(rf"\b(?:fixed\s+)?(?:time\s+)?step(?:\s+size)?\s*(?:of|=|:)?\s*({_NUMBER})\s*({_DURATION_UNITS})(?![\w/])", query, re.I) if rk4 else None
+    count = re.search(r"\b(?:exactly\s+)?(\d+)\s+(?:time\s+)?steps\b", query, re.I) if rk4 else None
+    step_seconds = float(step[1]) * _UNIT_SECONDS[step[2].lower()] if step else None
+    num_steps = int(count[1]) if count else None
+    if step_seconds is not None and num_steps is not None:
+        total = step_seconds * num_steps
+        if duration.explicit and not math.isclose(duration.seconds, total, rel_tol=1e-10):
+            errors.append(_err("FIXED_GRID_CONFLICT", "The requested RK4 step, count and duration disagree; none was changed."))
+        elif not duration.explicit and not duration.error_code:
+            duration = DurationParse(seconds=total, explicit=True, text=f"{num_steps} steps of {step_seconds:g} s")
     if duration.error_code:
         errors.append(_err(duration.error_code, duration.message))
     elif duration.explicit and not (SIM_DURATION_MIN_SECONDS <= duration.seconds <= SIM_DURATION_MAX_SECONDS):
@@ -633,6 +673,9 @@ def build_simulation_plan(query: str, *, biomodel_id: str | None, wants_steady_s
         duration_seconds=duration.seconds if math.isfinite(duration.seconds) else DEFAULT_SIM_DURATION_S,
         duration_explicit=duration.explicit,
         intervals=intervals,
+        solver_method="RK4" if rk4 else None,
+        step_size_seconds=step_seconds,
+        num_steps=num_steps,
         parameter_overrides=overrides,
         target_species=_target_species(query),
     )
@@ -1140,6 +1183,15 @@ def _entities_from(data: dict[str, Any], query: str) -> list[ResolvedEntity]:
     return out
 
 
+def _self_contained_text(query: str) -> bool:
+    """The question text alone shows no outside evidence applies (evidence_need: closed computation, mathematics from
+    its own definitions, a word problem, a literal copy)."""
+    try:
+        return assess_evidence_need(query).kind in ("closed_computation", "self_contained", "format")
+    except Exception:  # noqa: BLE001 - when unsure, the planner runs
+        return False
+
+
 def planner_mode() -> str:
     mode = os.getenv("TRIBOS_PLANNER", "auto").strip().lower()
     return mode if mode in ("off", "auto", "always") else "auto"
@@ -1355,7 +1407,12 @@ def decide_builtin_sources(ctx: QueryContext) -> None:
 
     # Literature and web search only when the answer can depend on outside evidence (agents.evidence_need).
     need = ctx.evidence_need
-    if need is not None and need.skip_retrieval:
+    pol = getattr(ctx, "tool_policy", None)
+    if pol is not None and pol.prohibit_search:
+        s_reason = pol.search_reason or "Search disabled by user request"
+        ctx.decisions["archivon"] = SourceDecision(run=False, reason=s_reason)
+        ctx.decisions["websurfer"] = SourceDecision(run=False, reason=s_reason)
+    elif need is not None and need.skip_retrieval:
         ctx.decisions["archivon"] = SourceDecision(run=False, reason=need.reason)
         ctx.decisions["websurfer"] = SourceDecision(run=False, reason=need.reason)
     elif not ctx.enable_web_search:
@@ -1373,13 +1430,16 @@ def decide_builtin_sources(ctx: QueryContext) -> None:
         or re.search(r"\\(?:frac|int|sum|prod|sqrt|partial|nabla)|=", ctx.clean_query)
     )
     ctx.decisions["axiom"] = SourceDecision(
-        run=wants_axiom, reason="symbolic/formal reasoning requested" if wants_axiom else "no symbolic derivation requested"
+        run=wants_axiom, reason="symbolic reasoning requested" if (wants_axiom and pol and pol.prohibit_formal) else ("symbolic/formal reasoning requested" if wants_axiom else "no symbolic derivation requested")
     )
+    if pol is not None and pol.prohibit_formal:
+        ctx.decisions["formal_proof"] = SourceDecision(run=False, reason=pol.formal_reason or "formal prover disabled by user")
     wants_calcula = bool(
         {"compute", "estimate", "data_analysis"} & set(ctx.intents)
         or ctx.quantities
         or ctx.constants
         or ctx.dataset_attachment is not None
+        or PYTHON_REQUEST_RE.search(ctx.clean_query or "")
     )
     if wants_calcula:
         calcula_reason = "numerical computation requested"
@@ -1514,6 +1574,7 @@ def _offline_stem_entities(query: str, covered_spans: Sequence[tuple[int, int]])
         for item in items:
             item_metadata: dict[str, Any] = {}
             item_ids: dict[str, str] = {}
+            ambiguous_with: list[str] = []
             if isinstance(item, dict):
                 mention = str(item.get("mention") or item.get("canonical") or item.get("key") or "")
                 label = str(item.get("label") or item.get("canonical") or item.get("key") or mention)
@@ -1526,9 +1587,11 @@ def _offline_stem_entities(query: str, covered_spans: Sequence[tuple[int, int]])
                     item_ids["physical_type"] = str(phys)
                 if item.get("display_name"):
                     item_metadata["display_name"] = str(item["display_name"])  # shown to the reader; label stays the id
-                for k in ("value", "units", "param_name", "physical_type"):
+                for k in ("value", "units", "param_name", "physical_type", "ambiguous", "ambiguous_with"):
                     if k in item and item[k] is not None:
                         item_metadata[k] = item[k]
+                if item.get("ambiguous_with"):
+                    ambiguous_with = list(item["ambiguous_with"])
             elif isinstance(item, (list, tuple)) and len(item) == 3:
                 mention, label, span = item
             else:
@@ -1548,6 +1611,7 @@ def _offline_stem_entities(query: str, covered_spans: Sequence[tuple[int, int]])
                     matched_on="name",
                     validated=True,
                     metadata=item_metadata,
+                    ambiguous_with=ambiguous_with,
                 )
             )
 
@@ -1786,6 +1850,14 @@ async def _build_query_context(
             budget_s = max(0.1, float(env_budget))
         except ValueError:
             pass
+    from ..tools.policy import active_tool_policy, extract_tool_policy
+
+    tool_policy = active_tool_policy() or extract_tool_policy(
+        clean_query, enable_web_search=enable_web_search, standing_instructions=standing_instructions
+    )
+    if tool_policy.prohibit_search:
+        enable_web_search = False
+
     ctx = QueryContext(
         raw_query=query,
         clean_query=clean_query,
@@ -1794,6 +1866,7 @@ async def _build_query_context(
         attachments=list(attachments or []),
         attachment_errors=list(attachment_errors or []),
         enable_web_search=enable_web_search,
+        tool_policy=tool_policy,
     )
     holder.append(ctx)
     ctx.biomodel_id = extract_biomodel_id(clean_query)
@@ -1811,6 +1884,11 @@ async def _build_query_context(
     # The planner model starts now, alongside entity resolution. Its search plan helps every question; routing
     # waits for it only when nothing was recognised (or with TRIBOS_PLANNER=always).
     mode = planner_mode()
+    if mode == "auto" and _self_contained_text(clean_query):
+        # A word problem, proof or calculation from the question's own definitions runs no search, so the planner
+        # model's search plan has no use; waiting for it held routing up to 3.5 s.
+        mode = "off"
+        ctx.timings_ms["planner_skipped"] = 1.0
     if mode != "off" and llm_factory is not None:
         ctx.planner_started = time.perf_counter()
         ctx.planner_task = asyncio.ensure_future(

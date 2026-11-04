@@ -74,6 +74,7 @@ from .orchestration import draft as draft_stage
 from .orchestration import finalize as finalize_stage
 from .orchestration import gather as gather_stage
 from .orchestration import plan as plan_stage
+from .orchestration import presentation as presentation_stage
 from .orchestration import verify as verify_stage
 from .orchestration.context import RunContext
 from .prompts import (
@@ -204,8 +205,18 @@ _THANKS_RE = re.compile(r"\b(?:thanks?|thx|ty|cheers|appreciate)\b", re.I)
 _FAREWELL_RE = re.compile(r"\b(?:bye|goodbye|see\s+(?:you|ya)|good\s*night)\b", re.I)
 
 
+# Kappa Gate's answer to a self-referential query (agents/context_gate.py): it has no grounding context (K = 0).
+PARADOX_REPLY = (
+    "This statement refers only to itself, so no fact can confirm or refute it: under the Kappa gate it has context "
+    "K = 0 (neither true nor false), and nothing was looked up or computed. Ask about the claim it is meant to "
+    "test, or about the paradox itself (for example \"Why is the liar paradox neither true nor false?\")."
+)
+
+
 def _non_research_reply(query: str, scope: str) -> str:
     """A fixed reply for a message that is not a research question. Nothing is looked up, so nothing is claimed."""
+    if scope == "paradox":
+        return PARADOX_REPLY
     if scope == "conversational":
         if _THANKS_RE.search(query):
             return "You're welcome! Ask me about an equation, simulation, physical constant, proof or dataset whenever you're ready."
@@ -305,6 +316,12 @@ def literature_query(ctx: Any, clean_query: str, plan: Any = None) -> str:
         terms.append(hint)
     if terms:
         return " ".join(dict.fromkeys(terms))
+    # The planned keyword query, else the first sentence without its list number ("1. How many primes ...": the first
+    # "sentence" of a numbered task list is "1.", which searched the literature for the digit 1).
+    web = str(getattr(plan if plan is not None else getattr(ctx, "search_plan", None), "web_query", "") or "").strip()
+    if web:
+        return " ".join(dict.fromkeys([web, *([hint] if hint else [])]))
+    subject = re.sub(r"(?:^|(?<=[.?!:]\s))\(?\d{1,2}[.)]\s+", "", subject)
     first_sentence = re.split(r"(?<=[.?!])\s+", subject, maxsplit=1)[0]
     return first_sentence[:LONG_QUERY_CHARS]
 
@@ -895,20 +912,31 @@ class AuthoritativeOrchestrator:
         def out(status: TaskStatus, requested: str | None, executed: str | None, reason: str, match: bool = True) -> TaskOutcome:
             if core_phase_note and status == "completed" and closed:
                 reason = f"{reason} ({core_phase_note.rstrip('.')}; not needed for this computation.)".strip()
-            elif core_phase_note and status in ("completed", "partial"):
-                status = "partial"
+            elif core_phase_note and status in ("completed", "completed_fallback"):
+                status = "completed_fallback"
                 reason = core_phase_note if reason in ("", "Evidence gathered and synthesized.") else f"{core_phase_note} {reason}"
-            if recovered and status in ("completed", "partial"):
+            elif core_phase_note and status == "partial":
+                reason = core_phase_note if reason in ("", "Evidence gathered and synthesized.") else f"{core_phase_note} {reason}"
+            if recovered and status in ("completed", "completed_fallback", "partial"):
                 note = f"{len(recovered)} failed attempt(s) were recovered by a retry."
                 reason = f"{reason} {note}".strip() if note not in reason else reason
+            can_retry = status in ("partial", "failed") or not llm_ok
             return TaskOutcome(task_status=status, requested_operation=requested, executed_operation=executed,
                                request_match=match, reason=reason, grounding_status=grounding,
-                               recovered_failures=recovered, unresolved_failures=unresolved_failures(tool_results))
+                               recovered_failures=recovered, unresolved_failures=unresolved_failures(tool_results),
+                               can_retry=can_retry)
 
         def _simulation_outcome(plan: SimulationPlan) -> TaskOutcome:
             """The simulation part of the request: the requested action against what ran."""
             requested = plan.action
             dyn = tool_results.get(DYNAMIS) or tool_results.get("dynamis_simulate_ode") or tool_results.get("vivarix")
+            from .result_keys import COMPUTED_RESULTS
+
+            computed = tool_results.get(COMPUTED_RESULTS)
+            computed_data = computed.data if computed is not None and computed.success and isinstance(computed.data, dict) else {}
+            if computed_data.get("kind") in ("nbody_gravity", "dynamical_system") and requested == "time_course":
+                # The N-body system the question states was integrated by code (tribos.writer.nbody_facts).
+                return out("completed", requested, "time_course", "Trajectories integrated by two methods.")
             ss = tool_results.get(DYNAMIS_EQUILIBRIUM)
             scan = tool_results.get(DYNAMIS_SCAN) or tool_results.get("dynamis_parameter_scan") or tool_results.get("vivarix_scan")
             first_fail = next((r for r in (scan, ss, dyn) if r is not None and not r.success), None)
@@ -1046,6 +1074,12 @@ class AuthoritativeOrchestrator:
         (interactive=True makes approval requests wait for the user). project_id scopes project memory;
         agent_options carries per-request settings (budget limits, require_plan_approval, ...).
         """
+        from ..tools.policy import extract_tool_policy
+
+        policy = extract_tool_policy(query=query, enable_web_search=enable_web_search)
+        if policy.prohibit_search:
+            enable_web_search = False
+
         start_time = time.perf_counter()
         rec = _make_recorder(
             query=query,
@@ -1218,23 +1252,135 @@ class AuthoritativeOrchestrator:
         )
         run.pending["thoughts"] = run.thoughts
         run.show_reasoning = _show_reasoning()
-        # Search off is enforced for the whole inquiry at the tool layer: no networked tool runs from any workflow.
+        # Explicit prohibitions (search, formal proof, code) enforced at dispatch and context layers.
+        from ..tools.policy import enforce_tool_policy, extract_tool_policy
         from ..tools.reliability import external_retrieval_blocked
 
-        blocked = None if enable_web_search else "Search is off for this turn (no literature, web or online database retrieval)"
-        with external_retrieval_blocked(blocked):
-            return await self._run_stages(run)
+        policy = getattr(run, "tool_policy", None) or extract_tool_policy(
+            query=query, enable_web_search=enable_web_search, standing_instructions=None
+        )
+        if policy.prohibit_search:
+            enable_web_search = False
+            run.enable_web_search = False
+        run.tool_policy = policy
+
+        blocked = None if enable_web_search else (policy.search_reason or "Search is off for this turn (no literature, web or online database retrieval)")
+        # The per-request "Allow code analysis on datasets" option is authoritative for the whole run: when it is
+        # off, the sandbox gateway refuses every server-side Python and SageMath execution, whatever the planner
+        # or a direct tool call asks for. The permission travels in a context variable, so it reaches the worker
+        # threads the registry tools run in, exactly like the dataset scope does.
+        from ..agentic.sandbox import execution_permitted
+
+        code_analysis_allowed = (agent_options or {}).get("enable_code_analysis", True) is not False
+        with external_retrieval_blocked(blocked), enforce_tool_policy(policy), execution_permitted(code_analysis_allowed):
+            result = await self._run_stages(run)
+        await self._attach_requested_files(run, result)
+        self._close_task_plan(run, result)
+        return result
+
+    async def _plan_tasks(self, run: RunContext) -> None:
+        """The parts of the question and the tool for each (tribos.agents.task_plan), shown as the run's plan; a step
+        that needs a tool its stage would not choose on its own (a Python check) switches that stage on."""
+        if getattr(run.ctx, "scope", "research") != "research":
+            return
+        from ..utils.latex_check import malformed_latex
+        from .question_text import is_multiple_choice
+        from .task_plan import build_task_plan, needs
+
+        if is_multiple_choice(run.clean_query or run.query or ""):
+            run.gather_notes.append(
+                "MULTIPLE CHOICE: open with the correct option, letter and value (\"(b) 55 m\"), then show the working "
+                "as one solution. Do not write a section for each option, and do not discuss the wrong options beyond "
+                "one line if a common mistake leads to one of them.")
+        broken = malformed_latex(run.clean_query or run.query or "")
+        if broken:
+            # A formula that lost part of itself (copied math often drops a fraction's braces) is read literally and
+            # said so up front, never silently reinterpreted.
+            run.gather_notes.append(
+                "NOTATION WARNING, state it in the first sentence: the question's math looks broken ("
+                + "; ".join(broken) + "). Say how it was read (literally, as written) and that the result may differ "
+                "from what was meant; ask the reader to resend the formula if a part is missing.")
+            await run.emit("notation", "The question's formula looks broken", "; ".join(broken)[:300], status="error")
+
+        try:
+            run.task_plan = build_task_plan(run.clean_query or run.query or "")
+        except Exception as exc:  # noqa: BLE001 - no plan never blocks the answer
+            logger.info("Task plan skipped: %s", exc)
+            run.task_plan = []
+        if not run.task_plan:
+            return
+        if needs(run.task_plan, "code"):
+            run.agent_options = {**(run.agent_options or {}), "codeact": "always"}
+        await run.emit(
+            "task_plan",
+            title=f"Planned {len(run.task_plan)} steps",
+            text=" · ".join(f"{i}. {s['title']} ({s['tool']})" for i, s in enumerate(run.task_plan, 1)),
+            extra={"steps": run.task_plan},
+        )
+
+    def _close_task_plan(self, run: RunContext, result: AuthoritativeOrchestrationResult) -> None:
+        if not run.task_plan:
+            return
+        from .task_plan import close_plan
+
+        steps = close_plan(run.task_plan, result.execution_artifacts or {}, result.response or "")
+        result.execution_artifacts = {**(result.execution_artifacts or {}), "task_plan": {"steps": steps}}
+
+    async def _attach_requested_files(self, run: RunContext, result: AuthoritativeOrchestrationResult) -> None:
+        """Files the question asked for (a Word report, a Python script, a CSV, ...), built from the final answer and
+        attached to it as downloads (tribos.files). A file that cannot be built never costs the answer."""
+        from ..files import build_files, requested_files, save_files
+        from .orchestration.plot_stage import plot_files
+
+        question = run.clean_query or run.query or ""
+        from .question_text import typed_part
+
+        kinds = requested_files(typed_part(question))
+        # A drawn plot always comes with its PNG and the script that drew it (and replaces a requested png/py).
+        from ..axiom.certified_critical import certificate_files
+
+        drawn = plot_files(question, (result.execution_artifacts or {}).get("plot"))
+        if drawn:
+            kinds = [k for k in kinds if k not in ("png", "py")]
+        # A certified critical-point list comes with its proof: a script anyone can re-run, and the result as JSON.
+        drawn += certificate_files(question, (result.execution_artifacts or {}).get("critical_points"))
+        if not (kinds or drawn) or not (result.response or "").strip():
+            return
+        try:
+            files, notes = (await asyncio.to_thread(
+                build_files, question, result.response, kinds, artifacts=result.execution_artifacts,
+                citations=result.citations, manifest=result.run_manifest)) if kinds else ([], [])
+            entries = await asyncio.to_thread(save_files, run.user_id or "", [*drawn, *files])
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Requested files not built: %s", exc)
+            return
+        artifacts = dict(result.execution_artifacts or {})
+        artifacts["files"] = entries
+        if notes:
+            artifacts["files_notes"] = notes
+        result.execution_artifacts = artifacts
+        await run.emit(
+            "files",
+            title=f"Prepared {len(entries)} file{'s' if len(entries) != 1 else ''}" if entries else "No file could be built",
+            text=", ".join(e["name"] for e in entries) + (f" · {'; '.join(notes)}" if notes else ""),
+            status="done" if entries else "error",
+        )
 
     async def _run_stages(self, run: RunContext) -> AuthoritativeOrchestrationResult:
         # Stage 0: greeting, query context and memory, agentic pre-evidence phases, source routing.
         result = await plan_stage.start(run)
         if result is None:
-            result = await plan_stage.read_question(run)
+            result = await run.timed("plan", plan_stage.read_question(run))
         if result is not None:
             return result
         # Each pipeline stage's wall time is recorded (run.pipeline_phases -> agent_run.phases, stage "pipeline"), so
         # the run's phase chart accounts for drafting, verification and memory as well as the agent phases.
         await run.timed("route", plan_stage.route_sources(run))
+        await self._plan_tasks(run)
+
+        # Values computed by code (exact, checked) and the user's task outline come first: they are seconds of work,
+        # and the agent phases skip what they already answer (presentation.facts_cover_question).
+        await run.timed("computed_results", presentation_stage.compute_results(run))
 
         # Stages 1-3: evidence and computational tools, agentic follow-up work, artifacts, prioritization.
         await run.timed("evidence", gather_stage.run_evidence(run))
@@ -1243,13 +1389,42 @@ class AuthoritativeOrchestrator:
         gather_stage.collect_artifacts(run)
         await gather_stage.prioritize(run)
 
-        # Stage 4: synthesis prompt and the streamed first draft, then the agentic draft loop.
-        draft_stage.prepare_context(run)
-        await run.timed("first_draft", draft_stage.write_first_draft(run))
-        await agent_rounds.draft_rounds(run)  # records rewrite_1, rewrite_2, ... itself
+        # Stage 4: the synthesis prompt and the streamed first draft, the agentic draft loop, then the presentation
+        # pass (the verifier checks the text the reader gets).
+        # Critical points the question asks for, proved complete by interval arithmetic (well under a second), before
+        # the writer's notes are assembled and before the plot, which marks exactly these points.
+        from .orchestration.critical_stage import run_certified_critical
 
-        # Stage 5: verification and bounded correction, citations, agentic finalize phases, reported result.
+        await run.timed("critical_points", run_certified_critical(run))
+        draft_stage.prepare_context(run)
+        # A computational question no code module covered: the model works it in a persistent Python session.
+        from .orchestration.codeact_stage import run_codeact
+
+        # A plot request: matplotlib draws it in the sandbox, and the figure is shown with the answer. The Python session
+        # and the plot are independent tools, so they run at the same time.
+        from .orchestration.plot_stage import run_plot
+
+        await asyncio.gather(run.timed("codeact", run_codeact(run)), run.timed("plot", run_plot(run)))
+        # A Lean proof started in the background joins here, before the answer is written (bounded by its budget).
+        from ..agentic.formal_proof import await_formal_proof
+
+        await run.timed("formal_proof", await_formal_proof(run))
+        if run.task_plan:
+            from .task_plan import writer_note
+
+            run.scope_notes = [*run.scope_notes, writer_note(run.task_plan)]
+        await run.timed("first_draft", draft_stage.write_first_draft(run))
+        # A mathematical draft with a statement the auditor finds false: the best of a few audited alternatives.
+        from .orchestration.best_of_n import best_of_n
+
+        await run.timed("best_of_n", best_of_n(run))
+        await agent_rounds.draft_rounds(run)  # records rewrite_1, rewrite_2, ... itself
+        await run.timed("presentation", presentation_stage.polish(run))
+
+        # Stage 5: verification and bounded correction, citations, agentic finalize phases, reported result. A
+        # corrected answer gets the deterministic presentation clean-up again (no second rewrite).
         await run.timed("verification", verify_stage.check_and_correct(run))
+        await presentation_stage.polish(run, allow_rewrite=False)
         run.timed_sync("citations", lambda: verify_stage.build_citations(run))
         await agent_rounds.finalize_phases(run)
         await verify_stage.report_result(run)

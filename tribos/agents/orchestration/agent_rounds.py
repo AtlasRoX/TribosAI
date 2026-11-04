@@ -119,6 +119,8 @@ def _repair_targets(agent_state: Any, feedback: list[str], sections: list[Any]) 
     return kept, sentences, new_keys
 
 
+CONVERGED_CHANGE = 0.05  # a rewrite round changing less than this share of the answer ends the loop
+
 async def _try_section_repair(run: RunContext, feedback: list[str], draft: str, round_id: str) -> tuple[str, Any] | None:
     """Repair only the sections this round's evidence or critique touches. None: fall back to a whole rewrite."""
     ao = orchestrator_module()
@@ -198,7 +200,24 @@ async def draft_rounds(run: RunContext) -> None:
 
     if agent_rt is not None and agent_state is not None and llm_ok:
         budget = agent_state.budget
-        while agent_state.draft_round < budget.max_draft_rounds:
+        import re
+        q_text = (getattr(run, "query", "") or getattr(run, "clean_query", "") or "").lower()
+        limited_search = bool(
+            re.search(
+                r"\b(?:keep\s+search(?:ing)?\s+limited|limited\s+search|narrow\s+search|brief\s+search|skip\s+deep\s+search|few\s+sources)\b",
+                q_text,
+            )
+        )
+        effective_max_rounds = min(budget.max_draft_rounds, 1) if limited_search else budget.max_draft_rounds
+        from ..prompts import answer_style
+
+        if answer_style() == "concise":
+            # Each rewrite round resends the whole evidence (about 30k characters on a literature question); a concise
+            # answer needs fewer of them: at most 1 at medium effort and 2 at high (ultra keeps its budget).
+            level = str(getattr(agent_state, "effort_level", "") or "medium").lower()
+            effective_max_rounds = min(effective_max_rounds, {"low": 1, "medium": 1, "high": 2}.get(level, effective_max_rounds))
+        converged = False
+        while agent_state.draft_round < effective_max_rounds and not converged:
             agent_state.control.checkpoint()
             # Optional checks stop at the finalization reserve: what is left writes and verifies the answer.
             if budget.optional_exhausted():
@@ -262,12 +281,16 @@ async def draft_rounds(run: RunContext) -> None:
             try:
                 from ...agentic.config import get_effort_profile
                 effort_prof = get_effort_profile(agent_state.effort_level)
+                # A re-synthesis round edits an existing answer: the edit options (short reasoning) win over the
+                # effort's reasoning level, as they did for every model before Meta's took a reasoning_effort too
+                # (passing both raised "got multiple values for keyword argument 'reasoning_effort'").
+                round_kwargs = {"reasoning_effort": effort_prof.get("reasoning_effort"),
+                                **ao._edit_llm_kwargs(synthesis_model)}
                 round_llm = ao.get_llm(
                     model_name=synthesis_model,
                     api_key=api_key,
-                    reasoning_effort=effort_prof.get("reasoning_effort"),
                     max_tokens=cap,
-                    **ao._edit_llm_kwargs(synthesis_model),
+                    **round_kwargs,
                 )
 
                 def before_retry(
@@ -303,6 +326,9 @@ async def draft_rounds(run: RunContext) -> None:
                 budget.settle(holder["alloc"], output_chars=len(round_text or "".join(round_parts)) + len(round_reasoning or ""))
                 rewritten = orch._sanitize_answer(round_text or "".join(round_parts))
                 ratio = change_ratio(candidate_response, rewritten) if rewritten.strip() else 0.0
+                # A rewrite that changed under 5% of the text has converged: another round would cost a full resend
+                # of the evidence for a smaller change still (measured: 14%, then 3%).
+                converged = ratio < CONVERGED_CHANGE
                 # Any edit is kept (a minimal edit may touch one sentence); only an identical text is "unchanged".
                 unchanged = bool(rewritten.strip()) and rewritten.strip() == candidate_response.strip()
                 if rewritten.strip():

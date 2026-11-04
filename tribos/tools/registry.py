@@ -470,6 +470,38 @@ class WebSurferSearchInput(BaseModel):
     max_results: int = Field(default=3, ge=1, le=20)
 
 
+class SubstrateMaterialInput(BaseModel):
+    material_name: str = Field(..., description="Name or designation of material, e.g. Al6061-T6, Steel 4140, Ti-6Al-4V")
+    temperature_celsius: float = Field(default=20.0, description="Temperature in Celsius for temperature-dependent properties")
+
+
+class SubstrateStandardsInput(BaseModel):
+    clause_id: str = Field(default="ASME_VIII_1_UG27_CYL", description="Standard clause identifier")
+    pressure_mpa: float = Field(..., description="Internal or external design pressure in MPa")
+    radius_mm: float = Field(..., description="Vessel inside radius in mm")
+    allowable_stress_mpa: float = Field(..., description="Maximum allowable stress in MPa")
+    wall_thickness_mm: float = Field(..., description="Actual or proposed shell wall thickness in mm")
+    joint_efficiency: float = Field(default=1.0, description="Weld joint efficiency factor E (0.0 to 1.0)")
+
+
+class SubstrateGeometryInput(BaseModel):
+    stl_content: str = Field(..., min_length=1, description="ASCII STL text (the file content itself; paths are not read)")
+    file_name: str = Field(default="model.stl", description="Filename of 3D CAD/STL model")
+    material_density_kg_m3: float = Field(default=2700.0, description="Density of material in kg/m^3 for mass calculation")
+
+
+class SubstrateCAEInput(BaseModel):
+    applied_load_n: float = Field(..., description="Total applied load in Newtons")
+    reaction_force_n: float = Field(..., description="Sum of reaction forces in Newtons")
+    coarse_stress_mpa: float = Field(..., description="Peak stress from coarse mesh in MPa")
+    fine_stress_mpa: float = Field(..., description="Peak stress from refined mesh in MPa")
+    yield_strength_mpa: float = Field(..., description="Material yield strength in MPa")
+    analytical_stress_mpa: float = Field(..., description="Stress from classical analytical formula in MPa")
+    stress_gradient_ratio: float | None = Field(
+        default=None, description="Peak-to-nominal stress gradient ratio for the singularity screen; omit if unknown"
+    )
+
+
 def _alias_system(model_label: str | None, sbml_path: str | None) -> tuple[dict[str, Any] | None, str]:
     """The Dynamis preset a legacy vivarix_* call names (its model_label), or why there is none.
 
@@ -656,6 +688,119 @@ def register_default_tools(registry: ToolRegistry) -> None:
             executor=_vivarix_steady_alias(dyn_eq_exec),
         )
 
+
+
+    # Substrate engineering tools: Materials, Standards, CAD Geometry, CAE five-gate screen (F-01..F-04)
+    if registry.get_entry("substrate_material_lookup") is None:
+        def _exec_mat(material_name: str, temperature_celsius: float = 20.0, **kwargs: Any) -> dict[str, Any]:
+            from ..substrate.materials import get_material, list_materials, material_properties
+            mat = get_material(material_name)
+            if not mat:
+                return {"found": False, "error": f"Material '{material_name}' is not an exact catalogue name or alias",
+                        "available": list_materials()}
+            return {"found": True, **material_properties(mat, temperature_celsius)}
+
+        registry.register(
+            ToolUniverseEntry(
+                name="substrate_material_lookup",
+                description=(
+                    "Look up typical room-temperature (15-25 C) mechanical and thermal properties of five catalogued "
+                    "alloys (Al 6061-T6, AISI 4140, Ti-6Al-4V, 316L, Inconel 718). Not design allowables; no data at "
+                    "other temperatures."
+                ),
+                domain="substrate",
+                adapter_type=AdapterType.LOCAL_COMPUTE,
+                input_schema=SubstrateMaterialInput,
+                timeout_seconds=10.0,
+                tags=["material", "properties", "mechanics", "thermal"],
+            ),
+            executor=_exec_mat,
+        )
+
+    if registry.get_entry("substrate_standards_check") is None:
+        def _exec_std(clause_id: str = "ASME_VIII_1_UG27_CYL", **kwargs: Any) -> dict[str, Any]:
+            from ..substrate.standards import check_asme_compliance
+            return check_asme_compliance(kwargs, clause_id=clause_id)
+
+        registry.register(
+            ToolUniverseEntry(
+                name="substrate_standards_check",
+                description=(
+                    "ASME Section VIII Div 1 UG-27 minimum thickness under internal pressure for cylindrical "
+                    "(ASME_VIII_1_UG27_CYL, (c)(1) and (c)(2)) and spherical (ASME_VIII_1_UG27_SPH, (d)) shells, "
+                    "within the clause's applicability limits; other clauses are reported as not evaluated."
+                ),
+                domain="substrate",
+                adapter_type=AdapterType.LOCAL_COMPUTE,
+                input_schema=SubstrateStandardsInput,
+                timeout_seconds=10.0,
+                tags=["standards", "asme", "compliance", "pressure_vessel"],
+            ),
+            executor=_exec_std,
+        )
+
+    if registry.get_entry("substrate_geometry_inspect") is None:
+        def _exec_cad(stl_content: str = "", file_name: str = "model.stl", material_density_kg_m3: float = 2700.0, **kwargs: Any) -> dict[str, Any]:
+            from ..substrate.cad.inspector import GeometryInspector
+            try:
+                geom = GeometryInspector.inspect_stl_ascii(stl_content, file_name=file_name, density_kg_m3=material_density_kg_m3)
+            except ValueError as exc:
+                return {"status": "error", "error": str(exc)}
+            return {"status": "ok", **geom.to_dict()}
+
+        registry.register(
+            ToolUniverseEntry(
+                name="substrate_geometry_inspect",
+                description=(
+                    "Inspect an ASCII STL mesh given as text: bounding box and facet surface area; volume, mass and "
+                    "centre of gravity by the divergence theorem when the mesh is closed (None otherwise)."
+                ),
+                domain="substrate",
+                adapter_type=AdapterType.LOCAL_COMPUTE,
+                input_schema=SubstrateGeometryInput,
+                timeout_seconds=15.0,
+                tags=["cad", "geometry", "3d", "mass_properties"],
+            ),
+            executor=_exec_cad,
+        )
+
+    if registry.get_entry("substrate_cae_review") is None:
+        def _exec_cae(**kwargs: Any) -> dict[str, Any]:
+            from ..substrate.cae.review import CAEReviewer
+            return CAEReviewer.run_full_cae_audit(
+                applied_load_n=float(kwargs.get("applied_load_n", 0.0)),
+                reaction_force_n=float(kwargs.get("reaction_force_n", 0.0)),
+                coarse_stress_mpa=float(kwargs.get("coarse_stress_mpa", 0.0)),
+                fine_stress_mpa=float(kwargs.get("fine_stress_mpa", 0.0)),
+                yield_strength_mpa=float(kwargs.get("yield_strength_mpa", 0.0)),
+                analytical_stress_mpa=float(kwargs.get("analytical_stress_mpa", 0.0)),
+                stress_gradient_ratio=(None if kwargs.get("stress_gradient_ratio") is None
+                                       else float(kwargs["stress_gradient_ratio"])),
+            )
+
+        registry.register(
+            ToolUniverseEntry(
+                name="substrate_cae_review",
+                description=(
+                    "Screen FEA/CAE summary values against five gates: reaction equilibrium, mesh convergence, "
+                    "linear-elastic validity, singularity screen, hand-calculation cross-check."
+                ),
+                domain="substrate",
+                adapter_type=AdapterType.LOCAL_COMPUTE,
+                input_schema=SubstrateCAEInput,
+                timeout_seconds=15.0,
+                tags=["cae", "fea", "simulation_verification", "mesh_convergence"],
+            ),
+            executor=_exec_cae,
+        )
+
+    # External MCP tool servers the operator configured (TRIBOS_MCP_CLIENT_SERVERS).
+    try:
+        from .mcp_client import register_mcp_tools
+
+        register_mcp_tools(registry)
+    except Exception as exc:  # noqa: BLE001 - a bad MCP configuration never blocks the built-in tools
+        logger.warning("MCP client tools not registered: %s", exc)
 
 # Global singleton instance
 _GLOBAL_REGISTRY: ToolRegistry | None = None

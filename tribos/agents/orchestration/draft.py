@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -13,7 +14,12 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from ...agentic.budget import BudgetExhausted, RunDeadlineExceeded
 from ...agentic.control import RunCancelled
-from ..evidence_need import CLOSED_COMPUTATION_ANSWER_NOTE, PROOF_ATTEMPT_NOTE, is_closed_computation
+from ..evidence_need import (
+    CLOSED_COMPUTATION_ANSWER_NOTE,
+    PROOF_ATTEMPT_NOTE,
+    is_closed_computation,
+    is_self_contained,
+)
 from ..result_keys import (
     AXIOM,
     CALCULA,
@@ -43,6 +49,15 @@ def first_draft_output_cap() -> int:
         return 16_000
 
 
+def compute_draft_output_cap(closed_calc: bool, has_strict: bool, exact_items: int = 0) -> int:
+    """Output tokens allocated to the first draft: the same ceiling for every question. A ceiling never makes the model
+    write less (it stops when the answer is done); a lower one only cuts off the answers that needed more, which then
+    cost continuation calls. A short answer is kept fast by the low reasoning effort a closed calculation or strict
+    contract is drafted with, not by truncation."""
+    del closed_calc, has_strict, exact_items  # kept in the signature: callers pass the question's shape
+    return first_draft_output_cap()
+
+
 # A draft the provider cut off at max_tokens (finish reason "length") is continued, at most this many times, so an
 # answer never ends mid-sentence.
 MAX_DRAFT_CONTINUATIONS = 2
@@ -62,13 +77,30 @@ def join_continuation(text: str, more: str, window: int = 300) -> str:
     return text + more
 
 
+def sanitize_error_message(err: BaseException | str) -> str:
+    """Sanitize error messages for user-facing displays to strip internal URLs, keys, or stack traces."""
+    msg = str(err or "").strip()
+    msg = re.sub(r"\b(?:sk-[a-zA-Z0-9_\-]{8,}|bearer\s+[a-zA-Z0-9_\-\.]{8,}|key=[a-zA-Z0-9_\-]{8,})", "[REDACTED_KEY]", msg, flags=re.I)
+    msg = re.sub(r"https?://[^\s/$.?#].[^\s]*", "[endpoint]", msg)
+    msg = re.sub(r"[A-Za-z]:\\[\w\s\\.\-]+|/(?:home|usr|var|tmp|app)/[\w\s/.\-]+", "[path]", msg)
+    return msg
+
+
 def fallback_reason(err: BaseException) -> str:
     """Why the written answer is missing, for a reader: never an empty message."""
     name = type(err).__name__
     if "Timeout" in name:
-        return "the model provider did not respond in time (twice)"
-    text = str(err).strip()
-    return f"{name}: {text[:200]}" if text else name
+        return "the model provider did not respond in time"
+    if "InternalServerError" in name or "500" in str(err):
+        return "the model service encountered an internal error (HTTP 500: Failed to generate completions)"
+    if "RateLimit" in name or "429" in str(err):
+        return "the model rate limit was reached"
+    if "AuthenticationError" in name or "401" in str(err):
+        return "model authentication failed"
+    sanitized = sanitize_error_message(err)
+    if sanitized:
+        return f"{name}: {sanitized[:120]}"
+    return name
 
 
 def verification_fallback_markdown(rep: dict[str, Any] | None) -> str:
@@ -256,13 +288,60 @@ def prepare_context(run: RunContext) -> None:
         # or a bare status report.
         scope_notes.append(PROOF_ATTEMPT_NOTE)
     elif is_closed_computation(ctx):
-        scope_notes.append(CLOSED_COMPUTATION_ANSWER_NOTE)
+        from ..prompts import answer_style
+
+        note = CLOSED_COMPUTATION_ANSWER_NOTE
+        if answer_style() == "concise":
+            # The checks are shown beside the answer; a Verification section of checker names only repeats them.
+            note = note.replace("(3) a short Verification section naming the independent checks that agree.",
+                                "(3) no Verification section: the checks are shown beside the answer.")
+        scope_notes.append(note)
     run.vivarix_summary, run.lumicell_summary = vivarix_summary, lumicell_summary
     run.lithoscribe_summary, run.synapta_summary = lithoscribe_summary, synapta_summary
     run.scope_notes = scope_notes
 
 
+_PYTHON_TOOLS = ("calcula_run_python", "analysis_run_python", "calcula", "codeact")
+
+
+def _python_outputs(tool_results: dict[str, Any] | None, agent_state: Any) -> str:
+    """What sandboxed Python printed during the run (the planner's scripts, the CodeAct notebook), for an answer the
+    writer could not write: these are computed results, and "no tool produced a result" was false when they ran."""
+    results = dict(tool_results or {})
+    if agent_state is not None:
+        results.update(getattr(agent_state, "results", None) or {})
+    blocks: list[str] = []
+    for key, res in results.items():
+        if res is None or not getattr(res, "success", False):
+            continue
+        name = str(getattr(res, "tool_name", "") or key)
+        if name not in _PYTHON_TOOLS and not any(t in str(key) for t in _PYTHON_TOOLS):
+            continue
+        data = getattr(res, "data", None) or {}
+        printed = ""
+        if isinstance(data, dict):
+            printed = str(data.get("stdout") or "").strip()
+            if not printed and data.get("cells"):
+                printed = "\n".join(str(c.get("stdout") or "").strip() for c in data["cells"] if isinstance(c, dict))
+        if printed.strip():
+            blocks.append("```text\n" + printed.strip()[:3000] + "\n```")
+    return "\n\n".join(blocks[:4])
+
+
+def _math_answer_verified(run: RunContext) -> bool:
+    """The mathematics agent's answer to this run is verified (and not since invalidated)."""
+    art = run.execution_artifacts.get("math_agent") if isinstance(run.execution_artifacts, dict) else None
+    if not isinstance(art, dict) and run.agent_state is not None:
+        art = (getattr(run.agent_state, "artifacts", None) or {}).get("math_agent")
+    return isinstance(art, dict) and art.get("status") == "verified" and not art.get("invalidated")
+
+
 def build_prompt(run: RunContext, feedback: list[str] | None = None, previous_draft: str = "") -> str:
+    from ...files import requested_files as requested_kinds
+    from ...files import writer_note
+    from ...writer.outline import outline_text
+    from ..prompts import answer_style
+
     """The synthesis request; agentic runs add the research brief, the critique to address and the previous draft."""
     ao = orchestrator_module()
     agent_state, tool_results, discovery_report, ctx = run.agent_state, run.tool_results, run.discovery_report, run.ctx
@@ -276,10 +355,15 @@ def build_prompt(run: RunContext, feedback: list[str] | None = None, previous_dr
             brief += f"\n{REVISION_INSTRUCTION}\n" + "\n".join(f"- {f}" for f in feedback)
         if previous_draft:
             brief += f"\n<previous_draft>\n{previous_draft[:12000]}\n</previous_draft>"
+    gate_report: dict[str, Any] = {}
+    evidence_block = ao.build_evidence_block(
+        tool_results, discovery_report.to_markdown_summary(), query_context=ctx, extra_sections=extra_sections,
+        query=run.clean_query or query or "", gate_report=gate_report,
+    )
+    if gate_report:
+        run.pending["context_gate"] = gate_report
     return ao.build_synthesis_request(
-        evidence_block=ao.build_evidence_block(
-            tool_results, discovery_report.to_markdown_summary(), query_context=ctx, extra_sections=extra_sections
-        ),
+        evidence_block=evidence_block,
         tool_status_block=ao.build_tool_status_block(
             tool_results, scope_notes + (agent_state.scope_notes if agent_state is not None else [])
         ),
@@ -288,6 +372,9 @@ def build_prompt(run: RunContext, feedback: list[str] | None = None, previous_dr
         question_type=ctx.search_plan.question_type if ctx.search_plan is not None else "general",
         research_brief=brief,
         retrieval_date=retrieval_date(),  # UTC; dates approvals, trial status and FAERS counts
+        answer_outline=outline_text(run.answer_outline),
+        answer_style=answer_style(),
+        requested_files=writer_note(requested_kinds(run.clean_query or query or "")),
     )
 
 
@@ -297,6 +384,24 @@ def _verified_render(run: RunContext) -> str | None:
 
     agent_state = run.agent_state
     art = (getattr(agent_state, "artifacts", None) or {}).get("math_agent") if agent_state is not None else None
+    if art is None and getattr(run, "tool_results", None):
+        for k in ("axiom_solve_problem", "axiom", "axiom_solve"):
+            tr = run.tool_results.get(k)
+            if tr is not None and tr.success and isinstance(tr.data, dict) and tr.data.get("status") == "verified":
+                art = tr.data
+                break
+    if art is None and getattr(run, "execution_artifacts", None):
+        artifacts = run.execution_artifacts
+        if (
+            "scientific_executions" in artifacts
+            or "oscillator_simulation" in artifacts
+            or "scientific_execution" in artifacts
+        ):
+            try:
+                from ...scientific.assembly import assemble_eight_part_answer
+                return assemble_eight_part_answer(artifacts)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Scientific assembly fallback skipped: %s", exc)
     try:
         return render_verified_answer(run.clean_query or run.query, art, getattr(run, "output_contract", None))
     except Exception as exc:  # noqa: BLE001 - the writer path remains
@@ -317,6 +422,17 @@ async def write_first_draft(run: RunContext) -> None:
     if agent_state is not None:
         agent_state.bag.setdefault("steering", []).extend(agent_state.control.drain_steering())
     synthesis_prompt = build_prompt(run)
+    gate = run.pending.get("context_gate")
+    if gate and not gate.get("fallback"):
+        withheld = gate.get("quarantined", 0) + gate.get("blocked", 0)
+        await emit(
+            "context_gate",
+            title=f"Context gate: kept {gate.get('admitted', 0)} relevant statements, {gate.get('saved_pct', 0):.0f}% less text",
+            text=(f"{gate.get('admitted', 0)} of {gate.get('sentences_in', 0)} sentences admitted (Kappa K >= 1); "
+                  f"{withheld} withheld as unverified or contradicted"),
+            status="done",
+            extra={"context_gate": gate},
+        )
     system_prompt = ao.get_synthesis_system_prompt()
     if agent_state is not None:
         system_prompt = f"{system_prompt}\n\n{ao.SPOTLIGHT_RULE}"
@@ -332,8 +448,23 @@ async def write_first_draft(run: RunContext) -> None:
         "deep": "\n[EFFORT LEVEL: HIGH / DEEP THINKING]\nEngage in deep, multi-angle deliberation. Check every derivation step and its assumptions, verify dimensional consistency and limiting cases, compare alternative models or regimes, and weigh numerical results (method, step size, convergence) against analytical ones before concluding.",
         "exhaustive": "\n[EFFORT LEVEL: ULTRA / EXHAUSTIVE THINKING]\nEngage in exhaustive, maximal-rigor deliberation. Systematically interrogate every modelling assumption, boundary and initial condition, limiting and edge case, numerical error source (discretization, conditioning, convergence, tolerances), uncertainty propagation and significant figures, and any discordant literature or tool result; stress-test the conclusion against alternative models and regimes.",
     }
+    closed_calc = is_closed_computation(run.ctx)
+    contract = getattr(run, "output_contract", None)
+    has_strict = contract is not None and (contract.strict_form or contract.exact_items or contract.exact_lines or contract.exact_words)
+
     depth = effort_prof.get("deliberation_depth", "standard")
-    delib_text = deliberation_prompts.get(depth, "")
+    if closed_calc:
+        delib_text = (
+            "\n[EFFORT LEVEL: TARGETED / CLOSED COMPUTATION]\n"
+            "State the verified mathematical result directly and follow any formatting instructions precisely. "
+            "Preserve the stated domains and units, perform required unit conversions, and omit unrequested literature or regimes."
+        )
+    else:
+        delib_text = deliberation_prompts.get(depth, "")
+    from ...skills import skills_prompt
+
+    # Matching procedures (tribos/skills), before the effort instruction so that stays the last word on depth.
+    system_prompt += skills_prompt(run.clean_query or run.query or "")
     if delib_text:
         system_prompt = f"{system_prompt}\n{delib_text}"
     from ...utils.output_contract import writer_rule
@@ -385,27 +516,46 @@ async def write_first_draft(run: RunContext) -> None:
         streamed_chars[0] += len(delta or "")
         await on_text(delta)
 
-    want = first_draft_output_cap()
+    want = compute_draft_output_cap(
+        closed_calc=closed_calc,
+        has_strict=has_strict,
+        exact_items=(getattr(contract, "exact_items", 0) or 0),
+    )
+    effort_word =effort_prof.get("reasoning_effort")
+    if not (closed_calc or has_strict) and (
+        effort_word == "high" or (effort_word == "medium" and is_self_contained(getattr(run, "ctx", None)))
+    ):
+        # A reasoning model's thinking counts against max_tokens: at high effort a hard proof used all 16k thinking
+        # and wrote nothing. At medium, a self-contained problem the writer solves itself does too (Q.7, rolling
+        # discs: 28.9k reasoning tokens; the provider returned no text, labelled "stop"). Twice the room (still
+        # admitted from the run budget) leaves space for the answer; an easy problem stops long before the cap.
+        want *= 2
     finish = [""]  # the provider's finish reason of the latest draft call
 
     def on_finish(reason: str) -> None:
         finish[0] = reason
 
     try:
-        llm_kwargs: dict[str, Any] = {}
+        llm_kwargs: dict[str, Any] = {"max_tokens": want}
+        min_out = min(512 if closed_calc else 1024, want)
         if budget is not None:
             try:
                 alloc = budget.admit(
-                    "first_draft", len(system_prompt) + len(synthesis_prompt), want, min_output=min(1024, want)
+                    "first_draft", len(system_prompt) + len(synthesis_prompt), want, min_output=min_out
                 )
             except BudgetExhausted as exc:
                 raise DraftBudgetStop(str(exc)) from exc
             llm_kwargs["max_tokens"] = alloc.output_cap
+        reasoning_effort = "low" if (closed_calc or has_strict) else effort_prof.get("reasoning_effort")
+        if closed_calc and _math_answer_verified(run):
+            # The mathematics agent computed and checked the answer: the writer only presents it (10 s at "low" for a
+            # two-line answer). Nothing is left to reason about.
+            reasoning_effort = "minimal"
         llm = ao.get_llm(
             model_name=synthesis_model,
             api_key=api_key,
             streaming=True,
-            reasoning_effort=effort_prof.get("reasoning_effort"),
+            reasoning_effort=reasoning_effort,
             **llm_kwargs,
         )
         messages = [
@@ -437,7 +587,7 @@ async def write_first_draft(run: RunContext) -> None:
                 await emit("synthesis", title="Model error; writing the answer again", text=type(exc).__name__,
                            status="running")
                 # A long silent reasoning pass is what times out (no bytes for minutes), so the retry answers directly.
-                llm = ao.get_llm(model_name=synthesis_model, api_key=api_key, streaming=True, reasoning_effort="low",
+                llm = ao.get_llm(model_name=synthesis_model, api_key=api_key, streaming=True, reasoning_effort="minimal",
                                  **llm_kwargs)
                 await asyncio.sleep(2.0)
         candidate_response = draft_text
@@ -447,8 +597,9 @@ async def write_first_draft(run: RunContext) -> None:
         if not (draft_text or "").strip():
             # A reasoning model can spend its whole output allocation thinking and return no answer text. Ask once more
             # with extended reasoning off (the answer text then gets the allocation); an empty draft is never kept.
-            logger.warning("First draft returned no text (%d reasoning chars); retrying without extended reasoning",
-                           len(draft_reasoning or ""))
+            logger.warning("First draft returned no text (%d reasoning chars, finish=%r, max_tokens=%s, effort=%s); "
+                           "retrying without extended reasoning", len(draft_reasoning or ""), finish[0],
+                           llm_kwargs.get("max_tokens"), reasoning_effort)
             await emit("synthesis", title="Writing the answer again: the first attempt returned no text",
                        text=f"{len(draft_reasoning or '')} characters of reasoning, no answer text", status="running")
             retry_kwargs: dict[str, Any] = {}
@@ -460,7 +611,10 @@ async def write_first_draft(run: RunContext) -> None:
                 except BudgetExhausted as exc:
                     raise DraftBudgetStop(str(exc)) from exc
                 retry_kwargs["max_tokens"] = alloc.output_cap
-            llm = ao.get_llm(model_name=synthesis_model, api_key=api_key, streaming=True, reasoning_effort="low",
+            # One level less reasoning, not none: Q.7 (a rolling-discs problem) returned nothing at "medium" (its
+            # thinking outgrew the 16k allocation) but answered in 49 s at "low"; "minimal" guesses at a hard problem.
+            retry_effort = "minimal" if str(reasoning_effort or "").lower() in ("low", "minimal") else "low"
+            llm = ao.get_llm(model_name=synthesis_model, api_key=api_key, streaming=True, reasoning_effort=retry_effort,
                              **retry_kwargs)
             draft_text, retry_reasoning = await run.watched(
                 "synthesis",
@@ -472,6 +626,8 @@ async def write_first_draft(run: RunContext) -> None:
                 alloc = None
             candidate_response = draft_text
             if not (draft_text or "").strip():
+                logger.warning("Retry draft returned no text either (finish=%r, max_tokens=%s)", finish[0],
+                               retry_kwargs.get("max_tokens"))
                 raise EmptyDraftError("the model returned reasoning but no answer text, twice")
         for _ in range(MAX_DRAFT_CONTINUATIONS):
             if finish[0] != "length" or not candidate_response.strip():
@@ -502,6 +658,12 @@ async def write_first_draft(run: RunContext) -> None:
             if not (more or "").strip():
                 break
             candidate_response = join_continuation(candidate_response, more)
+        if candidate_response and getattr(run, "execution_artifacts", None):
+            try:
+                from ...scientific.assembly import check_and_repair_truncation
+                candidate_response = check_and_repair_truncation(candidate_response, run.execution_artifacts)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Truncation repair skipped: %s", exc)
         await emit(
             "synthesis",
             title="Reasoned over the evidence and wrote the answer",
@@ -514,20 +676,21 @@ async def write_first_draft(run: RunContext) -> None:
         if isinstance(err, RunCancelled) or not isinstance(err, Exception):
             raise
         llm_ok = False
-        fallback_error = f"{type(err).__name__}: {str(err)[:240]}"
+        reason = fallback_reason(err)
+        fallback_error = reason
         logger.warning("LLM synthesis error: %s. Generating deterministic evidence fallback.", err)
         if isinstance(err, DraftBudgetStop):
-            title = "Agent budget used up before the answer could be written; showing the gathered evidence"
+            title = "Agent budget used up before the answer could be written (partial run)"
         elif isinstance(err, EmptyDraftError):
-            title = "The model returned no answer text; showing the computed results and evidence"
+            title = "The model returned no answer text (partial run)"
         elif isinstance(err, RunDeadlineExceeded):
-            title = "Run time budget ran out while writing; showing the gathered evidence"
+            title = "Run time budget ran out while writing (partial run)"
         else:
-            title = "Model unavailable; showing the raw evidence instead"
+            title = "Synthesis failed: model unavailable (partial run)"
         await emit(
             "synthesis",
             title=title,
-            text=f"{type(err).__name__}: {str(err)[:240]}",
+            text=sanitize_error_message(err)[:180],
             status="error",
         )
         await send({"type": "content_reset", "reason": "model_error"})
@@ -554,6 +717,7 @@ async def write_first_draft(run: RunContext) -> None:
             ("Literature passages (Archivon)", lithoscribe_summary),
             ("Target-disease associations", synapta_summary),
             ("Single-cell analysis", lumicell_summary),
+            ("Computed in Python (sandbox)", _python_outputs(tool_results, agent_state)),
         ]
         body = "".join(f"#### {title_}\n{text_}\n\n" for title_, text_ in sections if (text_ or "").strip())
         contract = getattr(run, "output_contract", None)
@@ -568,13 +732,13 @@ async def write_first_draft(run: RunContext) -> None:
             # answer (the task status reports that no model wrote it), not a report about the failed writer.
             candidate_response = str(math_answer["text"]).strip()
         elif body.strip() or plugin_sections:
-            # Computed results exist: they are shown as results, never preceded by the question (audit I28).
+            # Computed results exist: clearly label that the run is incomplete and raw results are preserved for diagnostics
             candidate_response = (
-                f"The written answer could not be produced ({fallback_reason(err)}). These are the computed results, "
-                "without interpretation:\n\n"
+                f"> ⚠️ **Run Incomplete (Synthesis Error)**: The final answer could not be generated ({reason}). "
+                "The computed results and evidence below are preserved for diagnostics only, not as a completed answer.\n\n"
                 f"{body}{''.join(plugin_sections)}"
                 "#### Evidence limitations\n"
-                f"No written answer: {fallback_reason(err)}. Check the results above against the question before "
+                f"No written answer: {reason}. Check the results above against the question before "
                 "relying on them."
             )
         else:
@@ -582,7 +746,7 @@ async def write_first_draft(run: RunContext) -> None:
             failed = sorted({str(getattr(r, "tool_name", "") or k) for k, r in (tool_results or {}).items()
                              if r is not None and not getattr(r, "success", False)})
             candidate_response = (
-                f"No answer could be produced. The writing model failed ({fallback_reason(err)})"
+                f"> ⚠️ **Run Failed (Synthesis Error)**: No answer could be produced. The writing model failed ({reason})"
                 + (f", and these tools returned no result: {', '.join(failed[:8])}" if failed else
                    ", and no tool produced a result for this question")
                 + ". No mathematical or evidence result is available from this run; please try again."

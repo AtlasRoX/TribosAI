@@ -1,7 +1,7 @@
 // Data shaping for the Lean proof card (FormalProofArtifact.tsx), free of React so node tests can import it.
 
 export type FormalData = {
-  status?: "verified" | "failed" | "timeout" | "unavailable" | "mismatch" | "not_formalizable";
+  status?: "verified" | "failed" | "timeout" | "unavailable" | "mismatch" | "not_formalizable" | "disabled" | "disabled_by_user" | "not_applicable" | "running" | "cancelled";
   title?: string;
   question?: string;
   statement?: string;
@@ -20,6 +20,10 @@ export function formalData(data: unknown): FormalData | null {
 /** The badge: only a clean Lean compile is "formally verified (Lean)". */
 export function formalBadge(d: FormalData): { tone: "ok" | "bad" | "neutral"; text: string } {
   if (d.status === "verified") return { tone: "ok", text: "formally verified (Lean)" };
+  if (d.status === "disabled" || d.status === "disabled_by_user") return { tone: "neutral", text: "Skipped: disabled by user" };
+  if (d.status === "not_applicable") return { tone: "neutral", text: "not applicable" };
+  if (d.status === "cancelled") return { tone: "neutral", text: "cancelled" };
+  if (d.status === "running") return { tone: "neutral", text: "running" };
   if (d.status === "unavailable") return { tone: "neutral", text: "formal checker unavailable" };
   // Not a failed proof: the question cannot be stated without Mathlib, so nothing was checked (audit I33).
   if (d.status === "not_formalizable") return { tone: "neutral", text: "not formalisable without Mathlib" };

@@ -256,11 +256,18 @@ def tool_allowed(ctx: Any, entry: Any) -> tuple[bool, str]:
     """(allowed, reason) for one tool under the turn's hard policy."""
     if entry is None:
         return False, "tool is not registered"
+    from ..tools.policy import active_tool_policy
+
+    policy = getattr(ctx, "tool_policy", None) or active_tool_policy()
+    if policy is not None:
+        prohibited, reason = policy.is_tool_prohibited(getattr(entry, "name", ""), entry)
+        if prohibited:
+            return False, reason
     domain = (getattr(entry, "domain", "") or "").lower()
     if domain in _EXCLUDED_DOMAINS:
         return False, "sandboxed analysis runs only through the analyst phase"
     if executes_code(entry, entry) and (getattr(ctx, "extras", None) or {}).get("code_analysis_forbidden"):
-        return False, "the researcher asked for no code execution"
+        return False, "code execution is disabled for this request (the 'Allow code analysis on datasets' option is off)"
     if (is_simulation_tool(entry, entry) or classify_tool(entry) == "numerical") and simulation_forbidden(ctx):
         return False, "the researcher asked for no simulation"
     excluded = excluded_by_question(entry, ctx)
@@ -277,6 +284,8 @@ def tool_allowed(ctx: Any, entry: Any) -> tuple[bool, str]:
     need = getattr(ctx, "evidence_need", None)
     if key in ("archivon", "lithoscribe", "websurfer") and need is not None and need.skip_retrieval:
         return False, need.reason
+    if key in ("archivon", "lithoscribe") and need is not None and need.kind == "web_fact":
+        return False, "a specific real-world fact: answered from the web, not the scholarly literature"
     allowlist = getattr(ctx, "source_allowlist", None)
     if allowlist is not None and key not in allowlist:
         # Accept archivon <-> lithoscribe alias when source_allowlist uses either name

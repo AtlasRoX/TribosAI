@@ -32,6 +32,7 @@ import importlib.util
 import re
 from collections.abc import Iterable
 from pathlib import PurePosixPath, PureWindowsPath
+from typing import cast
 
 _BASE_ALLOWED = (
     "numpy",
@@ -39,6 +40,7 @@ _BASE_ALLOWED = (
     "scipy",
     "sklearn",
     "matplotlib",
+    "mpl_toolkits",
     "sympy",
     "mpmath",
     "networkx",
@@ -69,9 +71,35 @@ def _optional(name: str) -> bool:
 ALLOWED_MODULE_ROOTS: frozenset = frozenset(_BASE_ALLOWED + (("statsmodels",) if _optional("statsmodels") else ()))
 ALLOWED_MODULES: frozenset = ALLOWED_MODULE_ROOTS
 
+# SageMath code legitimately does `from sage.all import *`, which the analysis allowlist rejects. The sage profile
+# widens only the module roots: every banned name, banned attribute, banned call, dunder ban and write restriction
+# is identical to the analysis profile, so the escape surface does not widen with the import surface.
+SAGE_MODULE_ROOTS: frozenset = frozenset(("sage", "sagemath"))
+PROFILE_MODULE_ROOTS: dict[str, frozenset] = {
+    "analysis": ALLOWED_MODULE_ROOTS,
+    "sage": ALLOWED_MODULE_ROOTS | SAGE_MODULE_ROOTS,
+}
+
 BANNED_NAMES: frozenset = frozenset(
-    {"os", "sys", "subprocess", "socket", "shutil", "ctypes", "importlib", "builtins", "pickle", "marshal", "pathlib"}
+    {"os", "sys", "subprocess", "socket", "shutil", "ctypes", "importlib", "builtins", "pickle", "marshal", "pathlib",
+     # Native code and program launchers reachable from allowed libraries (audit AUDIT-102).
+     "load_library", "CDLL", "cdll", "windll", "WinDLL", "oledll", "OleDLL", "pydll", "PyDLL", "LibraryLoader",
+     "autowrap", "ufuncify", "binary_function", "preview", "Popen", "check_output", "check_call", "startfile"}
 )
+
+# Submodules of allowed libraries that load native libraries, compile code or launch programs: refused whatever the
+# import spelling (`import numpy.ctypeslib as c` once loaded kernel32 and called it, audit AUDIT-102).
+BANNED_MODULES: tuple[str, ...] = (
+    "numpy.ctypeslib", "numpy.f2py", "numpy.distutils", "numpy.testing", "sympy.utilities.autowrap",
+    "sympy.utilities._compilation", "sympy.printing.preview", "sympy.external.importtools", "pandas.io.clipboard",
+    "pandas.io.clipboards", "matplotlib.testing", "scipy._lib._testutils",
+)
+
+
+def banned_module(name: str | None) -> bool:
+    """A dotted module path inside BANNED_MODULES (the module or anything below it)."""
+    name = str(name or "")
+    return any(name == m or name.startswith(m + ".") for m in BANNED_MODULES)
 
 BANNED_CALLS: frozenset = frozenset(
     {"eval", "exec", "compile", "__import__", "globals", "locals", "vars", "setattr", "delattr", "breakpoint",
@@ -83,7 +111,12 @@ BANNED_ATTRIBUTES: frozenset = frozenset(
     {"f_globals", "f_locals", "f_builtins", "f_back", "f_code", "gi_frame", "gi_code", "cr_frame", "cr_code",
      "ag_frame", "tb_frame", "tb_next", "co_code", "func_globals", "read_pickle", "to_pickle", "eval",
      "system", "popen", "spawnv", "execv", "fork", "ctypeslib", "load_module", "exec_module", "to_sql",
-     "read_sql", "read_sql_query", "read_sql_table", "read_clipboard", "to_clipboard"}
+     "read_sql", "read_sql_query", "read_sql_table", "read_clipboard", "to_clipboard",
+     # Native code, compilers, program launchers and the HDF5 C-level file API (audit AUDIT-102).
+     "ctypes", "load_library", "CDLL", "cdll", "windll", "WinDLL", "oledll", "OleDLL", "pydll", "PyDLL",
+     "LibraryLoader", "autowrap", "ufuncify", "binary_function", "preview", "f2py", "Popen", "check_output",
+     "check_call", "startfile", "spawnl", "spawnlp", "spawnve", "spawnvp", "execl", "execlp", "execve", "execvp",
+     "posix_spawn", "posix_spawnp", "h5f", "h5fd", "_hl"}
 )
 
 # Methods/functions that write a file: the output path must be a string literal, relative, inside the work dir.
@@ -148,8 +181,9 @@ def _is_input_files_item(node: ast.AST) -> bool:
 
 
 class _Checker(ast.NodeVisitor):
-    def __init__(self, input_names: set[str]) -> None:
+    def __init__(self, input_names: set[str], allowed_roots: frozenset = ALLOWED_MODULE_ROOTS) -> None:
         self.input_names = input_names
+        self.allowed_roots = allowed_roots
         self.violations: list[str] = []
 
     def flag(self, node: ast.AST, message: str) -> None:
@@ -162,7 +196,7 @@ class _Checker(ast.NodeVisitor):
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
             root = _root(alias.name)
-            if root not in ALLOWED_MODULE_ROOTS:
+            if root not in self.allowed_roots or banned_module(alias.name):
                 self.flag(node, f"import of '{alias.name}' is not allowed")
         self.generic_visit(node)
 
@@ -170,8 +204,11 @@ class _Checker(ast.NodeVisitor):
         root = _root(node.module)
         if node.level:
             self.flag(node, "relative imports are not allowed")
-        elif root not in ALLOWED_MODULE_ROOTS:
+        elif root not in self.allowed_roots or banned_module(node.module):
             self.flag(node, f"import from '{node.module}' is not allowed")
+        for alias in node.names:
+            if banned_module(f"{node.module}.{alias.name}"):
+                self.flag(node, f"importing '{node.module}.{alias.name}' is not allowed")
         for alias in node.names:
             if alias.name.startswith("__") or alias.name in BANNED_NAMES or alias.name in BANNED_ATTRIBUTES:
                 self.flag(node, f"importing '{alias.name}' is not allowed")
@@ -223,7 +260,7 @@ class _Checker(ast.NodeVisitor):
         if name == "open":
             self._check_open(node)
         if attr in WRITER_ATTRIBUTES:
-            self._check_writer(node, attr)
+            self._check_writer(node, cast(str, attr))  # WRITER_ATTRIBUTES holds only strings
         reader = attr or name
         if reader and (reader in READER_FUNCTIONS or reader in READER_CLASSES):
             self._check_reader(node, reader)
@@ -308,8 +345,17 @@ class _Checker(ast.NodeVisitor):
             self.flag(node, f".{attr}() may not overwrite the input file '{path_node.value}'")
 
 
-def check_code(code: str, input_names: Iterable[str] | None = None) -> list[str]:
-    """Policy violations of one code cell (empty = allowed). Syntax errors are reported as violations."""
+def check_code(
+    code: str,
+    input_names: Iterable[str] | None = None,
+    *,
+    profile: str = "analysis",
+) -> list[str]:
+    """Policy violations of one code cell (empty = allowed). Syntax errors are reported as violations.
+
+    `profile` selects the allowed module roots: "analysis" for the scientific stack, "sage" for SageMath code
+    (the analysis roots plus sage/sagemath). Every other rule is identical in both profiles.
+    """
     if not isinstance(code, str) or not code.strip():
         return ["no code"]
     if "\x00" in code:
@@ -318,7 +364,8 @@ def check_code(code: str, input_names: Iterable[str] | None = None) -> list[str]
         tree = ast.parse(code, mode="exec")
     except SyntaxError as exc:
         return [f"syntax error at line {exc.lineno}: {exc.msg}"]
-    checker = _Checker({str(n) for n in (input_names or [])})
+    allowed_roots = PROFILE_MODULE_ROOTS.get(profile, ALLOWED_MODULE_ROOTS)
+    checker = _Checker({str(n) for n in (input_names or [])}, allowed_roots)
     checker.visit(tree)
     return checker.violations
 
@@ -326,6 +373,8 @@ def check_code(code: str, input_names: Iterable[str] | None = None) -> list[str]
 __all__ = [
     "ALLOWED_MODULES",
     "ALLOWED_MODULE_ROOTS",
+    "PROFILE_MODULE_ROOTS",
+    "SAGE_MODULE_ROOTS",
     "BANNED_ATTRIBUTES",
     "BANNED_CALLS",
     "BANNED_NAMES",

@@ -111,8 +111,21 @@ _ASKS_VALUE_RE = re.compile(
 
 def _given_quantities(text: str) -> int:
     from ..verify.latex_math import is_unit_word
+    from .entity_lexicon import _is_algebraic_occurrence, extract_declared_variables
 
-    return sum(1 for m in _GIVEN_QUANTITY_RE.finditer(text) if is_unit_word(m.group(1).split("/")[0]))
+    declared = extract_declared_variables(text or "")
+    count = 0
+    for m in _GIVEN_QUANTITY_RE.finditer(text or ""):
+        unit_word = m.group(1).split("/")[0]
+        if not is_unit_word(unit_word):
+            continue
+        if len(unit_word) == 1 and unit_word.isalpha():
+            if unit_word in declared or unit_word.lower() in {d.lower() for d in declared}:
+                continue
+            if _is_algebraic_occurrence(text or "", m.start(), m.end(), unit_word):
+                continue
+        count += 1
+    return count
 
 
 # "the current accepted status of", "acknowledge its accepted status", "has it been proved", "is it still open".
@@ -134,6 +147,44 @@ MODEL_REASON = ("a model stated in the question, to be simulated or solved: the 
 GIVEN_DATA_REASON = "a calculation from the values the question gives: no outside evidence needed"
 ESTABLISHED_REASON = ("a conceptual question about established knowledge: no search needed; ask for sources or recent "
                       "work to search the literature")
+WORD_PROBLEM_REASON = ("an arithmetic word problem: every value is in the question, so computation answers it and no "
+                       "outside evidence is needed; ask for sources to search the literature")
+# A word problem asks for one value ("how many days", "how much", "what is the total") and tells a story in numbers.
+_WORD_ASK_RE = re.compile(
+    r"\b(?:how\s+(?:many|much|long|far|old|fast)|what\s+(?:is|was|were|are|will\s+be)\s+(?:the\s+)?(?:total|sum|"
+    r"number|amount|value|largest|smallest|greatest|least|average|mean|price|cost|age|area|perimeter|length|speed|"
+    r"remainder|probability)|find\s+(?:the\s+)?(?:number|value|total|sum|amount))\b", re.I)
+_WORD_STORY_RE = re.compile(
+    # Money is "$60" or LaTeX's "\$60", never a "$x = 2$" math delimiter (a digit before "$" closes math).
+    r"\\\$|(?<![\w$\\])\$\s?\d|%|\bpercent\b|\b(?:each|per|every|total|left|left\s+over|remain\w*|more\s+than|less\s+than|fewer|twice|"
+    r"thrice|times\s+as|half|third|quarter|altogether|in\s+all|earns?|earned|paid|pays|costs?|spent|spends|bought|sold|"
+    r"received|shares?|split|divided|ratio|average|consecutive|integers?|digits?|remainder)\b", re.I)
+_NUMBER_RE = re.compile(r"(?<![\w.])\d+(?:[.,]\d+)?(?![\w.])|\b\d+(?=-[A-Za-z])")
+
+
+MCQ_REASON = ("a multiple-choice calculation: the data are in the question, the options are values to compute and "
+              "compare, so no outside evidence is needed; ask for sources to search the literature")
+MCQ_STATEMENTS_REASON = ("a multiple-choice problem: the data are in the question and each option is a statement to "
+                         "derive and check, so no outside evidence is needed; ask for sources to search the literature")
+_OPTION_VALUE_RE = re.compile(r"(?:^|\s)\(?[a-eA-E][).]\s+\$?\s*-?\d+(?:\.\d+)?", re.M)
+
+
+def _numeric_multiple_choice(text: str) -> bool:
+    """Lettered options (three or more) whose values are numbers ("(a) 60 m", "(b) $55\\ m$")."""
+    from .question_text import is_multiple_choice
+
+    return is_multiple_choice(text) and len(_OPTION_VALUE_RE.findall(text or "")) >= 3
+
+
+def is_word_problem(text: str) -> bool:
+    """A self-contained arithmetic word problem: one value asked for, at least three numbers, story arithmetic words.
+    Callers check sources, dates, measured values and named real-world entities first."""
+    t = text or ""
+    if t.count("?") > 1 or not _WORD_ASK_RE.search(t) or not _WORD_STORY_RE.search(t):
+        return False
+    return len(_NUMBER_RE.findall(t)) >= 3
+
+
 # Written mathematics: an equation, a power, a function application, LaTeX or math symbols.
 _MATH_NOTATION_RE = re.compile(r"[=^∫∑√≤≥≠]|\\(?:frac|int|sum|sqrt)|\b[A-Za-z]\s*\(\s*[A-Za-z0-9]\s*\)|\d\s*[a-z]\b")
 
@@ -188,6 +239,20 @@ def assess_evidence_need(query: str, ctx: Any = None) -> EvidenceNeed:
     from .search_plan import classify_question
 
     qtype = classify_question(text)
+    if _numeric_multiple_choice(text):
+        # "(a) 60 m (b) 55 m (c) 25 m (d) 30 m" with the data in the question (or its attached figure): a textbook
+        # calculation. Searching its words found forum posts about attaching images.
+        return EvidenceNeed("none", "self_contained", MCQ_REASON, "multiple-choice calculation")
+    from .question_text import is_math_multiple_choice
+
+    if is_math_multiple_choice(text):
+        # "(A) The centre of mass rotates at $\omega/5$ ... (D) $L_z = 55ma^2\omega$": a textbook problem whose options
+        # are statements to derive and check from the data given; its words ("rolling", "disc") find only forum posts.
+        return EvidenceNeed("none", "self_contained", MCQ_STATEMENTS_REASON, "multiple-choice problem")
+    if is_word_problem(text):
+        # "Sam earns $60 a day worked and loses $30 a day missed; he received $660 over 20 days: how many days ...":
+        # the numbers are all in the story; a search on its words ("Sam", "hired") only finds noise.
+        return EvidenceNeed("none", "self_contained", WORD_PROBLEM_REASON, "word problem")
     if _ASKS_VALUE_RE.search(text) and _given_quantities(text) >= 2:
         # A calculation from values the question supplies ("a 120 L tank drains at 4 L/min; how long ...").
         return EvidenceNeed("none", "self_contained", GIVEN_DATA_REASON, "given quantities")

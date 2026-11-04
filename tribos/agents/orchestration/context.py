@@ -102,6 +102,7 @@ class RunContext:
     agent_state: Any = None  # AgentState (agentic frameworks only)
     routing: dict[str, Any] | None = None  # Auto runs: the router's decision (execution_artifacts.framework_routing)
     output_contract: Any = None  # tribos.utils.output_contract.Contract: the answer's requested form
+    tool_policy: Any = None  # tribos.tools.policy.ToolPolicy: explicit user prohibitions
     evaluated_sources: list[Any] = field(default_factory=list)
     active_sources: list[Any] = field(default_factory=list)
     title_ctx: dict[str, Any] = field(default_factory=dict)
@@ -119,12 +120,16 @@ class RunContext:
     synapta_summary: str = ""
     scope_notes: list[str] = field(default_factory=list)
     gather_notes: list[str] = field(default_factory=list)  # what the gather stages did not run, for the scope notes
+    # The parts of the question and the tool for each (tribos.agents.task_plan); [] for a single ask.
+    task_plan: list[dict[str, Any]] = field(default_factory=list)
     synthesis_prompt: str = ""
     system_prompt: str = ""
     synthesis_model: str = ""
     llm_ok: bool = True
     candidate_response: str = ""
     streamed_draft: str = ""
+    answer_outline: list[tuple[str, str]] = field(default_factory=list)  # the user's own numbered tasks, in order
+    presentation: dict[str, Any] = field(default_factory=dict)  # what the presentation stage changed and why
 
     # verify
     entailment_judge: Any = None

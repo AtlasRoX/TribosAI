@@ -6,7 +6,7 @@
 
 import React from "react";
 import { ShieldCheck } from "lucide-react";
-import { Card, CopyButton, Disclosure, Pill, Section, styles as ui } from "../agentic/ui";
+import { Card, CopyButton, Disclosure, OpenCodeButton, Pill, Section, styles as ui } from "../agentic/ui";
 import { compilerLines, formalBadge, formalData } from "./formalData";
 
 export function FormalProofArtifact({ data }: { data: unknown }) {
@@ -39,6 +39,7 @@ export function FormalProofArtifact({ data }: { data: unknown }) {
           {d.lean_code && (
             <Section title="Lean code" meta={d.repairs ? `${d.repairs} repair${d.repairs === 1 ? "" : "s"}` : undefined}>
               <div className={ui.codeWrap}>
+                <OpenCodeButton title="Lean proof" files={[{ name: "Proof.lean", language: "lean", code: d.lean_code }]} label="Open" />
                 <CopyButton text={d.lean_code} label="Copy Lean" />
                 <pre className={ui.code}>{d.lean_code}</pre>
               </div>

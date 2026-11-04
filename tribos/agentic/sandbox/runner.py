@@ -34,6 +34,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from typing import Any
 
@@ -41,22 +42,47 @@ from .policy import (
     ALLOWED_MODULE_ROOTS,
     BANNED_ATTRIBUTES,
     BANNED_CALLS,
+    BANNED_MODULES,
     BANNED_NAMES,
     READER_FUNCTIONS,
     READER_PATH_KWARGS,
     check_code,
     safe_relative_path,
 )
+from .process import (
+    STDERR_TAIL_BYTES,
+    allowlisted_env,
+    dir_size_bytes,
+    kill_tree,
+    process_group_kwargs,
+    read_capped,
+    rmtree,
+)
 
 logger = logging.getLogger(__name__)
 
-MAX_FIGURES = 3
+MAX_FIGURES = int(os.getenv("TRIBOS_SANDBOX_MAX_FIGURES", "6"))
 MAX_TABLES = 5
 MAX_TABLE_ROWS = 50
-MAX_FIGURE_BYTES = 1_500_000
-STDERR_TAIL_BYTES = 8 * 1024
+MAX_FIGURE_BYTES = int(os.getenv("TRIBOS_SANDBOX_MAX_FIGURE_BYTES", "3500000"))
 _INPUT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$")
+# Kept for backwards compatibility: the allowlist itself now lives in process.py.
 _ENV_ALLOWLIST = ("PATH", "SYSTEMROOT", "SystemRoot", "WINDIR", "PATHEXT")
+
+# How long a run waits for a free sandbox slot before it is refused as busy.
+queue_timeout_s = 30.0
+# The semaphore bounds how many sandboxed cells may run at once, so N cells cannot multiply the memory limit.
+_RUN_SLOTS = threading.BoundedSemaphore(max(1, int(os.getenv("TRIBOS_SANDBOX_MAX_CONCURRENCY", "2"))))
+
+
+def _under_test() -> bool:
+    """True while a pytest test is running (the only place the policy escape hatch may be used)."""
+    return bool(os.getenv("PYTEST_CURRENT_TEST"))
+
+
+def run_semaphore() -> threading.BoundedSemaphore:
+    """The shared semaphore that bounds concurrent sandboxed runs."""
+    return _RUN_SLOTS
 
 _BOOTSTRAP = r'''
 import base64 as _base64
@@ -73,34 +99,43 @@ with open(_sys.argv[1], encoding="utf-8") as _fh:
     _CFG = _json.load(_fh)
 _os.remove(_sys.argv[1])
 _WORK = _os.path.realpath(_CFG["work_dir"])
+# Where the uploaded files live. In the subprocess backend they are copied into the work dir, so the two
+# are the same. In the container backend the inputs are a separate read-only mount, so the code can read
+# them without being able to change them, while the work dir stays a writable, size-capped tmpfs.
+_INPUT_DIR = _os.path.realpath(_CFG.get("input_dir") or _CFG["work_dir"])
 _OUT = _CFG["out_path"]
 _dumps = _json.dumps
 _b64 = _base64.b64encode
 _real_open = _builtins.open
 _real_import = _builtins.__import__
 _real_getattr = _builtins.getattr
-_LIMITS = {"memory": "none", "cpu": "none", "processes": "unrestricted"}
+_LIMITS = {"memory": "none", "cpu": "none", "processes": "unrestricted", "degraded": False, "degraded_reason": None}
 
 
-def _posix_limits(memory_mb, cpu_s):
+def _posix_limits(memory_mb, cpu_s, max_processes, max_disk_bytes):
     import resource
     mem = int(memory_mb) * 1024 * 1024
+    failures = []
     for name, value in (("RLIMIT_AS", mem), ("RLIMIT_CPU", int(cpu_s)), ("RLIMIT_NOFILE", 256),
-                        ("RLIMIT_NPROC", 64), ("RLIMIT_FSIZE", 256 * 1024 * 1024)):
+                        ("RLIMIT_NPROC", int(max_processes)), ("RLIMIT_FSIZE", int(max_disk_bytes))):
         lim = getattr(resource, name, None)
         if lim is None:
             continue
         try:
             resource.setrlimit(lim, (value, value))
-        except (ValueError, OSError):
-            pass
-    _LIMITS.update(memory=f"RLIMIT_AS {memory_mb} MB", cpu=f"RLIMIT_CPU {int(cpu_s)} s")
+        except (ValueError, OSError) as _exc:
+            failures.append(f"{name}: {type(_exc).__name__}")
+    _LIMITS.update(memory=f"RLIMIT_AS {memory_mb} MB", cpu=f"RLIMIT_CPU {int(cpu_s)} s",
+                   processes=f"RLIMIT_NPROC {int(max_processes)}")
+    if failures:
+        _LIMITS["degraded"] = True
+        _LIMITS["degraded_reason"] = "some POSIX limits could not be applied: " + ", ".join(failures)
 
 
 _JOB = None
 
 
-def _windows_job(memory_mb, cpu_s):
+def _windows_job(memory_mb, cpu_s, max_processes):
     global _JOB
     import ctypes
     from ctypes import wintypes
@@ -129,27 +164,40 @@ def _windows_job(memory_mb, cpu_s):
     k32.GetCurrentProcess.restype = wintypes.HANDLE
     job = k32.CreateJobObjectW(None, None)
     if not job:
+        _LIMITS["degraded"] = True
+        _LIMITS["degraded_reason"] = "the Windows Job Object could not be created"
         return
     info = _Extended()
     # PROCESS_TIME | ACTIVE_PROCESS | PROCESS_MEMORY
     info.BasicLimitInformation.LimitFlags = 0x00000002 | 0x00000008 | 0x00000100
     info.BasicLimitInformation.PerProcessUserTimeLimit = int(cpu_s * 10_000_000)
-    info.BasicLimitInformation.ActiveProcessLimit = 1
+    # The active-process cap is the configured one, not a hardcoded 1: the code may start workers of its
+    # own (a pool, a helper process), up to the server's process ceiling.
+    info.BasicLimitInformation.ActiveProcessLimit = max(1, int(max_processes))
     info.ProcessMemoryLimit = int(memory_mb) * 1024 * 1024
     if not k32.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info)):
+        _LIMITS["degraded"] = True
+        _LIMITS["degraded_reason"] = "the Windows Job Object limits could not be set"
         return
     if k32.AssignProcessToJobObject(job, k32.GetCurrentProcess()):
         _JOB = job
-        _LIMITS.update(memory=f"job object {memory_mb} MB", cpu=f"job object {int(cpu_s)} s", processes="1")
+        _LIMITS.update(memory=f"job object {memory_mb} MB", cpu=f"job object {int(cpu_s)} s",
+                       processes=str(int(max_processes)))
+    else:
+        _LIMITS["degraded"] = True
+        _LIMITS["degraded_reason"] = "the process could not be assigned to the Windows Job Object"
 
 
 try:
     if _os.name == "posix":
-        _posix_limits(_CFG["memory_mb"], _CFG["cpu_s"])
+        _posix_limits(_CFG["memory_mb"], _CFG["cpu_s"], _CFG.get("max_processes", 64),
+                      _CFG.get("max_disk_bytes", 256 * 1024 * 1024))
     elif _os.name == "nt":
-        _windows_job(_CFG["memory_mb"], _CFG["cpu_s"])
-except Exception:
-    pass
+        _windows_job(_CFG["memory_mb"], _CFG["cpu_s"], _CFG.get("max_processes", 64))
+except Exception as _limit_exc:
+    # A limit that cannot be applied must never be silent: the parent sees the degraded flag and reports it.
+    _LIMITS["degraded"] = True
+    _LIMITS["degraded_reason"] = f"resource limits could not be applied: {type(_limit_exc).__name__}"
 
 
 def _block_network():
@@ -169,7 +217,9 @@ def _block_network():
             setattr(_socket, _name, _deny)
     try:
         import _socket as _csocket
-        for _name in ("getaddrinfo", "gethostbyname", "gethostbyname_ex", "gethostbyaddr"):
+        if hasattr(_csocket, "socket"):
+            setattr(_csocket, "socket", _BlockedSocket)
+        for _name in ("getaddrinfo", "gethostbyname", "gethostbyname_ex", "gethostbyaddr", "create_connection"):
             if hasattr(_csocket, _name):
                 setattr(_csocket, _name, _deny)
     except Exception:
@@ -177,6 +227,32 @@ def _block_network():
 
 
 _block_network()
+
+
+def _block_processes():
+    """No program may be started: library features that launch one (matplotlib's animation writers run a configurable
+    executable, sympy's autowrap runs a compiler) were a way out of the sandbox (audit AUDIT-102)."""
+    import subprocess as _subprocess
+
+    def _deny(*_a, **_k):
+        raise PermissionError("starting programs is disabled in the analysis sandbox")
+
+    class _BlockedPopen(_subprocess.Popen):
+        def __init__(self, *_a, **_k):
+            _deny()
+
+    _subprocess.Popen = _BlockedPopen  # run, call, check_output and getoutput are built on Popen
+    for _name in ("system", "popen", "startfile", "posix_spawn", "posix_spawnp", "fork", "forkpty", "execv", "execve",
+                  "execl", "execle", "execlp", "execlpe", "execvp", "execvpe", "spawnl", "spawnle", "spawnlp", "spawnlpe",
+                  "spawnv", "spawnve", "spawnvp", "spawnvpe"):
+        if hasattr(_os, _name):
+            setattr(_os, _name, _deny)
+    for _mod, _fn in (("_winapi", "CreateProcess"), ("_posixsubprocess", "fork_exec")):
+        try:
+            setattr(__import__(_mod), _fn, _deny)
+        except Exception:
+            pass
+
 
 
 class _Capped(_io.TextIOBase):
@@ -220,6 +296,7 @@ _BANNED_ATTRS = frozenset(_CFG["banned_attributes"]) | frozenset(_CFG["banned_na
 _READ_MODES = frozenset({"r", "rb", "rt", "br", "tr"})
 
 
+_BANNED_MODULES = tuple(_CFG.get("banned_modules") or ())
 _READER_FUNCS = tuple(_CFG.get("reader_functions") or ())
 _READER_KWARGS = tuple(_CFG.get("reader_path_kwargs") or ())
 _READER_ROOTS = frozenset({"pandas", "numpy", "scipy", "matplotlib", "sklearn", "h5py"})
@@ -227,10 +304,25 @@ _READER_WRAPPERS = {}
 
 
 def _inside_work(path):
-    real = _os.path.realpath(_os.path.join(_WORK, path))
     try:
+        real = _os.path.realpath(_os.path.join(_WORK, path))
         return _os.path.commonpath([_os.path.normcase(real), _os.path.normcase(_WORK)]) == _os.path.normcase(_WORK)
-    except ValueError:
+    except Exception:
+        return False
+
+
+def _inside_input(path):
+    """True when the path is inside the work dir or inside the read-only input dir."""
+    if _inside_work(path):
+        return True
+    if _INPUT_DIR == _WORK:
+        return False
+    try:
+        real = _os.path.realpath(_os.path.join(_INPUT_DIR, path))
+        return _os.path.commonpath([_os.path.normcase(real), _os.path.normcase(_INPUT_DIR)]) == _os.path.normcase(
+            _INPUT_DIR
+        )
+    except Exception:
         return False
 
 
@@ -244,7 +336,42 @@ def _reader_target_ok(target):
     text = target.strip()
     if "://" in text or text.startswith("~") or "\x00" in text:
         return False
-    return _inside_work(text)
+    return _inside_input(text)
+
+
+def _h5_target(name):
+    if hasattr(name, "__fspath__"):
+        name = _os.fspath(name)
+    if isinstance(name, bytes):
+        name = name.decode("utf-8", "replace")
+    return name
+
+
+def _harden_h5py():
+    """HDF5 opens files in C, past the guarded open(): its file API (h5py.h5f.create/open, which h5py.File itself
+    calls) checks the path. Creating or writing a file stays inside the work dir; reading may also use the inputs.
+    `h5py.File(<computed path>, 'w')` once created a file outside the work directory (audit AUDIT-102)."""
+    h5f = _sys.modules.get("h5py.h5f")
+    if h5f is None or getattr(h5f, "_tribos_guarded", False):
+        return
+    real_create, real_open = h5f.create, h5f.open
+    read_only = getattr(h5f, "ACC_RDONLY", 0)
+
+    def create(name, *args, **kwargs):
+        target = _h5_target(name)
+        if isinstance(target, str) and not _inside_work(target):
+            raise PermissionError("h5py may only create files inside the work directory")
+        return real_create(name, *args, **kwargs)
+
+    def open(name, flags=None, *args, **kwargs):  # noqa: A001 - the h5f API name
+        target = _h5_target(name)
+        reading = flags == read_only
+        if isinstance(target, str) and not (_reader_target_ok(target) if reading else _inside_work(target)):
+            raise PermissionError("h5py may only open files inside the work directory")
+        return real_open(name, *args, **kwargs) if flags is None else real_open(name, flags, *args, **kwargs)
+
+    h5f.create, h5f.open = create, open
+    h5f._tribos_guarded = True
 
 
 def _wrap_reader(fn, name):
@@ -283,14 +410,20 @@ def _guard_readers():
                 pass
 
 
+def _banned_module(name):
+    return any(name == m or name.startswith(m + ".") for m in _BANNED_MODULES)
+
+
 def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
-    if level or str(name).split(".", 1)[0] not in _ALLOWED:
+    if level or str(name).split(".", 1)[0] not in _ALLOWED or _banned_module(str(name)):
         raise ImportError(f"import of '{name}' is not allowed in the analysis sandbox")
     for item in fromlist or ():
-        if str(item).startswith("__") or item in _BANNED_ATTRS:
+        if str(item).startswith("__") or item in _BANNED_ATTRS or _banned_module(f"{name}.{item}"):
             raise ImportError(f"importing '{item}' is not allowed in the analysis sandbox")
     module = _real_import(name, globals, locals, fromlist, level)
     root = str(name).split(".", 1)[0]
+    if root == "h5py":
+        _harden_h5py()
     if root in _READER_ROOTS:
         _guard_readers()
     if root == "numpy":
@@ -344,31 +477,41 @@ def _load_dataset(name=None, **kwargs):
         if not inputs:
             raise FileNotFoundError("No input dataset files are bound to this sandbox run")
         name = inputs[0]
-    if not isinstance(name, str) or not _inside_work(name):
+    elif isinstance(name, str) and name not in inputs and not _os.path.exists(_os.path.join(_WORK, name)):
+        for candidate in inputs:
+            if candidate == name or _os.path.splitext(candidate)[0] == name or candidate.startswith(f"{name}."):
+                name = candidate
+                break
+    if not isinstance(name, str) or not _inside_input(name):
         raise PermissionError("load_dataset() may only read files inside the work directory")
+    # The file may live in the read-only input mount rather than in the work dir, so it is addressed by its
+    # absolute path there. The confinement check above has already established that it stays inside.
+    source = name
+    if not _os.path.exists(_os.path.join(_WORK, name)) and _INPUT_DIR != _WORK:
+        source = _os.path.join(_INPUT_DIR, name)
     ext = _os.path.splitext(name)[1].lower()
     if ext == ".csv":
         pd = _guarded_import("pandas")
-        return pd.read_csv(name, **kwargs)
+        return pd.read_csv(source, **kwargs)
     if ext == ".tsv":
         pd = _guarded_import("pandas")
         kwargs.setdefault("sep", "\t")
-        return pd.read_csv(name, **kwargs)
+        return pd.read_csv(source, **kwargs)
     if ext == ".xlsx":
         pd = _guarded_import("pandas")
-        return pd.read_excel(name, **kwargs)
+        return pd.read_excel(source, **kwargs)
     if ext == ".parquet":
         pd = _guarded_import("pandas")
-        return pd.read_parquet(name, **kwargs)
+        return pd.read_parquet(source, **kwargs)
     if ext == ".json":
         pd = _guarded_import("pandas")
-        return pd.read_json(name, **kwargs)
+        return pd.read_json(source, **kwargs)
     if ext in (".h5", ".hdf5"):
         h5py = _guarded_import("h5py")
-        return h5py.File(name, "r")
+        return h5py.File(source, "r")
     if ext == ".mat":
         scipy_io = _guarded_import("scipy.io", fromlist=("loadmat",))
-        return scipy_io.loadmat(name, **kwargs)
+        return scipy_io.loadmat(source, **kwargs)
     raise ValueError(f"Unsupported dataset extension {ext!r}")
 
 
@@ -398,6 +541,8 @@ def _read_roots():
     # third-party packages under prefix). sys.path is deliberately NOT trusted: an editable install adds the
     # project source root to it, and nothing in work should read the repository.
     roots = {_norm(_WORK)}
+    if _INPUT_DIR != _WORK:
+        roots.add(_norm(_INPUT_DIR))
     for var in ("TEMP", "TMP", "TMPDIR", "MPLCONFIGDIR", "NUMBA_CACHE_DIR"):
         value = _os.environ.get(var)
         if value:
@@ -417,8 +562,8 @@ def _write_roots():
     return frozenset(roots)
 
 
-_READ_ROOTS = None
-_WRITE_ROOTS = None
+_READ_ROOTS = frozenset()
+_WRITE_ROOTS = frozenset()
 
 
 def _under(real, roots):
@@ -444,7 +589,10 @@ def _check_access(file, writing):
     text = _fspath_str(file)
     if text is None:
         return  # a file descriptor or buffer, not a path
-    real = _os.path.realpath(text if _os.path.isabs(text) else _os.path.join(_WORK, text))
+    try:
+        real = _os.path.realpath(text if _os.path.isabs(text) else _os.path.join(_WORK, text))
+    except Exception:
+        raise PermissionError(f"invalid file path {text!r}")
     roots = _WRITE_ROOTS if writing else _READ_ROOTS
     if not _under(real, roots):
         verb = "write" if writing else "read"
@@ -504,12 +652,93 @@ def _os_open_guard(real_os_open):
     return guarded
 
 
+def _make_fileio_guard(real_fileio):
+    class _GuardedFileIO(real_fileio):
+        def __init__(self, file, mode="r", *args, **kwargs):
+            writing = any(ch in str(mode) for ch in "wax+")
+            _check_access(file, writing)
+            super().__init__(file, mode, *args, **kwargs)
+    return _GuardedFileIO
+
+
+def _os_write_path_guard(real_fn):
+    def guarded(path, *args, **kwargs):
+        _check_access(path, True)
+        return real_fn(path, *args, **kwargs)
+    return guarded
+
+
+def _os_rename_guard(real_fn):
+    def guarded(src, dst, *args, **kwargs):
+        _check_access(src, True)
+        _check_access(dst, True)
+        return real_fn(src, dst, *args, **kwargs)
+    return guarded
+
+
+def _os_listdir_guard(real_listdir):
+    def guarded(path=".", *args, **kwargs):
+        _check_access(path, False)
+        return real_listdir(path, *args, **kwargs)
+    return guarded
+
+
+def _os_scandir_guard(real_scandir):
+    def guarded(path=".", *args, **kwargs):
+        _check_access(path, False)
+        return real_scandir(path, *args, **kwargs)
+    return guarded
+
+
 def _install_io_guard():
     global _READ_ROOTS, _WRITE_ROOTS
     _READ_ROOTS, _WRITE_ROOTS = _read_roots(), _write_roots()
     _builtins.open = _make_open_guard(_real_open)
     _io.open = _make_open_guard(_real_io_open)
+    c_io = _sys.modules.get("_io")
+    if c_io is not None:
+        if hasattr(c_io, "open"):
+            try:
+                c_io.open = _make_open_guard(getattr(c_io, "open"))
+            except (AttributeError, TypeError):
+                pass
+        if hasattr(c_io, "FileIO"):
+            try:
+                c_io.FileIO = _make_fileio_guard(getattr(c_io, "FileIO"))
+            except (AttributeError, TypeError):
+                pass
+    if hasattr(_io, "FileIO"):
+        try:
+            _io.FileIO = _make_fileio_guard(getattr(_io, "FileIO"))
+        except (AttributeError, TypeError):
+            pass
+    if hasattr(_io, "open_code"):
+        orig_open_code = _io.open_code
+
+        def _guarded_open_code(path):
+            _check_access(path, False)
+            return orig_open_code(path)
+        try:
+            _io.open_code = _guarded_open_code
+        except (AttributeError, TypeError):
+            pass
     _os.open = _os_open_guard(_real_os_open)
+    if hasattr(_os, "listdir"):
+        _os.listdir = _os_listdir_guard(_os.listdir)
+    if hasattr(_os, "scandir"):
+        _os.scandir = _os_scandir_guard(_os.scandir)
+    for _fn_name in ("remove", "unlink", "rmdir", "mkdir", "makedirs"):
+        if hasattr(_os, _fn_name):
+            try:
+                setattr(_os, _fn_name, _os_write_path_guard(getattr(_os, _fn_name)))
+            except (AttributeError, TypeError):
+                pass
+    for _fn_name in ("rename", "replace"):
+        if hasattr(_os, _fn_name):
+            try:
+                setattr(_os, _fn_name, _os_rename_guard(getattr(_os, _fn_name)))
+            except (AttributeError, TypeError):
+                pass
 
 
 # --- SymPy string-parser hardening (SEC-1) -------------------------------------------------------------------------
@@ -605,14 +834,15 @@ def _jsonable(v, depth=0):
         return {"table": "result", "shape": [int(v.shape[0]), int(v.shape[1])]}
     if pd is not None and isinstance(v, pd.Series):
         return {str(k): _jsonable(x, depth + 1) for k, x in list(v.items())[:MAX_ROWS]}
+    max_items = int(_CFG.get("max_array_items", 25000))
     if np is not None and isinstance(v, np.ndarray):
-        return _jsonable(v.ravel()[:200].tolist() if v.ndim != 1 else v[:200].tolist(), depth + 1)
+        return _jsonable(v.ravel()[:max_items].tolist() if v.ndim != 1 else v[:max_items].tolist(), depth + 1)
     if np is not None and isinstance(v, np.generic):
         return _jsonable(v.item(), depth + 1)
     if isinstance(v, dict):
-        return {str(k): _jsonable(x, depth + 1) for k, x in list(v.items())[:200]}
+        return {str(k): _jsonable(x, depth + 1) for k, x in list(v.items())[:max_items]}
     if isinstance(v, (list, tuple, set, frozenset)):
-        return [_jsonable(x, depth + 1) for x in list(v)[:200]]
+        return [_jsonable(x, depth + 1) for x in list(v)[:max_items]]
     return repr(v)[:2000]
 
 
@@ -640,18 +870,59 @@ def _table(name, df):
 def _figures(limit):
     plt = _sys.modules.get("matplotlib.pyplot")
     out = []
+    warnings = []
     if plt is None:
-        return out
-    for num in list(plt.get_fignums())[:limit]:
+        return out, warnings
+    all_fignums = list(plt.get_fignums())
+    if len(all_fignums) > limit:
+        warnings.append(f"Generated {len(all_fignums)} figures; limit is {limit}. Figures beyond {limit} were omitted.")
+    dpi = _CFG.get("figure_dpi", 120)
+    for num in all_fignums[:limit]:
         try:
-            buf = _io.BytesIO()
-            plt.figure(num).savefig(buf, format="png", dpi=100, bbox_inches="tight")
-            data = buf.getvalue()
-            if len(data) <= _CFG["max_figure_bytes"]:
-                out.append({"name": f"figure_{num}.png", "png_base64": _b64(data).decode("ascii")})
-        except Exception:
-            continue
-    return out
+            fig = plt.figure(num)
+            axes_meta = []
+            for ax in fig.get_axes():
+                axes_meta.append({
+                    "title": str(ax.get_title() or ""),
+                    "xlabel": str(ax.get_xlabel() or ""),
+                    "ylabel": str(ax.get_ylabel() or ""),
+                })
+            width, height = fig.get_size_inches()
+
+            buf_png = _io.BytesIO()
+            fig.savefig(buf_png, format="png", dpi=dpi, bbox_inches="tight")
+            png_data = buf_png.getvalue()
+
+            svg_str = None
+            try:
+                buf_svg = _io.BytesIO()
+                fig.savefig(buf_svg, format="svg", bbox_inches="tight")
+                svg_data = buf_svg.getvalue()
+                if len(svg_data) <= _CFG["max_figure_bytes"] * 2:
+                    svg_str = svg_data.decode("utf-8", "replace")
+            except Exception:
+                pass
+
+            if len(png_data) > _CFG["max_figure_bytes"]:
+                warnings.append(f"Figure {num} exceeded size limit ({len(png_data)} > {_CFG['max_figure_bytes']} bytes).")
+                continue
+
+            import hashlib as _hl
+            f_hash = _hl.sha256(png_data).hexdigest()[:16]
+            out.append({
+                "figure_id": f"fig_{num}_{f_hash}",
+                "name": f"figure_{num}.png",
+                "png_base64": _b64(png_data).decode("ascii"),
+                "svg": svg_str,
+                "dpi": dpi,
+                "dimensions": [float(width), float(height)],
+                "axes": axes_meta,
+                "file_hash": f_hash,
+                "bytes": len(png_data),
+            })
+        except Exception as _ex:
+            warnings.append(f"Figure {num} capture failed: {type(_ex).__name__}")
+    return out, warnings
 
 
 def _main():
@@ -662,6 +933,9 @@ def _main():
         _install_io_guard()
         if "sympy" in _sys.modules:
             _harden_sympy()
+        if "h5py" in _sys.modules:
+            _harden_h5py()
+        _block_processes()  # with the other guards: off only in the test-only unsafe mode
     g = {
         "__builtins__": _restricted_builtins(),
         "__name__": "__analysis__",
@@ -703,12 +977,13 @@ def _main():
                     tables.append(t)
     except Exception as exc:  # noqa: BLE001
         result = f"<result could not be serialised: {type(exc).__name__}>"
-    figures = []
+    figures, fig_warnings = [], []
     try:
-        figures = _figures(_CFG["max_figures"])
-    except Exception:
-        pass
+        figures, fig_warnings = _figures(_CFG["max_figures"])
+    except Exception as _ex:
+        fig_warnings.append(f"Figure extraction error: {type(_ex).__name__}")
     payload = {"status": status, "error": error, "result": result, "tables": tables, "figures": figures,
+               "warnings": fig_warnings,
                "exec_seconds": round(seconds, 3), "limits": _LIMITS,
                "stdout_truncated": bool(getattr(_sys.stdout, "truncated", False))}
     try:
@@ -729,85 +1004,24 @@ def sandbox_python() -> str:
 
 
 def _child_env(root: str, tmp: str) -> dict[str, str]:
-    """The child's whole environment: an allowlist, never API keys or tokens."""
-    env: dict[str, str] = {}
-    for key in _ENV_ALLOWLIST:
-        value = os.environ.get(key)
-        if value:
-            env[key] = value
-    mpl_dir = os.path.join(tempfile.gettempdir(), "tribos-sandbox-mpl")  # font cache shared across runs
-    try:
-        os.makedirs(mpl_dir, exist_ok=True)
-    except OSError:
-        mpl_dir = os.path.join(root, "mpl")
-    env.update(
-        {
-            "TEMP": tmp,
-            "TMP": tmp,
-            "TMPDIR": tmp,
-            "PYTHONHASHSEED": "0",
-            "MPLBACKEND": "Agg",
-            "MPLCONFIGDIR": mpl_dir,
-            "NUMBA_CACHE_DIR": tmp,
-            "OMP_NUM_THREADS": "1",
-            "OPENBLAS_NUM_THREADS": "1",
-            "MKL_NUM_THREADS": "1",
-            "PYTHONIOENCODING": "utf-8",
-        }
-    )
-    return env
+    """The child's whole environment: an allowlist, never API keys or tokens.
+
+    MPLCONFIGDIR points inside this run's own directory: a shared, writable font cache would let one run (or one
+    user) alter the next run's cache.
+    """
+    return allowlisted_env(root, tmp, mpl_config_dir=os.path.join(tmp, "mpl"))
 
 
 def _rmtree(path: str) -> None:
-    def onerror(func: Any, p: str, _exc: Any) -> None:
-        try:
-            os.chmod(p, stat.S_IWRITE | stat.S_IREAD)
-            func(p)
-        except OSError:
-            pass
-
-    shutil.rmtree(path, onexc=onerror)
+    rmtree(path)
 
 
 def _kill_tree(proc: subprocess.Popen[bytes]) -> None:
-    try:
-        if os.name == "nt":
-            subprocess.run(
-                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=15,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-        else:
-            import signal
-
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        proc.kill()
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        proc.wait(timeout=10)
-    except Exception:  # noqa: BLE001
-        pass
+    kill_tree(proc)
 
 
 def _read_capped(path: str, limit: int, tail: bool = False) -> str:
-    try:
-        size = os.path.getsize(path)
-        with open(path, "rb") as fh:
-            if tail and size > limit:
-                fh.seek(size - limit)
-            data = fh.read(limit)
-    except OSError:
-        return ""
-    text = data.decode("utf-8", errors="replace")
-    if size > limit:
-        text = ("...(truncated)\n" + text) if tail else (text + "\n...(truncated)")
-    return text
+    return read_capped(path, limit, tail=tail)
 
 
 def _empty(status: str, error: str | None, **extra: Any) -> dict[str, Any]:
@@ -837,6 +1051,11 @@ def run_code(
     max_figures: int = MAX_FIGURES,
     data: dict[str, Any] | None = None,
     _unsafe_skip_policy: bool = False,
+    on_spawn: Any = None,
+    max_disk_mb: int = 256,
+    max_processes: int = 64,
+    strict_limits: bool = False,
+    semaphore: Any = None,
 ) -> dict[str, Any]:
     """
     Execute one analysis/computation cell. input_files maps the name the code reads (a plain file name) to a server path
@@ -845,8 +1064,11 @@ def run_code(
     seconds, error, violations, limits}. `data` (JSON-serialisable) is available to the code as the variable `inputs`.
 
     _unsafe_skip_policy (tests only) disables the AST policy and the runtime import/builtins guards so a test can
-    inspect the child's environment; the subprocess, env scrubbing and network stub still apply.
+    inspect the child's environment; the subprocess, env scrubbing and network stub still apply. It is refused
+    outside a test run, and it never disables the network stub.
     """
+    if _unsafe_skip_policy and not _under_test():
+        return _empty("failed", "the test-only sandbox escape hatch is not available in a production run")
     inputs = dict(input_files or {})
     for name in inputs:
         if not _INPUT_NAME_RE.match(str(name)) or not safe_relative_path(str(name)):
@@ -857,10 +1079,17 @@ def run_code(
             return _empty("policy_violation", "the code was rejected by the sandbox policy", violations=violations)
     timeout_s = max(1.0, float(timeout_s))
     max_bytes = max(1, int(max_output_kb)) * 1024
+    max_disk_bytes = max(0, int(max_disk_mb)) * 1024 * 1024
+    max_processes = max(1, int(max_processes))
 
     root = tempfile.mkdtemp(prefix="tribos-sbx-")
     work, io_dir, tmp = (os.path.join(root, d) for d in ("work", "io", "tmp"))
     t0 = time.perf_counter()
+    if semaphore is not None:
+        acquired = semaphore.acquire(timeout=queue_timeout_s)
+        if not acquired:
+            return _empty("busy", "the sandbox is busy; try again in a moment",
+                          seconds=round(time.perf_counter() - t0, 3))
     try:
         for d in (work, io_dir, tmp):
             os.makedirs(d, exist_ok=True)
@@ -891,6 +1120,7 @@ def run_code(
         cfg = {
             "data_path": data_path,
             "work_dir": work,
+            "input_dir": work,
             "out_path": out_path,
             "code_path": code_path,
             "inputs": sorted(inputs),
@@ -898,15 +1128,19 @@ def run_code(
             "cpu_s": int(timeout_s) + 5,
             "max_output_bytes": max_bytes,
             "install_guards": not _unsafe_skip_policy,
-            # POSIX already caps file size with RLIMIT_FSIZE; Windows has no equivalent, so the open guard counts
-            # bytes written and refuses once the budget is spent. -1 means no byte counting (POSIX).
-            "max_disk_bytes": 256 * 1024 * 1024 if os.name == "nt" else -1,
-            "max_figures": max(0, min(MAX_FIGURES, int(max_figures))),
+            # The write budget is enforced on every platform: the open guard counts bytes written and refuses once
+            # the budget is spent. RLIMIT_FSIZE additionally caps a single file on POSIX.
+            "max_disk_bytes": max_disk_bytes,
+            "max_processes": max_processes,
+            "max_array_items": int(os.getenv("TRIBOS_SANDBOX_MAX_ARRAY_ITEMS", "25000")),
+            "max_figures": max(0, int(max_figures)),
+            "figure_dpi": int(os.getenv("TRIBOS_SANDBOX_FIGURE_DPI", "120")),
             "max_figure_bytes": MAX_FIGURE_BYTES,
             "max_tables": MAX_TABLES,
             "max_table_rows": MAX_TABLE_ROWS,
             "allowed_modules": sorted(ALLOWED_MODULE_ROOTS),
             "banned_attributes": sorted(BANNED_ATTRIBUTES),
+            "banned_modules": list(BANNED_MODULES),
             "banned_names": sorted(BANNED_NAMES),
             "banned_calls": sorted(BANNED_CALLS),
             "reader_functions": sorted(READER_FUNCTIONS),
@@ -916,26 +1150,34 @@ def run_code(
             json.dump(cfg, fh)
 
         stdout_path, stderr_path = os.path.join(io_dir, "stdout.txt"), os.path.join(io_dir, "stderr.txt")
-        kwargs: dict[str, Any] = {}
-        if os.name == "nt":
-            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        else:
-            kwargs["start_new_session"] = True
+        kwargs: dict[str, Any] = dict(process_group_kwargs())
         timed_out = False
-        with open(stdout_path, "wb") as out_fh, open(stderr_path, "wb") as err_fh:
-            proc = subprocess.Popen(
-                [sandbox_python(), "-I", boot_path, cfg_path],
-                cwd=work,
-                env=_child_env(root, tmp),
-                stdin=subprocess.DEVNULL,
-                stdout=out_fh,
-                stderr=err_fh,
-                **kwargs,
-            )
-            try:
-                proc.wait(timeout=timeout_s)
-            except subprocess.TimeoutExpired:
-                timed_out = True
+        proc: subprocess.Popen[Any] | None = None
+        try:
+            with open(stdout_path, "wb") as out_fh, open(stderr_path, "wb") as err_fh:
+                proc = subprocess.Popen(
+                    [sandbox_python(), "-I", boot_path, cfg_path],
+                    cwd=work,
+                    env=_child_env(root, tmp),
+                    stdin=subprocess.DEVNULL,
+                    stdout=out_fh,
+                    stderr=err_fh,
+                    **kwargs,
+                )
+                if on_spawn is not None:
+                    try:
+                        on_spawn(proc)
+                    except Exception:
+                        pass
+                try:
+                    proc.wait(timeout=timeout_s)
+                except subprocess.TimeoutExpired:
+                    timed_out = True
+                    _kill_tree(proc)
+        finally:
+            # The child and every descendant must be gone before the run directory is removed, even when the
+            # parent raised between Popen and wait.
+            if proc is not None and proc.poll() is None:
                 _kill_tree(proc)
         seconds = round(time.perf_counter() - t0, 3)
         stdout = _read_capped(stdout_path, max_bytes)
@@ -943,17 +1185,33 @@ def run_code(
         if timed_out:
             return _empty("timeout", f"the analysis exceeded the {timeout_s:g} s time limit and was stopped",
                           stdout=stdout, stderr=stderr, seconds=seconds)
+        # The parent's backstop against a write budget the child could not enforce itself.
+        written = dir_size_bytes(work)
+        if max_disk_bytes > 0 and written > max_disk_bytes:
+            return _empty("error",
+                          f"the analysis wrote {written} bytes, over the {max_disk_bytes} byte budget",
+                          stdout=stdout, stderr=stderr, seconds=seconds,
+                          limits={"disk_bytes": written, "max_disk_bytes": max_disk_bytes})
         try:
             with open(out_path, encoding="utf-8") as fh:
                 payload = json.load(fh)
         except (OSError, ValueError):
             tail = stderr.strip().splitlines()[-1:] if stderr.strip() else []
-            reason = tail[0][:300] if tail else f"exit code {proc.returncode}"
-            killed = proc.returncode is not None and (proc.returncode < 0 or proc.returncode in (137, 3221225477))
+            reason = tail[0][:300] if tail else f"exit code {proc.returncode if proc is not None else 'unknown'}"
+            rc = proc.returncode if proc is not None else None
+            killed = rc is not None and (rc < 0 or rc in (137, 3221225477, 3221225540, -1073741756))
             if killed:
-                reason = f"the process was killed (exit code {proc.returncode}); it may have exceeded the memory limit"
+                reason = f"the process was killed (exit code {rc}); it may have exceeded the memory limit"
             return _empty("error", f"the analysis process ended without a result: {reason}",
                           stdout=stdout, stderr=stderr, seconds=seconds)
+        limits = dict(payload.get("limits") or {})
+        limits["disk_bytes"] = written
+        if limits.get("degraded"):
+            reason = str(limits.get("degraded_reason") or "some resource limits could not be applied")
+            if strict_limits:
+                return _empty("failed", f"the sandbox could not enforce its resource limits: {reason}",
+                              stdout=stdout, stderr=stderr, seconds=seconds, limits=limits)
+            logger.warning("Sandbox run was degraded: %s", reason)
         return {
             "status": "ok" if payload.get("status") == "ok" else "error",
             "stdout": stdout,
@@ -964,13 +1222,18 @@ def run_code(
             "seconds": seconds,
             "error": payload.get("error"),
             "violations": [],
-            "limits": payload.get("limits") or {},
+            "limits": limits,
         }
     except Exception as exc:  # noqa: BLE001
         logger.warning("Sandbox run failed: %s", exc, exc_info=True)
         return _empty("failed", f"{type(exc).__name__}: {str(exc)[:200]}", seconds=round(time.perf_counter() - t0, 3))
     finally:
         _rmtree(root)
+        if semaphore is not None:
+            try:
+                semaphore.release()
+            except Exception:  # noqa: BLE001
+                pass
 
 
 __all__ = ["MAX_FIGURES", "run_code", "sandbox_python"]

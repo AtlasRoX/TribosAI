@@ -98,6 +98,8 @@ export type StreamEvent =
   | { type: "reasoning_delta"; delta?: string }
   | { type: "content_delta"; delta?: string }
   | { type: "content_reset"; reason?: string }
+  /** The results panel (lib/genui.ts AnswerUi), sent before drafting so it is on screen before the answer text. */
+  | { type: "answer_ui"; ui?: unknown }
   | { type: "run_control"; run_id?: string }
   | (Omit<ApprovalRequestEvent, "run_id"> & { run_id?: string })
   | { type: "done"; result?: ChatResult | null }

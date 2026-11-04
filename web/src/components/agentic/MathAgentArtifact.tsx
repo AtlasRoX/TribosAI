@@ -15,6 +15,16 @@ const STATUS: Record<string, { label: string; tone: Tone; caveat?: string }> = {
   },
   unverified: { label: "Unverified", tone: "warn", caveat: "No independent check confirmed this answer." },
   failed: { label: "No answer", tone: "bad", caveat: "No strategy produced a result that survived verification." },
+  rejected: {
+    label: "Rejected (out of domain)",
+    tone: "bad",
+    caveat: "Candidate witness was rejected as out of domain; historical attempt only.",
+  },
+  invalidated: {
+    label: "Invalidated",
+    tone: "bad",
+    caveat: "Tool result was invalidated by revision or premise change.",
+  },
 };
 
 const LEVEL_LABEL: Record<number, string> = { 0: "Execution", 1: "Matches the problem", 2: "Independent check" };
@@ -41,7 +51,11 @@ function stepTone(s: MathAgentStep): Tone {
  */
 export function MathAgentArtifact({ data }: { data?: MathData | null }) {
   if (!data || typeof data !== "object") return null;
-  const status = STATUS[data.status] ?? STATUS.unverified;
+  const isInvalidated = Boolean(data.invalidated || data.status === "rejected" || data.status === "invalidated");
+  const isHistorical = Boolean(data.historical || isInvalidated);
+  const status = isInvalidated
+    ? (data.status === "rejected" ? STATUS.rejected : STATUS.invalidated)
+    : (STATUS[data.status] ?? STATUS.unverified);
   const answer = data.answer ?? {};
   const latex = str(answer.latex);
   const text = str(answer.text);
@@ -58,7 +72,15 @@ export function MathAgentArtifact({ data }: { data?: MathData | null }) {
   return (
     <Card
       icon={<Sigma style={{ width: 16, height: 16, color: "#a78bfa" }} />}
-      title={data.status === "verified" ? "Verified mathematics (Axiom agent)" : "Mathematics agent (Axiom)"}
+      title={
+        isInvalidated
+          ? (data.status === "rejected" ? "Rejected candidate result (Axiom)" : "Invalidated mathematics candidate (Axiom)")
+          : isHistorical
+          ? "Historical mathematics attempt (Axiom)"
+          : data.status === "verified"
+          ? "Verified mathematics (Axiom agent)"
+          : "Mathematics agent (Axiom)"
+      }
       meta={[
         kind && kind !== "unknown" ? KIND_LABEL[kind] ?? kind.replace(/_/g, " ") : null,
         `${calls} tool call${calls === 1 ? "" : "s"}`,
@@ -76,7 +98,7 @@ export function MathAgentArtifact({ data }: { data?: MathData | null }) {
           <Pill tone={status.tone} title="Status from the independent verifier, not from the model">
             {status.label}
           </Pill>
-          {conf && data.status === "verified" ? ( /* a benchmark rate of verified answers says nothing about an unverified one */
+          {conf && typeof conf.p_correct === "number" && typeof conf.n === "number" && conf.n >= 10 && data.status === "verified" && !isInvalidated && !isHistorical ? ( /* a benchmark rate of verified answers says nothing about an unverified or tiny-sample one */
             <Pill
               tone="faint"
               title={
@@ -114,16 +136,21 @@ export function MathAgentArtifact({ data }: { data?: MathData | null }) {
       {checks.length > 0 && (
         <Section title="Verification" meta={LEVEL_SUMMARY[level] ?? `level ${level}`}>
           <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 6 }}>
-            {checks.map((c, i) => (
-              <li key={i} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-                <Pill tone={checkTone(c)}>{c.passed === true ? "Pass" : c.passed === false ? "Fail" : "Not run"}</Pill>
-                <span>{str(c.name).charAt(0).toUpperCase() + str(c.name).slice(1)}</span>
-                <span className={styles.muted} style={{ fontSize: "0.8em" }}>
-                  {LEVEL_LABEL[c.level] ?? `Level ${c.level}`}
-                  {c.detail ? ` — ${str(c.detail)}` : ""}
-                </span>
-              </li>
-            ))}
+            {checks.map((c, i) => {
+              const passed = (isInvalidated && str(c.name).toLowerCase().includes("domain")) ? false : c.passed;
+              return (
+                <li key={i} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+                  <Pill tone={checkTone({ ...c, passed })}>{passed === true ? "Pass" : passed === false ? "Fail" : "Not run"}</Pill>
+                  <span>{str(c.name).charAt(0).toUpperCase() + str(c.name).slice(1)}</span>
+                  <span className={styles.muted} style={{ fontSize: "0.8em" }}>
+                    {LEVEL_LABEL[c.level] ?? `Level ${c.level}`}
+                    {(isInvalidated && str(c.name).toLowerCase().includes("domain") && data.invalidation_reason)
+                      ? ` — ${data.invalidation_reason}`
+                      : c.detail ? ` — ${str(c.detail)}` : ""}
+                  </span>
+                </li>
+              );
+            })}
           </ul>
         </Section>
       )}

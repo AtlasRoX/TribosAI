@@ -50,6 +50,8 @@ class SimulateRequest(BaseModel):
     t_span: list[float] | None = Field(default=None, min_length=2, max_length=2)
     num_points: int = Field(default=400, ge=2, le=interactive.MAX_NUM_POINTS)
     method: str | None = Field(default=None, max_length=16)
+    step_size: float | None = Field(default=None, gt=0)
+    num_steps: int | None = Field(default=None, ge=1, le=9999)
 
 
 class Spec(BaseModel):
@@ -61,6 +63,8 @@ class Spec(BaseModel):
     initial_state: Numbers | None = None
     t_span: list[float] | None = Field(default=None, min_length=2, max_length=2)
     method: str | None = Field(default=None, max_length=16)
+    step_size: float | None = Field(default=None, gt=0)
+    num_steps: int | None = Field(default=None, ge=1, le=9999)
 
 
 class BifurcationRequest(BaseModel):

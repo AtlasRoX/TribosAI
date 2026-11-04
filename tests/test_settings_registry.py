@@ -179,7 +179,8 @@ def test_get_bool_words_and_fallback(monkeypatch, caplog):
         assert get_bool("TRIBOS_SANDBOX") is expected, word
     monkeypatch.delenv("TRIBOS_SANDBOX", raising=False)
     assert get_bool("TRIBOS_SANDBOX") is True  # on by default, like sandbox_enabled()
-    assert get_bool("TRIBOS_LLM_FALLBACK") is True or "TRIBOS_LLM_FALLBACK" in os.environ
+    # Off by default since the OpenAI models left the catalog (no silent gpt-4o substitution).
+    assert get_bool("TRIBOS_LLM_FALLBACK") is False or "TRIBOS_LLM_FALLBACK" in os.environ
     with caplog.at_level(logging.WARNING, logger="tribos.config.settings"):
         monkeypatch.setenv("TRIBOS_SANDBOX", "maybe")
         assert get_bool("TRIBOS_SANDBOX") is True  # an unreadable value falls back to the default (on)

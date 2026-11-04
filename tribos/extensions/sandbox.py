@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import secrets
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -72,7 +73,7 @@ def _run_python_impl(
         sandbox_memory_mb,
         sandbox_timeout_s,
     )
-    from tribos.agentic.sandbox.runner import run_code
+    from tribos.scientific.worker import ExecutionJobRequest, get_python_worker
     from tribos.tools.registry import ErrorType, ToolResult
 
     if not sandbox_enabled():
@@ -83,7 +84,8 @@ def _run_python_impl(
             error="Code execution is disabled on this server (set TRIBOS_SANDBOX=on to enable it).",
             error_type=ErrorType.VALIDATION_ERROR,
         )
-    inputs, errors = resolve_inputs(current_scope(), dataset_ids or [])
+    scope = current_scope()
+    inputs, errors = resolve_inputs(scope, dataset_ids or [])
     if errors:
         return ToolResult(
             success=False,
@@ -92,21 +94,75 @@ def _run_python_impl(
             error="; ".join(errors)[:400],
             error_type=ErrorType.DATASET_REQUIRED,
         )
-    report = run_code(
-        code,
-        {i.name: i.path for i in inputs},
-        timeout_s=min(int(timeout_s), sandbox_timeout_s()),
+
+    if scope and scope.user_id:
+        user_id = scope.user_id
+        project_id = scope.project_id or "default_project"
+        task_id = scope.task_id or tool_name
+        run_id = scope.run_id or f"run_{secrets.token_hex(4)}"
+    else:
+        auth_mode = os.getenv("TRIBOS_AUTH_MODE", "").strip().lower()
+        user_id = "local_dev_user" if auth_mode == "disabled" else "anonymous"
+        project_id = "default_project"
+        task_id = tool_name
+        run_id = f"run_{secrets.token_hex(4)}"
+
+    input_files = {i.name: i.path for i in inputs}
+    for i in inputs:
+        ext = os.path.splitext(i.name)[1]
+        id_name = f"{i.dataset_id}{ext}"
+        if id_name not in input_files:
+            input_files[id_name] = i.path
+    input_art_ids = [i.dataset_id for i in inputs]
+
+    worker = get_python_worker()
+    job_req = ExecutionJobRequest(
+        code=code,
+        user_id=user_id,
+        project_id=project_id,
+        task_id=task_id,
+        run_id=run_id,
+        input_artifact_ids=input_art_ids,
+        input_files=input_files,
+        parameters=data or {},
+        timeout_s=min(float(timeout_s), float(sandbox_timeout_s())),
         memory_mb=sandbox_memory_mb(),
-        data=data,
+        allow_repair=True,
     )
-    report["inputs"] = [{"dataset_id": i.dataset_id, "name": i.name, "kind": i.kind} for i in inputs]
-    # The computation id covers the data passed in, so the same script over other inputs is another computation.
+    job_res = worker.execute_job_sync(job_req)
+
     data_key = json.dumps(data, sort_keys=True, default=str) if data is not None else ""
     digest = hashlib.sha256(f"{code}:{dataset_ids}:{data_key}".encode()).hexdigest()[:10]
     cid = f"comp:{tool_name}:{digest}"
-    report["canonical_id"] = cid
-    status = report.get("status")
-    if status == "ok":
+
+    report: dict[str, Any] = {
+        "status": "ok" if job_res.status in ("completed", "repaired") else job_res.status,
+        "exit_code": job_res.exit_code,
+        "stdout": job_res.stdout,
+        "stderr": job_res.stderr,
+        "result": job_res.result,
+        "figures": job_res.figures,
+        "tables": job_res.tables,
+        "downloads": job_res.downloads,
+        "reproducibility_bundle": job_res.reproducibility_bundle,
+        "validation": job_res.validation_report,
+        "runtime_manifest": {
+            "versions": job_res.runtime_versions,
+            "runtime_digest": job_res.runtime_digest,
+            "isolation": job_res.isolation,
+        },
+        "canonical_id": cid,
+        "job_id": job_res.job_id,
+        "seconds": job_res.elapsed_seconds,
+        "inputs": [{"dataset_id": i.dataset_id, "name": i.name, "kind": i.kind} for i in inputs],
+        "error": job_res.error or (job_res.stderr if job_res.exit_code != 0 else None),
+        "timings": job_res.timings,
+    }
+    if job_res.repaired_code:
+        report["repaired_code"] = job_res.repaired_code
+        report["repair_reason"] = job_res.repair_reason
+
+    if job_res.status in ("completed", "repaired"):
         cids = {"computation_id": cid}
         if inputs:
             cids["dataset_id"] = ",".join(i.dataset_id for i in inputs)
@@ -115,15 +171,18 @@ def _run_python_impl(
             tool_name=tool_name,
             data=report,
             canonical_ids=cids,
-            metadata={"sandbox": "subprocess"},
+            metadata={"sandbox": job_res.isolation},
         )
+
     error_type = {
         "timeout": ErrorType.TIMEOUT,
         "policy_violation": ErrorType.VALIDATION_ERROR,
-    }.get(str(status), ErrorType.INTERNAL_ERROR)
-    detail = report.get("error") or status
-    if report.get("violations"):
-        detail = f"{detail}: " + "; ".join(report["violations"][:5])
+        "failed_validation": ErrorType.VALIDATION_ERROR,
+        "unavailable": ErrorType.SIMULATION_FAILED,
+        "overloaded": ErrorType.UPSTREAM_API_ERROR,
+    }.get(str(job_res.status), ErrorType.INTERNAL_ERROR)
+
+    detail = job_res.error or report.get("error") or job_res.status
     return ToolResult(success=False, tool_name=tool_name, data=report, error=str(detail)[:600], error_type=error_type)
 
 

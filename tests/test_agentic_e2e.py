@@ -65,6 +65,7 @@ def test_classic_default_has_no_agentic_artifacts(monkeypatch, tmp_path):
 
 def test_interactive_simulation_waits_for_plan_approval(monkeypatch, tmp_path):
     """An interactive run that routes a simulation pauses until the researcher answers the approval request."""
+    monkeypatch.setenv("TRIBOS_APPROVE_EXPENSIVE", "1")  # asking first is opt-in
     orch, calls, _llm = make_agentic_orchestrator(monkeypatch, tmp_path)
     control = create_control("default_user", interactive=True)
     seen = []

@@ -352,3 +352,19 @@ def test_discovery_matches_species_through_aliases():
     assert "model species" in json.dumps(without.model_dump())
 
 
+
+
+def test_a_self_contained_question_reads_without_the_planner_model():
+    # The planner model plans the literature search; a word problem runs none, and waiting for it took 3.5 s.
+    q = ("A store sells pens at $2 each and notebooks at $5 each. Maria bought 7 items for $26. "
+         "How many notebooks did she buy?")
+
+    def factory(**_kw: Any) -> Any:
+        raise AssertionError("no planner model call for a self-contained question")
+
+    ctx = asyncio.run(qp.build_query_context(
+        query=q, clean_query=q, registry=None, enable_web_search=True, attachments=[], attachment_errors=[],
+        user_id="u", thread_id="t", model_name="m", api_key=None, llm_factory=factory,
+    ))
+    assert ctx.planner_task is None and ctx.timings_ms.get("planner_skipped")
+    assert ctx.scope == "research" and ctx.evidence_need.skip_retrieval

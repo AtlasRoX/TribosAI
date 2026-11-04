@@ -82,7 +82,9 @@ class SubQuestion:
     text: str
     focus: str = ""  # literature | target | simulation | single_cell | clinical | drug | variant | structure | omics | general
     depends_on: list[str] = field(default_factory=list)
-    status: str = "open"  # open | answered | partial | unanswerable
+    status: str = "open"  # open | answered | partial | unanswerable | missing
+    answer_state: str = "open"  # open | answered | partial | missing
+    check_state: str = "unverified"  # checked | supported_by_retrieval | unverified | failed
     evidence_keys: list[str] = field(default_factory=list)
     note: str = ""
     # Readable names of evidence keys set by the phase that added them ("Europe PMC (gap round 1)"); a key without
@@ -102,6 +104,8 @@ class SubQuestion:
             "focus": self.focus,
             "depends_on": list(self.depends_on),
             "status": self.status,
+            "answer_state": self.answer_state,
+            "check_state": self.check_state,
             "evidence_keys": list(self.evidence_keys),
             "evidence_labels": [self.evidence_key_names.get(k) or evidence_key_label(k) for k in self.evidence_keys],
             "note": self.note,
@@ -135,13 +139,23 @@ class AgentState:
     brief_notes: list[str] = field(default_factory=list)  # lines for the <research_brief> in the synthesis request
     scope_notes: list[str] = field(default_factory=list)
     artifacts: dict[str, Any] = field(default_factory=dict)
+    start_time: float = 0.0
     trace: list[dict[str, Any]] = field(default_factory=list)
     draft: str = ""
     draft_round: int = 0
     verification: Any = None
+    tool_policy: Any = None
     bag: dict[str, Any] = field(default_factory=dict)
     _counter: int = 0
     _running_steps: dict[str, dict[str, str]] = field(default_factory=dict)  # step id -> {title, agent} still spinning
+
+    @property
+    def working_memory(self) -> Any:
+        """Active working memory scratchpad for this run."""
+        if not hasattr(self, "_working_memory") or getattr(self, "_working_memory", None) is None:
+            from ..memory.working import WorkingMemory
+            self._working_memory = WorkingMemory(query=self.query)
+        return self._working_memory
 
     @property
     def effort_level(self) -> str:
@@ -179,6 +193,54 @@ class AgentState:
             named = list(getattr(self.ctx, "literature_ids", None) or [])
             if named:
                 kwargs["pinned_ids"] = list(dict.fromkeys([*(kwargs.get("pinned_ids") or []), *named]))
+        from ..tools.policy import active_tool_policy
+
+        pol = self.tool_policy or getattr(self.ctx, "tool_policy", None) or active_tool_policy()
+        if pol is not None:
+            prohibited, reason = pol.is_tool_prohibited(tool_name)
+            if prohibited:
+                res = ToolResult(
+                    success=False,
+                    tool_name=tool_name,
+                    error=f"Not run: {reason}",
+                    error_type=ErrorType.VALIDATION_ERROR,
+                    metadata={"skipped_by_policy": "disabled_by_user", "failure_class": "policy"},
+                )
+                self.trace.append({
+                    "phase": phase,
+                    "tool": tool_name,
+                    "purpose": purpose[:200],
+                    "success": False,
+                    "error_type": "VALIDATION_ERROR",
+                    "seconds": 0.0,
+                })
+                if store:
+                    self.add_result(key or self.next_key(phase, tool_name), res, phase=phase, purpose=purpose)
+                return res
+
+        # Pre-flight dimensional and argument gating (F-06 / P0.6)
+        from ..harness.preflight import PreflightGate
+        pf_ok, pf_reason = PreflightGate.inspect_tool_call(tool_name, kwargs)
+        if not pf_ok:
+            res = ToolResult(
+                success=False,
+                tool_name=tool_name,
+                error=f"Pre-flight gate rejected: {pf_reason}",
+                error_type=ErrorType.VALIDATION_ERROR,
+                metadata={"failure_class": "dimensional_mismatch", "preflight_failed": True},
+            )
+            self.trace.append({
+                "phase": phase,
+                "tool": tool_name,
+                "purpose": purpose[:200],
+                "success": False,
+                "error_type": "VALIDATION_ERROR",
+                "seconds": 0.0,
+            })
+            if store:
+                self.add_result(key or self.next_key(phase, tool_name), res, phase=phase, purpose=purpose)
+            return res
+
         try:
             self.budget.charge_tool(phase)
         except BudgetExhausted as exc:
@@ -207,6 +269,13 @@ class AgentState:
     def add_result(self, key: str, result: Any, *, phase: str, purpose: str, render: bool = True) -> str:
         self.tool_results[key] = result
         self.evidence_labels[key] = {"phase": phase, "purpose": purpose[:240], "render": "1" if render else ""}
+        # Mirror key outputs to working memory for sibling specialist discovery
+        if isinstance(result, dict) or hasattr(result, "data"):
+            data = getattr(result, "data", None) or (result if isinstance(result, dict) else {})
+            if isinstance(data, dict):
+                for k, v in data.items():
+                    if isinstance(v, (int, float, str)) and k in ("stress", "force", "thickness", "mass", "result", "value", "status"):
+                        self.working_memory.set_variable(f"{key.split('.')[-1]}_{k}", v)
         return key
 
     def agent_result_keys(self) -> list[str]:
@@ -262,6 +331,9 @@ class AgentState:
         skipped = [p for p in self.bag.get("skipped_phases") or [] if isinstance(p, dict) and p.get("phase") == key]
         if skipped:
             return {"phase": key, "label": label, "status": "skipped", "reason": str(skipped[-1].get("reason") or "")}
+        not_needed = (self.bag.get("not_needed_phases") or {}).get(key)
+        if not_needed:
+            return {"phase": key, "label": label, "status": "not_needed", "reason": str(not_needed)}
         return {"phase": key, "label": label, "status": "not_run", "reason": ""}
 
     def core_phase_note(self) -> str:
@@ -300,8 +372,10 @@ class AgentState:
     def research_brief(self) -> str:
         lines: list[str] = []
         if self.sub_questions:
-            lines.append("Address each sub-question explicitly; say which ones the evidence cannot answer:")
-            lines.extend(f"- [{q.id}] {q.text}" + (f" (status: {q.status})" if q.status != "open" else "") for q in self.sub_questions)
+            # A checklist for coverage only: the ids stay internal, and the answer follows the user's own structure.
+            lines.append("Points the answer must cover (an internal checklist: do not use it as headings and never print "
+                         "ids; say plainly which points cannot be answered):")
+            lines.extend(f"- {q.text}" + (f" (status: {q.status})" if q.status != "open" else "") for q in self.sub_questions)
         steering = self.bag.get("steering") or []
         if steering:
             lines.append("The researcher added these instructions while the run was in progress (follow them):")
@@ -341,8 +415,8 @@ def core_phase_note(core: dict[str, Any] | None, *, research: bool = True) -> st
         return ""
     status = str(core.get("status") or "ok")
     label = str(core.get("label") or core.get("phase") or "The agent phase")
-    if status == "ok" or (status == "not_run" and not research):
-        return ""
+    if status in ("ok", "not_needed") or (status == "not_run" and not research):
+        return ""  # not_needed: the phase decided the question needs no tool plan (a deliberate choice, not a fallback)
     if status == "fallback":
         reason = str(core.get("reason") or "").strip()
         return f"{label} ran in fallback mode: {reason}" if reason else f"{label} ran in fallback mode (model calls failed)."

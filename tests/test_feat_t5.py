@@ -24,6 +24,13 @@ FAKE_LEAN = textwrap.dedent('''
         sys.exit(1)
     if "sorry" in code:
         print(f"{path}:2:8: warning: declaration uses 'sorry'")
+    # Like real Lean: `#eval IO.println` prints its text, and each `#print axioms` prints a plain report line.
+    for line in code.splitlines():
+        if line.startswith('#eval IO.println "'):
+            print(line.split('"')[1])
+        elif line.startswith("#print axioms "):
+            name = line.split()[-1]
+            print(f"'{name}' depends on axioms: [sorryAx]" if "sorry" in code else f"'{name}' does not depend on any axioms")
     sys.exit(0)
 ''')
 
@@ -162,8 +169,11 @@ def _state(question: str, reply: str | None):
     )
 
 
-def test_math_agent_integration_with_a_fake_model(lean):
+def test_math_agent_integration_with_a_fake_model(lean, monkeypatch):
     from tribos.agentic.formal_proof import FormalProofPhase
+
+    monkeypatch.setenv("TRIBOS_FORMAL_MODE", "auto")  # Lean for every proof question (the default asks for "formal")
+    monkeypatch.setenv("TRIBOS_FORMAL_BACKGROUND", "0")  # the phase's own result, awaited here
 
     phase = FormalProofPhase()
     state = _state("Prove that 2 + 2 = 4.", f"```lean\n{GOOD}```")

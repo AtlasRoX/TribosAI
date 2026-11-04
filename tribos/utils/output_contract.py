@@ -43,6 +43,18 @@ _WORD_RANGE_RE = re.compile(r"(?i)\b(?:between\s+(\d{1,4})\s+and\s+(\d{1,4})|(\d
 _EXACT_WORDS_RE = re.compile(rf"(?i)\b(?:in\s+)?exactly\s+{_N}\s+words?\b")
 _EXACT_LINES_RE = re.compile(rf"(?i)\b(?:in\s+|on\s+|as\s+|using\s+)?exactly\s+{_N}\s+(?:separate\s+|non-?empty\s+)?lines?\b"
                              rf"|\b(?:in|on|as)\s+{_N}\s+lines?\s+(?:only|exactly)\b")
+_EXACT_ITEMS_RE = re.compile(
+    rf"(?i)\b(?:in\s+|as\s+|using\s+)?exactly\s+{_N}\s+(?:separate\s+|numbered\s+|bulleted\s+)?items?\b"
+    rf"|\b(?:in|as)\s+{_N}\s+(?:numbered\s+|bulleted\s+)?items?\s+(?:only|exactly)\b"
+    rf"|\b{_N}\s+numbered\s+items?\s+only\b"
+)
+_MAX_ITEMS_RE = re.compile(
+    rf"(?i)\b(?:at\s+most|no\s+more\s+than|up\s+to|a\s+maximum\s+of|maximum(?:\s+of)?|max\.?)\s+{_N}\s+(?:separate\s+|numbered\s+|bulleted\s+)?items?\b"
+    rf"|\b(?:in\s+)?{_N}\s+items?\s+or\s+(?:less|fewer)\b"
+)
+_NUMBERED_ITEMS_RE = re.compile(
+    r"(?i)\b(?:as\s+)?(?:numbered\s+items?|numbered\s+list)\b|\bnumbered\s+(?:1\s*[-–—]\s*\d+|1\s+to\s+\d+)\b"
+)
 # "Give the solution set on one line": a single line ("each case on one line" is a per-item rule, see _per_item).
 _ONE_LINE_RE = re.compile(r"(?i)\b(?:on|in|as)\s+(?:a\s+)?(?:single|one)\s+line\b")
 # A limit stated without a number and removed: "there is no word limit", "ignore the length limit", multilingual forms.
@@ -98,6 +110,9 @@ class Contract:
     exact_words: int | None = None
     exact_lines: int | None = None
     max_lines: int | None = None
+    exact_items: int | None = None
+    max_items: int | None = None
+    numbered_items: bool = False
     sentences: int | None = None
     plain_text: bool = False
     json_only: bool = False
@@ -111,12 +126,14 @@ class Contract:
     @property
     def active(self) -> bool:
         return any((self.literal is not None, self.max_words, self.min_words, self.exact_words, self.exact_lines,
-                    self.max_lines, self.sentences, self.plain_text, self.json_only, self.no_extra))
+                    self.max_lines, self.exact_items is not None, self.max_items is not None, self.numbered_items,
+                    self.sentences, self.plain_text, self.json_only, self.no_extra))
 
     @property
     def strict_form(self) -> bool:
         """The answer's form is fixed tightly enough that report sections, banners or appended notes break it."""
-        return any((self.literal is not None, self.exact_lines, self.max_lines, self.json_only, self.no_extra,
+        return any((self.literal is not None, self.exact_lines, self.max_lines, self.exact_items is not None,
+                    self.max_items is not None, self.numbered_items, self.json_only, self.no_extra,
                     self.plain_text, self.exact_words, (self.max_words or 10**9) <= 200,
                     (self.sentences or 10**9) <= 3))  # "answer in one sentence" fixes the form as tightly as one line
 
@@ -134,6 +151,14 @@ class Contract:
             parts.append(f"exactly {self.exact_lines} non-empty line(s)")
         if self.max_lines:
             parts.append(f"at most {self.max_lines} line(s)")
+        if self.exact_items is not None:
+            items_str = "numbered item(s)" if self.numbered_items else "item(s)"
+            parts.append(f"exactly {self.exact_items} {items_str}")
+        elif self.max_items is not None:
+            items_str = "numbered item(s)" if self.numbered_items else "item(s)"
+            parts.append(f"at most {self.max_items} {items_str}")
+        elif self.numbered_items:
+            parts.append("numbered items")
         if self.exact_words:
             parts.append(f"exactly {self.exact_words} words")
         if self.min_words and self.max_words:
@@ -233,14 +258,21 @@ def _apply_limits(c: Contract, text: str) -> None:
         if not _per_item(text, m.start(), m.end()):
             events.append((m.start(), m.end(), "exact_lines", 1))
     for rx, attr in ((_EXACT_WORDS_RE, "exact_words"), (_MAX_WORDS_RE, "max_words"), (_MIN_WORDS_RE, "min_words"),
-                     (_EXACT_LINES_RE, "exact_lines"), (_MAX_LINES_RE, "max_lines"), (_SENTENCES_RE, "sentences")):
+                     (_EXACT_LINES_RE, "exact_lines"), (_MAX_LINES_RE, "max_lines"),
+                     (_EXACT_ITEMS_RE, "exact_items"), (_MAX_ITEMS_RE, "max_items"),
+                     (_SENTENCES_RE, "sentences")):
         for m in rx.finditer(text):
-            events.append((m.start(), m.end(), attr, _num(next(g for g in m.groups() if g))))
+            val = _num(next(g for g in m.groups() if g))
+            events.append((m.start(), m.end(), attr, val))
+            if "numbered" in m.group(0).lower():
+                events.append((m.start(), m.end(), "numbered_items", True))
     for m in _WORD_RANGE_RE.finditer(text):
         lo, hi = sorted(int(g) for g in m.groups() if g)
         events.append((m.start(), m.end(), "word_range", (lo, hi)))
     for m in _NO_WORD_LIMIT_RE.finditer(text):
         events.append((m.start(), m.end(), "no_word_limit", None))
+    for m in _NUMBERED_ITEMS_RE.finditer(text):
+        events.append((m.start(), m.end(), "numbered_items", True))
     quoted = [m.span() for m in _QUOTED_RE.finditer(text)]
     for start, end, attr, value in sorted(events, key=lambda e: (e[0], -e[1])):
         mention = re.sub(r"\s+", " ", text[start:end].strip())
@@ -257,6 +289,8 @@ def _apply_limits(c: Contract, text: str) -> None:
             continue
         if attr == "word_range":
             c.min_words, c.max_words, c.exact_words = value[0], value[1], None
+        elif attr == "numbered_items":
+            c.numbered_items = bool(value)
         else:
             setattr(c, attr, value)
     if c.min_words and c.max_words and c.min_words > c.max_words:
@@ -315,6 +349,41 @@ def nonempty_lines(text: str) -> list[str]:
 
 
 _MARKDOWN_RE = re.compile(r"(?m)^\s{0,3}#{1,6}\s|\*\*[^*\n]+\*\*|^\s*```|^\s*>\s|^\s*\|.*\|\s*$|__[^_\n]+__")
+_ITEM_START_RE = re.compile(
+    r"(?m)^[ \t]{0,3}(?:(?:\d{1,3}[\.)]|\([0-9]{1,3}\)|\[[0-9]{1,3}\]|[-*•])\s+|[A-Za-z][\.)]\s+|Item\s+\d+[:.]\s+)",
+)
+_NUMBERED_START_RE = re.compile(
+    r"(?m)^[ \t]{0,3}(?:(?:\d{1,3}[\.)]|\([0-9]{1,3}\)|\[[0-9]{1,3}\])\s+|Item\s+\d+[:.]\s+)",
+)
+_WARNING_BANNER_RE = re.compile(r"(?ms)^\s*>\s*⚠️[^\n]*\n(?:[ \t]*>.*?\n)*\s*")
+_LIMITATIONS_BLOCK_RE = re.compile(r"(?ms)\n{2,}###\s+Evidence limitations\b.*$")
+
+
+def extract_items(text: str) -> list[str]:
+    """Returns top-level items extracted from a list in the text."""
+    numbered = list(_NUMBERED_START_RE.finditer(text))
+    if len(numbered) >= 2:
+        matches = numbered
+    else:
+        matches = list(_ITEM_START_RE.finditer(text))
+    if not matches:
+        return []
+    items: list[str] = []
+    for i, m in enumerate(matches):
+        start = m.start()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        item_raw = text[start:end]
+        if i == len(matches) - 1:
+            paras = re.split(r"\n[ \t]*\n", item_raw)
+            kept = [paras[0]]
+            for p in paras[1:]:
+                if p.startswith((" ", "\t", ">")) or re.match(r"^[ \t]*[-*•]\s+", p):
+                    kept.append(p)
+                else:
+                    break
+            item_raw = "\n\n".join(kept)
+        items.append(item_raw.rstrip())
+    return items
 
 
 def validate(answer: str, contract: Contract) -> list[str]:
@@ -327,6 +396,18 @@ def validate(answer: str, contract: Contract) -> list[str]:
         out.append(f"{len(nonempty_lines(text))} non-empty lines, {contract.exact_lines} required")
     if contract.max_lines is not None and len(nonempty_lines(text)) > contract.max_lines:
         out.append(f"{len(nonempty_lines(text))} lines, at most {contract.max_lines} allowed")
+    if contract.exact_items is not None:
+        items = extract_items(text)
+        if len(items) != contract.exact_items:
+            out.append(f"{len(items)} items, {contract.exact_items} required")
+    if contract.max_items is not None:
+        items = extract_items(text)
+        if len(items) > contract.max_items:
+            out.append(f"{len(items)} items, at most {contract.max_items} allowed")
+    if contract.numbered_items:
+        items = extract_items(text)
+        if items and not all(_NUMBERED_START_RE.match(it) for it in items):
+            out.append("items are not consistently numbered")
     words = word_count(text)
     if contract.max_words is not None and words > contract.max_words:
         out.append(f"{words} words, at most {contract.max_words} allowed")
@@ -346,7 +427,8 @@ def validate(answer: str, contract: Contract) -> list[str]:
 
 def conform(answer: str, contract: Contract) -> str:
     """Repairs that cannot change the content: LF newlines, no surrounding blank lines, a JSON code fence unwrapped
-    when JSON only was asked, and the literal payload when the answer contains exactly it plus wrapping."""
+    when JSON only was asked, stripping injected banners when strict form is active, trimming extraneous prose
+    for exact item contracts, and the literal payload when the answer contains exactly it plus wrapping."""
     text = _normalise_newlines(answer).strip("\n")
     if contract.literal is not None:
         if text.strip() == contract.literal.strip() or contract.literal in text:
@@ -360,9 +442,28 @@ def conform(answer: str, contract: Contract) -> str:
                 return fence.group(1).strip()
             except ValueError:
                 pass
+    if contract.strict_form:
+        text = _WARNING_BANNER_RE.sub("", text).strip("\n")
+        text = _LIMITATIONS_BLOCK_RE.sub("", text).strip("\n")
+        if contract.exact_items is not None:
+            matches = list(_ITEM_START_RE.finditer(text))
+            if len(matches) >= contract.exact_items:
+                start_pos = matches[0].start()
+                last_idx = contract.exact_items - 1
+                end_pos = matches[last_idx + 1].start() if last_idx + 1 < len(matches) else len(text)
+                last_block = text[matches[last_idx].start():end_pos]
+                paras = re.split(r"\n[ \t]*\n", last_block)
+                kept = [paras[0]]
+                for p in paras[1:]:
+                    if p.startswith((" ", "\t", ">")):
+                        kept.append(p)
+                    else:
+                        break
+                actual_end = matches[last_idx].start() + len("\n\n".join(kept).rstrip())
+                text = text[start_pos:actual_end].strip()
     if not contract.preserve_whitespace:
         text = text.strip()
     return text
 
 
-__all__ = ["Contract", "conform", "extract", "mask_instructions", "nonempty_lines", "validate", "word_count", "writer_rule"]
+__all__ = ["Contract", "conform", "extract", "extract_items", "mask_instructions", "nonempty_lines", "validate", "word_count", "writer_rule"]

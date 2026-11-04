@@ -30,7 +30,6 @@ from tribos.axiom.engine import (
     axiom_solve,
     axiom_verify_identity,
 )
-from tribos.axiom.sagemath import run_sagemath_code
 from tribos.axiom.schemas import (
     AxiomCalculusInput,
     AxiomDsolveInput,
@@ -116,10 +115,12 @@ def _wrap_async_executor(tool_name: str, fn: Callable[..., Any]) -> Callable[...
 
 def _wrap_sagemath_executor(tool_name: str) -> Callable[..., Any]:
     def _exec(code: str, timeout_s: int = 60, **kwargs: Any) -> Any:
+        from tribos.agentic.sandbox.gateway import execute
         from tribos.tools.registry import ErrorType, ToolResult
 
         try:
-            res = run_sagemath_code(code, timeout_s=timeout_s)
+            # The gateway owns the permission, policy and limit decisions for every execution path.
+            res = execute(code, engine="sage", timeout_s=timeout_s)
             cid = str(res.get("canonical_id") or "")
             canonical_ids = {"computation_id": cid} if cid else {}
             if res.get("status") == "ok":
@@ -133,11 +134,15 @@ def _wrap_sagemath_executor(tool_name: str) -> Callable[..., Any]:
                 )
             error_msg = str(res.get("error") or "SageMath execution failed")
             failure = str(res.get("failure_class") or "infrastructure")
+            status = str(res.get("status") or "")
             # A fault in the submitted code is a validation error of the action; anything else is the environment.
             error_type = {
                 "timeout": ErrorType.TIMEOUT,
                 "model_code_error": ErrorType.VALIDATION_ERROR,
-            }.get(failure, ErrorType.INTERNAL_ERROR)
+                "policy_violation": ErrorType.VALIDATION_ERROR,
+                "disabled": ErrorType.VALIDATION_ERROR,
+                "forbidden": ErrorType.VALIDATION_ERROR,
+            }.get(failure if failure != "infrastructure" else status, ErrorType.INTERNAL_ERROR)
             return ToolResult(
                 success=False,
                 tool_name=tool_name,
@@ -326,6 +331,66 @@ def register_tools(registry: Any) -> None:
         executor=_wrap_executor("calcula_statistics", calcula_statistics),
     )
 
+    # Accuracy tools (tribos.axiom.accuracy): rigorous bounds, precision loss, falsification, replication, distributions.
+    from tribos.axiom import accuracy as acc
+    from tribos.axiom.schemas import (
+        AxiomCounterexampleInput,
+        AxiomIntervalVerifyInput,
+        AxiomPrecisionCheckInput,
+        CalculaCrossValidateInput,
+        CalculaDistributionTestsInput,
+    )
+
+    accuracy_specs = [
+        ("axiom_interval_verify", "axiom",
+         "Rigorous interval arithmetic (mpmath.iv, outward rounding): a guaranteed enclosure of f over a box, or a "
+         "proof that f > 0, f >= 0, f < 0 or f <= 0 on the whole box by branch and bound, or a refuting point. "
+         "Returns a re-runnable certificate script. 'proved' is a proof; 'undecided' is not evidence.",
+         AxiomIntervalVerifyInput, acc.interval_verify,
+         ["interval", "rigorous", "certified", "bound", "inequality", "proof", "validated_numerics", "enclosure"]),
+        ("axiom_precision_check", "axiom",
+         "Evaluate an expression at 15, 30, 60 and 120 significant digits and in float64, and report how many digits "
+         "agree: detects catastrophic cancellation and ill-conditioning before a float result is trusted.",
+         AxiomPrecisionCheckInput, acc.precision_check,
+         ["precision", "cancellation", "floating_point", "rounding", "stability", "mpmath", "high_precision"]),
+        ("axiom_counterexample_search", "axiom",
+         "Try to falsify a conjectured identity, inequality or integer property (isprime, is_integer, is_square) in "
+         "exact arithmetic over a stated domain: edge cases, then seeded random samples; a small finite integer domain "
+         "is searched exhaustively. Returns a counterexample, or 'none found' (evidence, not proof).",
+         AxiomCounterexampleInput, acc.counterexample_search,
+         ["counterexample", "falsify", "conjecture", "test_claim", "exhaustive", "identity", "inequality", "prime"]),
+        ("calcula_distribution_tests", "analysis",
+         "Distribution checks on a sample: Shapiro-Wilk, D'Agostino K^2, Anderson-Darling and Kolmogorov-Smirnov "
+         "normality tests, skewness, excess kurtosis, bootstrap confidence intervals for mean and median, and Q-Q "
+         "plot points.",
+         CalculaDistributionTestsInput, acc.distribution_tests,
+         ["normality", "shapiro", "anderson", "kolmogorov", "skewness", "kurtosis", "bootstrap", "qq_plot", "distribution"]),
+    ]
+    for name, domain, desc, schema, fn, tags in accuracy_specs:
+        registry.register(
+            ToolUniverseEntry(name=name, description=desc, domain=domain, adapter_type=AdapterType.LOCAL_COMPUTE,
+                              input_schema=schema, canonical_id_types=["computation_id"], timeout_seconds=40.0,
+                              tags=tags, is_async=False),
+            executor=_wrap_executor(name, fn),
+        )
+    from tribos.agentic.sandbox import sandbox_enabled
+
+    if sandbox_enabled():
+        # Runs model-written code twice: gated like the other code tools (`executes_code`).
+        registry.register(
+            ToolUniverseEntry(
+                name="calcula_cross_validate",
+                description=(
+                    "Replicate a computation: run two independently written implementations (each sets `result`, a "
+                    "dict of named values) in the sandbox and compare every quantity, integers exactly and floats "
+                    "within a tolerance. Agreement is independent replication; any difference means one is wrong."),
+                domain="analysis", adapter_type=AdapterType.LOCAL_COMPUTE, input_schema=CalculaCrossValidateInput,
+                canonical_id_types=["computation_id"], timeout_seconds=240.0,
+                tags=["replicate", "cross_validate", "independent", "implementation", "compare", "executes_code"],
+                is_async=False),
+            executor=_wrap_executor("calcula_cross_validate", acc.cross_validate),
+        )
+
     # The verified mathematics agent as one tool: parse -> rule-routed tool loop -> independent verifier
     from tribos.axiom.agent import solve_problem_tool
 
@@ -349,12 +414,21 @@ def register_tools(registry: Any) -> None:
         executor=_wrap_async_executor("axiom_solve_problem", solve_problem_tool),
     )
 
-    # Register SageMath tools
+    # Register SageMath tools. They execute model-written code, so they are gated on the sandbox switch exactly
+    # like the Calcula tools: TRIBOS_SANDBOX=off removes them entirely.
+    from tribos.agentic.sandbox import sagemath_enabled
+
+    if not sagemath_enabled():
+        return
+
     sage_desc = (
         "Execute high-performance Python / SageMath code in a dedicated SageMath environment (supporting algebraic "
         "geometry, number theory, exact calculus, symbolic physics, and combinatorics). Returns stdout, stderr, and canonical id."
     )
-    sage_tags = ["sagemath", "sage", "symbolic", "math", "algebra", "calculus", "physics", "computation"]
+    # `executes_code` is what marks a tool as running model-written code: the planner filters it, the approval flow
+    # gates it, and the request-level "Allow code analysis" option blocks it.
+    sage_tags = ["sagemath", "sage", "symbolic", "math", "algebra", "calculus", "physics", "computation",
+                 "executes_code"]
     for s_name in ("axiom_sagemath", "calcula_run_sagemath"):
         registry.register(
             ToolUniverseEntry(

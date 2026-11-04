@@ -2,9 +2,11 @@
 
 import React, { createContext, useContext, useEffect, useId, useState } from "react";
 import { onUi } from "@/lib/uiEvents";
-import { Check, ChevronRight, Copy } from "lucide-react";
+import { Check, ChevronRight, Copy, PanelRightOpen } from "lucide-react";
+import { type CodeFile, openCode } from "@/lib/codePanel";
 import styles from "./Agentic.module.css";
 import { type CellKind, columnKind, isEmptyCell, isScalarList, listText, tableLayout } from "./tableColumns";
+import { formatNumber } from "@/lib/numberFormat";
 
 export { styles };
 
@@ -31,9 +33,7 @@ export function str(v: unknown): string {
 /** A number with sensible precision for tables; em dash when missing. */
 export function fmt(v: unknown, digits = 3): string {
   if (!isNum(v)) return typeof v === "string" && v ? v : "—";
-  const a = Math.abs(v);
-  if (a !== 0 && (a < 1e-3 || a >= 1e5)) return v.toExponential(2);
-  return Number(v.toFixed(digits)).toString();
+  return formatNumber(v, digits);
 }
 
 export function pct(v: unknown): string {
@@ -68,9 +68,10 @@ export function Pill({ tone = "neutral", title, children }: { tone?: Tone; title
 /** Tone for a generic status word (node, phase, job, sub-question). */
 export function statusTone(status: unknown): Tone {
   const s = str(status).toLowerCase();
-  if (["done", "ok", "succeeded", "success", "answered", "approved", "completed", "supported", "identifiable", "high"].includes(s)) return "ok";
+  if (["done", "ok", "succeeded", "success", "answered", "approved", "completed", "supported", "identifiable", "high", "verified"].includes(s)) return "ok";
   if (["running", "queued", "pending", "in_progress", "waiting_approval", "edited", "auto", "medium"].includes(s)) return "info";
-  if (["partial", "skipped", "timeout", "interrupted", "low", "practically_non_identifiable", "neutral"].includes(s)) return "warn";
+  if (["disabled", "disabled_by_user", "not_applicable", "not_needed", "not_run", "skipped", "neutral"].includes(s)) return "neutral";
+  if (["partial", "timeout", "interrupted", "low", "practically_non_identifiable"].includes(s)) return "warn";
   if (["error", "failed", "missing", "rejected", "cancelled", "contradicts", "structurally_non_identifiable", "exhausted"].includes(s)) return "bad";
   return "neutral";
 }
@@ -217,6 +218,16 @@ export function CopyButton({ text, label = "Copy" }: { text: string; label?: str
     >
       {copied ? <Check style={{ width: 12, height: 12 }} aria-hidden="true" /> : <Copy style={{ width: 12, height: 12 }} aria-hidden="true" />}
       {copied ? "Copied" : label}
+    </button>
+  );
+}
+
+/** Opens code in the right-hand panel (components/CodePanel.tsx). */
+export function OpenCodeButton({ title, files, label = "Open", active = 0 }: { title: string; files: CodeFile[]; label?: string; active?: number }) {
+  return (
+    <button type="button" className={styles.btn} onClick={() => openCode(title, files, active)} aria-label={`${label}: ${title}`}>
+      <PanelRightOpen style={{ width: 12, height: 12 }} aria-hidden="true" />
+      {label}
     </button>
   );
 }

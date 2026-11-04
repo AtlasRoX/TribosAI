@@ -193,3 +193,16 @@ test("streaming tail: unclosed bold and inline code are closed provisionally", (
   assert.equal(stabilizeStreamingTail("Run `npm te"), "Run `npm te`");
   assert.equal(stabilizeStreamingTail("Next **"), "Next");
 });
+
+test("reconcile: a local edit in shown text is patched in place, not retyped or cross-faded", async () => {
+  const { reconcile: rec, alignShownEnd } = await import("../src/lib/smoothText.ts");
+  const body = "For the forced oscillator the response is underdamped with a natural frequency of 5 rad/s and a damping ratio of 0.15, ";
+  const shown = "Executive Summary: " + body + "so the transient decays within a few seconds.";
+  const target = "### Executive Summary\n\n" + body[0].toUpperCase() + body.slice(1) + "so the transient decays within a few seconds.\n\n### 1. Derive";
+  const r = rec(shown, target);
+  assert.equal(r.rewrite, false);
+  assert.ok(target.startsWith(r.shown) && r.shown.endsWith("within a few seconds."), "the reader keeps their place");
+  // A genuinely different answer is still a rewrite.
+  assert.equal(rec(shown, "A completely different answer about something else entirely, with no shared text at all.").rewrite, true);
+  assert.equal(alignShownEnd("short", "other", 0), null);
+});

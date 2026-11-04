@@ -399,6 +399,10 @@ async def orchestrator_runner(
         agent_options=dict(request.get("agent_options") or {}),
         run_control=run_control,
         interactive=run_control.interactive,
+        # A research-project stage runs with both off: recalling the user's other chats carried a Lorenz simulation
+        # into a Collatz project. Its earlier findings arrive as research_context instead.
+        recall_memory=bool(request.get("recall_memory", True)),
+        persist_memory=bool(request.get("persist_memory", True)),
     )
     return res.to_dict()
 

@@ -311,8 +311,11 @@ export interface SubQuestion {
   text?: string;
   focus?: string;
   depends_on?: string[];
-  status?: "pending" | "answered" | "partial" | "missing" | string;
+  status?: "pending" | "answered" | "partial" | "missing" | "open" | string;
+  answer_state?: "open" | "answered" | "partial" | "missing" | string;
+  check_state?: "checked" | "supported_by_retrieval" | "unverified" | "failed" | string;
   evidence_keys?: string[];
+  evidence_labels?: string[];
   note?: string;
 }
 
@@ -491,12 +494,26 @@ export interface MathAgentStep {
 
 /** Verified mathematics agent run (tribos/axiom/agent.py). */
 export interface MathAgentArtifact {
-  status: "verified" | "partially_verified" | "unverified" | "failed";
+  status: "verified" | "partially_verified" | "unverified" | "failed" | "rejected" | "invalidated";
+  invalidated?: boolean;
+  historical?: boolean;
+  invalidation_reason?: string;
+  superseded?: boolean;
   answer?: { text?: string; latex?: string; [k: string]: any };
   verification?: { status: string; level: number; checks?: MathCheck[]; uncertainty?: string[] } | null;
   uncertainty?: string[];
-  /** Empirical P(correct | status) on the held-out benchmark; absent when no answer was given. */
-  confidence?: { p_correct: number; lower_95: number; n: number; fitted_on?: string } | null;
+  /** Empirical P(correct | status) on the held-out benchmark; absent when no answer was given or not verified. */
+  confidence?: {
+    p_correct: number;
+    lower_95: number;
+    n: number;
+    fitted_on?: string;
+    benchmark?: string;
+    split?: string;
+    scope?: string;
+    is_probability?: boolean;
+    limitations?: string;
+  } | null;
   problem?: { text?: string; kind?: string; [k: string]: any };
   steps?: MathAgentStep[];
   metrics?: Record<string, any>;

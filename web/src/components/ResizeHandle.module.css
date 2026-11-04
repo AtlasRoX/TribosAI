@@ -1,0 +1,51 @@
+/* A 7px hit area on the panel edge; a 2px line shows on hover, focus and while dragging. */
+.handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 5;
+  width: 7px;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+
+.right {
+  right: -3px;
+}
+
+.left {
+  left: -3px;
+}
+
+.handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 2px;
+  background: transparent;
+  transition: background 0.12s ease;
+}
+
+/* On a right-hand panel the line sits just inside its edge, which an overflow-clipped panel still shows. */
+.left::after {
+  left: 3px;
+}
+
+.handle:hover::after,
+.handle:focus-visible::after,
+:global(html[data-resizing]) .handle:active::after {
+  background: var(--border-strong);
+}
+
+.handle:focus-visible::after {
+  background: var(--text-muted);
+}
+
+@media (max-width: 900px) {
+  .handle {
+    display: none;
+  }
+}

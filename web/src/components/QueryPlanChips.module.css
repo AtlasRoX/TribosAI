@@ -37,7 +37,8 @@
   --chip-hue: #a78bfa;
 }
 
-.chip[data-type="quantity"] {
+.chip[data-type="quantity"],
+.chip[data-type="ambiguous"] {
   --chip-hue: #f59e0b;
 }
 

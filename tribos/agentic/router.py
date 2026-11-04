@@ -30,7 +30,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
 
-from ..agents.evidence_need import is_closed_computation, is_computation_request
+from ..agents.evidence_need import is_closed_computation, is_computation_request, is_self_contained
 from .budget import BudgetExhausted, RunBudget
 from .config import (
     AGENTIC,
@@ -395,6 +395,13 @@ class SemanticFeatures(BaseModel):
     comparison: bool = False
     exploratory: bool = False
     open_ended: bool = False
+    # The model's own pick among the approaches (an _OPTION_IDS value) and why: it settles a close score without a
+    # second model call.
+    route: str = ""
+    route_reason: str = ""
+    # Does the answer depend on facts outside the question and standard textbook knowledge (a specific product, place,
+    # person, dataset, measured value, published result or current event)? No: no literature or web search is run.
+    needs_outside_information: bool = True
 
     def to_features(self) -> dict[str, float]:
         domains = {
@@ -444,12 +451,22 @@ architecture. Do not answer the question.
 - hypothesis_generation: it asks to propose new conjectures, hypotheses, mathematical formulations, or candidate designs.
   Naming an existing one (the Riemann Hypothesis, Goldbach's conjecture, a null hypothesis) in order to prove it, check
   its status or critique a method is not hypothesis generation
-- contested: it asks to weigh a disputed or comparative conclusion ("is method X better than Y", conflicting bounds or measurements)
+- contested: sources or experts genuinely disagree on the answer (conflicting bounds, measurements or interpretations,
+  an open dispute). An ordinary comparison of methods ("explicit vs implicit integration") is comparison, not contested
 - high_stakes: safety-critical engineering (pressure vessels, structural loads, high voltage, nuclear/thermal limits, code compliance)
 - asks_recommendation: it asks what design, solver, method, or material should be chosen
 - comparison: it compares two or more methods, designs, models, or formulations head to head
 - exploratory: open exploration of mathematical or physical connections with no single expected answer
 - open_ended: broad assessment, survey, or state-of-the-art landscape rather than a single derivation or lookup
+- route: the cheapest approach that fully answers it: "direct" (a focused question: one pass, the mathematics agent,
+  simulation and claim checks), "plan_execute" (independent parts or parallel computations needing a tool plan),
+  "supervisor" (open-ended scope across several domains), "swarm" (exploratory multi-hop, low stakes), "debate" (new
+  hypotheses, or a genuinely disputed safety-critical conclusion; never an ordinary comparison)
+- route_reason: one sentence for the user on why that approach fits
+- needs_outside_information: true only if a correct answer needs facts that are neither in the question nor standard
+  textbook knowledge: a specific product, place, person, dataset, measured value, published result, or anything
+  recent. A calculation, derivation, proof, explanation of an established concept, or comparison of standard methods
+  is false
 Reply with only JSON with exactly these keys."""
 
 
@@ -518,11 +535,42 @@ async def _ask(llm_factory: Callable[..., Any], model_name: str, api_key: str | 
     return _first_json(text)
 
 
+@dataclass
+class SemanticReading:
+    """What the router's features call returned: averaged features, the majority question kind, the number of valid
+    samples, and the model's preferred route (an approach id, "" when none) with its reason."""
+
+    features: dict[str, float] | None = None
+    kind: str | None = None
+    valid: int = 0
+    route: str = ""
+    route_reason: str = ""
+    needs_outside_information: bool = True
+
+
 async def semantic_features(
     query: str, llm_factory: Callable[..., Any], model_name: str, api_key: str | None, samples: int = 1,
     budget: RunBudget | None = None,
 ) -> tuple[dict[str, float] | None, str | None, int]:
     """(averaged features, majority question kind, valid samples); (None, None, 0) when no sample parsed."""
+    reading = await semantic_reading(query, llm_factory, model_name, api_key, samples, budget=budget)
+    return reading.features, reading.kind, reading.valid
+
+
+def start_semantic_reading(query: str, llm_factory: Callable[..., Any], model_name: str, api_key: str | None,
+                           budget: RunBudget | None = None) -> asyncio.Task[SemanticReading]:
+    """Start the features call now, while the rest of the question is still being read: it needs only the question
+    text. choose_framework(prefetched=...) awaits it, and cancels it when the route needs no model."""
+    question, _ = strip_output_instructions(query)
+    return asyncio.ensure_future(
+        semantic_reading(question, llm_factory, model_name, api_key, router_samples(), budget=budget)
+    )
+
+
+async def semantic_reading(
+    query: str, llm_factory: Callable[..., Any], model_name: str, api_key: str | None, samples: int = 1,
+    budget: RunBudget | None = None,
+) -> SemanticReading:
     from ..agents.prompts import utc_date_line
 
     temperature = 0.0 if samples == 1 else 0.7
@@ -543,12 +591,17 @@ async def semantic_features(
             sf.question_kind = "other"
         parsed.append(sf)
     if not parsed:
-        return None, None, 0
+        return SemanticReading()
     vectors = [p.to_features() for p in parsed]
     avg = {f: round(sum(v[f] for v in vectors) / len(vectors), 3) for f in FEATURES}
     kinds = [p.question_kind for p in parsed]
     kind = max(set(kinds), key=kinds.count)
-    return avg, kind, len(parsed)
+    by_id = {v: k for k, v in _OPTION_IDS.items()}
+    votes = [by_id[p.route.strip()] for p in parsed if p.route.strip() in by_id]
+    route = max(set(votes), key=votes.count) if votes else ""
+    reason = next((p.route_reason.strip() for p in parsed if by_id.get(p.route.strip()) == route), "") if route else ""
+    outside = sum(1 for p in parsed if p.needs_outside_information) * 2 >= len(parsed)  # a tie keeps the search
+    return SemanticReading(avg, kind, len(parsed), route, reason[:300], outside)
 
 
 def blend(det: dict[str, float], sem: dict[str, float] | None) -> dict[str, float]:
@@ -583,6 +636,8 @@ def score_terms(f: dict[str, float]) -> dict[str, list[tuple[str, float]]]:
     - Debate is reserved for hypotheses and contested conclusions with stakes (debate gains over voting are small:
       Choi et al., NeurIPS 2025), damped in a brief of three or more parts where one contested point is one part.
     - Swarm only takes low-stakes exploration, because independent agents amplify errors (Cemri et al. 2025)."""
+    # Debate needs "contested" (a claim in dispute), which an ordinary comparison is not: a comparison only adds weight
+    # to a dispute, never starts one (the router prompt says so too; debate costs ~19 model calls against 4-6).
     contested_weight = max(f["high_stakes"], f["recommendation"], f["comparison"])
     hypothesis_term = 2.4 * f["hypothesis"]
     contested_term = 1.0 * f["contested"] + 1.4 * f["contested"] * contested_weight
@@ -792,6 +847,13 @@ def rule_decision(query: str, ctx: Any) -> RoutingDecision:
     if getattr(ctx, "scope", "research") != "research":
         return RoutingDecision(AGENTIC, "not_research", "Not a research question; no architecture is needed.", signals,
                                candidates=[AGENTIC], probabilities={AGENTIC: 1.0})
+    if is_closed_computation(ctx):
+        return RoutingDecision(AGENTIC, "closed_computation", "A self-contained calculation: solved and checked by "
+                               "computation, with no evidence search.", signals, candidates=[AGENTIC],
+                               probabilities={AGENTIC: 1.0}, label=DIRECT_WORKFLOW_LABEL)
+    if is_fully_specified(query, signals):
+        return RoutingDecision(AGENTIC, FULLY_SPECIFIED, FULLY_SPECIFIED_REASON, signals, candidates=[AGENTIC],
+                               probabilities={AGENTIC: 1.0}, label=DIRECT_WORKFLOW_LABEL)
     features = deterministic_features(signals)
     return decide(signals, features, bucket=bucket_key(signals.question_type, features),
                   excluded=set(getattr(ctx, "excluded_modules", None) or ()))
@@ -800,7 +862,7 @@ def rule_decision(query: str, ctx: Any) -> RoutingDecision:
 ROUTER_ADJUDICATE_SYSTEM = """[phase:router_adjudicate]
 You choose how a mathematics, physics, and engineering research assistant answers one question. Options:
 {options}
-Pick the cheapest option that fully answers the question: direct for focused questions, plan_execute only when independent parts or parallel computations need a tool plan, supervisor for open-ended multi-domain scope, debate only for hypotheses or contested high-stakes conclusions.
+Pick the cheapest option that fully answers the question: direct for focused questions, plan_execute only when independent parts or parallel computations need a tool plan, supervisor for open-ended multi-domain scope, debate only for new hypotheses or genuinely disputed safety-critical conclusions (never for an ordinary comparison).
 Reply with only JSON: {{"route": "<option id>", "reason": "<one sentence for the user>"}}"""
 
 _OPTION_TEXT: dict[str, str] = {
@@ -860,16 +922,47 @@ async def choose_framework(
     model_name: str = "",
     api_key: str | None = None,
     budget: RunBudget | None = None,
+    prefetched: asyncio.Future[SemanticReading] | None = None,
 ) -> RoutingDecision:
     """Route one question: blended features, scores with the history nudge, guardrails, then adjudication if close.
 
     `budget` is the run's budget: every router model call (semantic samples, adjudication) is charged to it under
-    the "router" phase, and a call it refuses is skipped (the deterministic route stands)."""
+    the "router" phase, and a call it refuses is skipped (the deterministic route stands). `prefetched` is the
+    features call started early (start_semantic_reading); it is cancelled when the route needs no model."""
+    decision = await _choose(query, ctx, llm_factory=llm_factory, model_name=model_name, api_key=api_key,
+                             budget=budget, prefetched=prefetched)
+    if prefetched is not None and not prefetched.done():
+        prefetched.cancel()
+    return decision
+
+
+SELF_CONTAINED_ROUTE = "self_contained"
+SELF_CONTAINED_ROUTE_REASON = ("Everything needed is in the question (a word problem, proof or calculation from its own "
+                               "definitions), so the direct workflow solves and checks it; no approach needs weighing.")
+
+
+async def _choose(
+    query: str,
+    ctx: Any,
+    *,
+    llm_factory: Callable[..., Any] | None,
+    model_name: str,
+    api_key: str | None,
+    budget: RunBudget | None,
+    prefetched: asyncio.Future[SemanticReading] | None,
+) -> RoutingDecision:
     if getattr(ctx, "scope", "research") != "research":
         return rule_decision(query, ctx)
     signals = routing_signals(query, ctx)
+    if is_self_contained(ctx) and not is_closed_computation(ctx) and not (
+        signals.hypothesis or signals.contested or signals.recommendation or signals.target_evaluation
+    ):
+        # No outside evidence applies and nothing asks for judgement between positions: the router's model calls
+        # (6 s on a word problem) would only confirm the direct workflow.
+        return RoutingDecision(AGENTIC, SELF_CONTAINED_ROUTE, SELF_CONTAINED_ROUTE_REASON, signals,
+                               candidates=[AGENTIC], probabilities={AGENTIC: 1.0}, label=DIRECT_WORKFLOW_LABEL)
     if is_closed_computation(ctx):
-        # A self-contained calculation needs no architecture choice: the verified mathematics agent answers it.
+        # A self-contained calculation needs no heavy architecture: the direct workflow answers it.
         return RoutingDecision(AGENTIC, "closed_computation", "A self-contained calculation: solved and checked by "
                                "computation, with no evidence search.", signals, candidates=[AGENTIC],
                                probabilities={AGENTIC: 1.0}, label=DIRECT_WORKFLOW_LABEL)
@@ -880,11 +973,20 @@ async def choose_framework(
     sem: dict[str, float] | None = None
     kind: str | None = None
     semantic: dict[str, Any] = {"used": False}
+    reading = SemanticReading()
     if llm_factory is not None and semantic_enabled():
         samples = router_samples()
-        question, _ = strip_output_instructions(query)
-        sem, kind, valid = await semantic_features(question, llm_factory, model_name, api_key, samples, budget=budget)
-        semantic = {"used": sem is not None, "samples": samples, "valid_samples": valid, "question_kind": kind}
+        if prefetched is not None:
+            try:
+                reading = await prefetched
+            except Exception as exc:  # noqa: BLE001 - routing falls back to the deterministic signals
+                logger.info("Router features call failed: %s", exc)
+        else:
+            question, _ = strip_output_instructions(query)
+            reading = await semantic_reading(question, llm_factory, model_name, api_key, samples, budget=budget)
+        sem, kind = reading.features, reading.kind
+        semantic = {"used": sem is not None, "samples": samples, "valid_samples": reading.valid, "question_kind": kind,
+                    "needs_outside_information": reading.needs_outside_information if sem is not None else True}
     features = blend(det, sem)
     bucket = bucket_key(kind or signals.question_type, features)
     learned: dict[str, dict[str, float]] = {}
@@ -898,7 +1000,11 @@ async def choose_framework(
                       excluded=set(getattr(ctx, "excluded_modules", None) or ()))
     if len(decision.candidates) < 2 or llm_factory is None:
         return decision
-    picked = await _adjudicate(query, decision, llm_factory, model_name, api_key, budget=budget)
+    if reading.route in decision.candidates:
+        # The features call already named its pick: no second model call.
+        picked: tuple[str, str] | None = (reading.route, reading.route_reason)
+    else:
+        picked = await _adjudicate(query, decision, llm_factory, model_name, api_key, budget=budget)
     if picked is None:
         decision.tie_break = "llm_failed"
         return decision
@@ -973,7 +1079,13 @@ def escalation_triggers(state: Any) -> list[str]:
     # A self-contained calculation, proof or copy (no outside evidence applies) is settled by its checks: neither an
     # uncertain route choice nor sub-questions "lacking evidence" is a concrete unresolved issue critics could fix
     # (audit I05). Contradicting passages, safety-critical content and a fallen-back core step still escalate.
-    from ..agents.evidence_need import is_self_contained
+    from ..config.settings import get_bool
+
+    if not get_bool("TRIBOS_ESCALATE_ON_WEAK_SIGNALS"):
+        # Matched-compute studies find debate ties or loses to self-consistency at several times the tokens
+        # (docs/plans/tribos-research-upgrade-plan.md, 2.3): only a concrete conflict or a safety-critical question
+        # is worth a 40-second critic round. The weaker signals stay available behind the setting.
+        return triggers
 
     if is_self_contained(getattr(state, "ctx", None)):
         core = state.core_phase_status() if hasattr(state, "core_phase_status") else None
@@ -990,7 +1102,12 @@ def escalation_triggers(state: Any) -> list[str]:
     # sources count.
     subs = [q for q in (getattr(state, "sub_questions", None) or []) if not is_computation_request(getattr(q, "text", ""))]
     open_subs = [q for q in subs if getattr(q, "status", "open") != "answered"]
-    if len(open_subs) >= 2 and len(open_subs) * 2 > len(subs):
+    from ..agents.orchestration.presentation import computations_cover_question
+
+    # Code computed and checked every requested value: sub-questions are marked answered only when the deliverables
+    # are assessed after the draft, so "open" here is not missing evidence (the source-needing parts were searched).
+    covered = computations_cover_question(getattr(state, "tool_results", None) or {})
+    if not covered and len(open_subs) >= 2 and len(open_subs) * 2 > len(subs):
         triggers.append(f"{len(open_subs)} of {len(subs)} sub-questions still lack evidence")
     return triggers
 

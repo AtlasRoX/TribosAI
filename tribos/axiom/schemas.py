@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Literal, get_args
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class AxiomSimplifyInput(BaseModel):
-    expression: str = Field(..., min_length=1, max_length=4000, description="Mathematical expression to simplify")
+    expression: str | list[str] | list[Any] | tuple[Any, ...] = Field(
+        ...,
+        description="Mathematical expression string or collection of expressions to simplify",
+    )
     assumptions: dict[str, str] | None = Field(
         default=None,
         description="Optional symbol assumptions mapping variable name to assumption flags (e.g. {'x': 'positive, real'})",
@@ -27,8 +30,41 @@ class AxiomSolveInput(BaseModel):
     )
     domain: str = Field(
         default="complex",
-        description="Solution domain: 'complex' (default) or 'real'",
+        description="Solution domain: 'complex', 'real', 'integer', or 'positive_integer'",
     )
+
+    @field_validator("domain")
+    @classmethod
+    def normalize_domain(cls, v: str) -> str:
+        s = str(v or "complex").strip().lower()
+        if s in ("real", "reals", "r"):
+            return "real"
+        if s in ("integer", "integers", "z"):
+            return "integer"
+        if s in ("positive_integer", "positive_integers", "natural", "n", "positive"):
+            return "positive_integer"
+        if s in ("complex", "c"):
+            return "complex"
+        return s
+
+    @field_validator("variables")
+    @classmethod
+    def sanitize_variables(cls, v: str | list[str] | None) -> str | list[str] | None:
+        if v is None:
+            return None
+
+        def _clean(item: str) -> str:
+            raw = str(item).strip().strip("$")
+            raw = re.split(r"\\in|>|<|>=|<=|=", raw)[0].strip()
+            m = re.search(r"[A-Za-z_]\w*", raw)
+            if not m:
+                raise ValueError(f"Invalid variable identifier: {item!r}")
+            return m.group(0)
+
+        if isinstance(v, str):
+            parts = [p.strip() for p in v.split(",") if p.strip()]
+            return ", ".join(_clean(p) for p in parts)
+        return [_clean(p) for p in v if str(p).strip()]
 
 
 class AxiomCalculusInput(BaseModel):
@@ -182,8 +218,7 @@ class AxiomSolveProblemInput(BaseModel):
     )
 
 
-_Domain = Literal["unspecified", "complex", "real", "rational", "integer", "nonnegative_integer", "positive_integer"]
-_DOMAINS = frozenset(get_args(_Domain))
+_Domain = str
 
 
 class StructuredBranch(BaseModel):
@@ -206,14 +241,15 @@ class StructuredDefinition(BaseModel):
             return data
         data = dict(data)
         domain = data.get("domain")
-        if isinstance(domain, str) and domain not in _DOMAINS:
-            # "positive_integers", "positive integers", "Z+": the same domain spelled differently, read with the same
-            # words the question parser uses; anything it cannot read is left for validation to reject, never widened.
-            from .definitions import domain_from_words  # local: definitions imports sympy
+        if isinstance(domain, str):
+            from .definitions import domain_from_words, is_valid_domain  # local: definitions imports sympy
 
-            mapped = domain_from_words(domain.replace("_", " "))
-            if mapped:
-                data["domain"] = mapped
+            if not is_valid_domain(domain):
+                mapped = domain_from_words(domain.replace("_", " "))
+                if mapped and is_valid_domain(mapped):
+                    data["domain"] = mapped
+                else:
+                    raise ValueError(f"invalid domain {domain!r}")
         # A single formula given without branches, or a branch whose formula is under another key ("formula",
         # "expr", "rule", "value"), is the same definition written differently; its condition is kept as given.
         if not data.get("branches"):
@@ -274,6 +310,22 @@ class StructuredTask(BaseModel):
     divisor: str | None = Field(default=None, max_length=100)
     variable: str | None = Field(default=None, pattern=r"^[A-Za-z]$")
     domain: _Domain | None = None
+
+    @field_validator("domain", mode="before")
+    @classmethod
+    def _validate_task_domain(cls, v: Any) -> Any:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            from .definitions import domain_from_words, is_valid_domain
+
+            if is_valid_domain(v):
+                return v
+            mapped = domain_from_words(v.replace("_", " "))
+            if mapped and is_valid_domain(mapped):
+                return mapped
+            raise ValueError(f"invalid domain {v!r}")
+        return v
     conditions: list[str] = Field(default_factory=list, max_length=4)
     statement: str | None = Field(default=None, max_length=1000)
     line: str | None = Field(default=None, max_length=40, description="zeros: c of a line Re(v) = c the zeros are compared with")
@@ -317,3 +369,40 @@ __all__ = [
     "StructuredDefinition",
     "StructuredTask",
 ]
+
+
+# Accuracy tools (tribos.axiom.accuracy) ------------------------------------------------------------------------
+
+class AxiomIntervalVerifyInput(BaseModel):
+    expression: str = Field(..., min_length=1, max_length=2000, description="f, e.g. 'x**2 - 2*x + 2' or 'sin(x) + x*y'")
+    bounds: dict[str, list[float]] = Field(..., description="Range of every variable, e.g. {'x': [0, 1], 'y': [-2, 2]}")
+    claim: Literal["enclose", "positive", "nonnegative", "negative", "nonpositive"] = Field(
+        default="enclose", description="enclose: rigorous range of f; or prove f > 0, f >= 0, f < 0, f <= 0 on the box")
+
+
+class AxiomPrecisionCheckInput(BaseModel):
+    expression: str = Field(..., min_length=1, max_length=2000, description="f, e.g. '(1 - cos(x))/x**2'")
+    values: dict[str, str | int | float] = Field(default_factory=dict, description="Value of every variable, exact as text, e.g. {'x': '1e-8'}")
+    digits: list[int] | None = Field(default=None, max_length=6, description="Working precisions in significant digits (default 15, 30, 60, 120)")
+
+
+class AxiomCounterexampleInput(BaseModel):
+    claim: str = Field(..., min_length=3, max_length=2000, description="'lhs <op> rhs' (op: <, <=, >, >=, ==, !=) or isprime(expr), is_integer(expr), is_square(expr)")
+    domain: dict[str, dict[str, Any]] = Field(..., description="Per variable: {'type': 'integer'|'real', 'min': .., 'max': ..}")
+    samples: int = Field(default=4000, ge=10, le=20000, description="Points to test (a finite integer domain this small is searched exhaustively)")
+    seed: int = Field(default=0, description="Random seed (reproducible)")
+
+
+class CalculaCrossValidateInput(BaseModel):
+    code_a: str = Field(..., min_length=1, max_length=40000, description="First implementation; must set `result` (a dict of named values)")
+    code_b: str = Field(..., min_length=1, max_length=40000, description="Second, independently written implementation; sets the same `result` keys")
+    rtol: float = Field(default=1e-9, ge=0, le=1, description="Relative tolerance for floats (integers must match exactly)")
+    atol: float = Field(default=1e-12, ge=0, description="Absolute tolerance for floats")
+    keys: list[str] | None = Field(default=None, max_length=200, description="Only compare these quantities")
+
+
+class CalculaDistributionTestsInput(BaseModel):
+    data: list[float] = Field(..., min_length=8, max_length=200000, description="The sample")
+    alpha: float = Field(default=0.05, gt=0, lt=0.5, description="Significance level")
+    bootstrap: int = Field(default=2000, ge=200, le=20000, description="Bootstrap resamples for confidence intervals")
+    seed: int = Field(default=0, description="Random seed (reproducible)")

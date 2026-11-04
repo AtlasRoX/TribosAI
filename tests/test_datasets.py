@@ -264,11 +264,16 @@ async def test_empty_hdf5_is_rejected(store, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_csv_with_non_numeric_column_is_rejected(store):
+async def test_csv_with_non_numeric_column_is_an_ordinary_table_but_not_a_matrix(store):
     df = _sample_df()
     df["label"] = "experiment_A"
+    # An ordinary table may carry text (material names, sample labels): it is accepted with its types (AUDIT-108).
+    rec = await store.create_from_stream("alice", [df.to_csv().encode()], "mixed.csv", _prov())
+    assert rec.validation.dtypes.get("label") == "object"
+    # Declared as an expression matrix, every value must be numeric.
     with pytest.raises(DatasetStoreError) as err:
-        await store.create_from_stream("alice", [df.to_csv().encode()], "mixed.csv", _prov())
+        await store.create_from_stream("alice", [df.to_csv().encode()], "mixed.csv",
+                                       _prov(table_orientation="cells_by_genes"))
     assert (err.value.status_code, err.value.reason_code) == (422, "non_numeric_values")
 
 

@@ -12,8 +12,19 @@ class AxiomFormalCheckInput(BaseModel):
 
 
 def execute_formal_check(lean_code: str) -> Any:
+    from tribos.tools.policy import active_tool_policy
     from tribos.tools.registry import ErrorType, ToolResult
     from tribos.verify.formal import check_lean, lean_statement
+
+    pol = active_tool_policy()
+    if pol is not None and pol.prohibit_formal:
+        return ToolResult(
+            success=False,
+            tool_name="axiom_formal_check",
+            error=pol.formal_reason or "Formal prover disabled by user request.",
+            error_type=ErrorType.VALIDATION_ERROR,
+            metadata={"skipped_by_policy": "disabled_by_user", "failure_class": "policy"},
+        )
 
     result = check_lean(lean_code)
     data = {**result, "lean_code": lean_code, "statement": lean_statement(lean_code)}

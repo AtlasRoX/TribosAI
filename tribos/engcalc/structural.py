@@ -75,12 +75,33 @@ def beam(v: dict[str, Any]) -> Outcome:
     L, E = v["length"], v["elastic_modulus"]
     sec = section_properties(v)
     inertia = float(sec["I"] or 0.0)
-    support, load = v["support"], v["load"]
+    
+    # Normalize unambiguous support and load descriptions (e.g. 'tip point load' -> 'point')
+    support_raw = str(v.get("support") or "simply_supported").lower().strip()
+    if "cantilever" in support_raw or "fixed" in support_raw:
+        support = "cantilever"
+    elif "simply" in support_raw or "pin" in support_raw:
+        support = "simply_supported"
+    else:
+        support = support_raw
+
+    load_raw = str(v.get("load") or "point").lower().strip()
+    if "point" in load_raw or "tip" in load_raw:
+        load = "point"
+    elif "udl" in load_raw or "distribut" in load_raw:
+        load = "udl"
+    else:
+        load = load_raw
+
     out = Outcome(results=[])
     if load == "point":
-        if v.get("point_load") is None:
+        P_val = v.get("point_load")
+        if P_val is None:
+            # Fallback to P or load_value if given
+            P_val = v.get("P") if v.get("P") is not None else v.get("load_value")
+        if P_val is None:
             raise ValueError("A point load needs point_load (N).")
-        P = v["point_load"]
+        P = float(P_val)
         a = v.get("load_position")
         if support == "simply_supported":
             a = L / 2.0 if a is None else a
@@ -112,6 +133,8 @@ def beam(v: dict[str, Any]) -> Outcome:
             M, V, delta = w * L**2 / 2.0, w * L, w * L**4 / (8.0 * E * inertia)
             out.formulas += ["M_max = w L^2 / 2", "delta_tip = w L^4 / (8 E I)"]
     out.results += [
+        Result("second_moment_of_area", "Second moment of area", inertia, "m^4"),
+        Result("deflection_ratio", "Deflection divided by span", delta / L, "1"),
         Result("max_deflection", "Maximum deflection", delta, "m", "mm"),
         Result("max_bending_moment", "Maximum bending moment", M, "N*m", "kN*m"),
         Result("max_shear_force", "Maximum shear force", V, "N", "kN"),
@@ -128,10 +151,11 @@ def beam(v: dict[str, Any]) -> Outcome:
             out.warnings.append("No yield strength (or material) was given, so the bending stress is not checked.")
     else:
         out.warnings.append("No extreme-fibre distance c was given, so the bending stress is not computed.")
-    limit = L / v["deflection_limit_ratio"]
-    out.checks.append(Check("deflection", delta <= limit,
-                            f"deflection {delta * 1e3:.4g} mm against the serviceability limit L/{v['deflection_limit_ratio']:g} "
-                            f"= {limit * 1e3:.4g} mm", utilisation=delta / limit))
+    if v.get("deflection_limit_ratio") is not None:
+        limit = L / v["deflection_limit_ratio"]
+        out.checks.append(Check("deflection", delta <= limit,
+                                f"deflection {delta * 1e3:.4g} mm against the serviceability limit L/{v['deflection_limit_ratio']:g} "
+                                f"= {limit * 1e3:.4g} mm", utilisation=delta / limit))
     depth = sec.get("depth")
     if depth:
         ratio = L / float(depth)
@@ -161,7 +185,7 @@ BEAM = Calculator(
         *SECTION_PARAMS,
         Param("yield_strength", "Pa", "Yield strength, for the stress check.", material="yield_strength", optional=True),
         Param("required_safety_factor", "1", "Required safety factor on yield.", default=1.5),
-        Param("deflection_limit_ratio", "1", "Serviceability limit as a span ratio (L/360 by default).", default=360.0),
+        Param("deflection_limit_ratio", "1", "Optional serviceability limit as a span ratio (e.g. 360 for L/360). No design limit is assumed.", optional=True),
     ),
     compute=beam,
     assumptions=("Linear-elastic, homogeneous, prismatic beam", "Euler-Bernoulli bending (plane sections remain plane)",

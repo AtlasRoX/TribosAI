@@ -29,6 +29,29 @@ const PREAMBLE_PATTERNS = [
   /^(?:i'm\s+looking\s+for|i\s+am\s+looking\s+for|tell\s+me\s+about|give\s+me\s+a\s+summary\s+of|can\s+we\s+look\s+at|about)\s+/i,
 ];
 
+const MATH_SYMBOLS: Record<string, string> = {
+  cdot: "·", times: "×", le: "≤", leq: "≤", ge: "≥", geq: "≥", neq: "≠", ne: "≠", approx: "≈", int: "∫", sum: "Σ",
+  prod: "Π", sqrt: "√", infty: "∞", pi: "π", alpha: "α", beta: "β", gamma: "γ", delta: "δ", theta: "θ", lambda: "λ",
+  mu: "μ", sigma: "σ", omega: "ω", partial: "∂", nabla: "∇", to: "→", rightarrow: "→", in: "∈",
+};
+
+/** LaTeX as plain text for a title: "$\frac{x^4+2y^2}{6}$" -> "(x^4+2y^2)/6", no "$" signs or backslash commands. */
+export function plainMath(text: string): string {
+  return (text || "")
+    .replace(/\\[[\]()]/g, " ") // display and inline math delimiters: \[ \] \( \)
+    .replace(/\\[dt]?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, "($1)/($2)")
+    .replace(/\((\w+)\)\//g, "$1/")
+    .replace(/\/\((\w+)\)/g, "/$1")
+    .replace(/\\(?:left|right|displaystyle)\b/g, "")
+    .replace(/\\(?:quad|qquad)\b|\\[,;! ]/g, " ")
+    .replace(/\\([A-Za-z]+)/g, (_m, name: string) => MATH_SYMBOLS[name] ?? name)
+    .replace(/\\\$/g, "$")
+    .replace(/\$\$/g, "")
+    // A "$" opening or closing math (not money such as "$60") is dropped.
+    .replace(/(?<![\w\\])\$(?!\d)|(?<=[^\s$])\$(?!\d)/g, "")
+    .replace(/[{}]/g, "");
+}
+
 /**
  * Format a single word for title casing, keeping the casing of known acronyms.
  */
@@ -39,6 +62,11 @@ function formatTitleWord(word: string, isFirst: boolean): string {
     if (upper === acr.toUpperCase()) {
       return acr;
     }
+  }
+
+  // Variables and expressions keep their case: "x = 2", "x^2", "(x^4+2y^2)/6".
+  if ((word.length === 1 && /[A-Za-z]/.test(word) && !/^[aAiI]$/.test(word)) || /[\^_=+*/()\d]/.test(word)) {
+    return word;
   }
 
   // Format each part of a hyphenated name (e.g. FFT-based, Runge-Kutta)
@@ -70,7 +98,7 @@ function formatTitleWord(word: string, isFirst: boolean): string {
 export function generateDynamicTitle(prompt: string, maxChars = 52): string {
   if (!prompt || typeof prompt !== "string") return "Investigation";
 
-  const clean = prompt
+  const clean = plainMath(prompt)
     .replace(/```[\s\S]*?```/g, " ") // remove code blocks
     .replace(/https?:\/\/\S+/g, " ")   // remove URLs
     .replace(/\s+/g, " ")

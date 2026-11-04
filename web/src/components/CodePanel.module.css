@@ -1,0 +1,235 @@
+.panel {
+  position: relative;
+  flex: 0 0 auto;
+  width: 0;
+  height: 100vh;
+  overflow: hidden;
+  border-left: 1px solid transparent;
+  background: var(--bg-surface);
+  transition: width 0.32s var(--ease-out), border-color 0.32s var(--ease-out);
+}
+
+/* The open width comes from the resize handle (inline style). */
+.open {
+  border-left-color: var(--border-subtle);
+}
+
+.inner {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  animation: slideIn 0.32s var(--ease-out);
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: none; }
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.titleIcon {
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
+  flex: 0 0 auto;
+}
+
+.titleText {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-heading);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.iconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s var(--ease-spring);
+}
+
+.iconBtn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.iconBtn:hover {
+  background: var(--bg-surface-hover);
+  color: var(--text-main);
+}
+
+.iconBtn:active {
+  transform: scale(0.92);
+}
+
+.iconBtn:focus-visible,
+.tab:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.ok {
+  color: var(--nvidia-green);
+}
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px 10px 0;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border-subtle);
+  scrollbar-width: thin;
+}
+
+.tab {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.2s var(--ease-out);
+}
+
+.tab:hover {
+  color: var(--text-main);
+}
+
+.tabActive {
+  color: var(--text-heading);
+  border-bottom-color: var(--accent);
+}
+
+.meta {
+  display: flex;
+  gap: 12px;
+  padding: 6px 14px;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 0 16px;
+}
+
+.code {
+  margin: 0;
+  padding: 4px 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  /* --bg-code is dark in both themes, so the code view has its own light-on-dark palette */
+  color: #e4e7f7;
+  background: var(--bg-code, #10122a);
+  tab-size: 4;
+}
+
+.code ::selection {
+  background: rgba(130, 150, 255, 0.35);
+  color: #fff;
+}
+
+.line {
+  display: flex;
+  padding-right: 14px;
+}
+
+.line:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.lineNo {
+  flex: 0 0 auto;
+  width: 44px;
+  padding-right: 12px;
+  text-align: right;
+  color: #6b7099;
+  user-select: none;
+}
+
+/* The global inline-code style (tinted box, padding) must not reach the lines of a code listing. */
+.line code {
+  white-space: pre;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
+.output {
+  margin: 12px 14px 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.outputLabel {
+  padding: 5px 10px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-surface-hover);
+}
+
+.output pre {
+  margin: 0;
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-main);
+}
+
+@media (max-width: 900px) {
+  .open {
+    position: fixed;
+    inset: 0 0 0 auto;
+    z-index: 60;
+    width: 100vw;
+    min-width: 0;
+    box-shadow: var(--card-shadow);
+  }
+
+  .inner {
+    width: 100vw;
+    min-width: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel,
+  .inner {
+    transition: none;
+    animation: none;
+  }
+}

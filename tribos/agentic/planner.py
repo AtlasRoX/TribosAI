@@ -52,6 +52,7 @@ The research pipeline has already run its standard searches; their results are s
 - Nodes without dependencies between them run in parallel, so keep chains short and only add depends_on when a node truly needs another's output.
 - Never repeat a call the pipeline already made with the same arguments, and do not plan a call whose answer is already in the pipeline results.
 - A request for computed results (an error between two methods, residuals, step-size or grid convergence, an energy balance, a parameter study) is filled by a computation call such as sandboxed Python, never by a search. Plan it whenever the question asks for those numbers and no pipeline result already reports them. Keep each script short and focused (well under 300 lines).
+- Every call computes the actual system or quantity the question states. Never call a tool on a placeholder, proxy, stand-in or made-up model (for example a guessed formula standing in for an energy integral, or a probe value): when no tool computes the real quantity directly, plan a sandboxed Python script that does, or leave it out.
 - At most @MAX_NODES@ nodes. If the pipeline results already cover the question, return an empty node list.
 - Respect the constraints listed in <constraints>; tools they forbid are not offered.
 @MODE_RULE@
@@ -193,6 +194,16 @@ def select_tools(state: Any, sub_questions: Sequence[Any], k: int = 8, per_sub: 
         for e in found:
             if e not in picked and len(picked) < cap:
                 picked.append(e)
+
+    query = state.clean_query or state.query
+    required = []
+    if re.search(r"\bMonte[ -]Carlo\b", query, re.I):
+        required.append("dynamis_monte_carlo_integrate")
+    if re.search(r"\bFTCS\b|heat\s+equation|\bPDE\b", query, re.I):
+        required.append("dynamis_solve_pde")
+    if re.search(r"\bRK4\b|fourth[ -]order\s+Runge", query, re.I):
+        required.append("dynamis_simulate_ode")
+    add([e for name in required if name not in excluded and (e := registry.get_entry(name)) is not None])
 
     # The literature tool is always offered, unless the policy rules it out (evidence_need.skip_retrieval, "no web"...).
     add(retrieve_tools(registry, state.clean_query or state.query, k=k, exclude=excluded, always=[lit_tool]))

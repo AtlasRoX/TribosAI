@@ -25,6 +25,8 @@ import { PlanApprovalArtifact, ProjectMemoryArtifact } from "@/components/agenti
 import { SandboxAnalysisArtifact } from "@/components/agentic/SandboxAnalysisArtifact";
 import { CardAttentionContext, CardDisclosureContext } from "@/components/agentic/ui";
 import { FEATURE_ARTIFACTS } from "@/components/artifacts/registry";
+import { PlotArtifact, type PlotData } from "@/components/PlotArtifact";
+import { TaskPlanArtifact } from "@/components/TaskPlanArtifact";
 import styles from "./MessageArtifacts.module.css";
 
 /** Why a card needs a look (artifactAttention), by artifact key; absent when it carries no warning. */
@@ -51,14 +53,21 @@ function ArtifactBoundary({
   );
 }
 
+/** Result cards that show the answer itself (simulations, fields, distributions): kept in the clean answer view. */
+const VISUAL_RESULT_KEYS = new Set(["scientific_execution", "monte_carlo", "pde", "uncertainty"]);
+
 export function MessageArtifacts({
   artifacts,
   question,
   taskStatus,
+  visualOnly = false,
 }: {
   artifacts?: ExecutionArtifacts;
   question?: string | null;
   taskStatus?: TaskOutcome | null;
+  /** The clean answer view: only the interactive results (a simulation, a field, a distribution); no evidence,
+   *  verification, solver or trace cards. */
+  visualOnly?: boolean;
 }) {
   const [chosenTab, setChosenTab] = useState<string | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState<boolean>(false); // supporting evidence starts closed: the answer comes first
@@ -179,23 +188,35 @@ export function MessageArtifacts({
 
   return (
     <AttentionContext.Provider value={attention}>
+      {/* 0. The plan of a multi-part question (its parts, tools and outcomes), then a plot it asked for: both shown in
+          full, in the clean view too */}
+      {(artifacts as Record<string, unknown>).task_plan ? (
+        <ErrorBoundary name="Task plan" resetKey={(artifacts as Record<string, unknown>).task_plan}>
+          <TaskPlanArtifact data={(artifacts as Record<string, unknown>).task_plan as { steps?: [] }} />
+        </ErrorBoundary>
+      ) : null}
+      {(artifacts as Record<string, unknown>).plot ? (
+        <ErrorBoundary name="Plot" resetKey={(artifacts as Record<string, unknown>).plot}>
+          <PlotArtifact data={(artifacts as Record<string, unknown>).plot as PlotData} />
+        </ErrorBoundary>
+      ) : null}
       {/* 1. Direct core analytical and physical results (a plan approval is a record of the run: Plan & trace) */}
-      {artifacts.math_agent && (
+      {!visualOnly && artifacts.math_agent && (
         <ArtifactBoundary name="math_agent" open={open["math_agent"]} data={artifacts.math_agent}>
           <MathAgentArtifact data={artifacts.math_agent} />
         </ArtifactBoundary>
       )}
-      {artifacts.ode_verification && (
+      {!visualOnly && artifacts.ode_verification && (
         <ArtifactBoundary name="ode_verification" open={open["ode_verification"]} data={artifacts.ode_verification}>
           <OdeVerificationArtifact data={artifacts.ode_verification} />
         </ArtifactBoundary>
       )}
-      {derivationData && (
+      {!visualOnly && derivationData && (
         <ArtifactBoundary name={derivationKey} open={open[derivationKey]} data={derivationData}>
           <DerivationArtifact data={derivationData} />
         </ArtifactBoundary>
       )}
-      {referenceData && (
+      {!visualOnly && referenceData && (
         <ArtifactBoundary name={referenceKey} open={open[referenceKey]} data={referenceData}>
           <ReferenceDataArtifact data={referenceData} />
         </ArtifactBoundary>
@@ -205,17 +226,18 @@ export function MessageArtifacts({
           <SimulationArtifact data={simData} scan={simScan} />
         </ArtifactBoundary>
       )}
-      {artifacts.sandbox_analysis && (
+      {!visualOnly && artifacts.sandbox_analysis && (
         <ArtifactBoundary name="sandbox_analysis" open={open["sandbox_analysis"]} data={artifacts.sandbox_analysis}>
           <SandboxAnalysisArtifact data={artifacts.sandbox_analysis} />
         </ArtifactBoundary>
       )}
-      {artifacts.model_calibration && (
+      {!visualOnly && artifacts.model_calibration && (
         <ArtifactBoundary name="model_calibration" open={open["model_calibration"]} data={artifacts.model_calibration}>
           <CalibrationArtifact data={artifacts.model_calibration} />
         </ArtifactBoundary>
       )}
       {FEATURE_ARTIFACTS.map(({ key, Component }) => {
+        if (visualOnly && !VISUAL_RESULT_KEYS.has(key)) return null;
         const data = (artifacts as Record<string, unknown>)[key];
         return data ? (
           <ArtifactBoundary key={key} name={key} open={open[key]} data={data}>
@@ -224,10 +246,10 @@ export function MessageArtifacts({
         ) : null;
       })}
 
-      <ReproductionFiles artifacts={artifacts} />
+      {!visualOnly && <ReproductionFiles artifacts={artifacts} />}
 
       {/* 3. Supporting evidence: a tab row over the cards, so secondary detail never sprawls down the page */}
-      {secondarySections.length > 0 && (
+      {!visualOnly && secondarySections.length > 0 && (
         <section ref={deckRef} className={styles.deck} aria-label="Supporting evidence">
           <div className={styles.bar}>
             <span className={styles.heading}>Evidence</span>

@@ -31,6 +31,7 @@ the checker computed, which the bounded correction loop sends back to the writer
 from __future__ import annotations
 
 import bisect
+import hashlib
 import logging
 import math
 import random
@@ -63,11 +64,25 @@ MAX_STATEMENTS = 400
 MAX_TOOL_NUMBERS = 50_000
 
 _CODE_RE = re.compile(r"```.*?```|`[^`\n]*`", re.S)
+def _sentence_at(document: str, position: int) -> str:
+    """The sentence of `document` that contains character `position` (a statement's surrounding words)."""
+    if not document or position < 0:
+        return ""
+    start = max(document.rfind(". ", 0, position), document.rfind("\n", 0, position)) + 1
+    ends = [i for i in (document.find(". ", position), document.find("\n", position)) if i != -1]
+    return document[start:(min(ends) + 1) if ends else len(document)]
+
+
+# A statement over all real numbers: "for all real x", "for every real number", "x ∈ ℝ", "x \in \mathbb{R}".
+_ALL_REALS_RE = re.compile(r"(?i)\bfor\s+(?:all|every|any)\s+real\b|(?:∈|\\in)\s*(?:ℝ|\\mathbb\s*\{?R\}?|\\R\b)"
+                           r"|\bover\s+(?:the\s+)?reals\b")
+# Inline math may end in a spacing command right before a unit ("$0.1\,$m"): the closing $ then touches a letter.
 _SEG_RE = re.compile(
-    r"\$\$(?P<d1>.+?)\$\$|\\\[(?P<d2>.+?)\\\]|\\\((?P<i1>.+?)\\\)|(?<![\\$\w])\$(?!\s)(?P<i2>[^$\n]+?)(?<!\s)\$(?!\w)",
+    r"\$\$(?P<d1>.+?)\$\$|\\\[(?P<d2>.+?)\\\]|\\\((?P<i1>.+?)\\\)"
+    r"|(?<![\\$\w])\$(?!\s)(?P<i2>[^$\n]+?)(?<!\s)\$(?:(?!\w)|(?<=\\[,;:! ]\$))",
     re.S,
 )
-_HEADING_RE = re.compile(r"^\s{0,3}(?:#{1,6}\s+(.+?)\s*#*\s*$|\*\*(.+?)\*\*\s*$)", re.M)
+_HEADING_RE = re.compile(r"^\s{0,3}(?:#{1,6}\s*(.+?)\s*#*\s*$|\*\*(.+?)\*\*\s*$)", re.M)
 # A statement about another case than the one solved is not a claim about this problem.
 _CONDITIONAL_RE = re.compile(
     r"\b(?:if|suppose|assum\w*|in the limit|limiting case|for example|e\.g\.|would|hypothetical\w*|undamped case|"
@@ -100,7 +115,7 @@ class MathClaim:
     claim_id: str
     text: str
     context: str
-    kind: str  # relation | derivative | table_row | condition | grounding | definition
+    kind: str  # relation | derivative | table_row | condition | grounding | definition | heading | refuted | example | instruction
     status: str
     links: list[Link] = field(default_factory=list)
     detail: str = ""
@@ -108,11 +123,16 @@ class MathClaim:
     position: int = 0
     source_text: str = ""  # the answer text the statement was read from (segment or table row)
     lead: str = ""  # the prose just before it ("... steady-state amplitude"), which names the quantity
+    domain: str = ""
+    assumptions: list[str] = field(default_factory=list)
+    quantifiers: list[str] = field(default_factory=list)
+    case_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "claim_id": self.claim_id, "text": self.text, "context": self.context, "kind": self.kind,
             "status": self.status, "detail": self.detail, "defines": self.defines, "source_text": self.source_text[:400],
+            "domain": self.domain, "assumptions": self.assumptions, "quantifiers": self.quantifiers, "case_id": self.case_id,
             "links": [{"left": lk.left, "right": lk.right, "relation": lk.relation, "status": lk.status,
                        "detail": lk.detail, "source": lk.source} for lk in self.links],
         }
@@ -125,6 +145,7 @@ class MathAudit:
     record_revision: str = ""
     variable: str = "t"
     units: dict[str, Any] = field(default_factory=dict)
+    reused: bool = False
 
     def counts(self) -> dict[str, int]:
         out = {PASSED: 0, FAILED: 0, INCONCLUSIVE: 0, UNSUPPORTED: 0}
@@ -140,6 +161,7 @@ class MathAudit:
 
     def to_dict(self) -> dict[str, Any]:
         return {"counts": self.counts(), "variable": self.variable, "record_revision": self.record_revision, "units": self.units,
+                "reused": self.reused,
                 "claims": [c.to_dict() for c in self.claims][:200],
                 "definitions": [d.to_dict() for d in self.definitions][:60]}
 
@@ -151,17 +173,110 @@ class _Statement:
     text: str
     context: str
     position: int
-    kind: str = "relation"  # relation | table_row
+    kind: str = "relation"  # relation | table_row | heading | refuted | example | instruction
     source: str = ""
     lead: str = ""
     around: str = ""  # the words just before and after the math ("for odd $n$", "(even $n$)")
+    domain: str = ""
+    assumptions: list[str] = field(default_factory=list)
+    quantifiers: list[str] = field(default_factory=list)
+    case_id: str = ""
 
 
 def _heading_before(md: str, pos: int) -> str:
     last = ""
     for m in _HEADING_RE.finditer(md, 0, pos):
-        last = (m.group(1) or m.group(2) or "").strip()
+        raw = (m.group(1) or m.group(2) or "").strip()
+        last = re.sub(r"^\s*#{1,6}\s*", "", raw).strip()
     return last[:120]
+
+
+def _is_in_heading(md: str, pos: int) -> bool:
+    line_start = md.rfind("\n", 0, pos) + 1
+    line_end = md.find("\n", pos)
+    line = md[line_start:line_end] if line_end != -1 else md[line_start:]
+    line_strip = line.strip()
+    if re.match(r"^\s{0,3}#{1,6}(?:\s+|$|[^\s#])", line):
+        return True
+    if line_strip.startswith("**") and line_strip.endswith("**") and len(line_strip) > 4:
+        return True
+    return False
+
+
+_REFUTED_CUE_RE = re.compile(
+    r"(?i)\b(?:refut(?:e|es|ed|ing|ation)|disprov(?:e|es|ed|ing)|false\s+claim|false\s+assertion|contradict(?:s|ed|ing|ion)\b.*that|suppose\s+for\s+contradiction|counterexample\s+to\b|hypothesi[sz]\s+that|fallacy|incorrect(?:ly)?\s+asserts?|claim(?:ed)?\s+falsely)\b"
+)
+_INSTRUCTION_CUE_RE = re.compile(
+    r"(?im)^\s*(?:task|instructions?|goal|objective)\s*:\s*"
+)
+
+
+def _extract_quantifiers(tokens: list[Tok]) -> tuple[list[Tok], list[str], list[str], str]:
+    if not tokens:
+        return tokens, [], [], ""
+    quantifiers: list[str] = []
+    assumptions: list[str] = []
+    domain = ""
+
+    # Leading \forall or \exists
+    if tokens[0].kind == "cmd" and tokens[0].value in ("forall", "exists"):
+        sep_idx = None
+        depth = 0
+        for i, tok in enumerate(tokens):
+            if tok.kind == "sym" and tok.value in ("(", "[", "{"):
+                depth += 1
+            elif tok.kind == "sym" and tok.value in (")", "]", "}"):
+                depth -= 1
+            elif depth == 0 and i > 0:
+                if tok.kind == "sym" and tok.value in (",", ":"):
+                    sep_idx = i
+                    break
+                if tok.kind == "cmd" and tok.value in ("quad", "qquad"):
+                    sep_idx = i
+                    break
+        if sep_idx is not None:
+            q_toks = tokens[:sep_idx]
+            rem_toks = tokens[sep_idx + 1:]
+            q_text = _tex(q_toks)
+            quantifiers.append(q_text)
+            tex_str = q_text
+            if "\\mathbb{N}" in tex_str or "\\mathbb{Z}" in tex_str or "integer" in tex_str:
+                domain = "integer"
+            elif "\\mathbb{R}" in tex_str or "real" in tex_str:
+                domain = "real"
+            elif "\\mathbb{C}" in tex_str or "complex" in tex_str:
+                domain = "complex"
+            m_ineq = re.search(r"([A-Za-z]\s*(?:>|<|\\ge|\\geq|\\le|\\leq|\\in)\s*[^,]+)", tex_str)
+            if m_ineq:
+                assumptions.append(m_ineq.group(1).strip())
+            return rem_toks, quantifiers, assumptions, domain
+
+    # Trailing (\forall ...) or (\exists ...)
+    if tokens and tokens[-1].kind == "sym" and tokens[-1].value == ")":
+        depth = 0
+        open_idx = None
+        for i in range(len(tokens) - 1, -1, -1):
+            if tokens[i].kind == "sym" and tokens[i].value == ")":
+                depth += 1
+            elif tokens[i].kind == "sym" and tokens[i].value == "(":
+                depth -= 1
+                if depth == 0:
+                    open_idx = i
+                    break
+        if open_idx is not None and open_idx + 1 < len(tokens):
+            if tokens[open_idx + 1].kind == "cmd" and tokens[open_idx + 1].value in ("forall", "exists"):
+                q_toks = tokens[open_idx + 1:-1]
+                rem_toks = tokens[:open_idx]
+                q_text = _tex(q_toks)
+                quantifiers.append(q_text)
+                if "\\mathbb{N}" in q_text or "\\mathbb{Z}" in q_text:
+                    domain = "integer"
+                m_ineq = re.search(r"([A-Za-z]\s*(?:>|<|\\ge|\\geq|\\le|\\leq|\\in)\s*[^,]+)", q_text)
+                if m_ineq:
+                    assumptions.append(m_ineq.group(1).strip())
+                return rem_toks, quantifiers, assumptions, domain
+
+    return tokens, quantifiers, assumptions, domain
 
 
 def _prefix(md: str, pos: int) -> str:
@@ -223,11 +338,27 @@ def _join_continuations(tokens: list[Tok]) -> list[Tok]:
                 return True
         return False
 
+    def starts_with_relation(line: list[Tok]) -> bool:
+        for tok in line:
+            if tok.kind == "sym" and tok.value in ("(", "[", "{"):
+                return False
+            if tok.kind == "sym" and tok.value == "=":
+                return True
+            if tok.kind == "cmd" and (tok.value in RELATIONS or tok.value in INEQUALITIES):
+                return True
+            if tok.kind == "sym" and tok.value in INEQUALITIES:
+                return True
+            if tok.kind in ("letter", "num", "word"):
+                return False
+        return False
+
     merged: list[list[Tok]] = []
     for line in cleaned:
-        if merged and line and not has_relation(line):
+        if not line:
+            continue
+        if merged and (not has_relation(line) or starts_with_relation(line)):
             merged[-1].extend(line)
-        elif line:
+        else:
             merged.append(line)
     out_tokens: list[Tok] = []
     for k, line in enumerate(merged):
@@ -276,8 +407,36 @@ def _clean_tokens(tokens: list[Tok]) -> list[Tok] | None:
     return out
 
 
+INEQUALITIES_MAP = {
+    "<": "lt",
+    ">": "gt",
+    "le": "le",
+    "leq": "le",
+    "leqslant": "le",
+    "ge": "ge",
+    "geq": "ge",
+    "geqslant": "ge",
+    "neq": "ne",
+    "ne": "ne",
+    "lt": "lt",
+    "gt": "gt",
+}
+
+
+def _split_pmod(tokens: list[Tok]) -> tuple[list[Tok], list[Tok] | None]:
+    for idx, tok in enumerate(tokens):
+        if tok.kind == "cmd" and tok.value in ("pmod", "pod"):
+            stripped = tokens[:idx]
+            mod_toks = tokens[idx + 1:]
+            if mod_toks and mod_toks[0].kind == "sym" and mod_toks[0].value == "{":
+                if mod_toks[-1].kind == "sym" and mod_toks[-1].value == "}":
+                    mod_toks = mod_toks[1:-1]
+            return stripped, mod_toks
+    return tokens, None
+
+
 def _split_relations(tokens: list[Tok]) -> tuple[list[list[Tok]], list[str]] | None:
-    """Terms and the relations between them; None when the statement is an inequality or uses +-."""
+    """Terms and the relations between them; None when the statement has unhandled relations or uses +-."""
     terms: list[list[Tok]] = [[]]
     rels: list[str] = []
     depth = 0
@@ -292,6 +451,10 @@ def _split_relations(tokens: list[Tok]) -> tuple[list[list[Tok]], list[str]] | N
                 rel = "eq"
             elif tok.kind == "cmd" and tok.value in RELATIONS:
                 rel = RELATIONS[tok.value]
+            elif tok.kind == "sym" and tok.value in INEQUALITIES_MAP:
+                rel = INEQUALITIES_MAP[tok.value]
+            elif tok.kind == "cmd" and tok.value in INEQUALITIES_MAP:
+                rel = INEQUALITIES_MAP[tok.value]
             elif (tok.kind == "sym" and tok.value in INEQUALITIES) or (tok.kind == "cmd" and tok.value in INEQUALITIES):
                 return None
             if rel is not None:
@@ -301,9 +464,48 @@ def _split_relations(tokens: list[Tok]) -> tuple[list[list[Tok]], list[str]] | N
         if tok.kind == "cmd" and tok.value in ("pm", "mp", "cdots", "ldots", "dots", "lim", "to"):
             return None
         terms[-1].append(tok)
+    cleaned_terms: list[list[Tok]] = []
+    for i, t in enumerate(terms):
+        stripped, mod_toks = _split_pmod(t)
+        if mod_toks is not None and i > 0:
+            mod_text = _tex(mod_toks)
+            rels[i - 1] = f"equiv_mod:{mod_text}"
+        cleaned_terms.append(stripped)
+    terms = cleaned_terms
     if any(not t for t in terms):
         return None
     return terms, rels
+
+
+def _unpack_tuple_tokens(tokens: list[Tok]) -> list[list[Tok]] | None:
+    """If tokens represent a comma-separated tuple `(a, b, ...)`, unpack into element token lists."""
+    if len(tokens) < 3:
+        return None
+    toks = [t for t in tokens if not (t.kind == "sym" and t.value in ("\\left", "\\right"))]
+    if not (toks[0].kind == "sym" and toks[0].value == "(" and toks[-1].kind == "sym" and toks[-1].value == ")"):
+        return None
+    items: list[list[Tok]] = []
+    current: list[Tok] = []
+    depth = 0
+    for tok in toks[1:-1]:
+        if tok.kind == "sym" and tok.value in ("(", "[", "{"):
+            depth += 1
+            current.append(tok)
+        elif tok.kind == "sym" and tok.value in (")", "]", "}"):
+            depth -= 1
+            current.append(tok)
+        elif depth == 0 and tok.kind == "sym" and tok.value == ",":
+            if not current:
+                return None
+            items.append(current)
+            current = []
+        else:
+            current.append(tok)
+    if current:
+        items.append(current)
+    if len(items) >= 2:
+        return items
+    return None
 
 
 def _strip_unit(term: list[Tok]) -> tuple[list[Tok], str]:
@@ -325,6 +527,11 @@ def _strip_unit(term: list[Tok]) -> tuple[list[Tok], str]:
         if inner and inner[0].kind == "num" and any(
                 (t.kind == "cmd" and t.value == "circ") or (t.kind == "word" and is_unit_word(t.value)) for t in inner):
             toks = toks[:k]
+    # A braced trailing unit "{\rm m}" ({ word }) is the same unit without its braces.
+    if (len(toks) >= 3 and toks[-1].kind == "sym" and toks[-1].value == "}" and toks[-2].kind == "word"
+            and is_unit_word(toks[-2].value) and toks[-3].kind == "sym" and toks[-3].value == "{"):
+        unit = toks[-2].value.strip()
+        toks = toks[:-3]
     while toks and toks[-1].kind == "word" and is_unit_word(toks[-1].value):
         unit = toks.pop().value.strip() + (" " + unit if unit else "")
     if len(toks) >= 2 and toks[-1].kind == "cmd" and toks[-1].value == "circ" and toks[-2].kind == "sym" and toks[-2].value == "^":
@@ -337,7 +544,13 @@ def _strip_unit(term: list[Tok]) -> tuple[list[Tok], str]:
     num_at = next((k for k, t in enumerate(toks) if t.kind == "num"), None)
     if num_at is not None and num_at <= 1:
         k = num_at + 1
-        if k + 2 < len(toks) and toks[k].kind == "cmd" and toks[k].value in ("times", "cdot") and toks[k + 1].value == "10":
+        is_mult = (
+            k + 2 < len(toks)
+            and ((toks[k].kind == "cmd" and toks[k].value in ("times", "cdot"))
+                 or (toks[k].kind == "sym" and toks[k].value in ("*", "×", "·")))
+            and toks[k + 1].value == "10"
+        )
+        if is_mult:
             k += 2
             if k < len(toks) and toks[k].kind == "sym" and toks[k].value == "^":
                 k += 1
@@ -346,14 +559,20 @@ def _strip_unit(term: list[Tok]) -> tuple[list[Tok], str]:
                         k += 1
                     k += 1
                 elif k < len(toks):
-                    k += 1
-                    if k < len(toks) and toks[k].kind == "num" and toks[k - 1].kind == "sym":
+                    if toks[k].kind == "sym" and toks[k].value in ("-", "+"):
+                        k += 1
+                    if k < len(toks) and toks[k].kind == "num":
                         k += 1
         rest = toks[k:]
         if rest and all(t.kind in ("letter", "num") or (t.kind == "sym" and t.value in ("/", "^", "-", "{", "}"))
                         or (t.kind == "cmd" and t.value == "cdot") for t in rest):
-            text = "".join("·" if t.kind == "cmd" else t.value for t in rest)
-            if is_unit_word(text) and rest[0].kind == "letter":
+            # A braced unit ("0.46225\ {\rm m}" tokenizes as { m }) reads like the bare one.
+            core = [t for t in rest if not (t.kind == "sym" and t.value in ("{", "}"))]
+            text = "".join("·" if t.kind == "cmd" else t.value for t in core)
+            # A lone italic capital after a number ("12A = 3", "3B") is an undetermined coefficient times the number;
+            # a unit of that letter is written upright (\mathrm{A}), which tokenizes as a word, not a letter.
+            lone_capital = len(core) == 1 and core[0].value.isupper()
+            if core and is_unit_word(text) and core[0].kind == "letter" and not lone_capital:
                 return toks[:k], (text + (" " + unit if unit else "")).strip()
     return toks, unit
 
@@ -369,8 +588,15 @@ def _literal_ulp(term: list[Tok]) -> float | None:
     exp = 0
     rest = toks[1:]
     if rest:
-        if (len(rest) >= 3 and rest[0].kind == "cmd" and rest[0].value in ("times", "cdot") and rest[1].value == "10"
-                and rest[2].kind == "sym" and rest[2].value == "^"):
+        is_mult = (
+            len(rest) >= 3
+            and ((rest[0].kind == "cmd" and rest[0].value in ("times", "cdot"))
+                 or (rest[0].kind == "sym" and rest[0].value in ("*", "×", "·")))
+            and rest[1].value == "10"
+            and rest[2].kind == "sym"
+            and rest[2].value == "^"
+        )
+        if is_mult:
             tail = rest[3:]
             sign = -1 if tail and tail[0].kind == "sym" and tail[0].value == "-" else 1
             digits = [t for t in tail if t.kind == "num"]
@@ -415,10 +641,10 @@ _BRANCH_WORDS_RE = re.compile(
     r"\b(?:even|odd|otherwise)\b|\\text\s*\{\s*(?:if|for|when|otherwise)|"
     r"\b(?:if|when|for)\s+\$?\s*[A-Za-z]\s*\$?\s*(?:is\b|[<>≤≥]|\\(?:le|ge|lt|gt|leq|geq|neq)\b)", re.I)
 
-_PLAIN_ATOM = (r"(?:[A-Za-z]\w{0,2}\s*\([^()\n=$]{1,30}\)|\d+(?:\.\d+)?|(?<![A-Za-z])[A-Za-z](?![A-Za-z(])"
+_PLAIN_ATOM = (r"(?:[A-Za-z]\w{0,3}\s*\([^()\n=$]{1,30}\)|[-−]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?|(?<![A-Za-z])[A-Za-z]{1,4}(?![A-Za-z(])"
                r"|\((?:[^()\n=$]|\([^()\n=$]*\)){1,60}\))")
-_PLAIN_EXPR = rf"[-−]?\s*{_PLAIN_ATOM}(?:\s*(?:\*\*|[-+*/^×·−])\s*{_PLAIN_ATOM})*"
-_PLAIN_RUN_RE = re.compile(rf"(?<![\w$\\^.]){_PLAIN_EXPR}(?:\s*(?:=|≈)\s*{_PLAIN_EXPR})+(?![\w(])")
+_PLAIN_EXPR = rf"[-−]?[^\S\r\n]*{_PLAIN_ATOM}(?:[^\S\r\n]*(?:\*\*|[-+*/^×·−])[^\S\r\n]*{_PLAIN_ATOM})*"
+_PLAIN_RUN_RE = re.compile(rf"(?<![\w$\\^.}}_]){_PLAIN_EXPR}(?:[^\S\r\n]*(?:=|≈)[^\S\r\n]*{_PLAIN_EXPR})+(?![\w(])")
 
 
 def _plain_segments(md: str) -> list[tuple[int, str, bool]]:
@@ -511,9 +737,11 @@ class _Env:
         self.func_rel: dict[str, float] = {}
         self.func_dec: dict[str, list[str]] = {}
         self.bound_heading: dict[str, str] = {}  # symbol -> heading of the statement that bound it
+        self.bound_case: dict[str, str | None] = {}  # symbol -> case id under which it was bound
         # Functions the question itself defines (axiom/definitions.py: branches, conditions, domains). They are applied
         # through their own definition, never re-bound by a restatement in the answer and never read as a product.
         self.defined: dict[str, dict[str, Any]] = {}
+        self.bounds: dict[str, tuple[float | None, float | None]] = {}
         self.order: list[str] = []  # symbols in the order they were bound (case scopes are cut from this list)
 
     def apply_defined(self, e: Any) -> sp.Expr:
@@ -575,6 +803,26 @@ class _Env:
         if depth > 12:
             raise Unsupported("bindings refer to each other")
         funcs = self.funcs
+
+        def expand_iterates(e: sp.Expr) -> sp.Expr:
+            def replace_iter(node: Any) -> Any:
+                if not isinstance(node, AppliedUndef):
+                    return node
+                name = type(node).__name__
+                m = re.fullmatch(r"(.+)__pow_(\d+)", name)
+                if not m:
+                    return node
+                base_name, k = m.group(1), int(m.group(2))
+                c = canonical_name(base_name)
+                if c not in funcs and c not in self.defined:
+                    return node
+                cur = node.args[0]
+                for _ in range(k):
+                    cur = sp.Function(base_name)(cur)
+                return cur
+            return e.replace(lambda x: isinstance(x, AppliedUndef), replace_iter)
+
+        expr = expand_iterates(expr)
 
         def is_bound_app(e: Any) -> bool:
             if not isinstance(e, AppliedUndef):
@@ -672,6 +920,13 @@ def _scale(expr: sp.Expr) -> float:
     return best
 
 
+# "B=(0.909,0.6146)" (a labelled point, written with or without spaces) and "D(B)=7.902" (a value at one).
+_POINT_LABEL_RE = re.compile(
+    r"^\s*[A-Z](?:_\{?\w+\}?)?\s*=\s*(?:\\left)?\s*\(\s*-?[\d.]+\s*,\s*-?[\d.]+(?:\s*,\s*-?[\d.]+)?\s*(?:\\right)?\s*\)\s*$")
+_POINT_VALUE_RE = re.compile(r"^\s*[A-Za-z]\w*(?:_\{?\w+\}?)?\s*\(\s*[A-Z]\s*\)\s*(?:=|\\approx)")
+_PART_HEADING_RE = re.compile(r"^\s*(?:#{1,6}\s*)?(?:part\s+)?\(?\d{1,2}[.):]\s+\S", re.I)
+
+
 def _heading_of(claim: MathClaim) -> str:
     return claim.context.split(" · ")[0]
 
@@ -680,12 +935,20 @@ def _short(text: str, limit: int = 70) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def _fmt(v: complex | float) -> str:
-    if isinstance(v, complex):
-        if abs(v.imag) > 1e-12 * max(1.0, abs(v.real)):
-            return f"{v.real:.6g}{v.imag:+.6g}i"
-        v = v.real
-    return f"{v:.6g}"
+def _fmt(v: Any) -> str:
+    if isinstance(v, (int, sp.Integer)):
+        return str(v)
+    if isinstance(v, sp.Rational):
+        fl = float(v)
+        return str(int(fl)) if fl.is_integer() else f"{fl:.6g}"
+    try:
+        c = complex(v)
+    except Exception:
+        return str(v)
+    if abs(c.imag) > 1e-12 * max(1.0, abs(c.real)):
+        return f"{c.real:.6g}{c.imag:+.6g}i"
+    r = c.real
+    return f"{r:.6g}"
 
 
 @dataclass
@@ -699,6 +962,7 @@ class _Term:
     bare_fn: bool = False
     integer_literal: bool = False
     log10_expr: sp.Expr | None = None  # the term with a base-less \log read as base 10 (None: no bare \log)
+    unit: str = ""
 
 
 class _Auditor:
@@ -713,7 +977,13 @@ class _Auditor:
                 if cname in {canonical_name(f) for f in functions}:
                     continue
                 try:
-                    params[cname] = sp.Rational(str(p["value"]))
+                    value = p["value"]
+                    if p.get("unit"):
+                        from ..physis.units import get_unit_registry
+
+                        unit = str(p["unit"]).replace("·", "*").replace("Ω", "ohm").replace("μ", "u")
+                        value = get_unit_registry().Quantity(float(value), unit).to_base_units().magnitude
+                    params[cname] = sp.Rational(str(value))
                 except (TypeError, ValueError, KeyError):
                     continue
         self.env = _Env(variable, params, functions)
@@ -722,6 +992,7 @@ class _Auditor:
         # Names bound per case ("Case A: n = 40", "Case B: n = 41", a disproof's tested n): a second value opens a new
         # case scope instead of contradicting the first.
         self.case_scoped = {canonical_name(n) for n in problem.get("case_scoped") or ()}
+        self._since_label: set[str] = set()  # names bound since the last labelled point (A = (x, y))
         # The question's labelled cases ({"Case A": {"n": "40"}}): a statement under a case label is evaluated with
         # that case's bindings even when the answer does not restate them.
         self.cases: dict[str, dict[str, str]] = {str(c["id"]): dict(c.get("bindings") or {})
@@ -730,9 +1001,17 @@ class _Auditor:
         self.piecewise: set[str] = set()  # answer functions written branch by branch
         # The problem's unknowns (solve / inequality / extremum): "x = 0" names a case examined, never binds x.
         self.unknowns = {canonical_name(u) for u in unknowns or ()}
+        for d in problem.get("definitions") or []:
+            if isinstance(d, dict) and d.get("parameter"):
+                self.unknowns.add(canonical_name(d["parameter"]))
+        if problem.get("variable"):
+            self.unknowns.add(canonical_name(problem["variable"]))
+        for sym in (problem.get("assumptions") or ()):
+            self.unknowns.add(canonical_name(sym))
         self.functions = functions
         self.claims: list[MathClaim] = []
         self.definitions: list[MathClaim] = []
+        self.seen_claims: set[tuple[str, str, str, str]] = set()
         # (claim, link index, a, b, relation, heading, symbols unknown when it was deferred)
         self.pending: list[tuple[MathClaim, int, _Term, _Term, str, str, frozenset[str]]] = []
         self._n = 0
@@ -747,7 +1026,28 @@ class _Auditor:
             unit = ""
         else:
             toks = stripped
-        ctx = ParseContext(functions=set(self.functions), variable=str(self.env.var))
+        symbols = (
+            set(self.unknowns)
+            | {canonical_name(str(self.env.var))}
+            | set(self.env.params)
+            | set(self.env.values)
+            | set(self.case_scoped)
+            | set(self.env.defined)
+        )
+        prob = (self.record.problem if self.record else None) or {}
+        is_symbol_i = (
+            "i" in symbols
+            or str(self.env.var) == "i"
+            or any(canonical_name(s) == "i" for s in self.unknowns)
+            or any(d.get("parameter") == "i" for d in (prob.get("definitions") or ()) if isinstance(d, dict))
+            or "i" in (prob.get("assumptions") or ())
+            or bool(re.search(r"\b(?:non[\s-]?negative\s+integer|positive\s+integer|integer|natural|index)\s+i\b|\bi\s+(?:is|in|a|as|be|to\s+be)\s+(?:an?\s+)?(?:non[\s-]?negative\s+integer|positive\s+integer|integer|natural|index)\b", self.query or "", re.I))
+            or (prob.get("domain") in ("integer", "nonnegative_integer", "positive_integer", "real") and str(self.env.var) in ("i", "t"))
+        )
+        if is_symbol_i:
+            symbols.add("i")
+        imaginary_i = not is_symbol_i
+        ctx = ParseContext(functions=set(self.functions), variable=str(self.env.var), symbols=symbols, imaginary_i=imaginary_i)
         text = _tex(toks)
         ulp = _literal_ulp(toks)
         if unit in ("deg", "degree", "degrees", "°"):
@@ -760,7 +1060,23 @@ class _Auditor:
                 deg.ulp = deg.ulp * math.pi / 180 if deg.ulp is not None else None
                 deg.text = text + "°"
             return deg
-        return self._term_in(toks, ctx, text, ulp)
+        term = self._term_in(toks, ctx, text, ulp)
+        if unit and term.expr is not None:
+            from ..physis.units import get_unit_registry
+
+            try:
+                normal_unit = unit.replace("\\cdot", "*").replace("·", "*").replace("{", "").replace("}", "")
+                normal_unit = normal_unit.replace("Ω", "ohm").replace("μ", "u").replace("µ", "u")
+                factor = sp.Rational(str(get_unit_registry().Quantity(1, normal_unit).to_base_units().magnitude))
+                term.expr *= factor
+                if term.log10_expr is not None:
+                    term.log10_expr *= factor
+                if term.ulp is not None:
+                    term.ulp *= abs(float(factor))
+                term.unit = unit
+            except Exception:  # an unrecognised or offset unit cannot justify a mathematical contradiction
+                return replace(term, expr=None, error=f"unit conversion not supported: {unit}")
+        return term
 
     def _term_in(self, toks: list[Tok], ctx: ParseContext, text: str, ulp: float | None) -> _Term:
         try:
@@ -776,6 +1092,7 @@ class _Auditor:
             # "\log" without a base is natural in mathematics and base 10 in much engineering text: read it both ways.
             try:
                 log10_expr = parse_tokens(toks, ParseContext(functions=set(ctx.functions), variable=ctx.variable,
+                                                             symbols=set(ctx.symbols), imaginary_i=ctx.imaginary_i,
                                                              log_base=10))
             except Exception:  # noqa: BLE001 - parsed once already; a failure here only drops the second reading
                 log10_expr = None
@@ -812,6 +1129,28 @@ class _Auditor:
                     coef_abs += 10.0 ** (-places)
         floor = (1e-6 if numeric_integral else 1e-9) * max(1.0, scale)
         return max(abs_tol, floor) + coef_abs, rel_tol
+
+    @staticmethod
+    def _misrounded(a: _Term, b: _Term, lv: complex, rv: complex, tol: float) -> bool:
+        """A printed literal on one side within one unit of its last place of the computed other side, yet neither its
+        rounding (within half a unit) nor its truncation (toward zero, under one unit): "arctan(196/99) ~ 1.2" for
+        1.10308, whose rounding and truncation are both 1.1."""
+        if (a.ulp is None) == (b.ulp is None):
+            return False
+        lit, printed, true = (a, lv, rv) if a.ulp is not None else (b, rv, lv)
+        other = b if lit is a else a
+        # Only against a closed numeric expression (arctan(196/99), sqrt(3)): a symbol or function may carry the
+        # rounding of values stated earlier ("P" from a rounded X), and the writer rightly rounds the exact value.
+        if other.expr is None or other.expr.free_symbols or other.refs or other.decimals:
+            return False
+        if abs(printed.imag) > 1e-12 or abs(true.imag) > 1e-12:
+            return False
+        u = float(lit.ulp or 0.0)
+        slack = max(0.0, tol - u)  # tolerance from other sources (inherited rounding, coefficients, the floor)
+        p, v = printed.real, true.real
+        rounded = abs(v - p) <= 0.5 * u * 1.000001 + slack
+        truncated = (p == 0 or v == 0 or (p > 0) == (v > 0)) and -slack <= abs(v) - abs(p) < u + slack
+        return not (rounded or truncated)
 
     def _inherited_abs(self, a: _Term, b: _Term, base_diff: complex) -> float:
         """How much the comparison can move from rounding in the values it uses that were bound from printed decimals:
@@ -875,33 +1214,138 @@ class _Auditor:
         extra_abs, extra_rel = self.env.precision_of(a.expr, b.expr)
         fl, fr = left.free_symbols, right.free_symbols
         integral = left.has(sp.Integral) or right.has(sp.Integral)
-        if fl != fr:
+        if rel in ("eq", "approx") and fl != fr:
             return "equation", f"unknowns {', '.join(sorted(str(s) for s in (fl ^ fr)))[:80]}"
-        if not fl:
+        if rel in ("lt", "gt", "le", "ge") and fl != fr:
+            # Condition on variables or domain constraint (e.g. x <= y, or n >= 2, k >= 1)
+            sym_side = fl if not fr else (fr if not fl else None)
+            if sym_side and len(sym_side) == 1:
+                sym = next(iter(sym_side))
+                c_val = right if not fr else left
+                if c_val.is_number:
+                    num_c = float(c_val)
+                    c_name = canonical_name(sym.name)
+                    if (not fr and rel in ("ge", "gt")) or (not fl and rel in ("le", "lt")):
+                        cur_low = self.env.bounds.get(c_name, (None, None))[0]
+                        self.env.bounds[c_name] = (max(cur_low or num_c, num_c), self.env.bounds.get(c_name, (None, None))[1])
+                    elif (not fr and rel in ("le", "lt")) or (not fl and rel in ("ge", "gt")):
+                        cur_hi = self.env.bounds.get(c_name, (None, None))[1]
+                        self.env.bounds[c_name] = (self.env.bounds.get(c_name, (None, None))[0], min(cur_hi or num_c, num_c))
+                    return PASSED, f"domain constraint on {sym.name}"
+            return INCONCLUSIVE, f"condition on variables {', '.join(sorted(str(s) for s in (fl | fr)))[:80]}"
+        if rel.startswith("equiv_mod:") and (fl or fr):
+            mod_str = rel.split(":", 1)[1]
+            try:
+                mod_expr = self.env.resolve(parse_tokens(tokenize(mod_str), ParseContext(symbols=set(self.unknowns))))
+                if not integral and sp.simplify(sp.Mod(left - right, mod_expr)) == 0:
+                    return PASSED, ""
+            except Exception:
+                pass
+            return INCONCLUSIVE, f"congruence condition on {', '.join(sorted(str(s) for s in (fl | fr)))[:80]}"
+        all_syms = sorted(fl | fr, key=lambda s: s.name)
+        if not all_syms:
             lv, rv = _as_complex(left), _as_complex(right)
             if lv is None or rv is None:
                 return INCONCLUSIVE, "could not be evaluated numerically"
             scale = max(abs(lv), abs(rv), _scale(left), _scale(right))
             abs_tol, rel_tol = self._tolerance(a, b, rel, scale, integral)
             abs_tol, rel_tol = abs_tol + self._inherited_abs(a, b, lv - rv), max(rel_tol, extra_rel)
-            if abs(lv - rv) <= abs_tol + rel_tol * max(abs(lv), abs(rv)):
+            tol = abs_tol + rel_tol * max(abs(lv), abs(rv))
+
+            if rel.startswith("equiv_mod:"):
+                mod_str = rel.split(":", 1)[1]
+                try:
+                    mod_expr = self.env.resolve(parse_tokens(tokenize(mod_str), ParseContext(symbols=set(self.unknowns))))
+                    mv = complex(sp.N(mod_expr))
+                except Exception:
+                    try:
+                        mv = complex(float(mod_str))
+                    except Exception:
+                        mv = None
+                if mv is not None and abs(mv.imag) < 1e-9 and abs(mv.real) > 1e-9:
+                    m_val = abs(mv.real)
+                    diff = (lv.real - rv.real) / m_val
+                    err = abs(diff - round(diff)) * m_val
+                    if abs(lv.imag) < 1e-9 and abs(rv.imag) < 1e-9 and err <= tol:
+                        return PASSED, ""
+                    return FAILED, f"{_short(a.text)} ({_fmt(lv)}) is not congruent to {_short(b.text)} ({_fmt(rv)}) modulo {mod_str}"
+                return INCONCLUSIVE, f"unknown modulus {mod_str}"
+
+            if rel in ("lt", "gt", "le", "ge", "ne"):
+                if abs(lv.imag) > 1e-9 or abs(rv.imag) > 1e-9:
+                    return INCONCLUSIVE, "inequality on complex values"
+                lr, rr = lv.real, rv.real
+                ok = False
+                if rel == "lt":
+                    ok = (lr < rr + tol) and not (lr >= rr and tol == 0.0)
+                elif rel == "le":
+                    ok = (lr <= rr + tol)
+                elif rel == "gt":
+                    ok = (lr > rr - tol) and not (lr <= rr and tol == 0.0)
+                elif rel == "ge":
+                    ok = (lr >= rr - tol)
+                elif rel == "ne":
+                    ok = abs(lr - rr) > tol
+                if ok:
+                    return PASSED, ""
+                op_str = {"lt": "<", "le": "<=", "gt": ">", "ge": ">=", "ne": "!="}.get(rel, rel)
+                return FAILED, f"{_short(a.text)} evaluates to {_fmt(lv)}, which is not {op_str} {_short(b.text)} ({_fmt(rv)})"
+
+            if abs(lv - rv) <= tol and not self._misrounded(a, b, lv, rv, tol):
                 return PASSED, ""
-            return FAILED, f"{_short(a.text)} evaluates to {_fmt(lv)}, {_short(b.text)} to {_fmt(rv)}"
-        # An identity in the shared free symbols, tested at sample points.
-        syms = sorted(fl, key=lambda s: s.name)
+            case_info = f" (case: {self.current_case})" if self.current_case else ""
+            used = {k: v for k, v in self.env.values.items() if (a.expr and sp.Symbol(k) in a.expr.free_symbols) or (b.expr and sp.Symbol(k) in b.expr.free_symbols)}
+            substs = used if used else self.env.values
+            subst_info = f" with {', '.join(f'{k}={_fmt(v)}' for k, v in substs.items())}" if substs else ""
+            return FAILED, f"{_short(a.text)} evaluates to {_fmt(lv)}, {_short(b.text)} to {_fmt(rv)}{case_info}{subst_info}"
+        # An identity or inequality in the shared free symbols, tested at sample points.
+        syms = all_syms
+        if rel in ("eq", "approx") and not integral:
+            try:
+                if sp.simplify(left - right) == 0:
+                    return PASSED, ""
+            except Exception:
+                pass
+        mod_val = None
+        if rel.startswith("equiv_mod:"):
+            mod_str = rel.split(":", 1)[1]
+            try:
+                mod_expr = self.env.resolve(parse_tokens(tokenize(mod_str), ParseContext(symbols=set(self.unknowns))))
+                if not integral:
+                    if sp.simplify(sp.Mod(left - right, mod_expr)) == 0:
+                        return PASSED, ""
+                mod_val = float(sp.N(mod_expr))
+            except Exception:
+                try:
+                    mod_val = float(mod_str)
+                except Exception:
+                    return INCONCLUSIVE, f"unknown modulus {mod_str}"
+
         try:
             fa = sp.lambdify(syms, _numeric_integrals(left), modules=["mpmath"])
             fb = sp.lambdify(syms, _numeric_integrals(right), modules=["mpmath"])
         except Exception:  # noqa: BLE001
             return INCONCLUSIVE, "could not be evaluated numerically"
+
         rng = random.Random(7)
-        t_values = [0.37, 1.13, 2.71, 4.4, 6.9, 0.05]
+        prob = (self.record.problem if self.record else None) or {}
+        is_int_sym = {s: (s.name in ("n", "k", "m", "i", "j") or "integer" in prob.get("domain", "")) for s in syms}
+        t_values = [1.0, 2.0, 3.0, 5.0, 7.0, 11.0] if all(is_int_sym.values()) else [0.37, 1.13, 2.71, 4.4, 6.9, 0.05]
         ok = bad = 0
         worst = ""
         for k in range(6):
             point = []
             for s in syms:
-                point.append(t_values[k] if s == self.env.var else rng.uniform(0.35, 2.2))
+                b_low = self.env.bounds.get(canonical_name(s.name), (None, None))[0]
+                if is_int_sym.get(s):
+                    start_val = max(1.0, b_low) if b_low is not None else 1.0
+                    pt = float(start_val + k)
+                elif s == self.env.var:
+                    pt = t_values[k] if b_low is None or t_values[k] >= b_low else float(b_low + k * 0.5)
+                else:
+                    base_min = max(0.35, b_low) if b_low is not None else 0.35
+                    pt = rng.uniform(base_min, base_min + 1.85)
+                point.append(pt)
             try:
                 lv, rv = complex(fa(*point)), complex(fb(*point))
             except Exception:  # noqa: BLE001 - a singular sample point is skipped
@@ -910,7 +1354,31 @@ class _Auditor:
                 continue
             abs_tol, rel_tol = self._tolerance(a, b, rel, max(abs(lv), abs(rv)), integral)
             abs_tol, rel_tol = abs_tol + 0.5 * extra_abs, max(rel_tol, extra_rel)
-            if abs(lv - rv) <= abs_tol + rel_tol * max(abs(lv), abs(rv)):
+            tol = abs_tol + rel_tol * max(abs(lv.real), abs(rv.real))
+
+            sample_ok = False
+            if rel.startswith("equiv_mod:") and mod_val is not None:
+                if abs(lv.imag) < 1e-9 and abs(rv.imag) < 1e-9:
+                    diff = (lv.real - rv.real) / mod_val
+                    err = abs(diff - round(diff)) * mod_val
+                    sample_ok = (err <= tol)
+            elif rel in ("lt", "gt", "le", "ge", "ne"):
+                if abs(lv.imag) < 1e-9 and abs(rv.imag) < 1e-9:
+                    lr, rr = lv.real, rv.real
+                    if rel == "lt":
+                        sample_ok = (lr < rr + tol) and not (lr >= rr and tol == 0.0)
+                    elif rel == "le":
+                        sample_ok = (lr <= rr + tol)
+                    elif rel == "gt":
+                        sample_ok = (lr > rr - tol) and not (lr <= rr and tol == 0.0)
+                    elif rel == "ge":
+                        sample_ok = (lr >= rr - tol)
+                    elif rel == "ne":
+                        sample_ok = abs(lr - rr) > tol
+            else:
+                sample_ok = abs(lv - rv) <= tol
+
+            if sample_ok:
                 ok += 1
             else:
                 bad += 1
@@ -918,26 +1386,93 @@ class _Auditor:
                     at = ", ".join(f"{s}={v:.3g}" for s, v in zip(syms, point, strict=True))
                     worst = f"at {at}: {_fmt(lv)} vs {_fmt(rv)}"
         if bad:
-            return FAILED, f"{_short(a.text)} and {_short(b.text)} differ ({worst})"
-        if ok >= 3:
-            return PASSED, ""
-        return INCONCLUSIVE, "too few valid sample points"
+            if rel in ("lt", "gt", "le", "ge", "ne"):
+                # A counterexample refutes a universal inequality when every variable's domain was declared, so the
+                # sampled point is inside it (AUDIT-023); with undeclared domains the intended range is unknown.
+                declared = all(self.env.bounds.get(canonical_name(s.name), (None, None))[0] is not None for s in syms)
+                if declared:
+                    op_label = {"lt": "<", "le": "<=", "gt": ">", "ge": ">=", "ne": "!="}[rel]
+                    return FAILED, f"counterexample in the stated domain: not {op_label} {worst}"
+                return INCONCLUSIVE, f"undecided across sample points ({worst})"
+            if rel.startswith("equiv_mod:"):
+                return INCONCLUSIVE, f"undecided across sample points ({worst})"
+            if rel == "approx" and self.env.var in syms and len(syms) == 1:
+                # "x ≈ sin 3t" (for large t): an asymptotic statement, true when the difference dies out.
+                try:
+                    if sp.limit(left - right, self.env.var, sp.oo) == 0:
+                        return PASSED, ""
+                except Exception:  # noqa: BLE001 - no limit: judged by the samples below
+                    pass
+            op_label = {"lt": "<", "le": "<=", "gt": ">", "ge": ">=", "ne": "!="}.get(rel, rel)
+            return FAILED, f"{_short(a.text)} and {_short(b.text)} differ under {op_label} ({worst})"
+        if ok < 3:
+            return INCONCLUSIVE, "too few valid sample points"
+        if rel in ("eq", "approx"):
+            # The sample points above are positive. A real variable with no declared lower bound may also be
+            # negative, where identities such as sqrt(x^2) = x or ln(x^2) = 2 ln(x) fail (AUDIT-005).
+            negative = self._negative_counterexample(syms, is_int_sym, fa, fb, a, b, rel, integral, extra_abs,
+                                                     extra_rel)
+            if negative:
+                if getattr(self, "_all_reals_stated", False):
+                    return FAILED, f"false for all real numbers: differs at {negative}"
+                return INCONCLUSIVE, f"holds for positive values only; differs at {negative}"
+        return PASSED, ""
+
+    def _negative_counterexample(self, syms: list[sp.Symbol], is_int_sym: dict[sp.Symbol, bool], fa: Any, fb: Any,
+                                 a: _Term, b: _Term, rel: str, integral: bool, extra_abs: float,
+                                 extra_rel: float) -> str:
+        """A point with negative values for the unbounded real variables where the two sides differ, or ""."""
+        free = [s for s in syms if not is_int_sym.get(s) and self.env.bounds.get(canonical_name(s.name),
+                                                                                    (None, None))[0] is None
+                and s.is_positive is not True and s.is_nonnegative is not True]
+        if not free:
+            return ""
+        prob = (self.record.problem if self.record else None) or {}
+        if re.search(r"positive|nonnegative|non-negative|natural|> ?0", str(prob.get("domain") or ""), re.I):
+            return ""
+        for t in (-0.37, -1.13, -2.71, -4.4):
+            point = [t if s in free else (1.0 if is_int_sym.get(s) else 0.77) for s in syms]
+            try:
+                lv, rv = complex(fa(*point)), complex(fb(*point))
+            except Exception:  # noqa: BLE001 - a singular point is skipped
+                continue
+            if any(math.isnan(x) or math.isinf(x) for x in (lv.real, lv.imag, rv.real, rv.imag)):
+                continue
+            abs_tol, rel_tol = self._tolerance(a, b, rel, max(abs(lv), abs(rv)), integral)
+            tol = abs_tol + 0.5 * extra_abs + max(rel_tol, extra_rel) * max(abs(lv), abs(rv))
+            if abs(lv - rv) > tol:
+                return ", ".join(f"{s}={v:.3g}" for s, v in zip(syms, point, strict=True)) + f": {_fmt(lv)} vs {_fmt(rv)}"
+        return ""
 
     # -- claims ---------------------------------------------------------------------------------------------------------
     def _new_claim(self, st: _Statement, kind: str) -> MathClaim:
         self._n += 1
-        return MathClaim(claim_id=f"m{self._n}", text=st.text[:300], context=st.context[:160], kind=kind,
-                         status=INCONCLUSIVE, position=st.position, source_text=st.source or st.text, lead=st.lead)
+        return MathClaim(
+            claim_id=f"m{self._n}",
+            text=st.text[:300],
+            context=st.context[:160],
+            kind=kind,
+            status=INCONCLUSIVE,
+            position=st.position,
+            source_text=st.source or st.text,
+            lead=st.lead,
+            domain=st.domain,
+            assumptions=list(st.assumptions),
+            quantifiers=list(st.quantifiers),
+            case_id=st.case_id or (self.current_case or ""),
+        )
 
     @staticmethod
     def _settle(claim: MathClaim) -> None:
+        if claim.kind in ("heading", "instruction"):
+            return
         statuses = [lk.status for lk in claim.links]
         if FAILED in statuses:
             claim.status = FAILED
             claim.detail = next(lk.detail for lk in claim.links if lk.status == FAILED)
         elif statuses and all(s == PASSED for s in statuses):
             claim.status = PASSED
-            claim.detail = ""
+            claim.detail = claim.links[0].detail if claim.kind == "refuted" and claim.links else ""
         else:
             claim.status = INCONCLUSIVE
             decided = sum(1 for s in statuses if s == PASSED)
@@ -961,7 +1496,72 @@ class _Auditor:
             return "function", name, tuple(e.args)  # type: ignore[arg-type]
         return None
 
+    def _quantified_compare(self, a: _Term, b: _Term, rel: str, st: _Statement) -> tuple[str, str] | None:
+        """A quantified conclusion is an assertion, not another assumption to add to the domain."""
+        if not st.quantifiers:
+            return None
+        if not all("\\forall" in q for q in st.quantifiers):
+            return INCONCLUSIVE, "existential statement requires a checked in-domain witness"
+        relations = {"eq": sp.Eq, "ne": sp.Ne, "lt": sp.Lt, "le": sp.Le, "gt": sp.Gt, "ge": sp.Ge}
+        if rel not in relations or a.expr is None or b.expr is None:
+            return INCONCLUSIVE, "quantified relation not supported by this checker"
+        try:
+            left, right = self.env.resolve(a.expr), self.env.resolve(b.expr)
+            symbols = left.free_symbols | right.free_symbols
+            conditions = []
+            for condition in st.assumptions:
+                split = _split_relations(tokenize(condition))
+                if split is None:
+                    return INCONCLUSIVE, "could not parse the quantifier domain"
+                parts, rels = split
+                terms = [self.term(p).expr for p in parts]
+                for i, relation in enumerate(rels):
+                    if relation not in relations or terms[i] is None or terms[i+1] is None:
+                        return INCONCLUSIVE, "could not parse the quantifier domain"
+                    conditions.append(relations[relation](terms[i], terms[i+1]))
+                    symbols |= terms[i].free_symbols | terms[i+1].free_symbols
+            if len(symbols) != 1:
+                return INCONCLUSIVE, "multivariate quantified assertion was not decided"
+            original = next(iter(symbols))
+            variable = sp.Symbol(original.name, real=True)
+            conclusion = relations[rel](left, right).xreplace({original: variable})
+            conditions = [c.xreplace({original: variable}) for c in conditions]
+            counter_region = sp.reduce_inequalities([*conditions, sp.Not(conclusion)], variable)
+            if counter_region is sp.false:
+                return PASSED, "conclusion holds throughout the stated quantifier domain"
+            region = counter_region.as_set()
+            if st.domain == "integer":
+                region = region.intersect(sp.S.Integers)
+            if region.is_empty is True:
+                return PASSED, "no counterexample lies in the stated quantifier domain"
+            if region.is_empty is False:
+                return FAILED, f"conclusion fails inside its stated domain: {counter_region}"
+        except Exception:  # an undecidable quantified assertion is never accepted as a domain assumption
+            pass
+        return INCONCLUSIVE, "quantified assertion could not be decided"
+
     def statement(self, st: _Statement) -> None:
+        if _POINT_LABEL_RE.match(st.text or ""):
+            # "B = (0.909, 0.6146)": the answer moves to another labelled point. What was bound for the previous point
+            # (its D, f_xx, ...) does not hold here.
+            for c in self._since_label:
+                self.env.values.pop(c, None)
+            self._since_label = set()
+            return
+        if _POINT_VALUE_RE.match(st.text or ""):
+            return  # "D(B) = 7.902", "f(A) = 0.1289": a value at a labelled point, not a definition of D or f
+        if st.kind == "heading":
+            claim = self._new_claim(st, "heading")
+            claim.status = INCONCLUSIVE
+            claim.detail = "Section heading (not an asserted factual identity)"
+            self.claims.append(claim)
+            return
+        if st.kind == "instruction":
+            claim = self._new_claim(st, "instruction")
+            claim.status = INCONCLUSIVE
+            claim.detail = "Instruction or goal statement"
+            self.claims.append(claim)
+            return
         cleaned = _clean_tokens(st.tokens)
         if cleaned is None:
             return
@@ -971,16 +1571,46 @@ class _Auditor:
         term_toks, rels = split
         if not rels:
             return
+        if len(rels) == 1 and rels[0] == "eq" and len(term_toks) == 2:
+            left_tup = _unpack_tuple_tokens(term_toks[0])
+            right_tup = _unpack_tuple_tokens(term_toks[1])
+            if left_tup is not None and right_tup is not None and len(left_tup) == len(right_tup):
+                for l_sub, r_sub in zip(left_tup, right_tup, strict=True):
+                    sub_toks = l_sub + [Tok("sym", "=")] + r_sub
+                    sub_st = replace(st, tokens=sub_toks, text=_tex(sub_toks))
+                    self.statement(sub_st)
+                return
         terms = [self.term(t) for t in term_toks]
-        if terms[0].expr is not None and terms[0].expr == self.env.var:
+        if rels and rels[0] in ("eq", "approx") and terms[0].expr is not None and terms[0].expr == self.env.var:
             return  # "t = 0" says where the next statements are evaluated; it is not a claim
-        if isinstance(terms[0].expr, sp.Symbol) and canonical_name(terms[0].expr.name) in self.unknowns:
+        if rels and rels[0] in ("eq", "approx") and isinstance(terms[0].expr, sp.Symbol) and canonical_name(terms[0].expr.name) in self.unknowns:
             return  # "x = 45/8 gives equality": a root, endpoint or test point of the problem's unknown, not a binding
+        if st.kind == "alternative" and len(rels) == 1 and rels[0] in ("eq", "approx") and isinstance(terms[0].expr, sp.Symbol):
+            return  # "z = 1 or 2": a candidate value, never a binding of z
+
         if terms[0].expr is None and len(terms) >= 3:
             # An unreadable first term ("P(K = 3) = binom(10,3) 0.5^3 ... ~ 0.117") is a label; the relations after it
             # carry the claim.
             terms, rels = terms[1:], rels[1:]
-        head = self._definable(terms[0])
+        if st.kind == "refuted":
+            claim = self._new_claim(st, "refuted")
+            for i, rel in enumerate(rels, start=1):
+                a, b = terms[i - 1], terms[i]
+                status, detail = self.compare(a, b, rel)
+                if status == FAILED:
+                    claim.links.append(Link(a.text[:120], b.text[:120], rel, PASSED, f"Refutation confirmed: statement does not hold ({detail})"))
+                elif status == PASSED:
+                    claim.links.append(Link(a.text[:120], b.text[:120], rel, FAILED, "Statement holds, but was asserted to be false / refuted"))
+                else:
+                    claim.links.append(Link(a.text[:120], b.text[:120], rel, INCONCLUSIVE, detail))
+            self._settle(claim)
+            dedup_key = (claim.text, claim.kind, claim.case_id or (self.current_case or ""), claim.context)
+            if dedup_key not in self.seen_claims or claim.status == FAILED:
+                self.seen_claims.add(dedup_key)
+                self.claims.append(claim)
+            return
+        is_def_rel = all(r in ("eq", "approx") for r in rels)
+        head = self._definable(terms[0]) if is_def_rel else None
         if head and head[0] == "function" and canonical_name(head[1]) not in self.env.defined:
             c = canonical_name(head[1])
             alias = self._question_branch(head, terms)
@@ -997,32 +1627,94 @@ class _Auditor:
                 head = None
         if head and head[0] == "function" and canonical_name(head[1]) in self.env.defined:
             head = None  # "T(n) = n/2" restates a branch of the question's definition: checked, never re-bound
-        if head and head[0] == "symbol" and canonical_name(head[1]) in self.case_scoped and self._is_bound(head):
-            self._open_case_scope(head[1])
+        if head and head[0] == "symbol" and self._is_bound(head):
+            c_name = canonical_name(head[1])
+            is_case = c_name in self.case_scoped
+            if not is_case and c_name not in self.env.params:
+                bound_case = self.env.bound_case.get(c_name)
+                case_changed = self.current_case is not None and bound_case != self.current_case
+                is_case_heading = bool(re.search(r"(?i)\b(?:case|example|item)\b", st.context or ""))
+                heading_changed = bool(st.context and self.env.bound_heading.get(c_name) and st.context != self.env.bound_heading.get(c_name))
+                has_case_cue = bool(re.search(r"(?i)\b(?:case|example|item)\s+[A-Za-z0-9]+\b|\b(?:for|when|if|let|consider)\b", st.lead + " " + st.around))
+                if case_changed or (heading_changed and is_case_heading) or has_case_cue:
+                    is_case = True
+                    self.case_scoped.add(c_name)
+            if is_case:
+                self._open_case_scope(head[1])
+                if not self.current_case or self.current_case not in self.cases:
+                    case_label = re.search(r"(?i)\b(?:case|example|item)\s+([A-Za-z0-9]+)\b", st.lead + " " + st.around)
+                    if case_label:
+                        self.current_case = f"Case {case_label.group(1)}"
+                    elif len(terms) > 1:
+                        self.current_case = f"{head[1]} = {terms[1].text}"
         kind = "table_row" if st.kind == "table_row" else ("derivative" if head and head[0] == "derivative" else "relation")
         claim = self._new_claim(st, kind)
         defined: tuple[str, str, tuple[sp.Symbol, ...]] | None = None
         for i, rel in enumerate(rels, start=1):
             a, b = terms[i - 1], terms[i]
-            if i == 1 and head and head[0] in ("symbol", "function") and not self._is_bound(head):
+            if (i == 1 and head and head[0] == "symbol" and rel in ("eq", "approx")
+                    and canonical_name(head[1]) in self._function_names() | self._point_variables()):
+                # "f = -2.297" (f at a point the sentence names in words) or "x = 0.909" (one of several points): a
+                # value at a point, neither a binding nor something to compare with another point's value.
+                continue
+            if i == 1 and head and head[0] in ("symbol", "function") and rel in ("eq", "approx") and not self._is_bound(head):
                 defined = head
                 continue
-            if i == 1 and head and head[0] in ("symbol", "function") and self._is_bound(head):
+            if (i == 1 and head and head[0] == "symbol" and rel == "eq" and self._is_bound(head)
+                    and self._new_evaluation_point(head, terms, st)):
+                # "At T = 10 s" after "At T = 5 s": a new evaluation point of a symbol the answer introduced, not a
+                # restatement to compare. A value the question gave (m, k) is never rebound this way.
+                self.env.values.pop(canonical_name(head[1]), None)
+                defined = head
+                continue
+            if (i == 1 and head and head[0] == "symbol" and rel in ("eq", "approx") and self._is_bound(head)
+                    and self._new_part(head, st)):
+                # A multi-part answer's numbered parts ("1. Find all critical points", "3. Find the minimum subject to
+                # x + y = 1") are separate sub-problems: x and y name a different point in each. Restated under another
+                # numbered part, the symbol is defined afresh (an unnumbered summary restating a part is still checked).
+                here = (st.context or "").split(" · ")[0]
+                for sym, where in list(self.env.bound_heading.items()):
+                    # Every value of an earlier numbered part goes ("put y = 1 - x" must not freeze y at part 1's x).
+                    if where != here and _PART_HEADING_RE.match(where or "") and sym not in self.env.params:
+                        self.env.values.pop(sym, None)
+                        self.env.bound_heading.pop(sym, None)
+                self.env.values.pop(canonical_name(head[1]), None)
+                defined = head
+                continue
+            if (i == 1 and head and head[0] in ("symbol", "function") and rel in ("eq", "approx") and self._is_bound(head)
+                    and self._other_parameter_set(head, st)):
+                # "By contrast c = 0.4 gives T ~ 19.19" after "T ~ 4.04" (at c* = 2): the same quantity at another
+                # parameter value, not a restatement. Not comparable with the earlier value, and not rebound.
+                continue
+            if i == 1 and head and head[0] in ("symbol", "function") and rel in ("eq", "approx") and self._is_bound(head):
                 # A restatement: checked against the earlier statement as it was then, then rebound.
                 defined = head
                 a = self._snapshot(head, a)
-            status, detail = self.compare(a, b, rel)
+            # Does the statement range over all real numbers ("for all real x", "x ∈ ℝ")? Then a counterexample at a
+            # negative value is inside its stated domain and refutes it (AUDIT-111).
+            self._all_reals_stated = bool(_ALL_REALS_RE.search(
+                f"{claim.context} {claim.lead} {claim.domain} {' '.join(claim.quantifiers)} "
+                f"{_sentence_at(getattr(self, 'document', ''), claim.position)}"))
+            quantified = self._quantified_compare(a, b, rel, st)
+            status, detail = quantified if quantified is not None else self.compare(a, b, rel)
             if status == "equation":
                 claim.links.append(Link(a.text[:120], b.text[:120], rel, INCONCLUSIVE, "pending: " + detail))
                 self.pending.append((claim, len(claim.links) - 1, a, b, rel, _heading_of(claim), self._unknowns(a, b)))
                 continue
-            if status == FAILED and not (a.refs or b.refs or i == 1 and defined) and not self._numeric_only(a, b):
+            has_bound_var = bool(
+                (a.expr and any(canonical_name(s.name) in self.env.values for s in a.expr.free_symbols))
+                or (b.expr and any(canonical_name(s.name) in self.env.values for s in b.expr.free_symbols))
+            )
+            is_ineq = rel in ("lt", "gt", "le", "ge", "ne")
+            # "for all real x" in the sentence quantifies the statement: an identity, not an equation to solve.
+            has_quantifier = bool(st.quantifiers) or bool(getattr(self, "_all_reals_stated", False))
+            if status == FAILED and not is_ineq and not has_quantifier and not (a.refs or b.refs or has_bound_var or (i == 1 and defined)) and not self._numeric_only(a, b):
                 # An identity that fails without referring to anything bound may be an equation to solve.
                 claim.links.append(Link(a.text[:120], b.text[:120], rel, INCONCLUSIVE, "pending: possibly an equation"))
                 self.pending.append((claim, len(claim.links) - 1, a, b, rel, _heading_of(claim), self._unknowns(a, b)))
                 continue
             claim.links.append(Link(a.text[:120], b.text[:120], rel, status, detail))
-        if defined is not None:
+        if defined is not None and is_def_rel:
             # A restatement is checked against the earlier binding, never rebinds it: the first statement is usually
             # the exact one (a later "x_p(t) = X cos(4t - phi)" with rounded X and phi, or a contradicted value, must
             # not replace it). An ansatz with unknown constants resolves as soon as the constants are stated.
@@ -1036,7 +1728,10 @@ class _Auditor:
             self.definitions.append(claim)
             return
         self._settle(claim)
-        self.claims.append(claim)
+        dedup_key = (claim.text, claim.kind, claim.case_id or (self.current_case or ""), claim.context)
+        if dedup_key not in self.seen_claims or claim.status == FAILED:
+            self.seen_claims.add(dedup_key)
+            self.claims.append(claim)
 
     def _question_branch(self, head: tuple[str, str, tuple[sp.Symbol, ...]], terms: list[_Term]) -> dict[str, Any] | None:
         """The question's multi-branch definition whose branch this statement writes, renamed to the answer's name."""
@@ -1061,17 +1756,51 @@ class _Auditor:
 
     def enter_case(self, case_id: str) -> None:
         """Statements from here on belong to `case_id`: its bindings replace the previous case's."""
-        if case_id == self.current_case or case_id not in self.cases:
+        if case_id == self.current_case:
             return
         self.current_case = case_id
-        for name, value in self.cases[case_id].items():
-            self._open_case_scope(name)
-            c = canonical_name(name)
+        if case_id in self.cases:
+            for name, value in self.cases[case_id].items():
+                self._open_case_scope(name)
+                c = canonical_name(name)
+                try:
+                    self.env.values[c] = sp.Rational(str(value))
+                except (TypeError, ValueError):
+                    continue
+                self.env.order.append(c)
+                self.env.bound_case[c] = case_id
+
+    def _new_part(self, head: tuple[str, str, tuple[sp.Symbol, ...]], st: _Statement) -> bool:
+        """The symbol was bound under one numbered part heading and is stated now under another."""
+        c = canonical_name(head[1])
+        if c in self.env.params:
+            return False  # a value the question gives is the same in every part
+        name = re.escape(head[1])
+        if not re.search(rf"[A-Za-z]\s*\(\s*(?:[A-Za-z]\w*\s*,\s*)*{name}\s*(?:,\s*[A-Za-z]\w*\s*)*\)", self.query or ""):
+            return False  # only a variable of the question's function (x, y in f(x, y)) names a new point per part
+        bound = self.env.bound_heading.get(c) or ""
+        here = (st.context or "").split(" · ")[0]
+        return bool(bound and here != bound and _PART_HEADING_RE.match(here) and _PART_HEADING_RE.match(bound))
+
+    def _other_parameter_set(self, head: tuple[str, str, tuple[sp.Symbol, ...]], st: _Statement) -> bool:
+        """The statement's sentence sets a parameter of the question to a value the question does not fix ("$c = 0.4$
+        gives ... $T \\approx 19.19$", with c free in the question). Restating a given ("m = 2") is not a change."""
+        own = canonical_name(head[1])
+        text = (st.lead or "")[-160:]
+        for m in re.finditer(r"(?<![\w\\])([A-Za-z])\s*=\s*(-?\d+(?:\.\d+)?)", text):
+            name = canonical_name(m.group(1))
+            if name in (own, canonical_name(self.env.var.name)) or not re.search(
+                    rf"(?<![A-Za-z\\]){re.escape(m.group(1))}(?![A-Za-z])", self.query or ""):
+                continue  # the independent variable ("at t = 20") or not a parameter of the question
+            given = self.env.params.get(name)
+            if given is None:
+                return True  # a free parameter of the question, set to a value
             try:
-                self.env.values[c] = sp.Rational(str(value))
+                if abs(float(given) - float(m.group(2))) > 1e-9 * max(1.0, abs(float(given))):
+                    return True  # set to a value other than the given one
             except (TypeError, ValueError):
                 continue
-            self.env.order.append(c)
+        return False
 
     def _open_case_scope(self, name: str) -> None:
         """A case-local name is stated again: the previous case ends. Its binding and everything bound after it (values
@@ -1082,14 +1811,30 @@ class _Auditor:
             for later in self.env.order[cut:]:
                 self.env.values.pop(later, None)
                 self.env.ulps.pop(later, None)
+                self.env.bounds.pop(later, None)
                 self.env.bound_heading.pop(later, None)
+                self.env.bound_case.pop(later, None)
             del self.env.order[cut:]
         self.env.values.pop(c, None)
         self.env.params.pop(c, None)
+        self.env.bounds.pop(c, None)
+        self.env.bound_case.pop(c, None)
 
     @staticmethod
     def _numeric_only(a: _Term, b: _Term) -> bool:
         return a.expr is not None and b.expr is not None and not a.expr.free_symbols and not b.expr.free_symbols
+
+    _EVALUATION_CUE_RE = re.compile(r"(?i)\b(?:at|when|for|setting|taking|evaluat\w*\s+(?:\w+\s+){0,6}at)\s*\$?\s*$")
+
+    def _new_evaluation_point(self, head: tuple[str, str, tuple[sp.Symbol, ...]], terms: list[_Term], st: _Statement) -> bool:
+        """A symbol the answer introduced, set to a plain number right after "at"/"when"/"for": a new evaluation point."""
+        c = canonical_name(head[1])
+        if c in self.env.params or c not in self.env.values or len(terms) != 2:
+            return False
+        value = terms[1]
+        if value.expr is None or value.expr.free_symbols or not value.expr.is_number:
+            return False
+        return bool(self._EVALUATION_CUE_RE.search(st.lead[-80:]))
 
     def _is_bound(self, head: tuple[str, str, tuple[sp.Symbol, ...]]) -> bool:
         kind, name, _ = head
@@ -1112,8 +1857,24 @@ class _Auditor:
         return _Term(body.xreplace(dict(zip(params, args, strict=True))), term.text, None,
                      list(self.env.func_dec.get(c, [])), refs=True)
 
+    def _point_variables(self) -> set[str]:
+        """The variables of a function of several variables the question defines (x and y in "f(x,y) = ..."): an
+        answer names many points with them (a saddle, a minimum, a constrained optimum), so a value stated for one is
+        an evaluation point, never a binding that later statements are checked against."""
+        found: set[str] = set()
+        for m in re.finditer(r"\b[A-Za-z]\s*\(\s*([A-Za-z]\w*(?:\s*,\s*[A-Za-z]\w*)+)\s*\)\s*=", self.query or ""):
+            found.update(canonical_name(v.strip()) for v in m.group(1).split(","))
+        return found
+
+    def _function_names(self) -> set[str]:
+        """Names the question writes as functions ("f(x,y) = ..."): a bare "f = -2.297" is a value at an unstated point."""
+        return {canonical_name(m.group(1)) for m in re.finditer(r"\b([A-Za-z])\s*\(\s*[A-Za-z]\w*(?:\s*,\s*[A-Za-z]\w*)*\s*\)\s*=",
+                                                                    self.query or "")}
+
     def _bind(self, head: tuple[str, str, tuple[sp.Symbol, ...]], terms: list[_Term], claim: MathClaim) -> None:
         kind, name, params = head
+        if kind == "symbol" and canonical_name(name) in self._point_variables():
+            return  # "x = 0.909": one point of several, not a binding (see _point_variables)
         value = next((t for t in reversed(terms[1:]) if t.expr is not None), None)
         if value is None or value.expr is None:
             return
@@ -1125,6 +1886,7 @@ class _Auditor:
                 value = exact
         c = canonical_name(name)
         expr = value.expr
+        self._since_label.add(c)
         if kind == "symbol":
             if sp.Symbol(name) in expr.free_symbols:
                 return  # "X = 2X" defines nothing
@@ -1137,6 +1899,7 @@ class _Auditor:
                 self.env.order.remove(c)
             self.env.order.append(c)
             self.env.bound_heading[c] = _heading_of(claim)
+            self.env.bound_case[c] = self.current_case
             ulp = value.ulp
             long_decimals = [d for d in value.decimals if "." in d and len(d.split(".")[1]) >= 3]
             if ulp is None and long_decimals:
@@ -1371,25 +2134,83 @@ def _tool_numbers(tool_results: dict[str, Any]) -> list[float]:
     return sorted(out)
 
 
+_BUILTIN_FUNCS = {
+    "sin", "cos", "tan", "sec", "csc", "cot", "sinh", "cosh", "tanh",
+    "exp", "ln", "log", "sqrt", "abs", "sgn", "sign", "Re", "Im",
+    "asin", "acos", "atan", "arcsin", "arccos", "arctan",
+}
+
+
+# "C(n)=\begin{cases} n/2, & n\text{ even},\\ 3n+1, & n\text{ odd} \end{cases}": a map the answer defines by branches.
+_CASES_DEF_RE = re.compile(
+    r"(?<![\\A-Za-z])([A-Za-z])\s*\(\s*([a-z])\s*\)\s*(?::=|=)\s*\\begin\{cases\}(.*?)\\end\{cases\}", re.S)
+
+
+def _answer_case_definitions(md: str) -> list[dict[str, Any]]:
+    r"""Functions the answer defines with a cases environment, in the question-definition format
+    (axiom.definitions): applications such as C(97) = 292 are then evaluated through the branch whose condition
+    holds. A definition with a row whose expression or condition cannot be read is not registered."""
+    from ..axiom.definitions import parse_condition
+
+    out: list[dict[str, Any]] = []
+    for m in _CASES_DEF_RE.finditer(md or ""):
+        name, var, body = m.groups()
+        branches: list[dict[str, str]] = []
+        for row in re.split(r"\\\\", body):
+            if not row.strip():
+                continue
+            expr_tex, sep, cond_tex = row.partition("&")
+            cond = re.sub(r"\\(?:text|textrm|mathrm|operatorname)\s*\{([^{}]*)\}", r" \1 ", cond_tex)
+            cond = re.sub(r"\\[,;:!]|\\q?quad|[{}$]", " ", cond)
+            cond = re.sub(r"\s+", " ", cond.replace(",", " ")).strip(" .")
+            parsed = parse_condition(cond, var) if sep else None
+            try:
+                toks = _clean_tokens(tokenize(expr_tex.strip().rstrip(",").strip()))
+                expr = parse_tokens(toks, ParseContext(variable=var)) if toks else None
+            except Exception:  # noqa: BLE001 - an unreadable row: the definition is not registered
+                expr = None
+            if parsed is None or expr is None or expr.free_symbols - {sp.Symbol(var)}:
+                branches = []
+                break
+            branches.append({"expression": sp.sstr(expr), "condition": parsed[0]})
+        if len(branches) >= 2:
+            parity = any(b["condition"] in ("even", "odd") for b in branches)
+            out.append({"name": name, "parameter": var, "domain": "integer" if parity else "unspecified",
+                        "branches": branches})
+    return out
+
+
 def _document_functions(md: str, problem_function: str) -> tuple[set[str], str]:
-    """Names used as functions (x(t), x_p(t), E(0), \\dot x) and the independent variable."""
+    r"""Names used as functions (x(t), x_p(t), E(0), \dot x) and the independent variable."""
     names: set[str] = set()
     var_counts: dict[str, int] = {}
-    for _pos, raw, _t in _segments(md):
+    sources = [raw for _pos, raw, _t in _segments(md)]
+    sources.extend(raw for _pos, raw, _t in _plain_segments(md))
+    for raw in sources:
         body = re.sub(r"\\(?:rm|mathrm|text|textrm|operatorname)\s*\{([^{}]*)\}", r"\1", raw)
         body = re.sub(r"\\rm\s+", "", body)
-        for m in re.finditer(r"(?<![\\A-Za-z])([A-Za-z])(?:_\{?([A-Za-z0-9]+)\}?)?\s*\(\s*([A-Za-z]|[-\d.]+)\s*\)", body):
+        for m in re.finditer(r"(?<![\\A-Za-z])([A-Za-z]\w*?)(?:_\{?([A-Za-z0-9]+)\}?)?'*\s*\(\s*([A-Za-z]|[-\d.]+|[0-9]+[+-][A-Za-z]|[A-Za-z][+-][0-9A-Za-z]+)\s*\)", body):
             base = m.group(1) + (f"_{m.group(2)}" if m.group(2) else "")
-            if base in ("e", "d", "i"):
+            if base in ("e", "d", "i") or base in _BUILTIN_FUNCS:
                 continue
+            if m.group(3).startswith(m.group(1)) or re.search(
+                    rf"(?<![A-Za-z]){re.escape(m.group(1))}(?![A-Za-z])", m.group(3)):
+                continue  # n(n+1) and x(1-x) are scalar multiplication, not a new function n or x
             names.add(base)
-            if re.fullmatch(r"[A-Za-z]", m.group(3)):
-                var_counts[m.group(3)] = var_counts.get(m.group(3), 0) + 1
+            pure_var = re.search(r"[A-Za-z]", m.group(3))
+            if pure_var:
+                v = pure_var.group(0)
+                var_counts[v] = var_counts.get(v, 0) + 1
+        for m in re.finditer(r"(?<![\\A-Za-z])([A-Za-z])'+\b", body):
+            if m.group(1) not in _BUILTIN_FUNCS and m.group(1) not in ("e", "d", "i"):
+                names.add(m.group(1))
         # \dot x, \ddot{x}; not \dots (an ellipsis: "s = -2, -4, \dots" made s a function and bound it).
         for m in re.finditer(r"\\d?dot(?![A-Za-z])\s*\{?\s*([A-Za-z])", body):
-            names.add(m.group(1))
-    if problem_function:
+            if m.group(1) not in _BUILTIN_FUNCS:
+                names.add(m.group(1))
+    if problem_function and problem_function not in _BUILTIN_FUNCS:
         names.add(problem_function)
+    names = {n for n in names if n not in _BUILTIN_FUNCS}
     variable = max(var_counts, key=lambda k: var_counts[k]) if var_counts else "t"
     return names, variable
 
@@ -1424,6 +2245,41 @@ def _unknowns(md: str, problem: dict[str, Any], physical: bool = True) -> set[st
     return out
 
 
+_AUDIT_CACHE: dict[tuple[Any, ...], MathAudit] = {}
+
+
+def _math_content_hash(md: str) -> str:
+    # Table cells and surrounding prose carry numerical values, assumptions and case scopes. Hashing only $...$
+    # reused a passing audit after a result cell was corrupted, and after a domain/condition was changed.
+    return hashlib.sha256(md.replace("\r\n", "\n").encode("utf-8")).hexdigest()
+
+
+_FUNCTION_ARGUMENT_RE = re.compile(r"(?<![\\A-Za-z])[A-Za-z](?:_\{?[A-Za-z0-9]+\}?)?'*\s*\(\s*([a-z])\s*\)")
+
+
+def _independent_variables(*texts: str) -> set[str]:
+    """Names used as the argument of a function, as t in x(t) or x_{ss}(t). "At t = 0" or "setting t = 0" evaluates
+    at a point; binding t = 0 for the rest of the answer would evaluate every later formula in t only at t = 0."""
+    return {m.group(1) for text in texts for m in _FUNCTION_ARGUMENT_RE.finditer(text or "")}
+
+
+_QUESTION_PART_RE = re.compile(r"(?m)^\s*(?:\(?\d{1,2}[.)]|[a-h][.)])\s+\S")
+_SECTION_HEADING_RE = re.compile(r"(?m)^\s{0,3}#{1,6}\s+\S.*$|^\s{0,3}\*\*\s*(?:part\s+)?\d{1,2}[.):].*\*\*\s*$")
+
+
+def _part_sections(response: str, query: str) -> list[str]:
+    """The answer cut at its headings, when the question has two or more numbered parts and the answer has two or more
+    headed sections; [] otherwise (the answer is checked as one piece)."""
+    if len(_QUESTION_PART_RE.findall(query or "")) < 2:
+        return []
+    starts = [m.start() for m in _SECTION_HEADING_RE.finditer(response or "")]
+    if len(starts) < 2:
+        return []
+    cuts = ([0] if starts[0] > 0 else []) + starts + [len(response)]
+    pieces = [response[a:b] for a, b in zip(cuts, cuts[1:], strict=False)]
+    return [p for p in pieces if p.strip()]
+
+
 def audit_answer(
     response: str,
     query: str = "",
@@ -1436,31 +2292,118 @@ def audit_answer(
     tool_results = tool_results or {}
     if record is None:
         record = build_result_record(query, tool_results)
+    sections = _part_sections(response or "", query or "")
+    if sections:
+        # A numbered multi-part question ("1. critical points ... 3. the minimum on x + y = 1 ... 4. the heat
+        # equation"): each part is its own problem, where x, y, f and t name different things. Every section of the
+        # answer is checked on its own, so a value from one part is never read as contradicting another.
+        merged = MathAudit(record_revision=record.revision)
+        for n, section in enumerate(sections):
+            part = audit_answer(section, query, tool_results, record)
+            for claim in part.claims:
+                claim.claim_id = f"s{n}-{claim.claim_id}"
+            merged.claims.extend(part.claims)
+            merged.definitions.extend(part.definitions)
+            merged.variable = part.variable
+            for key, value in (part.units or {}).items():
+                if isinstance(value, int):
+                    merged.units[key] = merged.units.get(key, 0) + value
+                elif isinstance(value, list):
+                    merged.units.setdefault(key, []).extend(value)
+        return merged
     md = response or ""
+
     problem = record.problem or {}
+    q_canon = re.sub(r"\s+", " ", str(query or "").strip().lower())
+    p_dom = str(problem.get("domain") or "")
+    p_defs = tuple(sorted((str(d.get("name", "")), str(d.get("parameter", "")), str(d.get("domain", ""))) for d in problem.get("definitions") or [] if isinstance(d, dict)))
+    p_bind = tuple(sorted((str(k), str(v)) for k, v in (problem.get("bindings") or {}).items()))
+    math_hash = _math_content_hash(md)
+    cache_key = (record.revision, q_canon, p_dom, p_defs, p_bind, math_hash)
+    if cache_key in _AUDIT_CACHE:
+        import copy
+
+        cached = copy.deepcopy(_AUDIT_CACHE[cache_key])
+        return MathAudit(
+            claims=list(cached.claims),
+            definitions=list(cached.definitions),
+            record_revision=cached.record_revision,
+            variable=cached.variable,
+            units=dict(cached.units),
+            reused=True,
+        )
     func = re.sub(r"\(.*$", "", str(problem.get("function") or ""))
     functions, variable = _document_functions(md, func)
     functions |= {str(d["name"]) for d in problem.get("definitions") or [] if d.get("name")}
     if problem.get("variable"):
         variable = str(problem.get("variable"))
+        functions.discard(variable)  # the independent variable cannot also be inferred as its own function
     auditor = _Auditor(query, record, _tool_numbers(tool_results), variable, functions,
-                       _unknowns(md, problem, physical=_physical_question(query)))
+                       _unknowns(md, problem, physical=_physical_question(query)) | _independent_variables(md, query))
+    auditor.document = md  # statements' positions index into it (their sentences state domains, AUDIT-111)
+    for defn in _answer_case_definitions(md):
+        c = canonical_name(defn["name"])
+        if c not in auditor.env.defined:  # the question's own definition of the name stays authoritative
+            auditor.env.defined[c] = defn
+            auditor.unknowns.add(canonical_name(defn["parameter"]))
 
     statements: list[_Statement] = []
+    case_marks = _case_marks(md, auditor.cases)
     for pos, body, in_table in sorted(_segments(md) + _plain_segments(md)):
         if in_table:
             continue
         prefix = _prefix(md, pos)
         if _CONDITIONAL_RE.search(prefix) or _REFERENCE_CUE_RE.search(prefix[-28:]):
             continue
+        if re.search(r"(?i)\bfor\s*$", prefix[-12:]) and re.search(r"\\d?dot\b|\\ddot|''|\\frac\s*\{\s*d", body):
+            continue  # "For $m\ddot x + kx = F_0 \sin\omega t$, ...": the general model as a premise, not a claim
         heading = _heading_before(md, pos)
+        suffix = md[pos + len(body):pos + len(body) + 60]
+        around = prefix[-60:] + " " + suffix
+
+        kind = "relation"
+        if _is_in_heading(md, pos):
+            kind = "heading"
+        elif _REFUTED_CUE_RE.search(prefix[-120:]) or _REFUTED_CUE_RE.search(suffix):
+            kind = "refuted"
+        elif _INSTRUCTION_CUE_RE.search(prefix[-80:]):
+            kind = "instruction"
+        elif re.match(r"(?:[^$\n]{0,3}\$+)?[\s,]*(?:or|and/or)\b", suffix) or re.search(r"\b(?:either|or)\s*\$*\s*$", prefix[-14:]):
+            # "so $z = 1$ or $2$": one candidate of a disjunction, not the value of z for what follows.
+            kind = "alternative"
+
+        case_id = next((cid for p, cid in reversed(case_marks) if p <= pos), "")
+
         try:
             tokens = _join_continuations(tokenize(body))
         except Exception:  # noqa: BLE001
             continue
-        for part in _depth_split(tokens, _is_separator):
-            statements.append(_Statement(part, _tex(part), heading, pos, source=body, lead=prefix[-160:],
-                                         around=prefix[-60:] + " " + md[pos + len(body):pos + len(body) + 60]))
+        if any(t.kind == "cmd" and t.value == "forall" for t in tokens) and any(
+                t.kind == "cmd" and t.value == "exists" for t in tokens):
+            continue  # "for every n there exist primes p, q with n = p + q": not decidable by sampling (a conjecture)
+        clean_tokens, quantifiers, assumptions, domain = _extract_quantifiers(tokens)
+        for q in quantifiers:
+            for v in re.findall(r"\\(?:forall|exists)\s*([A-Za-z])", q):
+                auditor.unknowns.add(canonical_name(v))
+
+        for part in _depth_split(clean_tokens, _is_separator):
+            clean_part_tex = re.sub(r"^\s*#{1,6}\s*", "", _tex(part)).strip()
+            lead_num = re.match(r"\d+(?:\.\d+)?", clean_part_tex)
+            if lead_num and re.search(
+                    r"\\(?:text|mathrm|textrm)\s*\{[^{}]*\b(?:of|for|at|in|on|to|with|from|below|above)\s*\}\s*"
+                    + re.escape(lead_num.group(0)) + r"(?!\d)", body):
+                continue  # "\text{partitions of }1000 = 28": a function of 1000 described in words, not 1000 = 28
+            statements.append(_Statement(
+                part, clean_part_tex, heading, pos,
+                kind=kind,
+                source=body,
+                lead=prefix[-160:],
+                around=around,
+                domain=domain,
+                assumptions=list(assumptions),
+                quantifiers=list(quantifiers),
+                case_id=case_id,
+            ))
 
     row_items: list[tuple[int, str, list[tuple[float, float, str]], str, str]] = []
     for pos, _header, cells, heading in _table_rows(md):
@@ -1501,8 +2444,29 @@ def audit_answer(
     for i, issue in enumerate(units["inconsistent"]):
         auditor.claims.append(MathClaim(claim_id=f"units-{i}", text=issue["statement"], context="Units",
             kind="units", status=FAILED, detail=issue["reason"], source_text=issue["statement"]))
-    return MathAudit(claims=auditor.claims, definitions=auditor.definitions, record_revision=record.revision,
-                     variable=variable, units=units)
+    question_norm = re.sub(r"[\s$\\{}]", "", query or "")
+    for claim in auditor.claims:
+        text = re.sub(r"[\s$\\{}]", "", claim.text or "")
+        if (claim.status == FAILED and claim.kind == "relation" and len(text) >= 3 and text.count("=") == 1
+                and text in question_norm):
+            # "On x + y = 1, put y = 1 - x": the question's own constraint, a condition rather than a result. Checked
+            # against what x and y meant in an earlier part, it read as false; it can confirm, never contradict.
+            claim.status = INCONCLUSIVE
+            claim.detail = "the question's own relation, a condition here rather than a result"
+    audit_res = MathAudit(
+        claims=auditor.claims,
+        definitions=auditor.definitions,
+        record_revision=record.revision,
+        variable=variable,
+        units=units,
+        reused=False,
+    )
+    if len(_AUDIT_CACHE) > 100:
+        _AUDIT_CACHE.clear()
+    import copy
+
+    _AUDIT_CACHE[cache_key] = copy.deepcopy(audit_res)
+    return audit_res
 
 
 _UNIT_NAME_RE = re.compile(
@@ -1530,7 +2494,20 @@ def _case_marks(md: str, cases: dict[str, dict[str, str]]) -> list[tuple[int, st
             continue
         pat = rf"\bcase\s+\(?{re.escape(label)}\)?(?![\w])|^[ \t>*-]*\(?{re.escape(label)}\)?\s*[:.)](?!\d)"
         marks += [(m.start(), cid) for m in re.finditer(pat, md, re.I | re.M)]
+    if not marks:
+        pat_generic = r"(?im)^[ \t>*-]*(?:#+\s*)?(?:Case|Example)\s+\(?([A-Za-z0-9]+)\)?\s*[:.)]"
+        for m in re.finditer(pat_generic, md):
+            marks.append((m.start(), f"Case {m.group(1)}"))
     return sorted(marks)
+
+
+def _cell_value_tex(cell: str) -> str:
+    """A value cell as LaTeX: "$1.197\\times10^{-6}$ J" keeps its plain-text unit upright (\\mathrm{J}), so the unit is
+    never read as an italic variable."""
+    m = re.match(r"^\s*\$([^$]*)\$\s*(\S.*?)\s*$", cell)
+    if m and is_unit_word(m.group(2)):
+        return m.group(1) + rf"\,\mathrm{{{m.group(2)}}}"
+    return cell.replace("$", "")
 
 
 def _table_statement(pos: int, cells: list[str], heading: str, statements: list[_Statement],
@@ -1544,11 +2521,13 @@ def _table_statement(pos: int, cells: list[str], heading: str, statements: list[
     row_text = " | ".join(cells)
     context = f"{heading} · {label}".strip(" ·")
     if formula_cell is not None and len(numeric) == 1:
-        toks = tokenize(_cell_math(formula_cell)) + [Tok("cmd", "approx")] + tokenize(numeric[0][0].replace("$", ""))
-        statements.append(_Statement(_strip_unit_tail(toks), row_text, context, pos, "table_row", row_text))
+        units = next((c.strip() for c in cells if c.strip() and is_unit_word(c.strip())), "")
+        result = _cell_value_tex(numeric[0][0]) + (rf"\,\mathrm{{{units}}}" if units else "")
+        toks = tokenize(_cell_math(formula_cell)) + [Tok("cmd", "approx")] + tokenize(result)
+        statements.append(_Statement(toks, row_text, context, pos, "table_row", row_text))
     elif label_math and len(numeric) == 1 and not re.search(r"=|\\approx", label_math):
-        toks = tokenize(label_math) + [Tok("cmd", "approx")] + tokenize(numeric[0][0].replace("$", ""))
-        statements.append(_Statement(_strip_unit_tail(toks), row_text, context, pos, "table_row", row_text))
+        toks = tokenize(label_math) + [Tok("cmd", "approx")] + tokenize(_cell_value_tex(numeric[0][0]))
+        statements.append(_Statement(toks, row_text, context, pos, "table_row", row_text))
     elif numeric:
         row_items.append((pos, label, [n for _c, n in numeric if n is not None], context, row_text))
 

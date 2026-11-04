@@ -395,6 +395,7 @@ async def test_t45_transient_provider_faults_are_retried_within_bounds(statuses,
 def test_t45_the_sdk_retry_is_off_where_the_transport_retries(monkeypatch):
     from tribos.utils.llm.llm_factory import get_llm
 
+    monkeypatch.setenv("TRIBOS_ALLOWED_MODELS", "nvidia/nemotron-3.5-super-vl-120b-a12b")  # NVIDIA is off the catalog; the NIM path stays for operators who allow a model
     monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test-not-a-real-key")
     llm = get_llm(model_name="nvidia/nemotron-3.5-super-vl-120b-a12b")
     assert llm.max_retries == 0 and llm.http_async_client is not None
@@ -404,6 +405,7 @@ def test_t45_a_status_error_the_transport_retried_is_not_sent_again_by_the_strea
     from tribos.utils.llm.llm_factory import get_llm
     from tribos.utils.llm.provider_retry import already_retried
 
+    monkeypatch.setenv("TRIBOS_ALLOWED_MODELS", "nvidia/nemotron-3.5-super-vl-120b-a12b")  # NVIDIA is off the catalog; the NIM path stays for operators who allow a model
     monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test-not-a-real-key")
     llm = get_llm(model_name="nvidia/nemotron-3.5-super-vl-120b-a12b")
     status_error = type("InternalServerError", (Exception,), {})()

@@ -116,6 +116,7 @@ def _fake_output(tool_name: str, kwargs: dict[str, Any]) -> dict[str, Any]:
         return {
             "ranked_passages": [rec],
             "total_found": 1,
+            "key_findings": [p_text],
         }
     if tool_name in ("axiom_simplify", "axiom_solve", "axiom_calculus"):
         return {"result": "x**2", "latex": "x^2", "verified": True}
@@ -185,7 +186,7 @@ def _fake_output(tool_name: str, kwargs: dict[str, Any]) -> dict[str, Any]:
             "failed_points": [],
         }
     if tool_name == "lithoscribe_literature_synthesis":
-        return {"ranked_passages": [{"pmid": "123456", "passage_text": "KRAS signaling in pancreatic cancer."}]}
+        return {"ranked_passages": [{"pmid": "123456", "passage_text": "KRAS signaling in pancreatic cancer."}], "key_findings": ["KRAS signaling in pancreatic cancer."]}
     return {"results": []}
 
 

@@ -6,9 +6,9 @@ import asyncio
 import time
 from typing import Any
 
+from ...export.report_model import strip_verification_banner
 from .. import query_planner
 from ..query_context import TaskOutcome
-from ...export.report_model import strip_verification_banner
 from ..result_keys import distinct_results
 from .context import RunContext, logger, orchestrator_module
 
@@ -166,6 +166,66 @@ def apply_incomplete_status(task_status: dict[str, Any], agent_state: Any) -> di
     return status
 
 
+def _sync_sub_questions(agent_state: Any, items: list[dict[str, Any]], tool_results: dict[str, Any] | None = None) -> None:
+    """Synchronize agent_state.sub_questions with assessed deliverables and tool results so items are not left open."""
+    if agent_state is None:
+        return
+    subs = getattr(agent_state, "sub_questions", None)
+    if not subs and len(items) >= 1:
+        from ...agentic.state import SubQuestion
+
+        new_subs: list[SubQuestion] = []
+        for it in items:
+            it_status = it.get("status", "addressed")
+            sq = SubQuestion(
+                id=it.get("id") or f"q{len(new_subs)+1}",
+                text=it.get("item", ""),
+                status="answered" if it_status in ("verified", "addressed") else it_status,
+                answer_state=it.get("answer_state", "answered" if it_status != "missing" else "missing"),
+                check_state=it.get("check_state", "unverified"),
+            )
+            for ev in it.get("evidence") or []:
+                sq.add_evidence(ev, ev.replace("_", " ").title())
+            new_subs.append(sq)
+        agent_state.sub_questions = new_subs
+        return
+
+    if not subs:
+        return
+
+    for idx, sq in enumerate(subs):
+        match = None
+        sq_text = str(sq.text or "").lower()
+        for it in items:
+            it_text = str(it.get("item") or "").lower()
+            if it_text in sq_text or sq_text in it_text:
+                match = it
+                break
+        if match is None and idx < len(items):
+            match = items[idx]
+
+        if match is not None:
+            it_status = match.get("status", "addressed")
+            sq.answer_state = match.get("answer_state", "answered" if it_status != "missing" else "missing")
+            sq.check_state = match.get("check_state", "unverified")
+            if it_status in ("verified", "addressed"):
+                sq.status = "answered"
+            elif it_status == "partial":
+                sq.status = "partial"
+                sq.note = "partly answered or unchecked"
+            elif it_status == "failed_check":
+                sq.status = "partial"
+                sq.check_state = "failed"
+                sq.note = "contradicted by claim check"
+            elif it_status == "missing":
+                sq.status = "missing"
+                sq.check_state = "unverified"
+                sq.note = "not addressed in answer"
+
+            for ev in match.get("evidence") or []:
+                sq.add_evidence(ev, ev.replace("_", " ").title())
+
+
 def apply_deliverables(task_status: dict[str, Any], items: list[dict[str, Any]]) -> dict[str, Any]:
     """Completeness from the requested deliverables: a requested quantity the answer leaves out, or states with a
     value the checks contradict, makes the answer partial with that reason; requests for prose are listed only."""
@@ -173,28 +233,38 @@ def apply_deliverables(task_status: dict[str, Any], items: list[dict[str, Any]])
     status["deliverables"] = items
     missing = [i["item"] for i in items if i.get("status") == "missing" and i.get("quantity")]
     failed = [i["item"] for i in items if i.get("status") == "failed_check"]
+    partial_items = [i["item"] for i in items if i.get("status") == "partial"]
     reasons = list(status.get("incomplete_reasons") or [])
     if missing:
         reasons.append(f"Not addressed: {', '.join(missing[:6])}.")
     if failed:
         reasons.append(f"Stated with values the checks contradict: {', '.join(failed[:6])}.")
+    if partial_items:
+        reasons.append(f"Validation incomplete or partially addressed: {', '.join(partial_items[:6])}.")
     status["incomplete_reasons"] = reasons
-    if (missing or failed) and status.get("task_status") == "completed":
+    if (missing or failed or partial_items) and status.get("task_status") in ("completed", "completed_fallback"):
         status["task_status"] = "partial"
         lead = " ".join(reasons)
         reason = str(status.get("reason") or "")
         status["reason"] = lead if reason in ("", "Evidence gathered and synthesized.") else f"{lead} {reason}"
+    elif (
+        not (missing or failed or partial_items)
+        and status.get("task_status") == "partial"
+        and "fallback" in str(status.get("reason", "")).lower()
+    ):
+        status["task_status"] = "completed_fallback"
     return status
 
 
 # Wall time per kind of work, from the pipeline stages and agent phases (phase key -> kind). Planned tool calls
 # (plan_execute) include the planner's own model calls; they are counted as execution.
 _STAGE_KIND = {
-    "route": "planning", "decompose": "planning", "clarify": "planning", "router": "planning",
+    "plan": "planning", "route": "planning", "decompose": "planning", "clarify": "planning", "router": "planning",
     "evidence": "retrieval", "gaps": "retrieval", "counter_evidence": "retrieval",
     "computations": "execution", "plan_execute": "execution", "math_agent": "execution",
     "ode_verification": "execution", "specialists": "execution", "analyst": "execution",
-    "first_draft": "drafting", "verification": "verification", "nli": "verification", "critique": "verification",
+    "first_draft": "drafting", "best_of_n": "drafting", "codeact": "execution",
+    "verification": "verification", "nli": "verification", "critique": "verification",
     "confidence": "verification", "memory": "memory",
 }
 
@@ -232,6 +302,11 @@ def merge_pipeline_phases(run: RunContext) -> None:
         art["stage_seconds"] = stage_seconds(merged)
         art["budget"] = run.agent_state.budget.to_dict()
         art["sub_questions"] = [q.to_dict() for q in run.agent_state.sub_questions]
+        if run.start_time:
+            total_duration = round(time.perf_counter() - run.start_time, 2)
+            art["duration_seconds"] = total_duration
+            if "used" in art["budget"]:
+                art["budget"]["used"]["seconds"] = total_duration
     except Exception as exc:  # noqa: BLE001
         logger.warning("Pipeline phase timing merge failed: %s", exc)
 
@@ -281,21 +356,41 @@ async def assemble_result(run: RunContext) -> Any:
         try:
             from ..deliverables import assess as assess_deliverables
 
-            items = assess_deliverables(run.resolved_query or run.query, candidate_response,
-                                        getattr(verification_report, "math_audit", None))
+            math_audit_payload = (
+                getattr(verification_report, "math_audit", None)
+                or (verification_report.get("math_audit") if isinstance(verification_report, dict) else None)
+            )
+            if math_audit_payload is None and verification_report is not None:
+                rep_claims = getattr(verification_report, "claims", None) or (verification_report.get("claims") if isinstance(verification_report, dict) else None) or []
+                if rep_claims:
+                    math_audit_payload = {
+                        "claims": [
+                            c.model_dump() if hasattr(c, "model_dump") else c
+                            for c in rep_claims
+                        ]
+                    }
+
+            items = assess_deliverables(
+                run.resolved_query or run.query,
+                candidate_response,
+                math_audit_payload,
+                tool_results=tool_results,
+            )
             if getattr(run, "synthesis_model", "") == "verified_computation":
                 # The answer is the checked computation in the requested form ("∅", "h(1) = 6"): every requested
                 # item is delivered by it, which word overlap with the question cannot see (audit I27/I43).
-                items = [{**it, "status": "verified", "where": "the verified computation, rendered in the requested form"}
+                items = [{**it, "status": "verified", "answer_state": "answered", "check_state": "checked",
+                          "where": "the verified computation, rendered in the requested form"}
                          for it in items]
             task_status = apply_deliverables(task_status, items)
+            _sync_sub_questions(agent_state, items, tool_results)
         except Exception as exc:  # noqa: BLE001 - completeness notes are additive
             logger.warning("Deliverable assessment failed: %s", exc)
     violations = ((execution_artifacts or {}).get("output_contract") or {}).get("violations") or []
     if violations:
         task_status["incomplete_reasons"] = [*task_status.get("incomplete_reasons", []),
                                              f"Requested format not met: {'; '.join(violations)}."]
-        if task_status.get("task_status") == "completed":
+        if task_status.get("task_status") in ("completed", "completed_fallback"):
             task_status["task_status"] = "partial"
     merge_pipeline_phases(run)
     record("note_step", "task_status", {}, task_status)

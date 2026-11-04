@@ -39,22 +39,41 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # ---------------------------------------------------------------------------------------------------------
 # Runtime: slim image, non-root user, source + venv only.
+#
+# This image is the API, not the executor. It holds the credentials, so it must never run model-written code:
+# that happens in docker/sandbox.Dockerfile, in a separate container with its own boundary. The API is
+# hardened at the compose level (read-only root, tmpfs writable paths, cap_drop ALL, no-new-privileges, a
+# process cap and memory/CPU limits); the image itself adds the non-root user and keeps the toolchain minimal.
 # ---------------------------------------------------------------------------------------------------------
 FROM python:${PYTHON_VERSION}-slim AS runtime
 
+# tesseract-ocr: the second text recognizer of image input (tribos/vision/tesseract.py; about 10 MB with English).
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl libgomp1 \
+     tesseract-ocr tesseract-ocr-eng \
   && rm -rf /var/lib/apt/lists/* \
   && groupadd --system --gid 10001 tribos \
   && useradd --system --uid 10001 --gid tribos --home-dir /home/tribos --create-home tribos \
-  && mkdir -p /data \
-  && chown tribos:tribos /data
+  && mkdir -p /data /app \
+  && chown tribos:tribos /data \
+  # The app tree is read-only at runtime (the compose service mounts a read-only root), so it is owned by root
+  # and only readable by the service user. Nothing the API writes may land here.
+  && chmod -R a-w /app
 
 WORKDIR /app
 
-COPY --from=builder --chown=tribos:tribos /app/.venv /app/.venv
-COPY --chown=tribos:tribos tribos/ ./tribos/
-COPY --chown=tribos:tribos app/ ./app/
+COPY --from=builder --chown=root:root /app/.venv /app/.venv
+COPY --chown=root:root tribos/ ./tribos/
+COPY --chown=root:root app/ ./app/
+
+# Research theses are typeset by headless Chromium (Playwright). THESIS_PDF=0 leaves it out (about 300 MB smaller);
+# thesis PDFs then use the plain fpdf2 fallback (TRIBOS_THESIS_PDF_ENGINE=auto picks whichever is present).
+ARG THESIS_PDF=1
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN if [ "$THESIS_PDF" = "1" ]; then \
+      /app/.venv/bin/playwright install --with-deps chromium \
+      && rm -rf /var/lib/apt/lists/* && chmod -R a+rX /opt/ms-playwright; \
+    fi
 
 # All mutable state lives on the /data volume. TRIBOS_DATA_DIR is the umbrella; the stores below are the
 # variables the code actually reads (run provenance, jobs, memory, projects, tool cache).

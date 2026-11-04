@@ -21,6 +21,7 @@ import sympy as sp
 
 from .safe_expr import SAFE_NAMES as _SAFE_LOCALS
 from .safe_expr import TRANSFORMATIONS, check_math_text, parse_math
+from .shapes import UnsupportedShapeError, extract_free_symbols, to_sympy_container
 
 _ASSUMPTION_KEYS = frozenset({
     "real",
@@ -75,13 +76,22 @@ def _check_safe_string(text: str) -> str:
 
 
 def safe_parse_expr(
-    expression: str,
+    expression: Any,
     local_dict: dict[str, Any] | None = None,
     assumptions: dict[str, str] | None = None,
-) -> sp.Expr:
+) -> sp.Basic:
     """Parse a mathematical expression string into a SymPy expression through the allowlist parser (safe_expr): the
     text is normalised, the generated code is validated (no attribute access, dunders or unlisted calls), and only
-    then evaluated without builtins."""
+    then evaluated without builtins. Supported containers (tuples, lists) are converted to SymPy containers (sp.Tuple)."""
+    if isinstance(expression, sp.Basic):
+        return expression
+    if isinstance(expression, (int, float, complex)):
+        return sp.sympify(expression)
+    if isinstance(expression, (tuple, list)):
+        return to_sympy_container([safe_parse_expr(x, local_dict=local_dict, assumptions=assumptions) for x in expression])
+    if isinstance(expression, dict):
+        raise UnsupportedShapeError(f"Dictionary is not a valid mathematical expression: {expression!r}")
+
     cleaned = _check_safe_string(expression)
     env = dict(_SAFE_LOCALS)
     if assumptions:
@@ -89,8 +99,13 @@ def safe_parse_expr(
     if local_dict:
         env.update(local_dict)
     try:
-        return parse_math(cleaned, env)
+        parsed = parse_math(cleaned, env)
+        if isinstance(parsed, (tuple, list)):
+            return to_sympy_container(parsed)
+        return parsed
     except Exception as exc:
+        if isinstance(exc, (ValueError, TypeError, UnsupportedShapeError)):
+            raise
         raise ValueError(f"Could not parse mathematical expression {cleaned!r}: {exc}") from exc
 
 
@@ -125,10 +140,10 @@ def axiom_latex(expression: str) -> dict[str, Any]:
     if "=" in cleaned.replace("==", "=") and not cleaned.startswith("Eq("):
         lhs, rhs, eq_obj = safe_parse_equation(cleaned)
         target: sp.Basic = eq_obj
-        free_syms = sorted({str(s) for s in (lhs.free_symbols | rhs.free_symbols)})
+        free_syms = extract_free_symbols(eq_obj)
     else:
         target = safe_parse_expr(cleaned)
-        free_syms = sorted({str(s) for s in target.free_symbols})
+        free_syms = extract_free_symbols(target)
     sympy_str = str(target)
     latex_str = sp.latex(target)
     cid = _canonical_id("axiom_latex", {"expression": cleaned, "sympy": sympy_str})
@@ -141,12 +156,10 @@ def axiom_latex(expression: str) -> dict[str, Any]:
     }
 
 
-def axiom_simplify(
-    expression: str,
+def _simplify_scalar_expr(
+    expr: sp.Expr,
     assumptions: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Simplify, factor, expand, trig-simplify, and cancel a symbolic mathematical expression."""
-    expr = safe_parse_expr(expression, assumptions=assumptions)
     simplified_expr = sp.simplify(expr)
     try:
         trig_expr = sp.trigsimp(simplified_expr)
@@ -167,11 +180,7 @@ def axiom_simplify(
     except Exception:
         canceled_expr = simplified_expr
 
-    free_syms = sorted(str(s) for s in expr.free_symbols)
-    cid = _canonical_id(
-        "axiom_simplify",
-        {"expression": expression, "assumptions": assumptions or {}, "simplified": str(simplified_expr)},
-    )
+    free_syms = sorted(str(s) for s in getattr(expr, "free_symbols", set()))
     return {
         "expression": str(expr),
         "simplified": str(simplified_expr),
@@ -181,8 +190,55 @@ def axiom_simplify(
         "canceled": str(canceled_expr),
         "trig_simplified": str(trig_expr),
         "free_symbols": free_syms,
-        "canonical_id": cid,
     }
+
+
+def axiom_simplify(
+    expression: Any,
+    assumptions: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Simplify, factor, expand, trig-simplify, and cancel a symbolic mathematical expression or collection."""
+    expr = safe_parse_expr(expression, assumptions=assumptions)
+
+    if isinstance(expr, (sp.Tuple, tuple, list)):
+        if len(expr) == 0:
+            raise UnsupportedShapeError("Empty container cannot be simplified")
+
+        items = [_simplify_scalar_expr(item, assumptions=assumptions) for item in expr]
+        is_list = isinstance(expression, list) or (isinstance(expression, str) and expression.strip().startswith("["))
+        op_bracket = "[" if is_list else "("
+        cl_bracket = "]" if is_list else ")"
+
+        def _join_str(key: str) -> str:
+            return op_bracket + ", ".join(item[key] for item in items) + cl_bracket
+
+        free_syms = sorted({s for item in items for s in item["free_symbols"]})
+        latex_str = sp.latex(sp.Tuple(*(sp.sympify(item["simplified"]) for item in items)))
+        cid = _canonical_id(
+            "axiom_simplify",
+            {"expression": str(expression), "assumptions": assumptions or {}, "simplified": _join_str("simplified")},
+        )
+        return {
+            "expression": str(expr),
+            "simplified": _join_str("simplified"),
+            "latex": latex_str,
+            "factored": _join_str("factored"),
+            "expanded": _join_str("expanded"),
+            "canceled": _join_str("canceled"),
+            "trig_simplified": _join_str("trig_simplified"),
+            "free_symbols": free_syms,
+            "items": items,
+            "shape": "list" if is_list else "tuple",
+            "canonical_id": cid,
+        }
+
+    res = _simplify_scalar_expr(expr, assumptions=assumptions)
+    cid = _canonical_id(
+        "axiom_simplify",
+        {"expression": str(expression), "assumptions": assumptions or {}, "simplified": res["simplified"]},
+    )
+    res["canonical_id"] = cid
+    return res
 
 
 def _is_real_value(val: sp.Basic) -> bool:
@@ -197,6 +253,55 @@ def _is_real_value(val: sp.Basic) -> bool:
         # A value that cannot be evaluated is not known to be real (it may be a complex root); a symbol declared real
         # was already accepted above.
         return False
+
+
+_INTERVAL_DOMAIN_RE = re.compile(r"^\s*([\[(])\s*([^,\[\]()]+(?:\([^()]*\))?[^,\[\]()]*)\s*,\s*([^,\[\]()]+(?:\([^()]*\))?[^,\[\]()]*)\s*([\])])\s*$")
+
+
+def _parse_interval_domain(domain: str) -> sp.Interval | None:
+    """"[0, 2*pi)" -> Interval.Ropen(0, 2*pi); None for a named domain (real, complex, integer, ...)."""
+    m = _INTERVAL_DOMAIN_RE.match(domain or "")
+    if not m:
+        return None
+    lo = safe_parse_expr(m.group(2).replace("π", "pi"))
+    hi = safe_parse_expr(m.group(3).replace("π", "pi"))
+    if lo.free_symbols or hi.free_symbols or not (lo.is_real and hi.is_real) or bool(hi < lo):
+        raise ValueError(f"Invalid interval domain {domain!r}")
+    return sp.Interval(lo, hi, left_open=m.group(1) == "(", right_open=m.group(4) == ")")
+
+
+def _solve_on_interval(eq_list: list[str], residual_exprs: list[sp.Expr], target_syms: list[sp.Symbol],
+                       interval: sp.Interval, domain_text: str) -> dict[str, Any]:
+    """A single equation in one unknown solved over a finite real interval with solveset: a periodic equation then has
+    finitely many solutions, all listed, each back-substituted."""
+    if len(residual_exprs) != 1 or len(target_syms) != 1:
+        raise ValueError("An interval domain applies to one equation in one unknown.")
+    sym = target_syms[0]
+    real_sym = sp.Symbol(sym.name, real=True)
+    expr = residual_exprs[0].subs(sym, real_sym)
+    found = sp.solveset(expr, real_sym, domain=interval)
+    finite = isinstance(found, sp.FiniteSet)
+    values = sorted(found, key=lambda v: float(sp.N(v))) if finite else []
+    solutions, latex_parts, residuals, ok = [], [], [], True
+    for v in values:
+        residual = sp.simplify(expr.subs(real_sym, v))
+        zero = residual == 0 or abs(complex(sp.N(expr.subs(real_sym, v), 30))) < 1e-12
+        ok = ok and bool(zero)
+        solutions.append({sym.name: str(sp.simplify(v))})
+        latex_parts.append(f"{sp.latex(sym)} = {sp.latex(sp.simplify(v))}")
+        residuals.append(["0" if zero else str(residual)])
+    return {
+        "equations": eq_list,
+        "variables": [sym.name],
+        "domain": domain_text,
+        "solutions": solutions,
+        "latex": ", ".join(latex_parts),
+        "verified": bool(solutions) and ok,
+        "residuals": residuals,
+        "complete": finite,
+        "solution_set": str(found),
+        "interval": str(interval),
+    }
 
 
 def axiom_solve(
@@ -216,26 +321,71 @@ def axiom_solve(
 
     for eq_str in eq_list:
         lhs, rhs, _ = safe_parse_equation(eq_str)
+        if isinstance(lhs, (sp.Tuple, tuple, list)) or isinstance(rhs, (sp.Tuple, tuple, list)):
+            if not (isinstance(lhs, (sp.Tuple, tuple, list)) and isinstance(rhs, (sp.Tuple, tuple, list))):
+                raise UnsupportedShapeError("Shape mismatch in equation: cannot equate container to scalar")
+            if len(lhs) != len(rhs):
+                raise UnsupportedShapeError(f"Shape length mismatch in equation: {len(lhs)} != {len(rhs)}")
+            for l_item, r_item in zip(lhs, rhs, strict=True):
+                parsed_pairs.append((l_item, r_item))
+                try:
+                    res = l_item - r_item
+                except TypeError as exc:
+                    raise UnsupportedShapeError(f"Cannot equate incompatible types in equation: {exc}") from exc
+                residual_exprs.append(res)
+                for sym in sorted(res.free_symbols, key=lambda s: s.name):
+                    if sym.name not in seen_names:
+                        seen_names.add(sym.name)
+                        all_free.append(sym)
+            continue
         parsed_pairs.append((lhs, rhs))
-        res_expr = lhs - rhs
+        try:
+            res_expr = lhs - rhs
+        except TypeError as exc:
+            raise UnsupportedShapeError(f"Cannot equate incompatible types in equation: {exc}") from exc
         residual_exprs.append(res_expr)
         for sym in sorted(res_expr.free_symbols, key=lambda s: s.name):
             if sym.name not in seen_names:
                 seen_names.add(sym.name)
                 all_free.append(sym)
 
+    def _clean_var(item: str) -> str:
+        raw = str(item).strip().strip("$")
+        raw = re.split(r"\\in|>|<|>=|<=|=", raw)[0].strip()
+        m = re.search(r"[A-Za-z_]\w*", raw)
+        if not m:
+            raise ValueError(f"Invalid variable identifier: {item!r}")
+        return m.group(0)
+
+    clean_dom = str(domain or "complex").strip().lower()
+    if clean_dom in ("real", "reals", "r"):
+        norm_domain = "real"
+    elif clean_dom in ("integer", "integers", "z"):
+        norm_domain = "integer"
+    elif clean_dom in ("positive_integer", "positive_integers", "natural", "n", "positive"):
+        norm_domain = "positive_integer"
+    elif clean_dom in ("complex", "c"):
+        norm_domain = "complex"
+    else:
+        norm_domain = clean_dom
+
     if variables is None:
         target_syms = all_free
     elif isinstance(variables, str):
-        names = [v.strip() for v in variables.split(",") if v.strip()]
+        names = [_clean_var(v) for v in variables.split(",") if v.strip()]
         target_syms = [sp.Symbol(n) for n in names]
     else:
-        target_syms = [sp.Symbol(str(n).strip()) for n in variables if str(n).strip()]
+        target_syms = [sp.Symbol(_clean_var(str(n))) for n in variables if str(n).strip()]
 
     if not target_syms:
         raise ValueError("No variables found to solve for.")
 
-    want_real = str(domain or "complex").strip().lower() in ("real", "reals", "r")
+    interval = _parse_interval_domain(norm_domain)
+    if interval is not None:
+        return _solve_on_interval(eq_list, residual_exprs, target_syms, interval, norm_domain)
+    want_real = norm_domain in ("real", "integer", "positive_integer")
+    want_integer = norm_domain in ("integer", "positive_integer")
+    want_positive = norm_domain == "positive_integer"
     if want_real:
         # Solve over real symbols, not only filter afterwards: Abs(x - 3) = 5 has no complex-domain method at all.
         real_map = {s: sp.Symbol(s.name, real=True) for s in target_syms if s.is_real is None}
@@ -253,6 +403,19 @@ def axiom_solve(
 
     for sol in raw_solutions:
         if want_real and not all(_is_real_value(v) for v in sol.values()):
+            continue
+        if want_integer and not all(
+            getattr(sp.simplify(v), "is_integer", None) is True
+            or isinstance(v, (int, sp.Integer))
+            or (isinstance(v, sp.Rational) and v.q == 1)
+            for v in sol.values()
+        ):
+            continue
+        if want_positive and not all(
+            getattr(sp.simplify(v), "is_positive", None) is True
+            or (isinstance(v, (int, float, sp.Number)) and float(v) > 0)
+            for v in sol.values()
+        ):
             continue
         sol_str = {str(k): str(sp.simplify(v)) for k, v in sol.items()}
         sol_ltx = {str(k): sp.latex(sp.simplify(v)) for k, v in sol.items()}
@@ -293,12 +456,12 @@ def axiom_solve(
 
     cid = _canonical_id(
         "axiom_solve",
-        {"equations": eq_list, "variables": [str(s) for s in target_syms], "domain": domain, "solutions": solutions_out},
+        {"equations": eq_list, "variables": [str(s) for s in target_syms], "domain": norm_domain, "solutions": solutions_out},
     )
     return {
         "equations": eq_list,
         "variables": [str(s) for s in target_syms],
-        "domain": domain,
+        "domain": norm_domain,
         "solutions": solutions_out,
         "latex": latex_summary,
         "verified": verified,
@@ -541,6 +704,25 @@ def axiom_calculus(
     expr = safe_parse_expr(expression, local_dict={variable: var_sym})
     op = str(operation).strip().lower()
 
+    if isinstance(expr, (sp.Tuple, tuple, list)):
+        if op == "diff":
+            items = [
+                axiom_calculus(str(item), operation="diff", variable=variable, order=order)
+                for item in expr
+            ]
+            res_tuple = sp.Tuple(*(sp.sympify(item["result"]) for item in items))
+            return {
+                "operation": "diff",
+                "variable": variable,
+                "order": int(order),
+                "result": str(res_tuple),
+                "latex": sp.latex(res_tuple),
+                "verified": all(item["verified"] for item in items),
+                "method": "element-wise derivative check",
+                "items": items,
+            }
+        raise UnsupportedShapeError(f"Operation '{op}' requires a scalar expression, got container {type(expr).__name__}")
+
     numeric_value: float | None = None
     verified = False
     method = "not checked"
@@ -688,7 +870,16 @@ def axiom_nsolve(
     The numeric fallback when no closed form exists (x = cos(x), x*exp(x) = 3). A scan cannot prove that it found
     every root, so `complete` is always None."""
     lhs, rhs, _ = safe_parse_equation(equation)
-    f_expr = lhs - rhs
+    if isinstance(lhs, (sp.Tuple, tuple, list)) or isinstance(rhs, (sp.Tuple, tuple, list)):
+        if not (isinstance(lhs, (sp.Tuple, tuple, list)) and isinstance(rhs, (sp.Tuple, tuple, list))):
+            raise UnsupportedShapeError("Shape mismatch in equation: cannot equate container to scalar")
+        raise UnsupportedShapeError(f"Operation 'nsolve' requires a scalar equation, got container {type(lhs).__name__}")
+    try:
+        f_expr = lhs - rhs
+    except TypeError as exc:
+        raise UnsupportedShapeError(f"Cannot form residual for numeric solve: {exc}") from exc
+    if isinstance(f_expr, (sp.Tuple, tuple, list)):
+        raise UnsupportedShapeError(f"Operation 'nsolve' requires a scalar equation, got container {type(f_expr).__name__}")
     free = sorted(f_expr.free_symbols, key=lambda s: s.name)
     if variable:
         sym = next((s for s in free if s.name == variable), sp.Symbol(variable))
@@ -803,13 +994,27 @@ def axiom_dsolve(
 
     norm_eq = _normalize_ode_primes(equation, func_name, var_name)
     lhs, rhs, eq_obj = safe_parse_equation(norm_eq, local_dict=local_env)
+    if isinstance(eq_obj, sp.Eq) and not eq_obj.has(sp.Derivative):
+        # "n = 0" with func s(x) once reached sympy.dsolve and crashed with IndexError; say what is wrong instead.
+        raise UnsupportedShapeError(
+            f"'{equation[:80]}' is not a differential equation in {func_name}({var_name}): it has no derivative")
+    if isinstance(lhs, (sp.Tuple, tuple, list)) or isinstance(rhs, (sp.Tuple, tuple, list)):
+        raise UnsupportedShapeError(
+            f"Operation 'dsolve' requires a scalar ODE, got container {type(lhs if isinstance(lhs, (sp.Tuple, tuple, list)) else rhs).__name__}"
+        )
 
+    # A decimal in a stated problem ("x(0) = 0.1", "0.3 x'") is exact: solve with rationals so the constants come out
+    # as -37/130, not -0.284615384615385.
+    if eq_obj.has(sp.Float):
+        eq_obj = sp.Eq(sp.nsimplify(eq_obj.lhs, rational=True), sp.nsimplify(eq_obj.rhs, rational=True))
     parsed_ics: dict[Any, Any] | None = None
     if ics:
         parsed_ics = {}
         for k, v in ics.items():
             k_str = str(k).strip()
             v_expr = safe_parse_expr(str(v), local_dict=local_env)
+            if v_expr.has(sp.Float):
+                v_expr = sp.nsimplify(v_expr, rational=True)
             # Match y(x0), y'(x0), y''(x0)
             m_ic = re.match(rf"^{re.escape(func_name)}('*)\s*\(\s*(.+)\s*\)$", k_str)
             if m_ic:
@@ -1067,6 +1272,51 @@ def axiom_verify_identity(
     assumptions restrict a symbol's domain)."""
     lhs_expr = safe_parse_expr(lhs, assumptions=assumptions)
     rhs_expr = safe_parse_expr(rhs, assumptions=assumptions)
+
+    lhs_is_container = isinstance(lhs_expr, (sp.Tuple, tuple, list))
+    rhs_is_container = isinstance(rhs_expr, (sp.Tuple, tuple, list))
+
+    if lhs_is_container or rhs_is_container:
+        if not (lhs_is_container and rhs_is_container):
+            return {
+                "equivalent": False,
+                "evidence": "refuted",
+                "evidence_detail": "shape mismatch: cannot equate scalar and collection",
+                "counterexample": {"error": "shape mismatch: container vs scalar"},
+                "counterexample_regime": None,
+                "max_numeric_error": float("inf"),
+                "points_tested": 0,
+                "holds_on_positive_reals": False,
+                "canonical_id": _canonical_id("axiom_verify_identity", {"lhs": str(lhs), "rhs": str(rhs)}),
+            }
+        if len(lhs_expr) != len(rhs_expr):
+            return {
+                "equivalent": False,
+                "evidence": "refuted",
+                "evidence_detail": f"shape length mismatch: {len(lhs_expr)} != {len(rhs_expr)}",
+                "counterexample": {"error": f"shape length mismatch: {len(lhs_expr)} != {len(rhs_expr)}"},
+                "counterexample_regime": None,
+                "max_numeric_error": float("inf"),
+                "points_tested": 0,
+                "holds_on_positive_reals": False,
+                "canonical_id": _canonical_id("axiom_verify_identity", {"lhs": str(lhs), "rhs": str(rhs)}),
+            }
+        for left_item, right_item in zip(lhs_expr, rhs_expr, strict=True):
+            sub_res = axiom_verify_identity(str(left_item), str(right_item), assumptions=assumptions, num_points=num_points, variables=variables)
+            if not sub_res["equivalent"]:
+                return sub_res
+        return {
+            "equivalent": True,
+            "evidence": "symbolic",
+            "evidence_detail": "element-wise symbolic equivalence across all container components",
+            "counterexample": None,
+            "counterexample_regime": None,
+            "max_numeric_error": 0.0,
+            "points_tested": len(lhs_expr),
+            "holds_on_positive_reals": True,
+            "canonical_id": _canonical_id("axiom_verify_identity", {"lhs": str(lhs), "rhs": str(rhs)}),
+        }
+
     diff_expr = lhs_expr - rhs_expr
     symbolic_zero = _is_symbolic_zero(diff_expr)
 

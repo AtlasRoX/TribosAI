@@ -5,8 +5,11 @@ import ReactMarkdown, { type Components, type Options as MarkdownOptions } from 
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
-import { Check, Copy, ExternalLink, Terminal } from "lucide-react";
+import { Check, Copy, ExternalLink, PanelRightOpen, Terminal } from "lucide-react";
 import { CitationRef } from "@/components/CitationRef";
+import { extensionFor, openCode } from "@/lib/codePanel";
+import { InlineUiBlock } from "@/components/genui/GenUI";
+import { parseUiFence } from "@/lib/genui";
 import { rehypeCitations, rehypeIdentifierLinkGuard } from "@/lib/citations";
 import { KATEX_OPTIONS, preprocessMarkdown } from "@/lib/markdownNormalize";
 import { rehypeMathBlocks, rehypeValueLinks, type LinkedValue } from "@/lib/mathInteractions";
@@ -346,6 +349,9 @@ function useMarkdownComponents(citations?: CitationMap, sectionActions = false):
 
         const codeText = String(children).replace(/\n$/, "");
         const language = match ? match[1] : "code";
+        // A writer's generative-UI block; an unfinished or invalid one (while streaming) stays plain code.
+        const uiBlock = language === "ui" ? parseUiFence(codeText) : null;
+        if (uiBlock) return <InlineUiBlock block={uiBlock} />;
 
         return <CodeBlock language={language} code={codeText} />;
       },
@@ -531,6 +537,15 @@ function CodeBlock({ language, code }: CodeBlockProps) {
           <Terminal style={{ width: 12, height: 12, color: "var(--domain-t2kg)" }} />
           <span>{language}</span>
         </div>
+        <div style={{ display: "flex", gap: 4 }}>
+        <button
+          onClick={() => openCode(`${language} code`, [{ name: `snippet.${extensionFor(language)}`, language, code }])}
+          className="code-copy-btn"
+          title="Open in the side panel"
+        >
+          <PanelRightOpen style={{ width: 12, height: 12 }} />
+          <span>Open</span>
+        </button>
         <button
           onClick={handleCopy}
           className="code-copy-btn"
@@ -548,6 +563,7 @@ function CodeBlock({ language, code }: CodeBlockProps) {
             </>
           )}
         </button>
+        </div>
       </div>
       <pre>
         <code>{code}</code>

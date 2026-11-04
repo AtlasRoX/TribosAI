@@ -20,6 +20,14 @@ import tempfile
 import time
 from typing import Any
 
+from ..agentic.sandbox.process import (
+    SAGE_ENV_ALLOWLIST,
+    allowlisted_env,
+    kill_tree,
+    process_group_kwargs,
+    read_capped,
+)
+
 logger = logging.getLogger(__name__)
 
 _DISCOVERED_CMD: list[str] | None = None
@@ -27,12 +35,8 @@ _DISCOVERED_MODE: str | None = None
 _CHECKED = False
 
 # Environment passed to Sage: only what the interpreter (or wsl.exe) needs to start. Model-written code never
-# sees the server's API keys, tokens or database credentials.
-_ENV_ALLOW = frozenset({
-    "PATH", "HOME", "USER", "LOGNAME", "LANG", "LANGUAGE", "TZ", "TMPDIR", "TEMP", "TMP",
-    "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "USERPROFILE", "LOCALAPPDATA", "PROGRAMDATA", "SYSTEMDRIVE",
-    "DOT_SAGE", "SAGE_ROOT", "SAGE_LOCAL", "MPLBACKEND",
-})
+# sees the server's API keys, tokens or database credentials. The allowlist itself lives in the shared sandbox
+# process module, so the Sage path and the Python path cannot drift apart.
 _SECRET_NAME_RE = re.compile(r"KEY|TOKEN|SECRET|PASSW|CREDENTIAL|AUTH", re.I)
 # stderr markers of a broken environment (not of the submitted code)
 _INFRA_ERROR_RE = re.compile(
@@ -40,6 +44,28 @@ _INFRA_ERROR_RE = re.compile(
     r"ImportError: libsage|sage: not found",
     re.I,
 )
+
+# Installed before the submitted code runs: the Sage process is a fresh interpreter, so the runner's socket stub
+# does not apply to it. Defence in depth only; the container's --network none is the layer that actually holds.
+_NETWORK_GUARD = r"""
+try:
+    import socket as _sb_socket
+
+    def _sb_deny(*_a, **_k):
+        raise PermissionError("network access is disabled in the analysis sandbox")
+
+    class _SBBlockedSocket(_sb_socket.socket):
+        def __init__(self, *_a, **_k):
+            _sb_deny()
+
+    _sb_socket.socket = _SBBlockedSocket
+    for _sb_name in ("create_connection", "create_server", "getaddrinfo", "gethostbyname", "gethostbyname_ex",
+                     "gethostbyaddr", "socketpair", "fromfd"):
+        if hasattr(_sb_socket, _sb_name):
+            setattr(_sb_socket, _sb_name, _sb_deny)
+except Exception:
+    pass
+"""
 
 _ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 _FIGURES_DELIM_RE = re.compile(r"__TRIBOS_FIGURES_START__(.*?)__TRIBOS_FIGURES_END__", re.DOTALL)
@@ -101,13 +127,17 @@ def _strip_ansi(text: str) -> str:
     return _ANSI_ESCAPE_RE.sub("", text)
 
 
-def _sandbox_env() -> dict[str, str]:
-    env = {
-        k: v for k, v in os.environ.items()
-        if (k.upper() in _ENV_ALLOW or k.upper().startswith("LC_")) and not _SECRET_NAME_RE.search(k)
-    }
+def _sandbox_env(tmp_dir: str | None = None) -> dict[str, str]:
+    """The Sage child's environment: an allowlist, never the server's credentials."""
+    root = tmp_dir or tempfile.mkdtemp(prefix="tribos-sbx-")
+    env = allowlisted_env(root, tmp_dir or root, allowlist=SAGE_ENV_ALLOWLIST)
+    env = {k: v for k, v in env.items() if not _SECRET_NAME_RE.search(k)}
     env["WSLENV"] = ""  # share no Windows variables with the WSL side
     env.setdefault("MPLBACKEND", "Agg")
+    # Sage needs a HOME for its own caches, but it must be the sandbox's scratch directory: the server
+    # user's home holds the credentials, the SSH keys and the rest of the deployment.
+    env["HOME"] = root
+    env["USERPROFILE"] = root
     return env
 
 
@@ -192,8 +222,22 @@ def find_sagemath_command(*, force_recheck: bool = False) -> tuple[list[str], st
 
 
 def is_sagemath_available(force_recheck: bool = False) -> bool:
-    """Returns True if SageMath is discovered and runnable on this system."""
-    return find_sagemath_command(force_recheck=force_recheck) is not None
+    """Returns True if SageMath is discovered and runnable on this system.
+
+    Discovery and execution must agree: a SageMath that is only reachable through WSL is not available
+    unless the operator has explicitly accepted the risk (TRIBOS_SANDBOX_SAGE_ALLOW_WSL=1), because the
+    Python-level sandbox guards do not reach into WSL's separate kernel.
+    """
+    found = find_sagemath_command(force_recheck=force_recheck)
+    if found is None:
+        return False
+    _cmd, mode = found
+    if mode == "wsl":
+        from ..agentic.sandbox import sagemath_allow_wsl
+
+        if not sagemath_allow_wsl():
+            return False
+    return True
 
 
 def _windows_to_wsl_path(path: str) -> str:
@@ -204,11 +248,24 @@ def _windows_to_wsl_path(path: str) -> str:
     return f"/mnt/{drive}{rest}"
 
 
-def run_sagemath_code(code: str, timeout_s: int = 60) -> dict[str, Any]:
+def run_sagemath_code(
+    code: str,
+    timeout_s: int = 60,
+    *,
+    memory_mb: int = 2048,
+    max_output_kb: int = 256,
+) -> dict[str, Any]:
     """
-    Executes Python/Sage code inside the SageMath environment.
+    Executes Python/Sage code inside the SageMath environment, under the sandbox policy.
+
+    The submitted code is untrusted (it was written by a model that read retrieved text and uploaded data), so it is
+    checked against the AST policy first, runs with a scrubbed environment and a blocked network, is bounded by a
+    wall-clock timeout that kills the whole process tree, and its output is capped.
+
     Returns structured results with stdout, stderr, execution_time_seconds, and canonical_id.
     """
+    from ..agentic.sandbox.policy import check_code
+
     cmd_info = find_sagemath_command()
     if not cmd_info:
         return {
@@ -225,31 +282,95 @@ def run_sagemath_code(code: str, timeout_s: int = 60) -> dict[str, Any]:
     digest = hashlib.sha256(code.encode("utf-8")).hexdigest()[:12]
     cid = f"comp:sagemath:{digest}"
 
-    wrapped_code = code + "\n" + _HARVESTER_SNIPPET
+    # The same static policy as the Python path, with the Sage import profile.
+    violations = check_code(code, profile="sage")
+    if violations:
+        return {
+            "status": "policy_violation",
+            "failure_class": "model_code_error",
+            "error": "the code was rejected by the sandbox policy",
+            "violations": violations,
+            "stdout": "",
+            "stderr": "",
+            "figures": [],
+            "execution_time_seconds": 0.0,
+            "mode": mode,
+            "canonical_id": cid,
+        }
 
-    with tempfile.NamedTemporaryFile("w", suffix=".sage", delete=False, encoding="utf-8") as tmp:
+    # WSL crosses into another kernel where the Python-level guards do not apply; it stays off unless the operator
+    # explicitly accepts that.
+    if mode == "wsl":
+        from ..agentic.sandbox import sagemath_allow_wsl
+
+        if not sagemath_allow_wsl():
+            return {
+                "status": "unavailable",
+                "failure_class": "infrastructure",
+                "error": (
+                    "SageMath was discovered inside WSL, where the sandbox guards do not apply. "
+                    "Install a native SageMath, or set TRIBOS_SANDBOX_SAGE_ALLOW_WSL=1 to accept that risk."
+                ),
+                "stdout": "",
+                "stderr": "",
+                "execution_time_seconds": 0.0,
+                "mode": mode,
+                "canonical_id": cid,
+            }
+
+    wrapped_code = _NETWORK_GUARD + "\n" + code + "\n" + _HARVESTER_SNIPPET
+    max_bytes = max(1, int(max_output_kb)) * 1024
+    effective_timeout = max(5, min(180, int(timeout_s)))
+
+    root = tempfile.mkdtemp(prefix="tribos-sbx-")
+    script_path = os.path.join(root, "cell.sage")
+    stdout_path = os.path.join(root, "stdout.txt")
+    stderr_path = os.path.join(root, "stderr.txt")
+    with open(script_path, "w", encoding="utf-8") as tmp:
         tmp.write(wrapped_code)
-        tmp_name = tmp.name
 
+    proc = None
     try:
-        script_arg = _windows_to_wsl_path(tmp_name) if mode == "wsl" else tmp_name
+        script_arg = _windows_to_wsl_path(script_path) if mode == "wsl" else script_path
         exec_cmd = cmd_prefix + [script_arg]
 
         start_time = time.monotonic()
-        proc = subprocess.run(
-            exec_cmd,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=max(5, min(180, int(timeout_s))),
-            env=_sandbox_env(),
-            stdin=subprocess.DEVNULL,
-        )
+        timed_out = False
+        try:
+            with open(stdout_path, "wb") as out_fh, open(stderr_path, "wb") as err_fh:
+                proc = subprocess.Popen(
+                    exec_cmd,
+                    stdout=out_fh,
+                    stderr=err_fh,
+                    env=_sandbox_env(root),
+                    stdin=subprocess.DEVNULL,
+                    **process_group_kwargs(),
+                )
+                try:
+                    proc.wait(timeout=effective_timeout)
+                except subprocess.TimeoutExpired:
+                    timed_out = True
+                    kill_tree(proc)
+        finally:
+            if proc is not None and proc.poll() is None:
+                kill_tree(proc)
         duration = round(time.monotonic() - start_time, 3)
 
-        raw_stdout = _strip_ansi(proc.stdout)
-        stderr = _strip_ansi(proc.stderr)
+        raw_stdout = _strip_ansi(read_capped(stdout_path, max_bytes))
+        stderr = _strip_ansi(read_capped(stderr_path, 8 * 1024, tail=True))
+
+        if timed_out:
+            return {
+                "status": "timeout",
+                "failure_class": "timeout",
+                "error": f"SageMath execution exceeded cutoff of {effective_timeout}s",
+                "stdout": raw_stdout,
+                "stderr": stderr,
+                "figures": [],
+                "execution_time_seconds": duration,
+                "mode": mode,
+                "canonical_id": cid,
+            }
 
         figures = []
         fig_match = _FIGURES_DELIM_RE.search(raw_stdout)
@@ -262,7 +383,8 @@ def run_sagemath_code(code: str, timeout_s: int = 60) -> dict[str, Any]:
         else:
             stdout = raw_stdout.strip()
 
-        if proc.returncode == 0:
+        returncode = proc.returncode if proc is not None else 1
+        if returncode == 0:
             return {
                 "status": "ok",
                 "stdout": stdout,
@@ -273,30 +395,20 @@ def run_sagemath_code(code: str, timeout_s: int = 60) -> dict[str, Any]:
                 "mode": mode,
                 "canonical_id": cid,
                 "failure_class": "none",
+                "limits": {"memory_mb": int(memory_mb), "timeout_s": effective_timeout},
             }
         return {
             "status": "error",
             "failure_class": classify_failure("error", stderr),
-            "error": f"SageMath returned exit code {proc.returncode}: {stderr or stdout}",
+            "error": f"SageMath returned exit code {returncode}: {stderr or stdout}",
             "stdout": stdout,
             "stderr": stderr,
             "figures": figures,
-            "returncode": proc.returncode,
+            "returncode": returncode,
             "execution_time_seconds": duration,
             "mode": mode,
             "canonical_id": cid,
-        }
-    except subprocess.TimeoutExpired:
-        return {
-            "status": "timeout",
-            "failure_class": "timeout",
-            "error": f"SageMath execution exceeded cutoff of {timeout_s}s",
-            "stdout": "",
-            "stderr": "",
-            "figures": [],
-            "execution_time_seconds": float(timeout_s),
-            "mode": mode,
-            "canonical_id": cid,
+            "limits": {"memory_mb": int(memory_mb), "timeout_s": effective_timeout},
         }
     except Exception as exc:
         return {
@@ -311,11 +423,9 @@ def run_sagemath_code(code: str, timeout_s: int = 60) -> dict[str, Any]:
             "canonical_id": cid,
         }
     finally:
-        if os.path.exists(tmp_name):
-            try:
-                os.unlink(tmp_name)
-            except OSError:
-                pass
+        from ..agentic.sandbox.process import rmtree
+
+        rmtree(root)
 
 
 __all__ = [

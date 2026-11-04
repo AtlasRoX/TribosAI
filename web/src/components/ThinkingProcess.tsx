@@ -12,6 +12,8 @@ import { REASONING_SMOOTH_OPTIONS } from "@/lib/smoothText";
 import { useSmoothText } from "@/lib/useSmoothText";
 
 interface ThinkingProcessProps {
+  /** The clean answer view: the finished header says only "Worked for ...", without step and issue counts. */
+  compact?: boolean;
   thoughts: ThoughtStep[];
   /** The model's own reasoning text (streamed live, or saved with the message). */
   reasoning?: string;
@@ -24,6 +26,25 @@ interface ThinkingProcessProps {
   answerStarted?: boolean;
   /** Live estimate of the time left ("about 2 min left"), from this browser's past runs of the same approach. */
   remaining?: string | null;
+}
+
+// A step's detail longer than this (or with more lines) is folded to three lines; the full text is one click away.
+const LONG_DETAIL_CHARS = 240;
+const LONG_DETAIL_LINES = 3;
+
+function StepDetail({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const long = text.length > LONG_DETAIL_CHARS || text.split("\n").length > LONG_DETAIL_LINES;
+  return (
+    <>
+      <div className={`thinking-step-detail${long && !open ? " thinking-step-detail-clamped" : ""}`}>{text}</div>
+      {long && (
+        <button type="button" className="thinking-step-more" aria-expanded={open} onClick={() => setOpen(!open)}>
+          {open ? "Show less" : "Show more"}
+        </button>
+      )}
+    </>
+  );
 }
 
 function StepIcon({ status }: { status: ThoughtStep["status"] }) {
@@ -58,6 +79,7 @@ export function ThinkingProcess({
   remaining = null,
   durationSeconds,
   answerStarted = false,
+  compact = false,
 }: ThinkingProcessProps) {
   const panelId = useId();
   // null = follow the automatic behaviour; once the reader toggles, respect their choice.
@@ -121,7 +143,7 @@ export function ThinkingProcess({
             {expanded && steps.length > 1 && <> &middot; {steps.length} steps</>}
           </span>
         ) : (
-          <span className="thinking-meta">
+          <span className="thinking-meta" hidden={compact}>
             {steps.length > 0 && <>&middot; {steps.length} step{steps.length === 1 ? "" : "s"}</>}
             {issues > 0 && (
               <span className="thinking-meta-warn">
@@ -153,7 +175,7 @@ export function ThinkingProcess({
                       {status === "unreported" ? <span className="thinking-step-time">not reported as finished</span> : null}
                       {liveness ? <span className="thinking-step-time" data-liveness="true">{liveness}</span> : null}
                     </div>
-                    {th.text && <div className="thinking-step-detail">{cleanStepText(th.text)}</div>}
+                    {th.text && <StepDetail text={cleanStepText(th.text)} />}
                     {th.id === "plan" && th.extra?.entities ? <QueryPlanChips plan={th.extra as QueryPlanExtra} /> : null}
                     {idx === reasoningAnchor && reasoningBlock}
                   </div>

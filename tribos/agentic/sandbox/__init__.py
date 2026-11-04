@@ -20,37 +20,112 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from typing import Optional
 
+from ...config.settings import get_bool, get_int, get_str
+
 DATASET_ID_RE = re.compile(r"^ds_[0-9a-f]{12}$")
 ANALYSABLE_KINDS = ("table", "hdf5", "mat")
 _LEGACY_ANALYSABLE_KINDS = ANALYSABLE_KINDS + ("h5ad",)
 
 
 def sandbox_enabled() -> bool:
-    """TRIBOS_SANDBOX=on by default; explicitly setting off/0/false/no disables code execution."""
-    raw = (os.getenv("TRIBOS_SANDBOX", "") or "").strip().lower()
-    if raw in ("off", "0", "false", "no"):
-        return False
-    if raw in ("on", "1", "true", "yes"):
-        return True
-    if "off_by_default" in os.getenv("PYTEST_CURRENT_TEST", ""):
-        return False
-    return True
+    """TRIBOS_SANDBOX=on by default; explicitly setting off/0/false/no disables code execution.
+
+    Read through the settings registry, so the documented default and the runtime default cannot drift apart.
+    """
+    return get_bool("TRIBOS_SANDBOX")
 
 
 def sandbox_timeout_s() -> int:
+    """The server's wall-clock ceiling for one sandboxed execution (higher inside research_ceiling)."""
+    base = get_int("TRIBOS_SANDBOX_TIMEOUT_S")
+    research = _RESEARCH_TIMEOUT.get()
+    return max(base, int(research)) if research else base
+
+
+# A research project's experiments (exact counts to 10^6, long sweeps) need more than a chat cell's minute. Only the
+# research engine raises the ceiling, for the cells it runs; every other execution keeps TRIBOS_SANDBOX_TIMEOUT_S.
+_RESEARCH_TIMEOUT: contextvars.ContextVar[int | None] = contextvars.ContextVar("tribos_research_timeout", default=None)
+
+
+@contextlib.contextmanager
+def research_ceiling(seconds: int | None = None) -> Iterator[int]:
+    """Raise the sandbox time ceiling to TRIBOS_RESEARCH_SANDBOX_TIMEOUT_S (or `seconds`) inside this block."""
+    value = int(seconds or get_int("TRIBOS_RESEARCH_SANDBOX_TIMEOUT_S"))
+    token = _RESEARCH_TIMEOUT.set(value)
     try:
-        value = int(os.getenv("TRIBOS_SANDBOX_TIMEOUT_S", "") or 60)
-    except ValueError:
-        value = 60
-    return max(5, min(110, value))
+        yield value
+    finally:
+        _RESEARCH_TIMEOUT.reset(token)
 
 
 def sandbox_memory_mb() -> int:
-    try:
-        value = int(os.getenv("TRIBOS_SANDBOX_MEMORY_MB", "") or 2048)
-    except ValueError:
-        value = 2048
-    return max(256, min(16384, value))
+    """The server's memory ceiling for one sandboxed execution."""
+    return get_int("TRIBOS_SANDBOX_MEMORY_MB")
+
+
+def sandbox_backend() -> str:
+    """Which isolation backend runs model-written code: auto, subprocess or container."""
+    return (get_str("TRIBOS_SANDBOX_BACKEND") or "auto").strip().lower()
+
+
+def sandbox_image() -> str:
+    """The container image the container backend runs."""
+    return (get_str("TRIBOS_SANDBOX_IMAGE") or "tribos-sandbox:local").strip()
+
+
+def sandbox_container_engine() -> str:
+    """Which container CLI the container backend uses: auto, docker or podman."""
+    return (get_str("TRIBOS_SANDBOX_CONTAINER_ENGINE") or "auto").strip().lower()
+
+
+def sandbox_max_concurrency() -> int:
+    """How many sandboxed cells may run at the same time."""
+    return get_int("TRIBOS_SANDBOX_MAX_CONCURRENCY")
+
+
+def sandbox_max_output_kb() -> int:
+    """The stdout/stderr cap of one run, in KB."""
+    return get_int("TRIBOS_SANDBOX_MAX_OUTPUT_KB")
+
+
+def sandbox_max_disk_mb() -> int:
+    """The write budget of one run, in MB."""
+    return get_int("TRIBOS_SANDBOX_MAX_DISK_MB")
+
+
+def sandbox_max_processes() -> int:
+    """The process-count cap of one run."""
+    return get_int("TRIBOS_SANDBOX_MAX_PROCESSES")
+
+
+def sandbox_max_result_bytes() -> int:
+    """The aggregate size cap of one run's result payload (result, tables and figures together)."""
+    return get_int("TRIBOS_SANDBOX_MAX_RESULT_BYTES")
+
+
+def sandbox_strict_limits() -> bool:
+    """True when a run that cannot enforce its resource limits must fail instead of degrading."""
+    return get_bool("TRIBOS_SANDBOX_STRICT_LIMITS")
+
+
+def sandbox_allow_unisolated() -> bool:
+    """True when the operator accepts running model code without an OS-level isolation boundary."""
+    return get_bool("TRIBOS_SANDBOX_ALLOW_UNISOLATED")
+
+
+def sagemath_enabled() -> bool:
+    """Whether the SageMath tools may be offered at all."""
+    return sandbox_enabled() and get_bool("TRIBOS_SANDBOX_SAGE_ENABLED")
+
+
+def sagemath_timeout_s() -> int:
+    """The wall-clock ceiling of one SageMath execution."""
+    return get_int("TRIBOS_SANDBOX_SAGE_TIMEOUT_S")
+
+
+def sagemath_allow_wsl() -> bool:
+    """Whether SageMath may run inside WSL, where the Python-level guards do not apply."""
+    return get_bool("TRIBOS_SANDBOX_SAGE_ALLOW_WSL")
 
 
 @dataclass(frozen=True)
@@ -59,6 +134,9 @@ class SandboxScope:
     dataset_ids: frozenset[str] = field(default_factory=frozenset)
     # dataset id -> owner, for project files other members shared (readable through project membership)
     owners: dict[str, str] = field(default_factory=dict)
+    project_id: str | None = None
+    task_id: str | None = None
+    run_id: str | None = None
 
     def owner_of(self, dataset_id: str) -> str:
         return self.owners.get(dataset_id, self.user_id)
@@ -69,12 +147,23 @@ _SCOPE: contextvars.ContextVar[SandboxScope | None] = contextvars.ContextVar("tr
 
 @contextlib.contextmanager
 def bound_scope(
-    user_id: str, dataset_ids: Iterable[str], owners: dict[str, str] | None = None
+    user_id: str,
+    dataset_ids: Iterable[str],
+    owners: dict[str, str] | None = None,
+    project_id: str | None = None,
+    task_id: str | None = None,
+    run_id: str | None = None,
 ) -> Iterator[SandboxScope]:
     """Bind the datasets one run may analyse for the duration of the block (copied into worker threads)."""
     ids = frozenset(i for i in dataset_ids if DATASET_ID_RE.match(str(i)))
-    scope = SandboxScope(user_id=str(user_id), dataset_ids=ids,
-                         owners={k: str(v) for k, v in (owners or {}).items() if k in ids})
+    scope = SandboxScope(
+        user_id=str(user_id),
+        dataset_ids=ids,
+        owners={k: str(v) for k, v in (owners or {}).items() if k in ids},
+        project_id=project_id,
+        task_id=task_id,
+        run_id=run_id,
+    )
     token = _SCOPE.set(scope)
     try:
         yield scope
@@ -84,6 +173,30 @@ def bound_scope(
 
 def current_scope() -> SandboxScope | None:
     return _SCOPE.get()
+
+
+# Whether this request may execute model-written code at all. The frontend option ("Allow code analysis on
+# datasets") sets it to False; the gateway refuses every execution path when it is False, so a direct tool call
+# cannot slip past the planner's filter. Context vars propagate into the worker threads the registry tools run in,
+# the same way bound_scope does.
+_EXECUTION_ALLOWED: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "tribos_sandbox_execution_allowed", default=True
+)
+
+
+@contextlib.contextmanager
+def execution_permitted(allowed: bool = True) -> Iterator[bool]:
+    """Allow or forbid model-written execution for the duration of the block (copied into worker threads)."""
+    token = _EXECUTION_ALLOWED.set(bool(allowed))
+    try:
+        yield bool(allowed)
+    finally:
+        _EXECUTION_ALLOWED.reset(token)
+
+
+def execution_permitted_now() -> bool:
+    """False when this request forbids server-side Python and SageMath execution."""
+    return bool(_EXECUTION_ALLOWED.get())
 
 
 def safe_input_name(display_name: str, ds_id: str, ext: str) -> str:
@@ -179,9 +292,23 @@ __all__ = [
     "SandboxScope",
     "bound_scope",
     "current_scope",
+    "execution_permitted",
+    "execution_permitted_now",
     "resolve_inputs",
     "safe_input_name",
+    "sagemath_allow_wsl",
+    "sagemath_enabled",
+    "sagemath_timeout_s",
+    "sandbox_allow_unisolated",
+    "sandbox_backend",
     "sandbox_enabled",
+    "sandbox_image",
+    "sandbox_max_concurrency",
+    "sandbox_max_disk_mb",
+    "sandbox_max_output_kb",
+    "sandbox_max_processes",
+    "sandbox_max_result_bytes",
     "sandbox_memory_mb",
+    "sandbox_strict_limits",
     "sandbox_timeout_s",
 ]

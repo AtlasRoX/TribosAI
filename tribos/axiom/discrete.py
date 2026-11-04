@@ -16,6 +16,7 @@ from typing import Any, Literal
 import sympy as sp
 
 from .engine import _canonical_id, _check_safe_string, _num, safe_parse_equation, safe_parse_expr
+from .shapes import UnsupportedShapeError
 
 # Number theory ------------------------------------------------------------------------------------------------------
 
@@ -219,15 +220,21 @@ def axiom_recurrence(recurrence: str, initial: dict[str, Any], function: str = "
     a = sp.Function(fname)
     local = {vname: n, fname: a}
     lhs, rhs, eq = safe_parse_equation(recurrence, local_dict=local)
+    if isinstance(lhs, (sp.Tuple, tuple, list)) or isinstance(rhs, (sp.Tuple, tuple, list)):
+        raise UnsupportedShapeError("Operation 'recurrence' requires a scalar equation, got container")
+    try:
+        res = lhs - rhs
+    except TypeError as exc:
+        raise UnsupportedShapeError(f"Cannot form recurrence residual: {exc}") from exc
     ics: dict[Any, Any] = {}
     for key, value in (initial or {}).items():
         arg = safe_parse_expr(str(key).strip()[len(fname):].strip("() ") if str(key).strip().startswith(fname) else str(key))
         ics[a(arg)] = safe_parse_expr(str(value))
-    sol = sp.rsolve(lhs - rhs, a(n), ics or None)
+    sol = sp.rsolve(res, a(n), ics or None)
     if sol is None:
         raise ValueError("NotImplementedError: rsolve found no closed form for this recurrence")
     sol = sp.simplify(sol)
-    terms = iterate_recurrence(lhs - rhs, a, n, ics, 15)
+    terms = iterate_recurrence(res, a, n, ics, 15)
     verified = check_recurrence(sol, n, terms)
     return {
         "recurrence": str(eq),

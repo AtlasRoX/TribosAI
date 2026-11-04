@@ -501,6 +501,12 @@ class HypothesisPhase(AgentPhase):
             return False  # "No ... hypothesis generation ... is needed": the question's own words win
         if is_closed_computation(ctx):
             return False  # a calculation has an answer to check, not hypotheses to rank, even with the option on
+        from ..agents.orchestration.presentation import facts_cover_question
+
+        if facts_cover_question(getattr(state, "tool_results", None) or {}):
+            # Solved exactly by code with every check passing: "explain why" asks for the mechanism of a known
+            # solution, not for hypotheses to rank and simulate (about a minute of model calls).
+            return False
         if option is True:
             return True
         # A named system alone ("simulate the Lorenz system") asks for a simulation, not for hypotheses.

@@ -1,0 +1,12 @@
+{"id":"formal-linear-eq","suite":"formal","statement":"Prove that for every real number x, if 2x + 3 = 7 then x = 2.","difficulty":"easy"}
+{"id":"formal-amgm-two","suite":"formal","statement":"Prove that for all real numbers a and b, 2ab <= a^2 + b^2.","difficulty":"easy"}
+{"id":"formal-prime-97","suite":"formal","statement":"Prove that 97 is a prime number.","difficulty":"easy"}
+{"id":"formal-even-n2-plus-n","suite":"formal","statement":"Prove that for every natural number n, n^2 + n is even.","difficulty":"easy"}
+{"id":"formal-x-plus-inverse","suite":"formal","statement":"Prove that for every real number x > 0, x + 1/x >= 2.","difficulty":"medium"}
+{"id":"formal-gauss-sum","suite":"formal","statement":"Prove that for every natural number n, 2 * (0 + 1 + ... + n) = n * (n + 1).","difficulty":"medium"}
+{"id":"formal-square-mod-4","suite":"formal","statement":"Prove that for every integer a, a^2 mod 4 is 0 or 1.","difficulty":"medium"}
+{"id":"formal-pythagorean-trig","suite":"formal","statement":"Prove that for every real x, sin(x)^2 + cos(x)^2 = 1.","difficulty":"easy"}
+{"id":"formal-three-squares","suite":"formal","statement":"Prove that for all real numbers a, b, c, a^2 + b^2 + c^2 >= ab + bc + ca.","difficulty":"medium"}
+{"id":"formal-quadratic-roots","suite":"formal","statement":"Determine all real x with x^2 - 5x + 6 = 0, and prove the answer is complete.","difficulty":"medium","hard_mode":true,"answer":"x = 2 or x = 3"}
+{"id":"formal-sqrt2-irrational","suite":"formal","statement":"Prove that the square root of 2 is irrational.","difficulty":"hard"}
+{"id":"formal-infinitely-many-primes","suite":"formal","statement":"Prove that for every natural number n there is a prime p with p > n.","difficulty":"hard"}

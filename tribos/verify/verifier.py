@@ -353,6 +353,18 @@ def is_operational_claim(text: str) -> bool:
     return bool(_OPERATIONAL_RE.search(text or ""))
 
 
+_BENCHMARK_CLAIM_RE = re.compile(
+    r"\b(?:held[\s\-]out\s+benchmark|benchmark\s+precision|benchmark\s+accuracy|"
+    r"(?:agent(?:'s)?|model(?:'s)?|verified\s+answers?|mathematics\s+agent)\b[^.;]{0,80}?\b(?:benchmark|calibration|precision|correct\s+in\s+\d+%)|"
+    r"(?:benchmark|calibration)\b[^.;]{0,80}?\b(?:precision\s+\d+%|n\s*=\s*\d+|\d+%\s+of\s+held[\s\-]out))\b",
+    re.IGNORECASE,
+)
+
+
+def is_benchmark_claim(text: str) -> bool:
+    return bool(_BENCHMARK_CLAIM_RE.search(text or ""))
+
+
 # Header words of a simulation output table ("| Variable | Initial | Final |"). A table without them (a discovery
 # table "| Material | Year |") holds no state values, so its bare numbers are not simulation claims.
 _SIM_TABLE_HEADER_RE = re.compile(
@@ -426,7 +438,11 @@ _ABSENCE_PATTERN = re.compile(
     r"\bwithout\s+(?P<v4>explaining|describing|identifying|reporting|mentioning|addressing|elucidating|investigating|"
     r"proposing|characteri[sz]ing)\b|"
     r"\b(?:makes?|made)\s+no\s+(?P<v5>mention)\b|\bno\s+(?P<v6>mention)\s+(?:of|is\s+made\s+of)\b|"
-    r"\b(?:there\s+(?:is|are)\s+no|no\s+(?:published\s+)?(?:studies|reports?|literature|publications?|data)\s+"
+    # "there is no" only about the literature ("there are no published studies"), never physics or mathematics
+    # ("there is no damping loss", "there is no real solution").
+    r"\b(?:there\s+(?:is|are)\s+no\s+(?:(?:published|prior|known|direct|experimental|clinical|peer[- ]reviewed)\s+)*"
+    r"(?:studies|study|reports?|literature|publications?|papers?|articles?|data|evidence|records?|mention|research)\b|"
+    r"no\s+(?:published\s+)?(?:studies|reports?|literature|publications?|data)\s+"
     r"(?:have|has|exist|exists|report|reports|describe|describes|show|shows))(?P<v7>)",
     re.IGNORECASE,
 )
@@ -478,10 +494,15 @@ def statement_role(text: str, question: str = "") -> str | None:
         return "instruction"
     if _INSTRUCTION_START_RE.match(t) and question and _echoes(t, question):
         return "instruction"
-    m = _ABSENCE_PATTERN.search(t)
+    # "There is no real solution of x^2 + 1 = 0": a mathematical negation ("there is no" alone is no longer an absence
+    # cue, see _ABSENCE_PATTERN, so it is looked for here directly).
+    m = _ABSENCE_PATTERN.search(t) or _THERE_IS_NO_RE.search(t)
     if m is not None and _MATH_OBJECT_RE.search(t[m.end(): m.end() + 80]) and not _LITERATURE_REFERENT.search(t):
         return "mathematical"
     return None
+
+
+_THERE_IS_NO_RE = re.compile(r"\bthere\s+(?:is|are|exists?)\s+no\b", re.IGNORECASE)
 
 
 _MENTION_VERBS = re.compile(r"^(?:mention\w*|discuss\w*|referenc\w*|nam\w*|includ\w*)$", re.IGNORECASE)
@@ -1326,7 +1347,7 @@ _CONFIDENCE_LEVEL_RE = re.compile(
     re.IGNORECASE,
 )
 _LEVEL_WORDS = {"high": "high", "moderate": "moderate", "medium": "moderate", "low": "low"}
-COMPUTED_CONFIDENCE_NOTE = "(computed from claim support)"
+COMPUTED_CONFIDENCE_NOTE = "(set by the automatic checks)"
 # Words that say how to answer, not what the question is about (the task-completion check ignores them).
 _ANSWER_INSTRUCTION_WORDS = frozenset(
     """
@@ -1393,9 +1414,10 @@ def _limitation_line(defect: Any) -> str:
     return f'- Removed "{claim}" because a retrieved source contradicts it.'
 
 
-def remove_flagged_sentences(response: str, defects: Iterable[Any]) -> tuple[str, list[Any]]:
+def remove_flagged_sentences(response: str, defects: Iterable[Any], contract: Any | None = None) -> tuple[str, list[Any]]:
     """The answer without the sentences (or table rows) of the given defects, plus one line per removal under an
-    "Evidence limitations" heading (created when missing). Returns (new text, defects actually removed)."""
+    "Evidence limitations" heading (created when missing, suppressed when strict output contract holds).
+    Returns (new text, defects actually removed)."""
     text = response
     removed: list[Any] = []
     seen: set[str] = set()
@@ -1428,6 +1450,9 @@ def remove_flagged_sentences(response: str, defects: Iterable[Any]) -> tuple[str
         removed.append(d)
     if not removed:
         return response, []
+    if contract is not None and getattr(contract, "strict_form", False):
+        text = re.sub(r"\n{3,}", "\n\n", text).strip()
+        return text, removed
     lines = [_limitation_line(d) for d in removed]
     m = _LIMITATIONS_HEADING_RE.search(text)
     if m:
@@ -1846,7 +1871,13 @@ class TribosVerifier:
         # -------------------------------------------------------------
         claims: list[ClaimRecord] = []
         claim_defects, claim_support = self._audit_claims(
-            response_markdown, grounding, claims, entailment_judge, tool_events=tool_events, question=query,
+            response_markdown,
+            grounding,
+            claims,
+            entailment_judge,
+            tool_events=tool_events,
+            question=query,
+            tool_results=tool_results,
         )
         defects.extend(claim_defects)
 
@@ -1867,10 +1898,13 @@ class TribosVerifier:
                           "inconclusive": "inconclusive"}
             for mc in math_audit.claims:
                 sources = list(dict.fromkeys(lk.source for lk in mc.links)) or ["answer"]
+                clean_context = re.sub(r"^\s*#{1,6}\s*", "", mc.context).strip() if mc.context else ""
+                clean_text = re.sub(r"^\s*#{1,6}\s*", "", mc.text).strip()
+                claim_text = (f"{clean_context}: " if clean_context else "") + clean_text
                 claims.append(ClaimRecord(
                     claim_id=f"math:{mc.claim_id}",
                     claim_type="mathematical" if mc.kind != "grounding" else "computational",
-                    claim_text=(f"{mc.context}: " if mc.context else "") + mc.text,
+                    claim_text=claim_text,
                     evidence=[ClaimEvidence(source_key=s, passage=mc.detail[:400]) for s in sources[:3]],
                     status=status_map.get(mc.status, "inconclusive"),
                     reason=mc.detail[:400],
@@ -1912,7 +1946,14 @@ class TribosVerifier:
         from ..utils.output_contract import extract as extract_contract
 
         need = getattr(query_context, "evidence_need", None) if query_context is not None else None
-        self_contained = bool(need is not None and getattr(need, "skip_retrieval", False))
+        from ..agents.evidence_need import is_self_contained
+        from ..axiom.problem import has_math_intent
+        is_math = bool(query and has_math_intent(query))
+        self_contained = bool(
+            (need is not None and getattr(need, "skip_retrieval", False))
+            or (query_context is not None and is_self_contained(query_context))
+            or is_math
+        )
         strict_form = extract_contract(query or "").strict_form
         if not non_empty_tools and not self_contained:
             # Response must state that evidence is unavailable
@@ -1946,6 +1987,174 @@ class TribosVerifier:
                     suggested_correction=f"Directly address the user query: '{query}'.",
                 )
             )
+
+        # -------------------------------------------------------------
+        # 4a. TASK CORRESPONDENCE CHECK (F04)
+        # -------------------------------------------------------------
+        from ..axiom.correspondence import check_task_correspondence
+        from ..axiom.problem import parse_problem
+
+        q_spec = parse_problem(query or "")
+        mismatched_tools: list[str] = []
+        for t_name, t_res in (tool_results or {}).items():
+            if not t_res or not getattr(t_res, "success", False):
+                continue
+            t_data = getattr(t_res, "data", None)
+            if isinstance(t_data, dict):
+                corr_ok, corr_detail, _ = check_task_correspondence(q_spec, t_name, getattr(t_res, "metadata", {}) or t_data, t_data)
+                if not corr_ok:
+                    mismatched_tools.append(f"{t_name}: {corr_detail}")
+
+        if mismatched_tools:
+            if "no solution" in resp_lower or "empty set" in resp_lower or "unsolvable" in resp_lower:
+                defects.append(
+                    DefectItem(
+                        category="COMPLETION",
+                        severity=DefectSeverity.CRITICAL,
+                        description=(
+                            f"Response asserts the result of a mistranslated computation ({'; '.join(mismatched_tools)}). "
+                            "Solving an inconsistent simultaneous system does not validate an independent evaluation request."
+                        ),
+                        suggested_correction="Answer the user's actual requested task instead of the mismatched computation.",
+                    )
+                )
+
+        # F09: Invalidate stale verification after revisions and contradictory evidence
+        # If response asserts that independent domain checks passed, but a tool result or candidate witness
+        # was invalidated, rejected, or failed domain checks:
+        def _as_dict(value: Any) -> dict[str, Any]:
+            return value if isinstance(value, dict) else {}
+
+        def _domain_check_failed(t_res: Any) -> bool:
+            # A tool's "verification" may be a dict of checks or a plain status string ("verified"); only the first
+            # carries domain checks. Assuming a dict crashed the whole answer with AttributeError.
+            checks = _as_dict(_as_dict(getattr(t_res, "data", None)).get("verification")).get("checks") or []
+            return any(isinstance(c, dict) and c.get("name") == "domain" and c.get("passed") is False
+                       for c in (checks if isinstance(checks, list) else []))
+
+        has_domain_failure = bool(mismatched_tools) or any(
+            _as_dict(getattr(t_res, "metadata", None)).get("invalidated")
+            or _as_dict(getattr(t_res, "metadata", None)).get("verification_status") in ("rejected", "failed")
+            or _domain_check_failed(t_res)
+            for t_res in (tool_results or {}).values()
+            if t_res is not None
+        )
+        if has_domain_failure and re.search(r"\b(?:independent\s+)?domain\s+checks?\s+passed\b|\bindependent\s+checks?\s+passed\s*\(domain\)", resp_lower):
+            matched_sentence = ""
+            for s in self._split_sentences(response_markdown):
+                if re.search(r"\b(?:independent\s+)?domain\s+checks?\s+passed\b|\bindependent\s+checks?\s+passed\s*\(domain\)", s.lower()):
+                    matched_sentence = s
+                    break
+            defects.append(
+                DefectItem(
+                    category="CLAIM_CONTRADICTED",
+                    severity=DefectSeverity.CRITICAL,
+                    description="Response asserts that independent domain checks passed, but the candidate witness or computation was rejected as out of domain.",
+                    suggested_correction="Omit the assertion that independent domain checks passed.",
+                    sentence=matched_sentence or None,
+                    claim="independent domain checks passed",
+                )
+            )
+
+        # Check for unverified tool checks claimed as passed (e.g. axiom_calculus, calculus check, both checks passed)
+        unverified_tools: set[str] = set()
+        for t_k, t_res in (tool_results or {}).items():
+            if t_res is not None:
+                t_data = getattr(t_res, "data", {}) if isinstance(getattr(t_res, "data", {}), dict) else {}
+                t_name = getattr(t_res, "tool_name", "") or t_k
+                is_unverified = (
+                    t_res.success is False
+                    or t_data.get("verified") is False
+                    or (
+                        isinstance(t_data.get("verification"), dict)
+                        and t_data["verification"].get("level") == "unverified"
+                    )
+                )
+                if is_unverified:
+                    t_lower = str(t_name).lower()
+                    unverified_tools.add(t_lower)
+                    if "calculus" in t_lower:
+                        unverified_tools.add("calculus")
+                    if "identity" in t_lower or "verify_identity" in t_lower:
+                        unverified_tools.add("identity")
+                    if "dynamis" in t_lower or "simulate" in t_lower or "ode" in t_lower:
+                        unverified_tools.add("simulation")
+                    if "calcula" in t_lower or "sandbox" in t_lower:
+                        unverified_tools.add("calcula")
+
+        if unverified_tools:
+            claimed_both = bool(
+                re.search(r"\b(?:both|all)\s+(?:verification\s+)?checks?\s+(?:passed|succeeded|verified)\b", resp_lower)
+            )
+            claimed_calc = "calculus" in unverified_tools and bool(
+                re.search(
+                    r"\b(?:calculus|axiom_calculus)\s+(?:check\s+)?(?:passed|succeeded|verified)\b|\bchecked\s+with\s+axiom_calculus\b",
+                    resp_lower,
+                )
+            )
+            claimed_identity = "identity" in unverified_tools and bool(
+                re.search(
+                    r"\b(?:identity|axiom_verify_identity)\s+(?:check\s+)?(?:passed|succeeded|verified)\b|\bidentity\s+was\s+verified\b|\bverified\s+the\s+identity\b",
+                    resp_lower,
+                )
+            )
+            claimed_sim = "simulation" in unverified_tools and bool(
+                re.search(
+                    r"\b(?:simulation|dynamis)\s+(?:check\s+)?(?:passed|succeeded|verified)\b|\bsimulation\s+was\s+verified\b",
+                    resp_lower,
+                )
+            )
+            claimed_calcula = "calcula" in unverified_tools and bool(
+                re.search(
+                    r"\b(?:calcula|sandbox)\s+(?:check\s+)?(?:passed|succeeded|verified)\b|\bcomputed\s+and\s+verified\s+in\s+calcula\b",
+                    resp_lower,
+                )
+            )
+            if claimed_both or claimed_calc or claimed_identity or claimed_sim or claimed_calcula:
+                matched_sentence = ""
+                for s in self._split_sentences(response_markdown):
+                    s_lower = s.lower()
+                    if claimed_both and re.search(
+                        r"\b(?:both|all)\s+(?:verification\s+)?checks?\s+(?:passed|succeeded|verified)\b", s_lower
+                    ):
+                        matched_sentence = s
+                        break
+                    if claimed_calc and re.search(
+                        r"\b(?:calculus|axiom_calculus)\s+(?:check\s+)?(?:passed|succeeded|verified)\b|\bchecked\s+with\s+axiom_calculus\b",
+                        s_lower,
+                    ):
+                        matched_sentence = s
+                        break
+                    if claimed_identity and re.search(
+                        r"\b(?:identity|axiom_verify_identity)\s+(?:check\s+)?(?:passed|succeeded|verified)\b|\bidentity\s+was\s+verified\b|\bverified\s+the\s+identity\b",
+                        s_lower,
+                    ):
+                        matched_sentence = s
+                        break
+                    if claimed_sim and re.search(
+                        r"\b(?:simulation|dynamis)\s+(?:check\s+)?(?:passed|succeeded|verified)\b|\bsimulation\s+was\s+verified\b",
+                        s_lower,
+                    ):
+                        matched_sentence = s
+                        break
+                    if claimed_calcula and re.search(
+                        r"\b(?:calcula|sandbox)\s+(?:check\s+)?(?:passed|succeeded|verified)\b|\bcomputed\s+and\s+verified\s+in\s+calcula\b",
+                        s_lower,
+                    ):
+                        matched_sentence = s
+                        break
+                defects.append(
+                    DefectItem(
+                        category="CLAIM_CONTRADICTED",
+                        severity=DefectSeverity.CRITICAL,
+                        description=(
+                            "Response claims tool check(s) passed, but tool execution was unverified or failed."
+                        ),
+                        suggested_correction="State that the check was unverified instead of claiming it passed.",
+                        sentence=matched_sentence or None,
+                        claim="verification checks passed",
+                    )
+                )
 
         # -------------------------------------------------------------
         # 4b. REGISTERED FEATURE CHECKS (ODE parameters, evidence grades, dataset consent, ...)
@@ -2705,7 +2914,9 @@ class TribosVerifier:
         accepted status; it does not show that no proof exists. Without such a passage it is unchecked background."""
         status_words = {"remain", "remains", "open", "unsolved", "unproven", "unproved", "unresolved", "accepted",
                         "known", "proof", "proved", "proven", "problem", "conjecture", "question", "still", "been",
-                        "generally", "complete", "valid", "published", "disproof", "solution", "settled", "resolved"}
+                        "generally", "complete", "valid", "published", "disproof", "solution", "settled", "resolved",
+                        # Negation and time words are no subject: "It has not been proven." names nothing to look up.
+                        "not", "yet", "never", "nor", "neither", "fully", "currently", "today"}
         # Audit I41: a statement that cites a page ("... official page: https://www.claymath.org/...") is judged against
         # that page when it was retrieved, never against another record that happens to share its words.
         def addr(u: str) -> str:
@@ -2842,6 +3053,133 @@ class TribosVerifier:
             "operational status: a statement about this run, not a scientific claim; no matching tool outcome was recorded",
         )
 
+    def _benchmark_claim(
+        self,
+        claims: list[ClaimRecord],
+        text: str,
+        tool_results: dict[str, Any] | None,
+        defects: list[DefectItem],
+    ) -> None:
+        """Ground a statement citing benchmark performance against genuine calibration records.
+
+        A historical metric (e.g. 98% precision on n=43 held-out problems) has traceable dataset/version
+        provenance in calibration.json or tool results. It is neither current-answer confidence nor a
+        substitute for verification; unavailable or contradictory provenance is reported truthfully.
+        """
+        from ..axiom.agent import calibrated_confidence
+
+        math_res = (tool_results or {}).get("agent.math_agent.result") or (tool_results or {}).get("axiom_solve")
+        res_data = getattr(math_res, "data", {}) or {} if math_res else {}
+        res_meta = getattr(math_res, "metadata", {}) or {} if math_res else {}
+        is_invalidated = bool(
+            res_meta.get("invalidated")
+            or res_data.get("invalidated")
+            or res_data.get("status") in ("rejected", "failed")
+        )
+        math_status = res_meta.get("status") or res_data.get("status")
+
+        if is_invalidated or math_status in ("rejected", "failed"):
+            self._add_claim(
+                claims,
+                "metadata",
+                text,
+                "contradicted",
+                "benchmark claim contradicted: mathematics for this problem was rejected or unverified; verified benchmark precision cannot apply",
+                "benchmark:invalidated",
+                "Candidate result rejected or invalidated; verified benchmark precision cannot apply",
+            )
+            defects.append(
+                DefectItem(
+                    category="CLAIM_CONTRADICTED",
+                    severity=DefectSeverity.CRITICAL,
+                    description=f"Sentence '{text}' asserts verified benchmark precision, but the mathematical candidate was rejected or unverified.",
+                    suggested_correction="Do not claim benchmark precision or verification confidence for unverified or rejected mathematics.",
+                    claim=text,
+                )
+            )
+            return
+
+        record = None
+        if isinstance(res_data, dict) and res_data.get("confidence"):
+            record = res_data["confidence"]
+        else:
+            record = calibrated_confidence("verified")
+
+        if not record or not record.get("n"):
+            self._add_claim(
+                claims,
+                "metadata",
+                text,
+                "unsupported",
+                "historical benchmark claim: no benchmark calibration record is available for this run",
+            )
+            defects.append(
+                DefectItem(
+                    category="GROUNDING",
+                    severity=DefectSeverity.MAJOR,
+                    description=f"Benchmark metric in '{text}' has no available benchmark calibration record or provenance.",
+                    suggested_correction="Omit unsupported benchmark metrics or ground them in real calibration records.",
+                    claim=text,
+                )
+            )
+            return
+
+        rec_p = float(record["p_correct"])
+        rec_n = int(record["n"])
+        rec_bench = str(record.get("benchmark") or "math-eval-v1")
+        rec_split = str(record.get("split") or record.get("fitted_on") or "held-out set")
+
+        pcts = re.findall(r"(\d+(?:\.\d+)?)%", text)
+        ns = re.findall(r"\bn\s*=\s*(\d+)", text, re.IGNORECASE) or re.findall(
+            r"(\d+)\s+held[\s\-]out", text, re.IGNORECASE
+        )
+
+        contradiction = False
+        mismatch_detail = []
+        if pcts:
+            for p_str in pcts:
+                p_val = float(p_str)
+                rec_pct = rec_p * 100
+                if abs(p_val - round(rec_pct)) > 1.0 and abs(p_val - rec_pct) > 1.0:
+                    contradiction = True
+                    mismatch_detail.append(f"claimed {p_str}% vs record {rec_p:.0%}")
+        if ns:
+            for n_str in ns:
+                if int(n_str) != rec_n:
+                    contradiction = True
+                    mismatch_detail.append(f"claimed n={n_str} vs record n={rec_n}")
+
+        if contradiction:
+            self._add_claim(
+                claims,
+                "metadata",
+                text,
+                "contradicted",
+                f"benchmark claim contradicted: {', '.join(mismatch_detail)}",
+                f"benchmark:{rec_bench}",
+                f"Benchmark record '{rec_bench}' ({rec_split}): n={rec_n}, precision={rec_p:.4f} (~{rec_p:.0%})",
+            )
+            defects.append(
+                DefectItem(
+                    category="CLAIM_CONTRADICTED",
+                    severity=DefectSeverity.CRITICAL,
+                    description=f"Sentence '{text}' contradicts the actual benchmark record ({', '.join(mismatch_detail)}).",
+                    suggested_correction=f"Report the exact historical benchmark figures ({rec_p:.0%}, n={rec_n}) or omit the claim.",
+                    claim=text,
+                )
+            )
+            return
+
+        self._add_claim(
+            claims,
+            "metadata",
+            text,
+            "supported",
+            f"historical benchmark precision: matches held-out benchmark record ({rec_p:.0%}, n={rec_n}, {rec_bench})",
+            f"benchmark:{rec_bench}",
+            f"Held-out benchmark '{rec_bench}' ({rec_split}): n={rec_n}, p_correct={rec_p:.4f} (~{rec_p:.0%}), 95% lower bound={record.get('lower_95', 0):.4f}",
+        )
+
     def _audit_claims(
         self,
         response: str,
@@ -2850,6 +3188,7 @@ class TribosVerifier:
         judge: Callable[[str, list[dict[str, str]]], dict[str, Any] | None] | None = None,
         tool_events: list[tuple[str, str]] | None = None,
         question: str = "",
+        tool_results: dict[str, Any] | None = None,
     ) -> tuple[list[DefectItem], list[dict[str, Any]]]:
         """Classify, check and record each material claim; return (defects, claim_support)."""
         defects: list[DefectItem] = []
@@ -2867,6 +3206,9 @@ class TribosVerifier:
             if is_operational_claim(plain):
                 # Before the hedge filter: "could not be retrieved" reports the run, it is not a hedge.
                 self._operational_claim(claims, plain.strip(), tool_events or [])
+                continue
+            if is_benchmark_claim(plain):
+                self._benchmark_claim(claims, plain.strip(), tool_results, defects)
                 continue
             if statement_role(plain, question) is not None:
                 continue  # an instruction, error text or mathematical statement (checked by the math audit), audit I30
@@ -2892,8 +3234,16 @@ class TribosVerifier:
                 passages = [doc] if doc is not None else [d for d in docs if _cites(d, cited)][:3]
                 if passages:
                     judge_calls += 1
+                    items = [{"source_key": d.key, "passage": judge_window(d.text, text)} for d in passages]
+                    if doc is not None and doc.key == "tool:computed_results":  # agents.result_keys.COMPUTED_RESULTS
+                        # The code-computed record is small and split into parts (the status note, each value): a
+                        # sentence that reports the status with the values ("Goldbach to 200,000 and 705 twin pairs
+                        # are verified facts; the conjectures remain open") needs all of it.
+                        whole = "\n".join(d.text for d in docs if d.key == doc.key)
+                        if len(whole) <= 6000:
+                            items = [{"source_key": doc.key, "passage": whole}]
                     try:
-                        verdict = judge(text, [{"source_key": d.key, "passage": judge_window(d.text, text)} for d in passages]) or {}
+                        verdict = judge(text, items) or {}
                     except Exception as exc:  # noqa: BLE001
                         logger.warning("Entailment judge failed: %s", exc)
                         verdict = {}
@@ -3006,7 +3356,8 @@ class TribosVerifier:
                         description=f"Quantitative claim is not supported by any retrieved passage or tool output ({reason}).",
                         suggested_correction=(
                             "Restate the figure exactly as a retrieved source gives it, with its unit and citation; "
-                            "otherwise remove it or mark it as established background not checked in this run."
+                            "otherwise remove it, or present it as a standard textbook value in plain words (no "
+                            "'established background' label)."
                         ),
                         claim=claim,
                         sentence=sentence,

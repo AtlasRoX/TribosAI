@@ -451,7 +451,8 @@ def _edit_run_false(payload):
 
 
 @pytest.mark.parametrize("edit", [_edit_run_false, lambda payload: {"drop": ["n2"]}], ids=["run_false", "drop_ids"])
-def test_approval_edit_drops_expensive_node(edit):
+def test_approval_edit_drops_expensive_node(edit, monkeypatch):
+    monkeypatch.setenv("TRIBOS_APPROVE_EXPENSIVE", "1")  # asking first is opt-in
     reg, calls = build_recording_registry()
     plan = _plan(
         {"id": "n1", "tool": "synapta_kegg_pathways", "args": {"target_symbol": "BRAF"}},
@@ -698,7 +699,9 @@ def test_orchestrator_decomposes_compound_question(monkeypatch, tmp_path, planni
     subs = res.execution_artifacts["agent_run"]["sub_questions"]
     assert [s["id"] for s in subs] == ["q1", "q2"] and subs[1]["depends_on"] == ["q1"]
     assert seen and "q2: Which clinical trials test sotorasib in lung cancer?" in seen[0]
-    assert "[q2] Which clinical trials test sotorasib in lung cancer?" in llm.prompts("synthesis")[0]
+    synthesis = llm.prompts("synthesis")[0]
+    # Points to cover reach the writer as a checklist without internal ids, which never become headings.
+    assert "- Which clinical trials test sotorasib in lung cancer?" in synthesis and "[q2]" not in synthesis
     assert res.execution_artifacts["agent_plan"]["nodes"] == []
 
 

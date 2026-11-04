@@ -37,17 +37,41 @@
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+  position: relative;
   margin-bottom: -1px;
-  padding: 0 10px 9px;
+  padding: 0 10px 11px;
   border: none;
-  border-bottom: 2px solid transparent;
   background: none;
   color: var(--text-muted);
   font: inherit;
   font-size: 13px;
   white-space: nowrap;
   cursor: pointer;
-  transition: color 0.15s ease, border-color 0.15s ease;
+  transition: color 0.15s ease;
+}
+
+/* The selected tab's underline grows out from its centre; a pressed tab dips by a pixel. */
+.tab::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--text-heading);
+  transform: scaleX(0);
+  transition: transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.tab > svg,
+.tab > span {
+  transition: transform 120ms ease;
+}
+
+.tab:active > svg,
+.tab:active > span {
+  transform: translateY(1px);
 }
 
 .tab:hover {
@@ -55,9 +79,12 @@
 }
 
 .tabActive {
-  border-bottom-color: var(--text-heading);
   color: var(--text-heading);
   font-weight: 600;
+}
+
+.tabActive::after {
+  transform: scaleX(1);
 }
 
 .tab:focus-visible,
@@ -111,14 +138,33 @@
   transform: rotate(180deg);
 }
 
-/* The cards keep their own frame; the first one sits close under the tab row. */
+/* The cards keep their own frame; the first one sits close under the tab row and arrives with a short fade. */
 .panel > :first-child {
   margin-top: 12px;
+  animation: panelIn 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes panelIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .tab,
+  .tab::after,
+  .tab > svg,
+  .tab > span,
   .chev {
     transition: none;
+  }
+
+  .panel > :first-child {
+    animation: none;
   }
 }

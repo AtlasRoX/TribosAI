@@ -13,6 +13,7 @@ result; a partially verified one with its stated gaps; anything else may not be 
 from __future__ import annotations
 
 import logging
+import re
 from html import escape
 from typing import Any
 
@@ -33,8 +34,22 @@ _STATUS_TITLE = {
     "partially_verified": "Partially verified answer",
     "unverified": "Unverified answer",
     "failed": "No verified answer",
+    "rejected": "Rejected candidate (out of domain)",
+    "invalidated": "Invalidated candidate",
 }
 
+
+
+def _verification_request(passed: list[str]) -> str:
+    """How the answer reports the checks. Concise answers (the default) leave them to the run details shown beside
+    the answer: checker names ("lhs - rhs simplifies to 0") are not something the reader asked for."""
+    from ..agents.prompts import answer_style
+
+    if answer_style() == "concise":
+        return (", and add no Verification section and no list of checks: the checks are shown beside the answer. "
+                "At most, end with one plain sentence such as 'Substituting back confirms it.'")
+    return (", and in the Verification section name the independent checks that "
+            f"passed ({'; '.join(passed)[:300]}).")
 
 def _enabled(state: AgentState) -> bool:
     from ..config.settings import get_bool
@@ -55,15 +70,21 @@ def _evidence_xml(art: dict[str, Any]) -> str:
 
     ver = art.get("verification") or {}
     problem = art.get("problem") or {}
+    invalidated = bool(art.get("invalidated") or art.get("status") in ("rejected", "failed"))
+    inval_reason = str(art.get("invalidation_reason") or "candidate result rejected or invalidated")
     # The benchmark rate is measured on verified answers only: it is never attached to an answer that is not verified.
-    conf = (art.get("confidence") or {}) if art.get("status") == "verified" else {}
+    conf = (art.get("confidence") or {}) if (art.get("status") == "verified" and not invalidated) else {}
     conf_attr = (
+        f'benchmark="{escape(str(conf.get("benchmark", "math-eval-v1")), quote=True)}" '
+        f'benchmark_split="{escape(str(conf.get("split", "")), quote=True)}" '
         f'benchmark_precision="{conf["p_correct"]}" calibration_n="{conf["n"]}" '
         'precision_scope="this final answer expression only, not the written explanation" '
+        'is_probability="false" '
         if conf else ""
     )
+    inval_attr = f'invalidated="true" invalidation_reason="{escape(inval_reason, quote=True)}" ' if invalidated else ""
     out = [
-        f'<math_agent key="{RESULT_KEY}" status="{escape(str(art.get("status")), quote=True)}" {conf_attr}'
+        f'<math_agent key="{RESULT_KEY}" status="{escape(str(art.get("status")), quote=True)}" {conf_attr}{inval_attr}'
         f'kind="{escape(str(problem.get("kind", "")), quote=True)}" '
         'note="computed with SymPy/mpmath by the verified mathematics agent; the verifier re-checked the answer '
         'against the original problem statement. Quote the answer exactly; report the verification status honestly">'
@@ -74,22 +95,34 @@ def _evidence_xml(art: dict[str, Any]) -> str:
         out.append(f"<math_answer>{esc(answer['text'], 3000)}</math_answer>")
     if answer.get("latex"):
         out.append(f"<math_answer_latex>{esc(answer['latex'], 3000)}</math_answer_latex>")
+    if invalidated:
+        out.append(f'<math_invalidated note="{esc(inval_reason)}">Candidate witness or computation was rejected '
+                   f'({esc(inval_reason)}); do NOT cite as verified or state that independent domain checks passed.</math_invalidated>')
     checks = [c for c in ver.get("checks") or [] if c.get("level", 0) >= 1]
-    if checks:
+    if checks and not invalidated:
         out.append("<math_checks>")
         for c in checks:
             passed = {True: "passed", False: "failed", None: "not run"}[c.get("passed")]
             out.append(f'<math_check level="{c.get("level")}" result="{passed}">{esc(c.get("name"), 200)}'
                        f'{": " + esc(c.get("detail"), 400) if c.get("detail") else ""}</math_check>')
         out.append("</math_checks>")
-    # The derivation of a structured answer, generated from the exact computation (which branch applies and why,
-    # the substitution, each term, the factorization, the counterexample): every line is already checked.
-    derivation = [f"[{r.get('id')}] {s}" for r in answer.get("results") or [] if isinstance(r, dict)
-                  for s in r.get("steps") or []]
-    if derivation:
-        out.append("<math_derivation note=\"checked steps, generated from the exact computation; use them as the "
-                   "worked solution, in this order, without changing a value\">" + esc("\n".join(derivation[:60]), 6000)
-                   + "</math_derivation>")
+    elif checks and invalidated:
+        out.append("<math_checks>")
+        for c in checks:
+            passed_val = False if "domain" in c.get("name", "") else c.get("passed")
+            passed = {True: "passed", False: "failed", None: "not run"}[passed_val]
+            detail_msg = inval_reason if "domain" in c.get("name", "") else c.get("detail")
+            out.append(f'<math_check level="{c.get("level")}" result="{passed}">{esc(c.get("name"), 200)}'
+                       f'{": " + esc(detail_msg, 400) if detail_msg else ""}</math_check>')
+        out.append("</math_checks>")
+    # The derivation of a structured answer: only when not invalidated
+    if not invalidated:
+        derivation = [f"[{r.get('id')}] {s}" for r in answer.get("results") or [] if isinstance(r, dict)
+                      for s in r.get("steps") or []]
+        if derivation:
+            out.append("<math_derivation note=\"checked steps, generated from the exact computation; use them as the "
+                       "worked solution, in this order, without changing a value\">" + esc("\n".join(derivation[:60]), 6000)
+                       + "</math_derivation>")
     for u in (art.get("uncertainty") or [])[:6]:
         out.append(f"<math_uncertainty>{esc(u, 600)}</math_uncertainty>")
     steps = art.get("steps") or []
@@ -104,6 +137,25 @@ def _evidence_xml(art: dict[str, Any]) -> str:
     return "\n".join(out)
 
 
+def _misread_problem(spec: Any, query: str) -> bool:
+    """A parse that misses the problem: a multiple-choice question read with its given values left out, or an
+    "expression" that is one bare symbol with no equation to solve (an option letter, a variable name)."""
+    from ..agents.question_text import is_multiple_choice
+
+    if spec.unaccounted and is_multiple_choice(query):
+        return True
+    expr = str(spec.expression or "").strip()
+    return spec.kind in ("solve", "simplify") and not spec.equations and bool(re.fullmatch(r"[A-Za-z]", expr))
+
+
+def _unmatched(run: Any) -> bool:
+    """The checker could not tie the agent's call to the question (no alignment check passed): whatever it computed
+    is a sub-result of the agent's own choosing, not an answer to what was asked."""
+    verdict = getattr(run, "verdict", None)
+    checks = list(getattr(verdict, "checks", None) or [])
+    return bool(checks) and not any(c.passed for c in checks if c.level == 1)
+
+
 class MathAgentPhase(AgentPhase):
     key = PHASE_KEY
     stage = "augment"
@@ -114,12 +166,31 @@ class MathAgentPhase(AgentPhase):
     def applies(self, state: AgentState) -> bool:
         if not math_agent_available(state):
             return False
+        from ..agents.orchestration.presentation import (
+            computations_cover_question,
+            facts_cover_question,
+        )
+
+        if facts_cover_question(state.tool_results):
+            # Solved exactly by code and checked by substitution and the initial conditions (computed_results).
+            state.bag["math_agent_skipped"] = "the initial-value problem was solved and checked by code"
+            return False
+        if computations_cover_question(state.tool_results):
+            state.bag["math_agent_skipped"] = "the requested finite computations were run and verified twice by code"
+            return False
         query = state.clean_query or state.query
+        if re.search(r"\bMonte[ -]Carlo\b|\bFTCS\b|heat\s+equation", query, re.I):
+            return False  # symbolic antiderivatives/stability arithmetic do not execute a numerical request
         # A closed computation ("What is 2+3?") is mathematics even without a keyword such as "solve".
-        if not has_math_intent(query) and not is_closed_computation(state.ctx):
+        if not has_math_intent(query) and not is_closed_computation(getattr(state, "ctx", None)):
             return False
         spec = parse_problem(query)
         state.bag["math_problem_spec"] = spec
+        if spec.parsed and _misread_problem(spec, query):
+            # "Solve the problem in the image ... (A) ... (D)" parsed as "solve A": the agent would spend a minute on
+            # a sub-expression that answers nothing asked (and the writer would have to explain it away).
+            state.bag["math_agent_skipped"] = "the question does not reduce to one expression the agent can solve"
+            return False
         return spec.parsed
 
     async def run(self, state: AgentState) -> PhaseOutcome | None:
@@ -140,31 +211,69 @@ class MathAgentPhase(AgentPhase):
         llm = state.llm if state.llm.available else None
         run = await solve_math_problem(spec, executor=execute, policy=HybridPolicy(llm, cfg), config=cfg, on_step=on_step)
         art = run.to_dict()
+
+        # F09: Invalidate stale verification after revisions and contradictory evidence
+        from ..axiom.correspondence import check_task_correspondence
+
+        corr_ok, corr_detail, _ = check_task_correspondence(spec, "axiom_solve_problem", getattr(run, "metadata", {}) or art, art)
+        domain_failed = any(
+            c.get("name") == "domain" and c.get("passed") is False
+            for c in (art.get("verification") or {}).get("checks") or []
+        )
+        if not corr_ok or domain_failed:
+            inval_reason = corr_detail if not corr_ok else "domain verification failed"
+            art["status"] = "rejected"
+            art["invalidated"] = True
+            art["historical"] = True
+            art["invalidation_reason"] = inval_reason
+            art["caveat"] = f"Candidate witness or result rejected: {inval_reason}"
+            if "confidence" in art:
+                art["confidence"] = None
+            if "verification" in art and isinstance(art["verification"], dict):
+                art["verification"]["status"] = "rejected"
+                for c in art["verification"].get("checks") or []:
+                    if "domain" in c.get("name", ""):
+                        c["passed"] = False
+                        c["detail"] = inval_reason
+
         state.artifacts["math_agent"] = art
 
         from ..tools.registry import ErrorType, ToolResult
 
-        ok = run.status != "failed"
+        ok = run.status != "failed" and not art.get("invalidated") and art.get("status") not in ("rejected", "failed")
+        err_msg = art.get("invalidation_reason") if art.get("invalidated") else ("; ".join((art.get("uncertainty") or [])[:2]) or "no verified answer")
         state.add_result(
             RESULT_KEY,
             ToolResult(
                 success=ok,
                 tool_name="axiom_solve_problem",
-                data={k: art[k] for k in ("status", "answer", "verification", "uncertainty", "metrics")},
-                error=None if ok else "; ".join(art["uncertainty"][:2]) or "no verified answer",
+                data={k: art[k] for k in ("status", "answer", "verification", "uncertainty", "metrics") if k in art},
+                error=None if ok else err_msg,
                 error_type=None if ok else ErrorType.SIMULATION_FAILED,
-                metadata={"engine": "sympy", "verification_status": run.status},
+                metadata={
+                    "engine": "sympy",
+                    "verification_status": art["status"],
+                    "invalidated": bool(art.get("invalidated")),
+                    "historical": bool(art.get("historical")),
+                    "invalidation_reason": art.get("invalidation_reason", ""),
+                },
             ),
             phase=PHASE_KEY,
             purpose=f"verified mathematics agent ({spec.kind})",
             render=False,
         )
-        if run.status in ("verified", "partially_verified"):
+        if (art["status"] in ("verified", "partially_verified") or art.get("invalidated") or art["status"] == "rejected") \
+                and not (run.status == "partially_verified" and _unmatched(run)):
             state.evidence_sections.append(_evidence_xml(art))
         answer = str(run.answer.get("text") or "")
         from ..utils.output_contract import extract as extract_contract
 
-        if run.status == "verified" and extract_contract(state.query).strict_form:
+        if art.get("invalidated") or art["status"] == "rejected":
+            state.scope_notes.append(
+                f"The candidate mathematical witness or computation was rejected ({art.get('invalidation_reason')}). "
+                "Do NOT present any candidate witness as verified or claim that independent domain checks passed."
+            )
+        elif run.status == "verified" and extract_contract(state.query).strict_form:
             # The user fixed the answer's form (lines, words, plain text): the checked values go into that form; the
             # checks are shown by the interface, not written as report sections.
             state.brief_notes.append(
@@ -180,14 +289,16 @@ class MathAgentPhase(AgentPhase):
                 + (" using the checked steps in <math_derivation> in order (each line states which definition or branch "
                    "applies and why, then the exact arithmetic), so every step of the worked solution is one the "
                    "checker confirmed" if any((r or {}).get("steps") for r in run.answer.get("results") or []) else "")
-                + ", and in the Verification section name the independent checks that "
-                f"passed ({'; '.join(passed)[:300]})."
-                + (f" The agent's verified answers were correct in {art['confidence']['p_correct']:.0%} of held-out "
-                   f"benchmark problems (n={art['confidence']['n']}); if you mention it, say it applies to the agent's "
-                   "final answer expression only, never to the whole answer or to values you derive from it." if art.get("confidence") else "")
+                + _verification_request(passed)
                 + " Every other quantity you state must be one the evidence computed (for example a <parameter> in "
                   "<ode_verification>), copied exactly; never re-derive a number in the text."
             )
+        elif run.status == "partially_verified" and _unmatched(run):
+            # Q.7 run: "An automated symbolic check returned 3888*sqrt(6)/125 for a sub-expression, but its call could
+            # not be matched ..." opened the answer. A value nobody asked for is not part of the answer.
+            state.scope_notes.append(
+                "The mathematics agent's computation could not be tied to the question, so it is "
+                "not a result for this question: do not mention it or its value; solve the question itself.")
         elif run.status == "partially_verified":
             state.brief_notes.append(
                 "The mathematics agent's answer (see <math_agent>) is only partially verified. Report it, and state "
@@ -198,11 +309,11 @@ class MathAgentPhase(AgentPhase):
                 "The mathematics agent found no verified answer; do not present any computed value as verified, and say "
                 "which parts of the derivation are unchecked."
             )
-        state.mark_phase(PHASE_KEY, "ok" if ok else "fallback", "" if ok else "no checked answer")
+        state.mark_phase(PHASE_KEY, "ok" if ok else "fallback", "" if ok else (art.get("invalidation_reason") or "no checked answer"))
         m = run.metrics
         # A long answer is cut with a visible ellipsis, so "... + 5*c" never reads as a term of the result.
         shown = answer if len(answer) <= 120 else answer[:119].rstrip() + "…"
-        title = f"{_STATUS_TITLE[run.status]}" + (f": {shown}" if answer else "")
+        title = f"{_STATUS_TITLE.get(art['status'], 'Math candidate')}" + (f": {shown}" if answer else "")
         await state.step(
             "agent_math", title,
             f"{m['tool_executions']} tool call(s), {m['strategy_switches']} strategy switch(es), {m['llm_calls']} model step(s), {m['seconds']:.2f}s",

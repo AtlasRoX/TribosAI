@@ -18,6 +18,8 @@ export interface ExportMenuProps {
   backendUrl: string;
   authHeaders: (extra?: Record<string, string>) => Record<string, string>;
   disabled?: boolean;
+  /** Icon-only trigger (the answer action row); the label stays as the accessible name. */
+  compact?: boolean;
 }
 
 type ServerKey = Exclude<ExportFormat, "bundle">;
@@ -64,7 +66,7 @@ async function runClient(key: ClientKey, message: Message, question: string): Pr
 }
 
 /** "Export" action: a small menu that downloads the answer as a report rendered by the backend. */
-export function ExportMenu({ message, question, backendUrl, authHeaders, disabled = false }: ExportMenuProps) {
+export function ExportMenu({ message, question, backendUrl, authHeaders, disabled = false, compact = false }: ExportMenuProps) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<ItemKey | null>(null);
   const [errors, setErrors] = useState<Partial<Record<ItemKey, string>>>({});
@@ -153,6 +155,7 @@ export function ExportMenu({ message, question, backendUrl, authHeaders, disable
         type="button"
         className="msg-action-btn"
         aria-haspopup="menu"
+        aria-label="Export"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
         disabled={disabled}
@@ -165,7 +168,7 @@ export function ExportMenu({ message, question, backendUrl, authHeaders, disable
           }
         }}
       >
-        <Download style={{ width: 13, height: 13 }} aria-hidden="true" /> Export
+        <Download style={{ width: 13, height: 13 }} aria-hidden="true" />{compact ? null : " Export"}
         <ChevronDown className={`${styles.chevron} ${open ? styles.chevronOpen : ""}`} aria-hidden="true" />
       </button>
       {open && (

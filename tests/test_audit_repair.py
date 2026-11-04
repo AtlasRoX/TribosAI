@@ -434,7 +434,8 @@ def test_computation_skip_reason_is_truthful():
     assert "no numerical computation requested" not in reason and "Axiom" in reason
 
 
-def test_a_self_contained_task_is_not_escalated_on_route_uncertainty_alone():
+def test_a_self_contained_task_is_not_escalated_on_route_uncertainty_alone(monkeypatch):
+    monkeypatch.setenv("TRIBOS_ESCALATE_ON_WEAK_SIGNALS", "1")  # the weak signals are opt-in
     from tribos.agentic.router import escalation_triggers
 
     state = SimpleNamespace(ctx=_ctx(T06), bag={"routing": {"confidence": 0.2}}, artifacts={}, sub_questions=[],

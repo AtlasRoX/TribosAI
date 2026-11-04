@@ -7,6 +7,8 @@ import { cancelJob, deleteJob, listJobs, resumeJob } from "@/services/agentServi
 import type { JobSummary } from "@/types/agentic";
 import { FRAMEWORK_NAMES } from "./AgentRunPanel";
 import { Pill, statusTone, str, styles } from "./ui";
+import { ResizeHandle } from "@/components/ResizeHandle";
+import { usePanelWidth } from "@/hooks/usePanelWidth";
 
 const ACTIVE = new Set(["queued", "running", "waiting_approval"]);
 const POLL_MS = 5000;
@@ -39,6 +41,7 @@ export function JobsPanel({
   /** True while another answer is streaming; opening a job waits until it finishes. */
   openDisabled: boolean;
 }) {
+  const panelWidth = usePanelWidth("jobs-drawer", { initial: 460, min: 340, max: 900 });
   const [open, setOpen] = useState(false);
   const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -131,7 +134,8 @@ export function JobsPanel({
             onClick={() => setOpen(false)}
             aria-hidden="true"
           />
-          <div className={styles.drawer} role="dialog" aria-modal="true" aria-label="Background jobs">
+          <div className={styles.drawer} role="dialog" aria-modal="true" aria-label="Background jobs" style={{ width: panelWidth.width }}>
+          <ResizeHandle edge="left" panel={panelWidth} label="Background jobs width" />
           <div className={styles.drawerHead}>
             <div>
               <div className={styles.title}>Background jobs</div>

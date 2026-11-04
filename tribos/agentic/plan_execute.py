@@ -26,7 +26,7 @@ import os
 import re
 from typing import Any
 
-from ..agents.evidence_need import is_closed_computation
+from ..agents.evidence_need import is_closed_computation, is_self_contained
 from .budget import BudgetExhausted
 from .config import AGENTIC, DEBATE, DIRECT_ROUTES, MATH_DIRECT_ROUTES, env_flag, env_float, env_int
 from .executor import PlanExecutor
@@ -159,6 +159,12 @@ async def request_dag_approval(state: Any, graph: PlanGraph, round_no: int) -> d
         return None
     if not expensive and not state.options.get("require_plan_approval"):
         return None
+    from ..config.settings import get_bool
+
+    if not state.options.get("require_plan_approval") and not get_bool("TRIBOS_APPROVE_EXPENSIVE"):
+        # Expensive tool calls ask first only when TRIBOS_APPROVE_EXPENSIVE is on (as the plan approval phase does):
+        # the follow-up plan waited 2 minutes for a click before running a few seconds of simulation.
+        return None
     payload = {
         "round": round_no,
         "nodes": [{**n.to_artifact(), "run": True, "expensive": n.id in expensive} for n in graph.nodes],
@@ -214,9 +220,21 @@ async def request_dag_approval(state: Any, graph: PlanGraph, round_no: int) -> d
 # calculation, a propagated uncertainty, an uploaded paper's reproduction. A question that needs one is planned even
 # when it parses as a closed computation, or the symbolic answer would stand in for the requested numerical check.
 SPECIALISED_TOOLS = frozenset({
-    "dynamis_solve_pde", "physis_engineering_calc", "physis_propagate_uncertainty", "archivon_read_paper",
+    "dynamis_solve_pde", "dynamis_monte_carlo_integrate", "physis_engineering_calc", "physis_propagate_uncertainty", "archivon_read_paper",
     "archivon_reproduce_paper",
 })
+
+
+def _rk4_computed_by_code(query: str) -> bool:
+    """An initial-value problem whose RK4 comparison the response layer computes deterministically
+    (tribos.writer.facts, before drafting): no planned Dynamis call is needed for it."""
+    try:
+        from ..writer.facts import parse_ode_problem
+
+        prob = parse_ode_problem(query)
+    except Exception:  # noqa: BLE001 - a routing hint only
+        return False
+    return prob is not None and prob.rk4 and len(prob.ics) == prob.order
 
 
 def needs_specialised_tool(state: Any) -> bool:
@@ -224,13 +242,49 @@ def needs_specialised_tool(state: Any) -> bool:
     registry = getattr(state, "registry", None)
     if registry is None:
         return False
+    query = state.clean_query or state.query
+    from ..agents.query_planner import PYTHON_REQUEST_RE
+
+    if PYTHON_REQUEST_RE.search(query) and registry.get_entry("calcula_run_python") is not None:
+        # "Run real Python and report its outputs": only the tool plan writes and runs code, so it is not skipped.
+        return True
+    # An explicit numerical method takes precedence over a symbolic parser's ability to read a formula.
+    if (re.search(r"\bMonte[ -]Carlo\b", query, re.I) and registry.get_entry("dynamis_monte_carlo_integrate") is not None):
+        return True
+    if (re.search(r"\b(?:FTCS|finite[ -]difference|PDE)\b|heat\s+equation", query, re.I)
+            and registry.get_entry("dynamis_solve_pde") is not None):
+        return True
+    if (re.search(r"\bRK4\b|fourth[ -]order\s+Runge", query, re.I) and registry.get_entry("dynamis_simulate_ode") is not None
+            and not _rk4_computed_by_code(query)):
+        return True
     try:
         from .tool_retrieval import retrieve_tools
 
         top = retrieve_tools(registry, state.clean_query or state.query, k=3)
     except Exception:  # noqa: BLE001 - retrieval is a routing hint; without it the default rules apply
         return False
-    return any(getattr(e, "name", "") in SPECIALISED_TOOLS and registry.get_entry(e.name) is not None for e in top)
+    hits = [getattr(e, "name", "") for e in top if getattr(e, "name", "") in SPECIALISED_TOOLS and registry.get_entry(e.name) is not None]
+    if not re.search(r"\bMonte[ -]Carlo\b|sampling|stochastic", query, re.I):
+        hits = [name for name in hits if name != "dynamis_monte_carlo_integrate"]
+    if not re.search(r"\b(?:papers?|articles?|preprints?|publications?|arXiv|doi)\b|10\.\d{4,}/", query, re.I):
+        # Reading or reproducing a paper needs a paper: "verify ... and has it been proven?" ranks the reproduction
+        # tool by its words ("verify", "results") without naming one.
+        hits = [name for name in hits if name not in ("archivon_read_paper", "archivon_reproduce_paper")]
+    if not hits:
+        return False
+    if hits == ["physis_engineering_calc"]:
+        # "physis_engineering_calc" contains "safety factor utilisation", which lexically matches the bare word "factor"
+        # in polynomial factoring problems. Guard against this false positive when there are no engineering terms.
+        query_lower = (state.clean_query or state.query or "").lower()
+        eng_keywords = (
+            "beam", "cantilever", "deflection", "bending", "stress", "buckling", "euler", "johnson",
+            "pressure vessel", "hoop stress", "shaft", "torsion", "von mises", "bolt", "preload", "torque",
+            "fatigue", "goodman", "pipe", "pressure drop", "colebrook", "heat exchanger", "lmtd", "ntu",
+            "conduction", "insulation", "safety factor", "utilisation", "utilization"
+        )
+        if not any(k in query_lower for k in eng_keywords):
+            return False
+    return True
 
 class PlanExecutePhase(AgentPhase):
     key = "plan_execute"
@@ -245,8 +299,25 @@ class PlanExecutePhase(AgentPhase):
         if state.options.get("enable_plan") is False:
             return False
         specialised = needs_specialised_tool(state)
-        if is_closed_computation(state.ctx) and math_agent_available(state) and not specialised:
-            return False  # the verified mathematics agent solves and checks it; a tool plan would only repeat that
+        from ..agents.orchestration.presentation import computations_cover_question
+
+        # Code that covers the question (a solved PDE, an integrated system) also covers a specialised tool request
+        # and a request to run Python: the computed results are Python's outputs.
+        if computations_cover_question(getattr(state, "tool_results", None) or {}):
+            # Code computed and checked every requested value; the evidence stage already searched for the rest.
+            state.bag.setdefault("not_needed_phases", {})[self.key] = (
+                "the requested computations were run and checked by code; no tool plan needed")
+            return False
+        if (
+            (is_closed_computation(state.ctx) or (is_self_contained(state.ctx) and getattr(getattr(state.ctx, "evidence_need", None), "level", "") == "none"))
+            and math_agent_available(state)
+            and not specialised
+        ):
+            # The verified mathematics agent (or the code-computed results) solves and checks it; a tool plan would
+            # only repeat that. Recorded so the run is not reported as a fallback.
+            state.bag.setdefault("not_needed_phases", {})[self.key] = (
+                "a self-contained computation, solved and checked without a tool plan")
+            return False
         rule = (state.bag.get("routing") or {}).get("rule")
         if rule in DIRECT_ROUTES and (rule not in MATH_DIRECT_ROUTES or math_agent_available(state)) and not specialised:
             # Auto chose the direct workflow (config.DIRECT_ROUTES); the two math-problem routes rely on the

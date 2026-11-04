@@ -5,6 +5,7 @@ and OpenAI cloud models with unified configuration.
 """
 
 import asyncio
+import contextlib
 import logging
 import os
 from collections.abc import Awaitable, Callable, Sequence
@@ -19,45 +20,29 @@ logger = logging.getLogger(__name__)
 
 # Supported model metadata catalog
 NVIDIA_NIM_BASE_URL = "https://integrate.api.nvidia.com/v1"
+# Silence allowed between bytes when a model reasons deeply before answering (LLM_DEEP_REASONING_TIMEOUT, seconds).
+DEEP_REASONING_EFFORTS = ("high", "xhigh", "max", "ultra")
+DEEP_REASONING_READ_TIMEOUT_S = float(os.getenv("LLM_DEEP_REASONING_TIMEOUT", "900.0"))
+# Tribos effort words -> Meta's reasoning_effort values ("ultra" is Tribos's top level).
+_META_EFFORT = {"minimal": "minimal", "low": "low", "medium": "medium", "high": "high", "xhigh": "xhigh",
+                "max": "max", "ultra": "xhigh"}
+META_API_BASE_URL = "https://api.meta.ai/v1"
 
 # nemotron-3-super-120b-a12b and llama-3.1-nemotron-70b-instruct were dropped: NIM returns 404 for them, so a
 # turn that selected either one lost every model call.
-DEFAULT_ORCHESTRATOR_MODEL = "nvidia/nemotron-3.5-super-vl-120b-a12b"
-DEFAULT_SYNTHESIS_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
+DEFAULT_ORCHESTRATOR_MODEL = "muse-spark-1.3"
+DEFAULT_SYNTHESIS_MODEL = "muse-spark-1.3"
 
 SUPPORTED_MODELS = [
     {
-        "id": "nvidia/nemotron-3.5-super-vl-120b-a12b",
-        "name": "NVIDIA Nemotron 3.5 120B Super VL",
-        "provider": "nvidia",
-        "description": "120B MoE (12B active), vision-language. Low latency; recommended default for planning, tool calling and synthesis.",
+        "id": "muse-spark-1.3",
+        "name": "Meta Muse Spark 1.3",
+        "provider": "meta",
+        "description": "Frontier multimodal & reasoning model with 1M context window for complex STEM reasoning and code.",
         "recommended_for": "orchestrator",
         "is_default": True,
     },
-    {
-        "id": "nvidia/nemotron-3-ultra-550b-a55b",
-        "name": "NVIDIA Nemotron 3 550B Ultra",
-        "provider": "nvidia",
-        "description": "550B MoE (55B active). Frontier deep reasoning for long derivations and cross-evidence synthesis; slower.",
-        "recommended_for": "deep_synthesis",
-        "is_default": False,
-    },
-    {
-        "id": "gpt-4o",
-        "name": "OpenAI GPT-4o",
-        "provider": "openai",
-        "description": "Omni-modal cloud LLM with strong generalized multi-step reasoning capabilities.",
-        "recommended_for": "general",
-        "is_default": False,
-    },
-    {
-        "id": "gpt-4o-mini",
-        "name": "OpenAI GPT-4o-mini",
-        "provider": "openai",
-        "description": "Lightweight, low-latency cloud model for standard tasks.",
-        "recommended_for": "fast",
-        "is_default": False,
-    },
+
 ]
 
 
@@ -116,9 +101,9 @@ def usable_key(key: str | None) -> str | None:
 
 
 def fallback_enabled() -> bool:
-    """TRIBOS_LLM_FALLBACK (default on): an NVIDIA model may be answered by gpt-4o when only OPENAI_API_KEY is set.
-    The substitution is always logged as a warning and recorded in the run manifest (PRV-002)."""
-    return (os.getenv("TRIBOS_LLM_FALLBACK") or "1").strip().lower() not in ("0", "false", "no", "off")
+    """TRIBOS_LLM_FALLBACK (default off since the OpenAI models left the catalog): an NVIDIA model may be answered by
+    gpt-4o when only OPENAI_API_KEY is set. The substitution is logged and recorded in the run manifest (PRV-002)."""
+    return (os.getenv("TRIBOS_LLM_FALLBACK") or "0").strip().lower() not in ("0", "false", "no", "off")
 
 
 def _record_client(
@@ -182,11 +167,65 @@ def get_llm(
     key_source = "caller" if caller_key else "server"
 
     reasoning_effort = kwargs.pop("reasoning_effort", None)
-    is_nvidia = (
+    is_meta = (
+        selected_model.startswith("muse-")
+        or "muse" in selected_model.lower()
+        or selected_model.startswith("meta/muse")
+    )
+    is_nvidia = not is_meta and (
         selected_model.startswith("nvidia/")
         or selected_model.startswith("meta/")
         or "nemotron" in selected_model.lower()
     )
+
+    if is_meta:
+        resolved_key = (
+            caller_key
+            or _usable_key(os.getenv("META_API_KEY"))
+        )
+        if not resolved_key:
+            raise LLMUnavailableError(
+                f"No API key configured for model '{selected_model}': set META_API_KEY "
+                "or supply an API key in Settings."
+            )
+        base_url = (os.getenv("META_API_BASE") or META_API_BASE_URL).rstrip("/")
+        logger.info(
+            "Initializing Meta Model API ChatOpenAI client with model: %s at %s",
+            selected_model,
+            base_url,
+        )
+        explicit_timeout = kwargs.get("timeout")
+        timeout_sec = float(kwargs.pop("timeout", None) or DEFAULT_LLM_TIMEOUT_S)
+        max_retries = int(kwargs.pop("max_retries", None) or 1)
+        if not explicit_timeout and str(reasoning_effort or "").lower() in DEEP_REASONING_EFFORTS:
+            # The model sends no bytes while it reasons, and deep reasoning on a hard proof lasts minutes: the 60 s
+            # read timeout ended the request mid-thought (ReadTimeout). The stream's total limit still applies.
+            timeout_sec = max(timeout_sec, DEEP_REASONING_READ_TIMEOUT_S)
+        # Meta's API takes reasoning_effort (minimal, low, medium, high, xhigh, max), and its reasoning tokens count
+        # against max_tokens. It used to be dropped here, so "answer without extended reasoning" retries reasoned as
+        # long as the first attempt, and a hard proof spent its whole output allocation thinking (no answer text).
+        meta_effort = _META_EFFORT.get(str(reasoning_effort or "").lower())
+        if meta_effort:
+            kwargs["reasoning_effort"] = meta_effort
+        client = ChatOpenAI(
+            model=selected_model,
+            base_url=base_url,
+            api_key=SecretStr(resolved_key),
+            temperature=temperature,
+            timeout=timeout_sec,
+            max_retries=max_retries,
+            **kwargs,
+        )
+        _record_client(
+            requested=selected_model,
+            served=selected_model,
+            provider="meta",
+            base_url=base_url,
+            key_source=key_source,
+            temperature=temperature,
+            kwargs=kwargs,
+        )
+        return client
 
     if is_nvidia:
         resolved_key = (
@@ -233,7 +272,7 @@ def get_llm(
             if isinstance(extra_body, dict):
                 ctk = extra_body.setdefault("chat_template_kwargs", {})
                 if isinstance(ctk, dict):
-                    ctk.setdefault("enable_thinking", str(reasoning_effort).lower() != "low")
+                    ctk.setdefault("enable_thinking", str(reasoning_effort).lower() not in ("low", "minimal"))
 
         timeout_sec = float(kwargs.pop("timeout", None) or DEFAULT_LLM_TIMEOUT_S)
         kwargs.pop("max_retries", None)
@@ -404,9 +443,18 @@ async def astream_with_reasoning(
                     params["temperature"] = llm.temperature
                 if llm.max_tokens:
                     params["max_tokens"] = llm.max_tokens
+                if getattr(llm, "reasoning_effort", None):
+                    # The raw request bypasses LangChain's payload builder, which is what sent reasoning_effort: without
+                    # this every streamed draft reasoned at the provider default, and a "minimal" retry did not apply.
+                    params["reasoning_effort"] = llm.reasoning_effort
                 if getattr(llm, "extra_body", None):
                     params["extra_body"] = llm.extra_body  # e.g. Nemotron's enable_thinking=false for edit rounds
-                stream = await client.with_options(timeout=STREAM_READ_TIMEOUT).chat.completions.create(**params)
+                # A reasoning model sends nothing while it thinks: a client created with a longer timeout (deep
+                # efforts, research calls) gets that much silence before the read is abandoned.
+                read_timeout = STREAM_READ_TIMEOUT
+                with contextlib.suppress(TypeError, ValueError):
+                    read_timeout = max(read_timeout, float(getattr(llm, "request_timeout", None) or 0))
+                stream = await client.with_options(timeout=read_timeout).chat.completions.create(**params)
                 async for chunk in stream:
                     if not chunk.choices:
                         continue

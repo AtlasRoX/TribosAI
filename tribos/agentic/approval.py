@@ -227,7 +227,11 @@ class PlanApprovalPhase(AgentPhase):
         required = bool(state.options.get("require_plan_approval"))
         if not _needs_decision(state.control):
             return required
-        return required or bool(expensive_work(state))
+        # Expensive work asks first only when TRIBOS_APPROVE_EXPENSIVE is on: a few seconds of simulation waited up to
+        # TRIBOS_APPROVAL_TIMEOUT_S (300 s) for a click the reader often never saw coming.
+        from ..config.settings import get_bool
+
+        return required or (get_bool("TRIBOS_APPROVE_EXPENSIVE") and bool(expensive_work(state)))
 
     async def run(self, state: AgentState) -> PhaseOutcome | None:
         ctx = state.ctx

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from collections.abc import Iterable
 from typing import Any
@@ -121,7 +122,31 @@ class PlanExecutor:
         blank = [k for k in getattr(node, "fill_from_run", []) or [] if not isinstance(args, dict) or k not in args]
         if blank:
             raise RefError(f"the planner left {', '.join(blank)} blank and no earlier step supplies it")
-        return args
+        return self._wire_script_inputs(node, args)
+
+    def _wire_script_inputs(self, node: PlanNode, args: Any) -> Any:
+        """A script that reads `inputs` but was given none gets the results of the steps it depends on.
+
+        Live run: "q4: disjoint rational intervals" read inputs['roots'] from the root-finding step, but the planner
+        passed no `inputs` argument, so the script stopped with NameError: name 'inputs' is not defined. The upstream
+        scripts' `result` values are merged in (keyed by their own names, and by step id), which is what such code
+        expects."""
+        if node.tool not in ("calcula_run_python", "analysis_run_python") or not isinstance(args, dict):
+            return args
+        if args.get("inputs") or not re.search(r"\binputs\b", str(args.get("code") or "")):
+            return args
+        wired: dict[str, Any] = {}
+        for dep in node.depends_on:
+            res = self.results.get(dep)
+            data = getattr(res, "data", None) if res is not None else None
+            value = data.get("result") if isinstance(data, dict) else None
+            if value is None:
+                continue
+            wired[dep] = value
+            if isinstance(value, dict):
+                for key, item in value.items():
+                    wired.setdefault(str(key), item)
+        return {**args, "inputs": wired} if wired else args
 
     async def _run_node(self, node: PlanNode) -> None:
         t0 = time.perf_counter()

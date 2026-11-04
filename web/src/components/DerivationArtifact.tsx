@@ -4,6 +4,7 @@ import React from "react";
 import { Sigma } from "lucide-react";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { Card, CopyButton, Pill, Section, Stats, arr, fmt, isNum, str, styles as ui } from "./agentic/ui";
+import { derivationRunStatus, derivationStepStatus } from "@/lib/derivationStatus";
 
 export interface DerivationStep {
   id?: string;
@@ -45,6 +46,7 @@ export function DerivationArtifact({ data }: DerivationArtifactProps) {
   const mainInput = str(data.input ?? data.query ?? data.equation ?? data.lhs);
   const operation = str(data.operation ?? data.tool ?? "symbolic derivation");
   const verified = typeof data.verified === "boolean" ? data.verified : typeof data.is_equal === "boolean" ? data.is_equal : null;
+  const runStatus = derivationRunStatus(data);
   const residual = isNum(data.residual ?? data.max_residual ?? data.spot_check_residual)
     ? Number(data.residual ?? data.max_residual ?? data.spot_check_residual)
     : null;
@@ -71,9 +73,7 @@ export function DerivationArtifact({ data }: DerivationArtifactProps) {
       collapsible
       actions={
         <>
-          {verified !== null && (
-            <Pill tone={verified ? "ok" : "warn"}>{verified ? "Verified symbolically" : "Unverified"}</Pill>
-          )}
+          {runStatus && <Pill tone={runStatus.tone}>{runStatus.label}</Pill>}
           {copyPayload ? <CopyButton text={copyPayload} label="Copy LaTeX" /> : null}
         </>
       }
@@ -158,14 +158,14 @@ export function DerivationArtifact({ data }: DerivationArtifactProps) {
                     .replace(/_/g, " ");
                   const inp = str(step.input_latex ?? step.input);
                   const out = str(step.output_latex ?? step.latex ?? step.output ?? step.result);
-                  const ok = step.verified ?? (step.status ? step.status === "ok" : true);
+                  const check = derivationStepStatus(step);
                   return (
                     <tr key={step.id || idx}>
                       <td>{stepOp}</td>
                       <td>{inp ? <code>{inp}</code> : "—"}</td>
                       <td>{out ? <MarkdownRenderer content={`$${out}$`} /> : "—"}</td>
                       <td>
-                        <Pill tone={ok ? "ok" : "warn"}>{ok ? "Verified" : str(step.status || "check")}</Pill>
+                        <Pill tone={check.tone}>{check.label}</Pill>
                       </td>
                     </tr>
                   );

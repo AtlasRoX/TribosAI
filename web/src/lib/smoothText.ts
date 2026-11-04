@@ -88,6 +88,10 @@ export interface Reconciled {
 export function reconcile(shown: string, target: string, opts: SmoothTextOptions = ANSWER_SMOOTH_OPTIONS): Reconciled {
   if (target.startsWith(shown)) return { shown, rewrite: false };
   const prefix = commonPrefixLength(shown, target);
+  // An edit inside text already on screen (the final copy-edit, a reworded heading): patch it in place and keep
+  // the reader's position, instead of retyping from the edit or cross-fading the whole answer.
+  const patched = alignShownEnd(shown, target, prefix, opts);
+  if (patched !== null) return { shown: patched, rewrite: false };
   if (shown.length >= opts.rewriteMinShown && prefix < shown.length * opts.rewritePrefixRatio) {
     return { shown: target, rewrite: true };
   }
@@ -98,6 +102,36 @@ export function reconcile(shown: string, target: string, opts: SmoothTextOptions
   cut = Math.min(cut, prefix);
   if (cut > 0 && target.charCodeAt(cut - 1) >= 0xd800 && target.charCodeAt(cut - 1) <= 0xdbff) cut--;
   return { shown: target.slice(0, cut), rewrite: false };
+}
+
+const ANCHOR_CHARS = 32;
+/** Share of the shown text that must be unchanged (common prefix + common suffix) for an in-place patch. */
+const PATCH_KEEP_RATIO = 0.7;
+
+export function commonSuffixLength(a: string, b: string): number {
+  const n = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < n && a.charCodeAt(a.length - 1 - i) === b.charCodeAt(b.length - 1 - i)) i++;
+  return i;
+}
+
+/**
+ * Where the end of the shown text lies in the new target, when the two differ only by a local edit: the last
+ * characters on screen are found in the target (the occurrence nearest the old position) and most of the shown
+ * text is a shared prefix or suffix. Returns the target up to that point, or null when the change is not local.
+ */
+export function alignShownEnd(shown: string, target: string, prefix: number, opts: SmoothTextOptions = ANSWER_SMOOTH_OPTIONS): string | null {
+  if (shown.length < opts.rewriteMinShown) return null;
+  const anchor = shown.slice(-ANCHOR_CHARS);
+  let best = -1;
+  for (let i = target.indexOf(anchor); i >= 0; i = target.indexOf(anchor, i + 1)) {
+    const end = i + anchor.length;
+    if (best < 0 || Math.abs(end - shown.length) < Math.abs(best - shown.length)) best = end;
+  }
+  if (best < 0) return null;
+  const head = target.slice(0, safeBoundary(target, best));
+  const suffix = commonSuffixLength(shown, head);
+  return Math.min(prefix + suffix, shown.length) >= shown.length * PATCH_KEEP_RATIO ? head : null;
 }
 
 /**

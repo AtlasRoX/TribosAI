@@ -38,6 +38,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
+import sympy as sp
+
 from pydantic import BaseModel, Field, ValidationError
 
 from . import analysis as A
@@ -290,7 +292,7 @@ def local_executor(timeout_s: float = 30.0) -> Executor:
             data = await asyncio.wait_for(asyncio.to_thread(TOOL_FUNCS[tool], **kwargs), timeout=timeout_s)
         except TimeoutError:
             return ToolResult(success=False, tool_name=tool, error=f"{tool} exceeded {timeout_s:.0f}s", error_type=ErrorType.TIMEOUT)
-        except ValueError as exc:
+        except (ValueError, TypeError) as exc:
             return ToolResult(success=False, tool_name=tool, error=str(exc), error_type=ErrorType.VALIDATION_ERROR)
         except Exception as exc:  # noqa: BLE001
             return ToolResult(success=False, tool_name=tool, error=f"{type(exc).__name__}: {exc}", error_type=ErrorType.INTERNAL_ERROR)
@@ -301,7 +303,7 @@ def local_executor(timeout_s: float = 30.0) -> Executor:
 
 _CANNOT_SOLVE_MARKERS = ("NotImplementedError", "could not solve", "No algorithms are implemented", "not implemented")
 _MODEL_FAULT_EXC = ("TypeError", "AttributeError", "KeyError", "IndexError", "ZeroDivisionError", "PolynomialError",
-                    "CoercionFailed", "SympifyError", "ShapeError", "NonSquareMatrixError", "SyntaxError")
+                    "CoercionFailed", "SympifyError", "ShapeError", "NonSquareMatrixError", "SyntaxError", "UnsupportedShapeError")
 _INFRA_EXC = ("MemoryError", "RecursionError", "OSError", "ConnectionError")
 
 
@@ -389,12 +391,26 @@ def _rule_strategies(spec: ProblemSpec) -> list[tuple[str, list[Builder]]]:
         positive = "positive" in (spec.assumptions.get(var or "", "") if var else "")
         strategies: list[tuple[str, list[Builder]]] = [("exact solve", [lambda st, prev: _act(
             "axiom_solve", "exact solve", "solve exactly; every root is back-substituted", equations=ex, variables=var, domain=spec.domain)])]
-        strategies.append(("numeric scan", [lambda st, prev: _act(
-            "axiom_nsolve", "numeric scan", "no usable closed form: locate real roots numerically",
-            equation=ex, variable=var, lower=0.0 if positive else -10.0, upper=10.0, samples=800)]))
-        strategies.append(("wide numeric scan", [lambda st, prev: _act(
-            "axiom_nsolve", "wide numeric scan", "widen the numeric search interval",
-            equation=ex, variable=var, lower=0.0 if positive else -1000.0, upper=1000.0, samples=5000)]))
+        can_numeric = False
+        if ex and isinstance(ex, str):
+            try:
+                lhs, rhs, _ = E.safe_parse_equation(ex)
+                if not (isinstance(lhs, (sp.Tuple, tuple, list)) or isinstance(rhs, (sp.Tuple, tuple, list))):
+                    f = lhs - rhs
+                    free = f.free_symbols
+                    if var:
+                        can_numeric = not bool(free - {sp.Symbol(var)})
+                    else:
+                        can_numeric = len(free) == 1
+            except Exception:
+                can_numeric = False
+        if can_numeric:
+            strategies.append(("numeric scan", [lambda st, prev: _act(
+                "axiom_nsolve", "numeric scan", "no usable closed form: locate real roots numerically",
+                equation=ex, variable=var, lower=0.0 if positive else -10.0, upper=10.0, samples=800)]))
+            strategies.append(("wide numeric scan", [lambda st, prev: _act(
+                "axiom_nsolve", "wide numeric scan", "widen the numeric search interval",
+                equation=ex, variable=var, lower=0.0 if positive else -1000.0, upper=1000.0, samples=5000)]))
         return strategies
     if k in ("simplify", "evaluate"):
         return [("simplify", [lambda st, prev: _act("axiom_simplify", "simplify", "simplify symbolically", expression=ex, assumptions=asm)])]
@@ -820,6 +836,21 @@ def _short(value: Any, limit: int = 200) -> str:
 
 # Calibration --------------------------------------------------------------------------------------------------------
 
+# The code a calibration describes: the parser, the policy and the verifier (AUDIT-013). A calibration file whose
+# code_sha256 does not match these sources describes different code and is not used.
+CALIBRATED_SOURCES = ("problem.py", "agent.py", "verifier.py", "verifier_ext.py", "engine.py", "safe_expr.py")
+
+
+@functools.lru_cache(maxsize=1)
+def calibrated_code_sha256() -> str:
+    h = hashlib.sha256()
+    for name in CALIBRATED_SOURCES:
+        path = Path(__file__).with_name(name)
+        h.update(name.encode("utf-8") + b"\x00")
+        h.update(path.read_bytes().replace(b"\r\n", b"\n") if path.exists() else b"<missing>")
+    return h.hexdigest()
+
+
 @functools.lru_cache(maxsize=1)
 def _calibration() -> dict[str, Any]:
     try:
@@ -828,20 +859,42 @@ def _calibration() -> dict[str, Any]:
         return {}
 
 
-def calibrated_confidence(status: str) -> dict[str, Any] | None:
-    """Empirical P(answer correct | status) from the held-out benchmark (tribos/axiom/math_eval.py). None when no answer
-    was given or no calibration is available: a status label is never turned into a made-up probability."""
-    if status == "failed":
+def clear_calibration_cache() -> None:
+    """Clear the cached calibration.json for testing or runtime reloads."""
+    _calibration.cache_clear()
+
+
+def calibrated_confidence(status: str, cal: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """Empirical P(answer correct | status) from the held-out benchmark (tribos/axiom/math_eval.py).
+
+    Applies strictly to the verified final answer expression only. Returns None when no answer was given,
+    status is not verified, or sample size is below statistical significance threshold: unverified,
+    rejected, invalidated or tiny-sample statuses never function as confidence badges.
+    """
+    if status != "verified":
         return None
-    cal = _calibration()
+    from_file = cal is None
+    if cal is None:
+        cal = _calibration()
+    if (from_file or "code_sha256" in cal) and cal.get("code_sha256") != calibrated_code_sha256():
+        return None  # fitted on other code (or of unknown code): stale
     entry = (cal.get("statuses") or {}).get(status)
-    if not entry or not entry.get("n"):
+    if not entry or not entry.get("n") or entry.get("n", 0) < 10:
         return None
     return {
         "p_correct": entry["confidence"],
         "lower_95": entry["lower_95"],
         "n": entry["n"],
+        "benchmark": cal.get("benchmark", "math-eval-v1"),
+        "split": cal.get("fitted_on", ""),
+        "fitted_at": cal.get("fitted_at"),
         "fitted_on": f"{cal.get('benchmark', '')}: {cal.get('fitted_on', '')}".strip(": "),
+        "scope": "final_expression_only",
+        "is_probability": False,
+        "limitations": (
+            "Held-out benchmark of single problems; applies strictly to the final expression, "
+            "not the surrounding written derivation or current-answer probability."
+        ),
     }
 
 
@@ -930,7 +983,9 @@ __all__ = [
     "StepLabels",
     "TOOL_CARDS",
     "TOOL_SCHEMAS",
+    "calibrated_confidence",
     "classify",
+    "clear_calibration_cache",
     "local_executor",
     "record_trajectory",
     "solve_math_problem",

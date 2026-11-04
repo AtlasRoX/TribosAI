@@ -14,6 +14,7 @@ from tribos.dynamis.engine import (
     dynamis_simulate_ode,
 )
 from tribos.dynamis.schemas import (
+    DynamisMonteCarloInput,
     DynamisEquilibriumInput,
     DynamisFitParametersInput,
     DynamisOptimizeInput,
@@ -36,7 +37,7 @@ def _wrap_executor(tool_name: str, fn: Callable[..., dict[str, Any]]) -> Callabl
                 tool_name=tool_name,
                 data=data,
                 canonical_ids=canonical_ids,
-                metadata={"engine": "scipy", "verified": bool(data.get("verified", True))},
+                metadata={"engine": "numpy/scipy", "verified": bool(data.get("verified", False))},
             )
         except ValueError as exc:
             return ToolResult(
@@ -67,8 +68,19 @@ def _wrap_executor(tool_name: str, fn: Callable[..., dict[str, Any]]) -> Callabl
 def register_tools(registry: Any) -> None:
     """Register all 6 Dynamis numerical simulation and optimization tools in the ToolRegistry."""
     from tribos.tools.registry import AdapterType, ToolUniverseEntry
+    from tribos.dynamis.monte_carlo import monte_carlo_integrate
 
     specs = [
+        (
+            "dynamis_monte_carlo_integrate",
+            "Execute crude Monte Carlo quadrature of a scalar integrand on a finite interval using exactly the "
+            "requested sample count and NumPy Generator(PCG64(seed)). Returns the estimate, sample-based standard "
+            "error (ddof=1), reference discrepancy in standard errors, and reproducibility metadata. "
+            "Use for Monte Carlo requests, not symbolic integration.",
+            DynamisMonteCarloInput,
+            monte_carlo_integrate,
+            ["numerical", "monte_carlo", "sampling", "quadrature", "reproducible", "numpy"],
+        ),
         (
             "dynamis_simulate_ode",
             "Simulate a system of ordinary differential equations (ODEs) dx_i/dt = f_i(t, x; p) or a named physical preset over time using SciPy solve_ivp.",
@@ -131,5 +143,16 @@ def register_tools(registry: Any) -> None:
             executor=run_ode_fit_tool if name == "dynamis_fit_parameters" else _wrap_executor(name, fn),
         )
 
+
+def _monte_carlo_artifact(tool_results: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    for result in reversed(list(tool_results.values())):
+        if getattr(result, "success", False) and getattr(result, "tool_name", "") == "dynamis_monte_carlo_integrate":
+            return {"monte_carlo": result.data}
+    return {}
+
+
+from tribos.extensions.hooks import register_artifact_builder
+
+register_artifact_builder("monte_carlo", _monte_carlo_artifact)
 
 __all__ = ["register_tools"]

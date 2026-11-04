@@ -107,9 +107,21 @@ def given_values(text: str, scoped: set[str] | frozenset[str] = frozenset()) -> 
     seen: dict[str, set[float]] = {}
     for m in _GIVEN_RE.finditer(text or ""):
         raw = m.group("name")
+        tail = (text or "")[m.end():]
+        if re.match(r"\s*,\s*\d+", tail):
+            continue
+        if re.search(r"[+\-−*/^·×]\s*$", (text or "")[: m.start()]):
+            continue  # "x + y = 1" is a constraint on x and y, not the given value y = 1
         unit = (m.group("unit") or "").strip()
         if unit.split(" ")[0].lower() in _NOT_UNITS:
             unit = ""
+        if re.match(r"\s*(?:[(*+/^]|-(?=\s*\w)|\*\*)", tail):
+            continue  # z = 2(k+1)n and a = 3*x are expressions, not scalar givens z=2 and a=3
+        if unit:
+            from .latex_math import is_unit_word
+
+            if not is_unit_word(unit):
+                continue  # z = 2n: n is not a physical unit or a scalar value for z
         try:
             value = float(m.group("value").replace("−", "-"))
         except ValueError:
@@ -178,21 +190,57 @@ def build_result_record(query: str, tool_results: dict[str, Any]) -> ResultRecor
             # stays a parameter of the problem. A claim's variable is case-local too: "n = 40 gives 1681" and
             # "n = 41 gives 1763" are two tested values.
             bound = [k for t in tasks for k in (t.get("bindings") or {})]
-            rec.problem["case_scoped"] = sorted({k for k in bound if bound.count(k) > 1}
-                                                | {t["variable"] for t in tasks if t.get("op") == "claim" and t.get("variable")})
+            cases = rec.problem["cases"]
+            case_vars = {k for c in cases for k in c.get("bindings", {})} if len(cases) > 1 else {k for k in bound if bound.count(k) > 1}
+            rec.problem["case_scoped"] = sorted(case_vars | {t["variable"] for t in tasks if t.get("op") == "claim" and t.get("variable")})
+        m_local = re.search(r"\b([a-z])\s+local\s+to\s+each\b", str(query or "").lower())
+        if m_local:
+            existing = set(rec.problem.get("case_scoped") or ())
+            existing.add(m_local.group(1))
+            rec.problem["case_scoped"] = sorted(existing)
     except Exception:  # noqa: BLE001 - an unparsed question still gets a record of its tool outputs
         rec.problem = {"text": (query or "")[:4000], "kind": "unknown"}
-    rec.parameters = given_values(query or "", set(rec.problem.get("case_scoped") or ()))
+    def_params = {d["parameter"] for d in rec.problem.get("definitions") or [] if isinstance(d, dict) and d.get("parameter")}
+    prob_vars = {rec.problem.get("variable")} if rec.problem.get("variable") else set()
+    prob_unknowns = set(rec.problem.get("unknowns") or ())
+    prob_assumptions = set(rec.problem.get("assumptions") or ())
+    scoped_symbols = (
+        set(rec.problem.get("case_scoped") or ())
+        | def_params
+        | prob_vars
+        | prob_unknowns
+        | prob_assumptions
+    )
+    rec.parameters = given_values(query or "", scoped_symbols)
     func_name = re.sub(r"\(.*$", "", str(rec.problem.get("function") or ""))
     var = str(rec.problem.get("variable") or "t")
 
     for key, res in (tool_results or {}).items():
-        if res is None or not getattr(res, "success", False):
+        if res is None:
+            continue
+        tool = str(getattr(res, "tool_name", "") or "")
+        if getattr(res, "metadata", {}).get("invalidated") or not getattr(res, "success", False):
+            rec.provenance.append({
+                "key": str(key), "tool": tool, "success": False,
+                "status": "invalidated" if getattr(res, "metadata", {}).get("invalidated") else "failed",
+                "reason": str(getattr(res, "error", "") or "invalidated or failed tool execution"),
+            })
             continue
         data = getattr(res, "data", None)
         if not isinstance(data, dict):
             continue
-        tool = str(getattr(res, "tool_name", "") or "")
+        from ..axiom.correspondence import check_task_correspondence
+        from ..axiom.problem import parse_problem
+
+        q_spec = parse_problem(query or "")
+        corr_ok, corr_detail, _ = check_task_correspondence(q_spec, tool, getattr(res, "metadata", {}) or data, data)
+        if not corr_ok:
+            rec.provenance.append({
+                "key": str(key), "tool": tool, "success": False,
+                "status": "irrelevant", "reason": corr_detail,
+            })
+            continue
+
         rec.provenance.append({"key": str(key), "tool": tool, "success": True})
         if tool == "axiom_solve_problem" or str(key).endswith("math_agent.result"):
             expr = _answer_expression(data, func_name, var, str(key))

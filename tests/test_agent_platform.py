@@ -235,12 +235,15 @@ def test_plan_rejection_keeps_literature_and_noninteractive_is_auto(monkeypatch,
     assert "plan_approval" not in plain.execution_artifacts
 
 
-def test_expensive_work_detection():
+def test_expensive_work_detection(monkeypatch):
     plan = SimpleNamespace(action="parameter_scan")
     ctx = _ctx(should_run=lambda k: k == "vivarix", simulation_plan=plan)
     state = _state(ctx)
     assert approval_mod.expensive_work(state) == ["parameter scan"]
     state.control.interactive = True
+    # Off by default: expensive work runs at once instead of waiting up to 300 s for a click.
+    assert not approval_mod.PlanApprovalPhase().applies(state)
+    monkeypatch.setenv("TRIBOS_APPROVE_EXPENSIVE", "1")
     assert approval_mod.PlanApprovalPhase().applies(state)
 
 

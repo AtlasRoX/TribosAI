@@ -37,7 +37,7 @@ from .state import AgentState
 logger = logging.getLogger(__name__)
 
 RECALL_K = 12
-MAX_FACTS_PER_TURN = 60
+MAX_FACTS_PER_TURN = 10
 
 
 def _store() -> ProjectStore:
@@ -239,15 +239,14 @@ def extract_facts(state: AgentState) -> list[FactInput]:
             found = _symbolic(data, topic)
         elif "dynamis" in name or "vivarix" in name:
             found = _dynamics(data, topic)
-        elif ("lithoscribe" in name or "archivon" in name or "literature" in name) and data.get("ranked_passages"):
-            for p in (data.get("ranked_passages") or [])[:5]:
-                text = p.get("passage_text") or p.get("text") or "" if isinstance(p, dict) else ""
-                if text:
+        elif ("lithoscribe" in name or "archivon" in name or "literature" in name) and data.get("key_findings"):
+            for p in (data.get("key_findings") or [])[:2]:
+                if isinstance(p, str) and p.strip():
                     found.append(FactInput(
                         subject=topic or "literature",
                         relation="literature_finding",
-                        object=text[:120],
-                        confidence=0.75,
+                        object=p.strip()[:200],
+                        confidence=0.85,
                         tags=["literature"],
                     ))
         for f in found:
@@ -294,9 +293,38 @@ class ProjectRecallPhase(AgentPhase):
             state.bag["project_owned"] = False
             return None
         state.bag["project_owned"] = True
-        facts = await asyncio.to_thread(store.recall, project["id"], state.user_id, state.clean_query, query_entities(state), RECALL_K)
+        facts = await asyncio.to_thread(
+            store.recall, project["id"], state.user_id, state.clean_query, query_entities(state), RECALL_K
+        )
         state.project_memory = format_memory_block(project, facts)
-        artifact = {"project_id": project["id"], "project_name": project["name"], "recalled": [_public(f) for f in facts], "written": 0, "invalidated": 0}
+        artifact = {
+            "project_id": project["id"],
+            "project_name": project["name"],
+            "recalled": [_public(f) for f in facts],
+            "written": 0,
+            "invalidated": 0,
+        }
+        try:
+            from .mem0_adapter import get_mem0_adapter
+
+            mem0 = get_mem0_adapter()
+            if mem0.enabled:
+                mem0_recalled = await asyncio.to_thread(
+                    mem0.search,
+                    query=state.clean_query or "",
+                    user_id=state.user_id,
+                    project_id=project["id"],
+                    limit=5,
+                )
+                if mem0_recalled:
+                    m_lines = [m.get("memory", "") for m in mem0_recalled if m.get("memory")]
+                    if m_lines:
+                        context_str = "\n".join(f"- {line}" for line in m_lines)
+                        state.project_memory += f"\n<mem0_context>\n{context_str}\n</mem0_context>"
+                    artifact["mem0_recalled"] = mem0_recalled
+        except Exception as exc:
+            logger.debug("Mem0 recall skipped: %s", exc)
+
         state.artifacts["project_memory"] = {**(state.artifacts.get("project_memory") or {}), **artifact}
         await state.step(
             "agent_project_memory",
@@ -330,11 +358,63 @@ class ProjectConsolidatePhase(AgentPhase):
         art.update({"project_id": state.project_id, "written": result["written"], "invalidated": result["invalidated"], "verified": verified})
         art["operations"] = {op: sum(1 for o in result["ops"] if o["op"] == op) for op in ("ADD", "UPDATE", "INVALIDATE", "NOOP")}
         state.artifacts["project_memory"] = art
+        mem0_enqueued = 0
+        mem0_delivered = 0
+        mem0_err: str | None = None
+        try:
+            from .mem0_adapter import Mem0Provenance, get_mem0_adapter, get_memory_queue
+
+            mem0 = get_mem0_adapter()
+            if mem0.enabled and facts:
+                queue = get_memory_queue()
+                for f in facts[:5]:
+                    fact_str = f"{f.subject} {f.relation.replace('_', ' ')} {f.object}"
+                    if f.value:
+                        fact_str += f": {f.value}"
+                    prov = Mem0Provenance(
+                        memory_type="project_fact" if f.subject != "researcher" else "instruction",
+                        origin="project_memory_consolidate",
+                        source_task_id=state.control.run_id or "",
+                        verification_status="verified" if verified else "unverified",
+                    )
+                    payload = {
+                        "content": fact_str,
+                        "provenance": prov.to_dict(),
+                    }
+                    await asyncio.to_thread(
+                        queue.enqueue,
+                        user_id=state.user_id,
+                        project_id=state.project_id,
+                        operation="add",
+                        payload=payload,
+                    )
+                    mem0_enqueued += 1
+
+                mem0_delivered = await asyncio.to_thread(queue.process_pending)
+        except Exception as exc:
+            mem0_err = str(exc)
+            logger.warning("Mem0 consolidation error: %s", exc)
+
+        art["mem0_status"] = {
+            "enqueued": mem0_enqueued,
+            "delivered": mem0_delivered,
+            "error": mem0_err,
+        }
+        state.artifacts["project_memory"] = art
+
         if facts:
+            step_detail = f"Saved {result['written']} fact(s) to the project"
+            if result["invalidated"]:
+                step_detail += f", {result['invalidated']} superseded"
+            sub_detail = "verified turn" if verified else "unverified turn: facts tagged unverified"
+            if mem0_delivered > 0:
+                sub_detail += f" (Mem0: {mem0_delivered} stored)"
+            elif mem0_enqueued > 0:
+                sub_detail += f" (Mem0: {mem0_enqueued} queued)"
             await state.step(
                 "agent_project_memory_write",
-                f"Saved {result['written']} fact(s) to the project" + (f", {result['invalidated']} superseded" if result["invalidated"] else ""),
-                "verified turn" if verified else "unverified turn: facts tagged unverified",
+                step_detail,
+                sub_detail,
                 agent="Project memory",
             )
         return None

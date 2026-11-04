@@ -17,14 +17,17 @@ Precedence for state directories: a specific variable (`TRIBOS_MEMORY_DIR`, `TRI
 `TRIBOS_UPLOAD_ROOT`, `TRIBOS_JOBS_DIR`, `TRIBOS_TOOL_CACHE_DIR`) wins over `TRIBOS_DATA_DIR`; with
 neither set, every store keeps its historical location under the workspace.
 
-167 variables.
+240 variables.
 
 ## State directories
 
 | Variable | Type | Default | Read at | Description |
 | --- | --- | --- | --- | --- |
+| `TRIBOS_CAMPAIGNS_DIR` | path | unset | `tribos/agentic/campaign.py` | Research-project (campaign) store directory (default <jobs dir>/campaigns). |
 | `TRIBOS_DATASET_ROOTS` | list | unset | `tribos/datasets/paths.py` | Directories (os.pathsep-separated) that typed dataset paths may point into; <cwd>/data when unset. |
 | `TRIBOS_DATA_DIR` | path | unset | `tribos/utils/paths.py` | One data root (`~` expanded): memory/, runs/, uploads/, jobs/, tool_cache/ default under it. |
+| `TRIBOS_FEEDBACK_DIR` | path | unset | `app/backend/routers/feedback.py` | Where answer ratings (thumbs up/down) are recorded as JSON lines (default <data>/feedback). |
+| `TRIBOS_FILES_DIR` | path | unset | `tribos/files/store.py` | Where files an answer produced on request (Word, PDF, Python, CSV, Excel, ...) are kept (default <data>/files). |
 | `TRIBOS_JOBS_DIR` | path | unset | `tribos/agentic/jobs.py` | Background-job SQLite store directory (wins over TRIBOS_RUNS_DIR/jobs). |
 | `TRIBOS_MEMORY_DIR` | path | unset | `tribos/utils/memory/project_store.py`<br>`tribos/utils/memory/research_memory.py` | Research memory vault directory (wins over TRIBOS_DATA_DIR); also the projects store fallback. |
 | `TRIBOS_PROJECTS_DIR` | path | unset | `tribos/utils/memory/project_store.py` | Projects store directory (wins over TRIBOS_MEMORY_DIR and TRIBOS_DATA_DIR). |
@@ -36,6 +39,7 @@ neither set, every store keeps its historical location under the workspace.
 
 | Variable | Type | Default | Read at | Description |
 | --- | --- | --- | --- | --- |
+| `TRIBOS_FILES_TTL_DAYS` | float (0 to 36500) | `30.0` | `tribos/files/store.py` | Files answers produced are deleted after this many days (0 keeps them). |
 | `TRIBOS_JOB_TTL_DAYS` | float (0 to 36500) | `30.0` | `tribos/agentic/jobs.py` | Finished jobs older than this many days are purged (0 keeps them). |
 | `TRIBOS_MAINTENANCE` | off \| auto \| on | `auto` | `tribos/utils/maintenance.py` | Retention sweep switch: off, auto (off under pytest) or on. |
 | `TRIBOS_MAINTENANCE_INTERVAL_H` | float (>= 0) | `6.0` | `tribos/utils/maintenance.py` | Hours between retention sweeps. |
@@ -49,7 +53,7 @@ neither set, every store keeps its historical location under the workspace.
 | --- | --- | --- | --- | --- |
 | `TRIBOS_ALLOW_INSECURE` | bool | `false` | `app/backend/security.py` | Allow non-loopback connections when authentication is disabled (unsafe). |
 | `TRIBOS_API_TOKENS` | list | (secret, unset) | `app/backend/auth.py` | Static bearer tokens as comma-separated `token:user_id` pairs. |
-| `TRIBOS_AUTH_MODE` | disabled \| bearer | unset | `app/backend/auth.py` | `disabled` runs every request as one local user (development only); otherwise bearer auth is required. |
+| `TRIBOS_AUTH_MODE` | disabled \| bearer | unset | `tribos/extensions/sandbox.py`<br>`app/backend/auth.py` | `disabled` runs every request as one local user (development only); otherwise bearer auth is required. |
 | `TRIBOS_JWT_AUDIENCE` | str | unset | `app/backend/auth.py` | Required JWT `aud` claim when set. |
 | `TRIBOS_JWT_ISSUER` | str | unset | `app/backend/auth.py` | Required JWT `iss` claim when set. |
 | `TRIBOS_JWT_SECRET` | str | (secret, unset) | `app/backend/auth.py` | HS256 secret for bearer JWTs (`sub` = user id, `exp` required). |
@@ -69,6 +73,7 @@ neither set, every store keeps its historical location under the workspace.
 | `TRIBOS_SSE_HEARTBEAT_S` | float (>= 0.05) | `15.0` | `app/backend/main.py`<br>`app/backend/routers/jobs.py` | Seconds between keep-alive comments on chat and job event streams. |
 | `TRIBOS_STRICT_CONFIG` | bool | `false` | `app/backend/main.py` | Fail startup when configuration validation reports a problem instead of only logging it. |
 | `TRIBOS_STRICT_ROUTERS` | bool | `false` | `app/backend/main.py` | Fail startup when an optional API router cannot be imported instead of disabling it. |
+| `TRIBOS_WEB_URL` | str | `http://localhost:3000` | `app/backend/main.py` | Address of the web app, linked from the backend's own status page at /. |
 
 ## TRIBOS_MCP_*: MCP and A2A endpoints
 
@@ -76,6 +81,7 @@ neither set, every store keeps its historical location under the workspace.
 | --- | --- | --- | --- | --- |
 | `TRIBOS_A2A_BLOCKING_TIMEOUT_S` | float (>= 0) | `300.0` | `app/backend/routers/a2a.py` | Seconds a blocking A2A message/send waits for its job before returning the task. |
 | `TRIBOS_MCP_ALLOWED_ORIGINS` | list | unset | `app/backend/routers/mcp.py`<br>`app/backend/security.py` | Extra comma-separated origins the MCP endpoint accepts besides TRIBOS_CORS_ORIGINS. |
+| `TRIBOS_MCP_CLIENT_SERVERS` | str | `` | `tribos/tools/mcp_client.py` | External MCP tool servers Tribos may call, as JSON {"name": {"command": [...], "tools": [...]}} (stdio transport; tools list optional). |
 | `TRIBOS_MCP_MAX_CONCURRENT` | int (>= 1) | `2` | `app/backend/routers/mcp.py` | Concurrent MCP research calls per user. |
 | `TRIBOS_MCP_RESEARCH_TIMEOUT_S` | float (>= 0) | `900.0` | `app/backend/routers/mcp.py` | Seconds an MCP research call may run before it is cancelled. |
 | `TRIBOS_MCP_TOOLS` | list | unset | `app/backend/routers/mcp.py` | Comma-separated registry tools exposed over MCP (default: the built-in allowlist). |
@@ -84,27 +90,46 @@ neither set, every store keeps its historical location under the workspace.
 
 | Variable | Type | Default | Read at | Description |
 | --- | --- | --- | --- | --- |
+| `TRIBOS_CAMPAIGN_AUTO_RESUME` | bool | `true` | `tribos/agentic/campaign.py` | Research projects interrupted by a server stop continue on their own when the server starts again (at most 3 times each). |
+| `TRIBOS_CAMPAIGN_CONTEXT_CHARS` | int (500 to 40000) | `3500` | `tribos/agentic/campaign.py` | Characters of each earlier stage a research-project stage is given (twice this for the report). |
+| `TRIBOS_CAMPAIGN_MAX_ACTIVE` | int (1 to 8) | `1` | `tribos/agentic/campaign.py` | Research projects run at once per server process; further ones wait in a queue. |
+| `TRIBOS_CAMPAIGN_MAX_PER_USER` | int (1 to 50) | `3` | `tribos/agentic/campaign.py` | Queued + running research projects per user; over it a new, resumed or continued project is refused (429). |
+| `TRIBOS_CAMPAIGN_STAGE_RETRIES` | int (0 to 5) | `1` | `tribos/agentic/campaign.py` | Times a failed research-project stage is run again before the project stops. |
 | `TRIBOS_JOB_CANCEL_GRACE_S` | float (0 to 600) | `20.0` | `tribos/agentic/jobs.py` | Seconds a cancelled job may take to stop before it is marked cancelled anyway. |
 | `TRIBOS_JOB_MAX_EVENTS` | int (100 to 1000000) | `20000` | `tribos/agentic/jobs.py` | Progress events kept per job; older ones are dropped. |
 | `TRIBOS_JOB_WORKERS` | int (1 to 16) | `2` | `tribos/agentic/jobs.py` | Background-job worker tasks. |
 | `TRIBOS_MAX_JOBS_PER_USER` | int (1 to 100) | `3` | `tribos/agentic/jobs.py` | Queued + running background jobs per user. |
+| `TRIBOS_RESEARCH_CODEACT_STEPS` | int (2 to 30) | `10` | `tribos/agentic/research/loop.py` | Python cells one research experiment may run. |
+| `TRIBOS_RESEARCH_CROSS_CHECK` | bool | `true` | `tribos/agentic/research/loop.py` | Re-implement each numeric research result independently and compare (the 'replicated' verification tier). |
+| `TRIBOS_RESEARCH_MAX_HOURS` | int (1 to 72) | `8` | `tribos/agentic/research/loop.py` | Safety ceiling on a research project's wall-clock hours before it writes its thesis with what it has. |
+| `TRIBOS_RESEARCH_MAX_ROUNDS` | int (1 to 40) | `12` | `tribos/agentic/research/loop.py` | Safety ceiling on research-loop rounds; a project normally stops earlier, when it reaches a conclusion or stops making progress. |
+| `TRIBOS_RESEARCH_MAX_TEST_RUNS` | int (5 to 1000) | `120` | `tribos/agentic/research/loop.py` | Safety ceiling on test runs (experiments, proofs, literature checks) in one research project. |
+| `TRIBOS_RESEARCH_PARALLEL_TESTS` | int (1 to 8) | `2` | `tribos/agentic/research/loop.py` | Research-project tests run at once. |
+| `TRIBOS_RESEARCH_REPLICATION_MODEL` | str | `` | `tribos/agentic/research/manifest.py`<br>`tribos/agentic/research/runner.py` | Model that re-implements numeric research results (must be in the allowed model list); empty means the research model, in a separate session. |
+| `TRIBOS_RESEARCH_SANDBOX_TIMEOUT_S` | int (30 to 1800) | `300` | `tribos/agentic/research/loop.py`<br>`tribos/agentic/sandbox/__init__.py` | Seconds one sandboxed cell of a research-project experiment may run (chat cells keep TRIBOS_SANDBOX_TIMEOUT_S). |
+| `TRIBOS_RESEARCH_STAGNATION_ROUNDS` | int (1 to 6) | `2` | `tribos/agentic/research/loop.py` | Consecutive research rounds without progress after which the project stops and writes its thesis. |
+| `TRIBOS_RESEARCH_TEST_RETRIES` | int (0 to 5) | `2` | `tribos/agentic/research/loop.py` | Times a failed research test is retried with a different method before it is marked blocked. |
+| `TRIBOS_THESIS_PDF_ENGINE` | auto \| chromium \| fpdf | `auto` | `tribos/export/thesis.py` | Thesis PDF renderer: chromium (typeset HTML with KaTeX, via Playwright), fpdf (built-in fallback) or auto. |
 
 ## Models and LLM providers
 
 | Variable | Type | Default | Read at | Description |
 | --- | --- | --- | --- | --- |
+| `LLM_DEEP_REASONING_TIMEOUT` | float (>= 60) | `900.0` | `tribos/utils/llm/llm_factory.py` | Seconds of silence allowed between bytes when a model reasons deeply (high effort or above) before answering; LLM_TIMEOUT applies otherwise. |
 | `LLM_STREAM_TIMEOUT` | float | `120.0` | `tribos/utils/llm/llm_factory.py` | Read timeout in seconds between streamed completion chunks. |
 | `LLM_STREAM_TOTAL_TIMEOUT` | float | `1800.0` | `tribos/utils/llm/llm_factory.py` | Wall-clock cap in seconds on one streamed completion. |
 | `LLM_TIMEOUT` | float | `60.0` | `tribos/utils/llm/llm_factory.py` | Per-request LLM client timeout in seconds. |
+| `META_API_BASE` | str | `https://api.meta.ai/v1` | `tribos/utils/llm/llm_factory.py` | Base URL for the Meta Model API. |
+| `META_API_KEY` | str | (secret, unset) | `tribos/utils/llm/llm_factory.py`<br>`app/backend/main.py` | Meta Model API models (such as Muse Spark). |
 | `NVIDIA_API_KEY` | str | (secret, unset) | `tribos/utils/llm/llm_factory.py`<br>`app/backend/main.py` | NVIDIA NIM models (default LLM provider) and the NIM structure tools. |
 | `NVIDIA_NIM_API_KEY` | str | (secret, unset) | `tribos/utils/llm/llm_factory.py`<br>`app/backend/main.py` | Alternative name for NVIDIA_API_KEY (used when that one is unset). |
 | `OPENAI_API_KEY` | str | (secret, unset) | `tribos/utils/llm/llm_factory.py`<br>`app/backend/main.py` | OpenAI models; also the fallback when no NVIDIA key is set. |
 | `TRIBOS_ALLOWED_MODELS` | list | unset | `tribos/utils/llm/llm_factory.py` | Extra comma-separated model ids callers may select besides the built-in catalog. |
-| `TRIBOS_LLM_FALLBACK` | bool | `true` | `tribos/utils/llm/llm_factory.py` | Allow fallback to an available provider when the requested model key is unset. |
+| `TRIBOS_LLM_FALLBACK` | bool | `false` | `tribos/utils/llm/llm_factory.py` | Allow fallback to an available provider when the requested model key is unset (off: only Meta models are offered). |
 | `TRIBOS_LLM_MODEL` | str | unset | `tribos/evals/cassette.py`<br>`tribos/evals/runner.py`<br>`tribos/utils/llm/llm_factory.py` | Default model id when a request names none (the orchestrator default when unset; gpt-4o-mini for the Lumicell SCP agent). |
 | `TRIBOS_LLM_RETRY_ATTEMPTS` | int (1 to 5) | `3` | `tribos/utils/llm/provider_retry.py` | Attempts per NVIDIA NIM model request on a transient provider failure (408/409/429/5xx or no connection); replaces the SDK's own retry, so attempts are not multiplied. |
 | `TRIBOS_LLM_RETRY_DEADLINE_S` | float (0 to 120) | `20.0` | `tribos/utils/llm/provider_retry.py` | Seconds from a model request's first attempt after which no further transient-failure retry starts. |
-| `TRIBOS_SYNTHESIS_MODEL` | str | unset | `tribos/agents/orchestration/draft.py`<br>`tribos/utils/llm/llm_factory.py` | Model that writes the final answer (default: the turn's model). |
+| `TRIBOS_SYNTHESIS_MODEL` | str | unset | `tribos/agentic/campaign.py`<br>`tribos/agentic/research/model.py`<br>`tribos/agents/orchestration/draft.py` (+2) | Model that writes the final answer (default: the turn's model). |
 
 ## TRIBOS_AGENT_*: Agentic runtime
 
@@ -132,9 +157,11 @@ neither set, every store keeps its historical location under the workspace.
 | `TRIBOS_AGENT_THINKING` | bool | `false` | `tribos/agentic/llm.py` | Keep model reasoning on for short agent calls (plans, critiques, JSON verdicts). |
 | `TRIBOS_APPROVAL_ON_TIMEOUT` | withhold_expensive \| reject | `withhold_expensive` | `tribos/agentic/approval.py` | Action on approval timeout: withhold_expensive (default) or reject. |
 | `TRIBOS_APPROVAL_TIMEOUT_S` | float (5 to 3600) | `300.0` | `tribos/agentic/approval.py` | Seconds a tool-approval request waits for the user before it is denied. |
+| `TRIBOS_APPROVE_EXPENSIVE` | bool | `false` | `tribos/agentic/approval.py`<br>`tribos/agentic/plan_execute.py` | Ask before a simulation, parameter scan, calibration or sandboxed code run starts (interactive chats). Off: it runs at once; agent_options.require_plan_approval still asks. |
 | `TRIBOS_CANCEL_GRACE_S` | float (>= 0) | `2.0` | `tribos/agents/orchestration/context.py` | Seconds a cancelled or deadline-expired model call is waited for before it is abandoned. |
 | `TRIBOS_COUNTER_EVIDENCE` | off \| auto \| on | `auto` | `tribos/agentic/counter_evidence.py` | Counter-evidence search for research answers: off disables it. |
 | `TRIBOS_DEFAULT_FRAMEWORK` | auto \| authoritative-react-compiler \| agentic-plan-execute \| multi-agent-supervisor \| multi-agent-swarm \| multi-agent-debate | unset | `tribos/agentic/config.py`<br>`app/backend/main.py` | Orchestration framework used when a request names none or an unknown one (default: auto routing for API requests; the classic pipeline for direct orchestrator calls). |
+| `TRIBOS_ESCALATE_ON_WEAK_SIGNALS` | bool | `false` | `tribos/agentic/router.py` | Auto runs: also escalate to the critic debate on an uncertain route, a fallen-back core step or open sub-questions (off: only contradicting evidence or safety-critical questions do). |
 | `TRIBOS_FIRST_DRAFT_MAX_OUTPUT_TOKENS` | int (>= 256) | `16000` | `tribos/agents/orchestration/draft.py` | Output tokens (reasoning included) admitted for the first draft of an agentic run and sent as its max_tokens. |
 | `TRIBOS_PROGRESS_HEARTBEAT_S` | float (>= 0) | `5.0` | `tribos/agents/orchestration/context.py` | Seconds between liveness re-emits of a step waiting on a long model call (0 disables). |
 | `TRIBOS_REWRITE_MAX_OUTPUT_TOKENS` | int (>= 1) | `8192` | `tribos/agents/orchestration/agent_rounds.py` | Most output tokens one answer rewrite or verifier revision may produce (never more than the run budget has left; a rewrite that would be cut off is skipped). |
@@ -142,7 +169,17 @@ neither set, every store keeps its historical location under the workspace.
 | `TRIBOS_ROUTER_LEARNING` | off \| auto \| on | `auto` | `tribos/agentic/router_store.py` | Auto routing outcome learning: off, auto (off under pytest) or on. |
 | `TRIBOS_ROUTER_LLM` | off \| auto \| on | `auto` | `tribos/agentic/router.py` | Auto routing: off scores the deterministic signals only; auto/on add the model's semantic features. |
 | `TRIBOS_ROUTER_SAMPLES` | int (1 to 5) | `1` | `tribos/agentic/router.py` | Auto routing: semantic feature samples averaged per question (self-consistency). |
+| `TRIBOS_SKILLS_DIR` | str | `` | `tribos/skills/__init__.py` | Folder of SKILL.md files (procedures added to the drafting prompt when a question matches); empty means the built-in skills. |
 | `TRIBOS_TOOL_EMBEDDINGS` | str | unset | `tribos/agentic/tool_retrieval.py` | Local sentence-transformers model id for embedding-based tool retrieval (unset = lexical only). |
+
+## TRIBOS_MEM0_*: Research memory (Mem0)
+
+| Variable | Type | Default | Read at | Description |
+| --- | --- | --- | --- | --- |
+| `TRIBOS_MEM0_DIR` | path | unset | `tribos/agentic/mem0_adapter.py` | Persistent directory for Mem0 Qdrant vector DB and SQLite history. |
+| `TRIBOS_MEM0_EMBEDDER_PROVIDER` | mock \| huggingface \| openai \| gemini \| langchain | `mock` | `tribos/agentic/mem0_adapter.py` | Embedder provider for Mem0 vector store. |
+| `TRIBOS_MEM0_ENABLED` | bool | `true` | `tribos/agentic/mem0_adapter.py` | Enable persistent Mem0 memory integration for factual recall. |
+| `TRIBOS_MEM0_LLM_PROVIDER` | mock \| openai \| gemini \| anthropic \| langchain | `mock` | `tribos/agentic/mem0_adapter.py` | LLM provider for Mem0 extraction and consolidation. |
 
 ## TRIBOS_NLI_*: Claim verification (NLI)
 
@@ -170,6 +207,9 @@ neither set, every store keeps its historical location under the workspace.
 
 | Variable | Type | Default | Read at | Description |
 | --- | --- | --- | --- | --- |
+| `TRIBOS_ANSWER_STYLE` | concise \| full | `concise` | `tribos/agents/prompts.py` | Answer length: `concise` answers only what was asked (direct answer first, no unrequested sections); `full` is the longer report format. |
+| `TRIBOS_CONTEXT_GATE` | bool | `true` | `tribos/agents/prompts.py` | Context gate: only query-relevant sentences with Kappa context K >= 1 (source-weighted, corroborated) reach the answer model. |
+| `TRIBOS_CONTEXT_GATE_CHARS` | int (1000 to 60000) | `6000` | `tribos/agents/prompts.py` | Characters of literature evidence the context gate admits (the most relevant sentences first). |
 | `TRIBOS_NORMALIZER_BUDGET_S` | float (>= 0.1) | unset | `tribos/agents/query_planner.py` | Seconds for query normalization when the caller keeps the 3.5 s default. |
 | `TRIBOS_PLANNER` | off \| auto \| always | `auto` | `tribos/agents/query_planner.py` | LLM query planner: off, auto (when heuristics are unsure) or always. |
 | `TRIBOS_RESOLVER_DISABLED` | bool | `false` | `tribos/agents/query_planner.py` | Skip the entity resolver in query normalization (1/true/yes). |
@@ -202,6 +242,8 @@ neither set, every store keeps its historical location under the workspace.
 | --- | --- | --- | --- | --- |
 | `NCBI_API_KEY` | str | (secret, unset) | `tribos/utils/http_limits.py` | NCBI E-utilities key (raises the rate limit from 3 to 10 requests/s). |
 | `TRIBOS_ADS_API_TOKEN` | str | (secret, unset) | `tribos/archivon/clients.py` | Optional NASA ADS Bearer API token for astrophysics literature search in Archivon. |
+| `TRIBOS_ARCHIVON_FULLTEXT` | bool | `true` | `tribos/archivon/engine.py` | Archivon: add body paragraphs of the top arXiv papers (arxiv.org/html) so claims are checked against full text, not abstracts only. |
+| `TRIBOS_ARCHIVON_PDF_FULLTEXT` | bool | `true` | `tribos/archivon/engine.py` | Archivon: for top papers without arXiv HTML, read open-access PDFs (size-capped) for full-text passages. |
 | `TRIBOS_CONTACT_EMAIL` | str | `contact@tribos.science` | `tribos/archivon/clients.py`<br>`tribos/archivon/integrity.py`<br>`tribos/physis/clients.py` | Polite-pool contact e-mail sent in User-Agent headers for arXiv, Crossref, OpenAlex, and Wikipedia. |
 | `TRIBOS_CROSSREF_MAILTO` | str | unset | `tribos/archivon/clients.py`<br>`tribos/archivon/integrity.py` | Contact e-mail for the Crossref polite pool (citation integrity checks). |
 | `TRIBOS_MP_API_KEY` | str | (secret, unset) | `tribos/physis/clients.py` | Optional Materials Project API v2 key for live crystalline/electronic material queries in Physis. |
@@ -240,19 +282,52 @@ neither set, every store keeps its historical location under the workspace.
 
 | Variable | Type | Default | Read at | Description |
 | --- | --- | --- | --- | --- |
+| `TRIBOS_PYTHON_WORKER_CONCURRENCY` | int (1 to 32) | `4` | `tribos/scientific/worker.py` | Maximum concurrent scientific Python worker jobs. |
+| `TRIBOS_PYTHON_WORKER_CONTAINER_ENGINE` | auto \| subprocess \| docker \| podman | `auto` | `tribos/scientific/worker.py` | Execution isolation engine for Python worker: auto, subprocess, docker, podman. |
+| `TRIBOS_PYTHON_WORKER_MEMORY_MB` | int (256 to 16384) | `2048` | `tribos/scientific/worker.py` | Memory limit for scientific Python worker in MB. |
+| `TRIBOS_PYTHON_WORKER_TIMEOUT_S` | float (5 to 300) | `60.0` | `tribos/scientific/worker.py` | Timeout for scientific Python worker jobs in seconds. |
 | `TRIBOS_SANDBOX` | bool | `true` | `tribos/agentic/sandbox/__init__.py` | Code-execution sandbox tool; on by default, off/0/false/no disables it. |
+| `TRIBOS_SANDBOX_ALLOW_UNISOLATED` | bool | `false` | `tribos/agentic/sandbox/__init__.py` | In strict mode, still allow the subprocess backend (no OS-level isolation boundary). Development only. Without strict mode, auto mode falls back to it whenever no container runtime is available. |
+| `TRIBOS_SANDBOX_BACKEND` | auto \| subprocess \| container | `auto` | `tribos/agentic/sandbox/__init__.py` | Isolation backend for model-written code: auto (container when available, else subprocess), subprocess (defence in depth only), container (OS-level boundary). |
+| `TRIBOS_SANDBOX_CONTAINER_ENGINE` | auto \| docker \| podman | `auto` | `tribos/agentic/sandbox/__init__.py` | Container CLI the sandbox backend uses: auto (docker or podman, whichever is on PATH), docker, podman. |
+| `TRIBOS_SANDBOX_FIGURE_DPI` | int (72 to 300) | `120` | `tribos/agentic/sandbox/container.py`<br>`tribos/agentic/sandbox/runner.py` | DPI for captured sandbox Matplotlib figures. |
+| `TRIBOS_SANDBOX_IMAGE` | str | `tribos-sandbox:local` | `tribos/agentic/sandbox/__init__.py` | Container image the container backend runs model-written code in; pin it by digest in production. |
+| `TRIBOS_SANDBOX_MAX_ARRAY_ITEMS` | int (200 to 100000) | `25000` | `tribos/agentic/sandbox/container.py`<br>`tribos/agentic/sandbox/runner.py` | Maximum array items in sandbox JSON output before truncation. |
+| `TRIBOS_SANDBOX_MAX_CONCURRENCY` | int (1 to 32) | `2` | `tribos/agentic/sandbox/__init__.py`<br>`tribos/agentic/sandbox/runner.py` | How many sandboxed executions may run at the same time. |
+| `TRIBOS_SANDBOX_MAX_DISK_MB` | int (16 to 4096) | `256` | `tribos/agentic/sandbox/__init__.py` | Write budget of one sandboxed execution, in MB. |
+| `TRIBOS_SANDBOX_MAX_FIGURES` | int (1 to 20) | `6` | `tribos/agentic/sandbox/runner.py` | Maximum number of Matplotlib figures captured from one sandboxed run. |
+| `TRIBOS_SANDBOX_MAX_FIGURE_BYTES` | int (100000 to 20000000) | `3500000` | `tribos/agentic/sandbox/container.py`<br>`tribos/agentic/sandbox/runner.py` | Maximum byte size of a captured figure PNG. |
+| `TRIBOS_SANDBOX_MAX_OUTPUT_KB` | int (16 to 4096) | `256` | `tribos/agentic/sandbox/__init__.py` | Cap on the stdout and stderr of one sandboxed execution, in KB. |
+| `TRIBOS_SANDBOX_MAX_PROCESSES` | int (1 to 512) | `64` | `tribos/agentic/sandbox/__init__.py` | Process-count cap of one sandboxed execution. |
+| `TRIBOS_SANDBOX_MAX_RESULT_BYTES` | int (100000 to 50000000) | `3000000` | `tribos/agentic/sandbox/__init__.py` | Aggregate cap of one execution's result payload (result, tables and figures together), in bytes. |
 | `TRIBOS_SANDBOX_MEMORY_MB` | int (256 to 16384) | `2048` | `tribos/agentic/sandbox/__init__.py` | Memory limit of one sandboxed execution in MB. |
+| `TRIBOS_SANDBOX_SAGE_ALLOW_WSL` | bool | `false` | `tribos/agentic/sandbox/__init__.py` | Allow SageMath to run inside WSL, where the Python-level sandbox guards do not apply. |
+| `TRIBOS_SANDBOX_SAGE_ENABLED` | bool | `true` | `tribos/agentic/sandbox/__init__.py` | Offer the SageMath tools. TRIBOS_SANDBOX=off overrides this. |
+| `TRIBOS_SANDBOX_SAGE_TIMEOUT_S` | int (10 to 600) | `120` | `tribos/agentic/sandbox/__init__.py` | Wall-clock limit of one SageMath execution, in seconds. |
+| `TRIBOS_SANDBOX_STRICT_LIMITS` | bool | `false` | `tribos/agentic/sandbox/__init__.py` | Fail a sandboxed execution whose resource limits could not be applied instead of running it degraded. |
 | `TRIBOS_SANDBOX_TIMEOUT_S` | int (5 to 110) | `60` | `tribos/agentic/sandbox/__init__.py` | Seconds one sandboxed execution may run. |
 
 ## TRIBOS_MATH_*: Mathematics agent
 
 | Variable | Type | Default | Read at | Description |
 | --- | --- | --- | --- | --- |
+| `TRIBOS_CODEACT` | bool | `true` | `tribos/agents/orchestration/codeact_stage.py` | Work computational questions in a persistent Python session, the model writing and fixing code step by step (CodeAct). |
+| `TRIBOS_CODEACT_MAX_STEPS` | int (1 to 20) | `6` | `tribos/agents/orchestration/codeact_stage.py` | Python cells one CodeAct session may run. |
+| `TRIBOS_CONSTRUCT` | bool | `true` | `tribos/agents/orchestration/construct_stage.py` | Construct mode: evolutionary search for constructions that beat a known bound, scored exactly by code. |
+| `TRIBOS_CONSTRUCT_GENERATIONS` | int (1 to 200) | `10` | `tribos/agents/orchestration/construct_stage.py` | Programs one construct-mode search writes (each is one model call and one sandbox run; two at a time). |
 | `TRIBOS_FORMAL` | bool | `true` | `tribos/verify/formal/prove.py` | Formal Lean 4 checking of 'prove ...' questions (used only when Lean is installed). |
+| `TRIBOS_FORMAL_BACKGROUND` | bool | `true` | `tribos/agentic/formal_proof.py` | Run the Lean formal proof beside the rest of the run; the answer waits for it only when it is written. |
+| `TRIBOS_FORMAL_BLUEPRINT` | bool | `true` | `tribos/verify/formal/prove.py` | When a direct Lean proof fails (Mathlib projects): split it into lemmas, prove each, and check the assembled file. |
+| `TRIBOS_FORMAL_BUDGET_S` | float (20 to 3600) | `150.0` | `tribos/agentic/formal_proof.py` | Seconds the Lean formal-proof stage may take in all (attempts, repairs, lemma blueprint); then the answer says it did not finish. |
 | `TRIBOS_FORMAL_MAX_REPAIRS` | int (0 to 10) | `2` | `tribos/verify/formal/prove.py` | Repairs of a Lean formalisation after compiler errors. |
+| `TRIBOS_FORMAL_MODE` | explicit \| auto | `explicit` | `tribos/agentic/formal_proof.py` | When Lean runs: `explicit` only when a formal (machine-checked, Lean) proof is asked for; `auto` for every 'prove ...' question. |
 | `TRIBOS_FORMAL_TIMEOUT_S` | float (1 to 600) | `60.0` | `tribos/verify/formal/runner.py` | Seconds one Lean check may run. |
+| `TRIBOS_LEAN_FULL_MATHLIB` | bool | `false` | `tribos/verify/formal/runner.py` | Allow a bare `import Mathlib` (several GB of memory); off replaces it with a default set of Mathlib modules. |
 | `TRIBOS_LEAN_PATH` | str | `` | `tribos/verify/formal/runner.py` | Path of the lean (or lake) executable; empty means lean on PATH. |
-| `TRIBOS_LEAN_PROJECT` | str | `` | `tribos/verify/formal/prove.py`<br>`tribos/verify/formal/runner.py` | A Lean project with Mathlib; proofs are checked with lake env lean there. |
+| `TRIBOS_LEAN_PREMISE_SEARCH` | bool | `true` | `tribos/verify/formal/premises.py` | Lean repairs: look up Mathlib lemmas for the failing names with Loogle (loogle.lean-lang.org) and show them to the model. |
+| `TRIBOS_LEAN_PROJECT` | str | `` | `tribos/agentic/research/manifest.py`<br>`tribos/verify/formal/prove.py`<br>`tribos/verify/formal/runner.py` | A Lean project with Mathlib; proofs are checked with lake env lean there. |
+| `TRIBOS_LEAN_PROVER_MODEL` | str | `` | `tribos/agentic/formal_proof.py` | Model for Lean proof attempts (e.g. a served Goedel-Prover); empty means the synthesis model. |
+| `TRIBOS_LEMMA_LIBRARY` | str | `` | `tribos/verify/formal/premises.py` | JSON file of kernel-checked lemmas reused as premises in later proofs; empty means data/lemma_library.json. |
 | `TRIBOS_MATH_AGENT` | bool | `true` | `tribos/agentic/math_agent.py` | Run the verified mathematics agent (bounded ReAct loop over the Axiom tools with an independent verifier) on mathematical questions. |
 | `TRIBOS_MATH_AGENT_MAX_REPAIRS` | int (0 to 10) | `4` | `tribos/axiom/agent.py` | Local repairs of one failed step before the agent switches strategy. |
 | `TRIBOS_MATH_AGENT_MAX_STEPS` | int (2 to 40) | `12` | `tribos/axiom/agent.py` | Tool calls one mathematics-agent run may make. |
@@ -263,15 +338,18 @@ neither set, every store keeps its historical location under the workspace.
 
 | Variable | Type | Default | Read at | Description |
 | --- | --- | --- | --- | --- |
-| `TRIBOS_VISION` | bool | `true` | `tribos/vision/reader.py`<br>`app/backend/routers/vision.py` | Accept images attached to questions (POST /api/vision/read); they are read into text before the question is solved. |
+| `TRIBOS_VISION` | bool | `true` | `tribos/vision/reader.py`<br>`app/backend/main.py`<br>`app/backend/routers/vision.py` | Accept images attached to questions (POST /api/vision/read); they are read into text before the question is solved. |
+| `TRIBOS_VISION_CROSSCHECK` | bool | `true` | `tribos/vision/reader.py` | Read each image twice with the vision model (once from the image alone, once with the OCR drafts); readings that differ are settled by a third look at the image. |
 | `TRIBOS_VISION_MAX_IMAGES` | int (1 to 10) | `4` | `app/backend/main.py` | Images one question may carry. |
 | `TRIBOS_VISION_MAX_MB` | int (1 to 50) | `10` | `tribos/vision/reader.py`<br>`app/backend/routers/vision.py` | Largest image upload in MB. |
 | `TRIBOS_VISION_MAX_PAGES` | int (1 to 20) | `4` | `tribos/vision/reader.py` | Pages of an attached PDF that are read (each like one image). |
-| `TRIBOS_VISION_MODEL` | str | `nvidia/nemotron-3.5-super-vl-120b-a12b` | `tribos/vision/vlm.py` | NVIDIA NIM vision model for `nim` (must be in the allowed model list). |
+| `TRIBOS_VISION_MODEL` | str | `muse-spark-1.3` | `tribos/vision/vlm.py` | Cloud vision model for `remote` (must be in the allowed model list). |
 | `TRIBOS_VISION_OCR_MATH` | bool | `true` | `tribos/vision/ocr.py` | Load Indra OCR's math models so formulas are read as LaTeX (about 60% slower OCR on math lines). |
 | `TRIBOS_VISION_OLLAMA_MODEL` | str | unset | `tribos/vision/vlm.py` | Ollama vision model for `ollama` (e.g. qwen2.5vl:7b); the first installed vision-family model when unset. |
 | `TRIBOS_VISION_OLLAMA_URL` | str | `http://127.0.0.1:11434` | `tribos/vision/vlm.py` | Base URL of the local Ollama server. |
-| `TRIBOS_VISION_PROVIDER` | nim \| ollama \| ocr | `nim` | `tribos/vision/vlm.py` | Vision model that corrects the OCR draft: `nim` (NVIDIA NIM, TRIBOS_VISION_MODEL), `ollama` (a local model through Ollama), or `ocr` (Indra OCR only; the image never leaves this machine). |
+| `TRIBOS_VISION_PROVIDER` | remote \| nim \| ollama \| ocr | `remote` | `tribos/vision/vlm.py` | Model that corrects the OCR draft: `remote` (cloud, TRIBOS_VISION_MODEL; `nim` is its old name), `ollama` (local), or `ocr` (OCR only; the image stays on this machine). |
+| `TRIBOS_VISION_TESSERACT` | str | unset | `tribos/vision/tesseract.py` | Tesseract executable, the second text recognizer (its confident words are what a transcription is checked against); found on PATH, in Scoop or in Program Files when unset; `off` disables it. |
+| `TRIBOS_VISION_TESSERACT_LANG` | str | `eng` | `tribos/vision/tesseract.py` | Tesseract language models to read with (e.g. `eng+deu`); each must be installed. |
 | `TRIBOS_VISION_TIMEOUT_S` | int (10 to 1800) | `300` | `tribos/vision/vlm.py` | Seconds one vision-model transcription may take (CPU inference of a 7B model can need minutes). |
 
 ## TRIBOS_EVAL_*: Evaluations
@@ -288,5 +366,5 @@ neither set, every store keeps its historical location under the workspace.
 
 | Variable | Type | Default | Read at | Description |
 | --- | --- | --- | --- | --- |
-| `PYTEST_CURRENT_TEST` | str | unset | `tribos/agentic/jobs.py`<br>`tribos/agentic/router_store.py`<br>`tribos/agentic/sandbox/__init__.py` (+6) | Set by pytest; `auto` switches and default stores treat its presence as a test run. Never set it yourself. |
+| `PYTEST_CURRENT_TEST` | str | unset | `tribos/agentic/jobs.py`<br>`tribos/agentic/router_store.py`<br>`tribos/agentic/sandbox/runner.py` (+8) | Set by pytest; `auto` switches and default stores treat its presence as a test run. Never set it yourself. |
 | `TRIBOS_LOAD_DOTENV` | bool | `true` | `app/backend/main.py` | Load the workspace `.env` when the API module is imported; tests/conftest.py sets 0 so a developer `.env` never reaches pytest. |

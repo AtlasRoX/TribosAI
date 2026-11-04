@@ -156,7 +156,8 @@ def test_semantic_features_catch_what_the_keywords_miss():
     assert router.rule_decision(q, asyncio.run(_ctx(q))).framework == AGENTIC  # "preferable to" is not a keyword
     decision = _route(q, _PhaseLLM(CONTESTED_FEATURES))
     assert decision.framework == DEBATE and decision.rule == "contested_claim"
-    assert decision.semantic == {"used": True, "samples": 1, "valid_samples": 1, "question_kind": "therapy_comparison"}
+    assert decision.semantic == {"used": True, "samples": 1, "valid_samples": 1, "question_kind": "therapy_comparison",
+                                 "needs_outside_information": True}  # not stated by the reply: the search is kept
     assert decision.bucket.startswith("therapy_comparison|")
 
 
@@ -211,6 +212,56 @@ def test_close_routes_are_adjudicated_by_the_model(monkeypatch):
     assert (bad.framework, bad.tie_break) == (AGENTIC, "llm_failed")
 
 
+def test_the_features_call_settles_close_routes_without_a_second_call(monkeypatch):
+    real = router.decide
+
+    def close(*args, **kwargs):
+        d = real(*args, **kwargs)
+        d.candidates = [AGENTIC, SUPERVISOR]
+        return d
+
+    monkeypatch.setattr(router, "decide", close)
+    picks = {**CONTESTED_FEATURES, "contested": False, "high_stakes": False, "route": "supervisor",
+             "route_reason": "Open-ended across several domains."}
+    llm = _PhaseLLM(picks)
+    decision = _route("What are the adverse events of pembrolizumab?", llm)
+    assert llm.calls == ["features"]
+    assert (decision.framework, decision.tie_break, decision.reason) == (SUPERVISOR, "llm", "Open-ended across several domains.")
+
+
+def test_a_self_contained_word_problem_routes_without_a_model_call():
+    q = (r"Sam is hired for a 20-day period. On days that he works, he earns $\$$60. For each day that he does not "
+         r"work, $\$$30 is subtracted from his earnings. At the end of the 20-day period, he received $\$$660. How many "
+         "days did he not work?")
+
+    def factory(**_kw: Any) -> Any:
+        raise AssertionError("no router model call for a self-contained question")
+
+    decision = asyncio.run(router.choose_framework(q, asyncio.run(_ctx(q)), llm_factory=factory))
+    assert (decision.framework, decision.rule) == (AGENTIC, router.SELF_CONTAINED_ROUTE)
+    assert decision.rule in agent_config.DIRECT_ROUTES
+
+
+def test_a_prefetched_features_call_is_used_and_an_unneeded_one_cancelled():
+    q = "Is immunotherapy preferable to chemotherapy for elderly patients with MSI-high colorectal cancer?"
+    ctx = asyncio.run(_ctx(q))
+
+    async def go() -> tuple[Any, Any]:
+        llm = _PhaseLLM(CONTESTED_FEATURES)
+        task = router.start_semantic_reading(q, lambda **_k: llm, "m", None)
+        used = await router.choose_framework(q, ctx, llm_factory=lambda **_k: llm, model_name="m", prefetched=task)
+        assert llm.calls == ["features"]  # the early call, not a second one
+
+        slow = asyncio.get_running_loop().create_future()
+        await router.choose_framework("thanks!", SimpleNamespace(scope="conversational", intents=set(), entities=[],
+                                                                  search_plan=None), prefetched=slow)
+        return used, slow
+
+    used, slow = asyncio.run(go())
+    assert used.framework == DEBATE and used.semantic["used"] is True
+    assert slow.cancelled()
+
+
 # -- outcome learning --------------------------------------------------------------------------------------------------
 
 def test_outcome_quality_weighs_grounding_confidence_completion_and_core_phase():
@@ -262,7 +313,8 @@ def _state(routing: dict[str, Any], conflicts: list, subs: list = (), core: Any 
     )
 
 
-def test_escalation_triggers():
+def test_escalation_triggers(monkeypatch):
+    monkeypatch.setenv("TRIBOS_ESCALATE_ON_WEAK_SIGNALS", "1")  # the weak signals are opt-in
     conflicts = [
         {"label": "contradicts", "classifier": "nli"},
         {"label": "contradicts", "classifier": "heuristic"},  # cue words alone never escalate

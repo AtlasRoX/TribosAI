@@ -10,6 +10,8 @@ import { addFact, deleteFact, getFactHistory, getProjectMemory, patchFact, revie
 import { type AuthHeaders, errorMessage } from "@/services/apiClient";
 import type { FactReviewStatus, MemoryFact } from "@/types/agentic";
 import styles from "./Projects.module.css";
+import { ResizeHandle } from "@/components/ResizeHandle";
+import { usePanelWidth } from "@/hooks/usePanelWidth";
 
 const FILTERS: (FactReviewStatus | "all")[] = ["all", "pending", "approved", "rejected"];
 
@@ -23,6 +25,7 @@ export function ProjectMemoryTab({ backendUrl, auth, projectId, canWrite }: {
   projectId: string;
   canWrite: boolean;
 }) {
+  const panelWidth = usePanelWidth("fact-history", { initial: 360, min: 280, max: 800 });
   const [query, setQuery] = useState("");
   const [applied, setApplied] = useState("");
   const [filter, setFilter] = useState<FactReviewStatus | "all">("all");
@@ -122,7 +125,8 @@ export function ProjectMemoryTab({ backendUrl, auth, projectId, canWrite }: {
         {facts.data && !facts.data.length && <li className={styles.notice}>No facts{filter !== "all" ? ` ${filter}` : ""} yet.</li>}
       </ul>
       {history && (
-        <aside className={styles.drawer} aria-label="Fact history">
+        <aside className={styles.drawer} aria-label="Fact history" style={{ width: panelWidth.width }}>
+          <ResizeHandle edge="left" panel={panelWidth} label="Fact history width" />
           <div className={styles.itemHead}>
             <strong>History</strong>
             <button type="button" className={styles.iconBtn} onClick={() => setHistory(null)} aria-label="Close history"><X style={{ width: 13, height: 13 }} /></button>

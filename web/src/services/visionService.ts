@@ -16,6 +16,10 @@ export interface ImageReading {
   /** Reading steps that ran, in plain words ("text recognition", "vision check"). */
   engines: string[];
   vision_checked: boolean;
+  /** How the two vision readings ended: agreed, settled (differed; decided against the image), unsettled, single, "". */
+  consensus?: "agreed" | "settled" | "unsettled" | "single" | "";
+  /** Where the two readings differed, "reading 1 | reading 2" in normalised tokens. */
+  differences?: string[];
   /** Numbers in the transcription that OCR never read: check them against the image. */
   unconfirmed_numbers: string[];
   warnings: string[];
@@ -35,6 +39,8 @@ export interface ComposerImage {
   previewUrl: string;
   /** A small JPEG data URL kept with the sent message (the full image is never stored). */
   thumbUrl: string;
+  /** A larger JPEG (long side 1400 px) for the in-app viewer of a sent message. */
+  viewUrl?: string;
   status: "reading" | "ready" | "error";
   reading?: ImageReading;
   /** The transcription as the user edited it; this is what is sent. */
@@ -42,10 +48,41 @@ export interface ComposerImage {
   error?: string;
 }
 
-/** An image shown on a sent user message: name and thumbnail only. */
+/** An image shown on a sent user message: its name, a thumbnail, a viewer-sized copy and the text read from it. */
 export interface MessageImage {
   name: string;
   thumbUrl?: string;
+  viewUrl?: string;
+  /** The transcription that was sent with the question (what Tribos read from the image). */
+  text?: string;
+}
+
+/** One plain line on how a reading was checked (engine and model names stay on the server). */
+export function readingSummary(reading: Pick<ImageReading, "engines" | "vision_checked" | "consensus" | "differences"> | null | undefined): string {
+  if (!reading) return "";
+  const ocr = reading.engines.filter((e) => e === "text recognition" || e === "word recognition").length;
+  const recognizers = ocr >= 2 ? "two text recognizers" : ocr === 1 ? "text recognition" : "";
+  const places = reading.differences?.length ?? 0;
+  let vision = "";
+  if (reading.vision_checked) {
+    switch (reading.consensus) {
+      case "agreed":
+        vision = "two separate vision readings agreed";
+        break;
+      case "settled":
+        vision = `two vision readings differed in ${places || "some"} ${places === 1 ? "place" : "places"}, settled against the image`;
+        break;
+      case "unsettled":
+        vision = "two vision readings differ; check against the image";
+        break;
+      default:
+        vision = "checked against the image";
+    }
+    if (reading.engines.includes("vision repair")) vision += " (read again for missing lines)";
+  }
+  if (!vision) return recognizers ? `Read by ${recognizers}` : "";
+  const text = recognizers ? `Read by ${recognizers}; ${vision}` : `Read by the vision model; ${vision}`;
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 export const IMAGE_ACCEPT = "image/png,image/jpeg,image/webp,image/bmp,image/tiff,application/pdf";
@@ -81,7 +118,7 @@ export async function makeThumbnail(file: File, side = 160): Promise<string> {
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL("image/jpeg", 0.72);
+    return canvas.toDataURL("image/jpeg", side > 400 ? 0.82 : 0.72);
   } catch {
     return "";
   } finally {
@@ -153,7 +190,12 @@ export const DEFAULT_IMAGE_QUESTION = "Solve the problem in the attached image, 
 
 /** What a sent message keeps of its images: names and small thumbnails. */
 export function sentImages(images: ComposerImage[]): MessageImage[] {
-  return images.filter((i) => i.status === "ready").map((i) => ({ name: i.name, thumbUrl: i.thumbUrl || undefined }));
+  return images.filter((i) => i.status === "ready").map((i) => ({
+    name: i.name,
+    thumbUrl: i.thumbUrl || undefined,
+    viewUrl: i.viewUrl || undefined,
+    text: i.text.trim() ? i.text.trim().slice(0, 8000) : undefined,
+  }));
 }
 
 /** The request field for the chat: the reviewed transcriptions of the images that were read. */

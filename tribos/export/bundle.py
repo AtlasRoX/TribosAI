@@ -80,8 +80,8 @@ def _reproduce_md(report: ReportModel, manifest: dict[str, Any] | None, notes: l
 
 def render_bundle(report: ReportModel) -> bytes:
     from .docx_renderer import render_docx
-    from .pdf_renderer import render_pdf
     from .notebook import render_notebook
+    from .pdf_renderer import render_pdf
 
     notes: list[str] = []
     files: dict[str, bytes] = {}

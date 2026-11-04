@@ -13,6 +13,10 @@ import { FormalProofArtifact } from "./FormalProofArtifact";
 import { PaperArtifact } from "./PaperArtifact";
 import { PdeArtifact } from "./PdeArtifact";
 import { UncertaintyArtifact } from "./UncertaintyArtifact";
+import { ScientificExecutionArtifact } from "./ScientificExecutionArtifact";
+import { MonteCarloArtifact } from "./MonteCarloArtifact";
+import { PythonSessionArtifact } from "./PythonSessionArtifact";
+import { ConstructionArtifact } from "./ConstructionArtifact";
 import { FEATURE_ARTIFACT_KEYS } from "./artifactKeys";
 
 export type FeatureArtifactProps = {
@@ -29,10 +33,14 @@ export type FeatureArtifact = {
 };
 
 export const FEATURE_ARTIFACTS: FeatureArtifact[] = [
+  { key: "scientific_execution", Component: ScientificExecutionArtifact },
+  { key: "monte_carlo", Component: MonteCarloArtifact },
   // Feature entries (one line each), e.g. { key: "pde", Component: PdeArtifact },
   { key: "uncertainty", Component: UncertaintyArtifact },
   { key: "pde", Component: PdeArtifact },
   { key: "engineering_calc", Component: EngineeringCalcArtifact },
   { key: "paper_reproduction", Component: PaperArtifact },
   { key: "formal_proof", Component: FormalProofArtifact },
+  { key: "codeact", Component: PythonSessionArtifact },
+  { key: "computed_results", Component: ConstructionArtifact },
 ];

@@ -174,6 +174,9 @@ def test_axiom_latex_and_registry_integration():
     axiom_ext.register_tools(reg)
     names = {t.name for t in reg.list_tools(domain="axiom")}
     assert names == {
+        "axiom_interval_verify",
+        "axiom_precision_check",
+        "axiom_counterexample_search",
         "axiom_simplify",
         "axiom_solve",
         "axiom_calculus",

@@ -214,3 +214,13 @@ gofullpage-*.pdf
 
 # Stray upload directory left by a local run (the app uploads to TRIBOS_UPLOAD_ROOT or <data dir>/uploads)
 /test_uploads/
+
+# Server logs from scripts/start-tribos.ps1
+logs/
+
+# Runtime stores written by a local server (feedback log, generated files, the Lean lemma memory)
+data/feedback/
+data/files/
+data/lemma_library.json
+# Another coding tool's local state
+.puku-cli/

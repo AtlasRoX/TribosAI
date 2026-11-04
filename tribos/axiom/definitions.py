@@ -21,8 +21,8 @@ every search is bounded.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
 import re
+from collections.abc import Callable
 from fractions import Fraction
 from typing import Any
 
@@ -70,18 +70,71 @@ _ELLIPSIS = r"(?:\.{3}|…|\\ldots|\\dots|\\cdots)"
 _SET_POSITIVE_RE = re.compile(rf"[{{(]\s*1\s*,\s*2\s*(?:,\s*3\s*)?,\s*{_ELLIPSIS}\s*[}})]")
 _SET_NONNEG_RE = re.compile(rf"[{{(]\s*0\s*,\s*1\s*(?:,\s*2\s*)?,\s*{_ELLIPSIS}\s*[}})]")
 _SET_INTEGER_RE = re.compile(rf"[{{(]\s*{_ELLIPSIS}\s*,\s*-\s*1\s*,\s*0\s*,\s*1\s*,\s*{_ELLIPSIS}\s*[}})]")
+_SET_INT_RAY_RE = re.compile(rf"[{{(]\s*({_NUMBER})\s*,\s*({_NUMBER})\s*(?:,\s*({_NUMBER})\s*)?,\s*{_ELLIPSIS}\s*[}})]")
+_SET_FINITE_RE = re.compile(rf"^\{{\s*({_NUMBER}(?:\s*,\s*{_NUMBER})*)\s*\}}$")
+_INTERVAL_RE = re.compile(rf"^([\[\(])\s*(-?oo|-?inf|{_NUMBER})\s*,\s*(-?oo|-?inf|{_NUMBER})\s*([\]\)])$")
+_EXCLUSION_RE = re.compile(
+    rf"(?i)(?:ℝ|reals?)\s*(?:\\?\s*\\setminus|excluding|except|without|\\)\s*\{{\s*({_NUMBER}(?:\s*,\s*{_NUMBER})*)\s*\}}"
+)
 
 
 def domain_from_words(text: str) -> str | None:
-    """The number set named in a phrase ("positive integers", "positive-integer-only", "{1, 2, 3, ...}", "every real
-    x", "ℤ", "R -> R")."""
-    low = text.lower()
+    """The number set named in a phrase ("positive integers", "positive-integer-only", "{1, 2, 3, ...}", "{2, 3, 4, ...}",
+    "every real x", "ℤ", "R -> R")."""
+    low = text.lower().strip()
+    mex = _EXCLUSION_RE.search(low)
+    if mex:
+        nums = [p.strip() for p in mex.group(1).split(",") if p.strip()]
+        return f"real_excluding:{{{','.join(nums)}}}"
+    minterval = _INTERVAL_RE.match(low)
+    if minterval:
+        left, a, b, right = minterval.groups()
+        return f"interval:{left}{a},{b}{right}"
+    mray = _SET_INT_RAY_RE.search(low)
+    if mray:
+        try:
+            n1 = int(safe_parse_expr(mray.group(1)))
+            n2 = int(safe_parse_expr(mray.group(2)))
+            if n2 - n1 == 1:
+                if n1 == 1:
+                    return "positive_integer"
+                if n1 == 0:
+                    return "nonnegative_integer"
+                return f"integer_ge_{n1}"
+        except Exception:
+            pass
+    m_ineq = re.search(rf"\bintegers?\s*(>=|>=?|\\geq?|≥|at least)\s*({_NUMBER})\b", low)
+    if m_ineq:
+        try:
+            k = int(safe_parse_expr(m_ineq.group(2)))
+            if k == 1:
+                return "positive_integer"
+            if k == 0:
+                return "nonnegative_integer"
+            return f"integer_ge_{k}"
+        except Exception:
+            pass
+    m_ineq_gt = re.search(rf"\bintegers?\s*(>|greater than)\s*({_NUMBER})\b", low)
+    if m_ineq_gt:
+        try:
+            k = int(safe_parse_expr(m_ineq_gt.group(2)))
+            if k == 0:
+                return "positive_integer"
+            return f"integer_ge_{k + 1}"
+        except Exception:
+            pass
+    mfin = _SET_FINITE_RE.match(low)
+    if mfin and not re.search(_ELLIPSIS, low):
+        nums = [p.strip() for p in mfin.group(1).split(",") if p.strip()]
+        if nums:
+            return f"finite_set:{{{','.join(nums)}}}"
     if _SET_NONNEG_RE.search(low) or re.search(
             r"\bnon[\s-]?negative[\s-]+(?:integers?|whole[\s-]+numbers?)\b|\bwhole[\s-]+numbers?\b|ℕ\s*(?:_\{?0\}?|₀|∪\s*\{\s*0\s*\})|"
-            r"ℤ\s*(?:_\{?\s*(?:≥|>=|\\geq?)\s*0\s*\}?|≥0)|\bn\s*0\b", low):
+            r"(?:[zℤ]|\\mathbb\{z\})\s*(?:_\{?\s*(?:≥|>=|\\geq?)\s*0\s*\}?|≥0|>=0|\\geq?0)|\b(?:[a-z]\s*(?:in|∈|\\in)\s*)?(?:[zℤ]|\\mathbb\{z\})\s*(?:>=|≥|\\geq?)\s*0|\bn\s*0\b", low):
         return "nonnegative_integer"
     if _SET_POSITIVE_RE.search(low) or re.search(
-            r"\bpositive[\s-]+integers?\b|\bnatural[\s-]+numbers?\b|ℕ|ℤ\s*(?:\+|⁺|\^\{?\+\}?)|ℤ\s*_\{?\s*(?:>|≥\s*1|>=\s*1|\\geq?\s*1)\s*0?\s*\}?|\bz\s*\+",
+            r"\bpositive[\s-]+integers?\b|\bnatural[\s-]+numbers?\b|ℕ|(?:[zℤ]|\\mathbb\{z\})\s*(?:\+|⁺|\^\{?\+\}?|_\+)|"
+            r"(?:[zℤ]|\\mathbb\{z\})\s*(?:_\{?\s*(?:>|≥\s*1|>=\s*1|\\geq?\s*1)\s*0?\s*\}?|>0|>=1|≥1)|\b(?:[a-z]\s*(?:in|∈|\\in)\s*)?(?:[zℤ]|\\mathbb\{z\})\s*(?:>0|>=1|≥1)|\bz\s*\+",
             low):
         return "positive_integer"
     if _SET_INTEGER_RE.search(low):
@@ -102,23 +155,150 @@ def _domain_from_symbol(sym: str) -> str | None:
             "q": "rational", "ℚ": "rational", "c": "complex", "ℂ": "complex"}.get(sym.strip().lower())
 
 
+def is_valid_domain(dom: str) -> bool:
+    """Whether dom is a recognized canonical domain string."""
+    if not isinstance(dom, str) or not dom.strip():
+        return False
+    if dom in DOMAINS:
+        return True
+    if re.fullmatch(r"integer_(?:ge|gt|le|lt)_-?\d+", dom):
+        return True
+    if dom.startswith("finite_set:{") and dom.endswith("}"):
+        content = dom[len("finite_set:{"):-1]
+        parts = [p.strip() for p in content.split(",") if p.strip()]
+        return bool(parts) and all(re.fullmatch(_NUMBER, p) for p in parts)
+    if dom.startswith("interval:") and len(dom) > 10:
+        return bool(_INTERVAL_RE.match(dom[len("interval:"):]))
+    if dom.startswith("real_excluding:{") and dom.endswith("}"):
+        content = dom[len("real_excluding:{"):-1]
+        parts = [p.strip() for p in content.split(",") if p.strip()]
+        return bool(parts) and all(re.fullmatch(_NUMBER, p) for p in parts)
+    return False
+
+
+def is_integer_domain(dom: str) -> bool:
+    """Whether all members of dom are integers."""
+    if dom in _INTEGER_DOMAINS or dom.startswith("integer_"):
+        return True
+    if dom.startswith("finite_set:{") and dom.endswith("}"):
+        content = dom[len("finite_set:{"):-1]
+        parts = [p.strip() for p in content.split(",") if p.strip()]
+        return bool(parts) and all(re.fullmatch(r"[-+]?\d+", p) for p in parts)
+    return False
+
+
+def domain_rank(dom: str) -> int:
+    """Specificity order: narrower domains have smaller rank."""
+    if dom.startswith("finite_set:"):
+        return 0
+    if dom.startswith("interval:") or dom.startswith("real_excluding:"):
+        return 1
+    if dom.startswith("integer_"):
+        return 2
+    return {"positive_integer": 3, "nonnegative_integer": 4, "integer": 5, "rational": 6, "real": 7, "complex": 8}.get(dom, 99)
+
+
+def is_proper_subdomain(d1: str, d2: str) -> bool:
+    """True if d1 is strictly narrower than d2 (using d2 when d1 is required is illegal domain widening)."""
+    if d1 == d2:
+        return False
+    if d2 == "unspecified":
+        return d1 != "unspecified"
+    r1, r2 = domain_rank(d1), domain_rank(d2)
+    if r1 < r2:
+        return True
+    if r1 > r2:
+        return False
+    if d1.startswith("integer_ge_") and d2.startswith("integer_ge_"):
+        try:
+            return int(d1.split("_ge_")[1]) > int(d2.split("_ge_")[1])
+        except Exception:
+            return False
+    return False
+
+
 def in_domain(value: sp.Expr, domain: str) -> bool | None:
     """Membership of an exact value; None when it cannot be decided."""
     if domain in ("unspecified", "complex"):
         return bool(value.is_finite) if value.is_finite is not None else None
     if domain == "real":
-        return value.is_extended_real and value.is_finite
+        return bool(value.is_extended_real and value.is_finite) if value.is_extended_real is not None else None
     if domain == "rational":
-        return value.is_rational
+        return bool(value.is_rational) if value.is_rational is not None else None
+    if domain.startswith("real_excluding:{") and domain.endswith("}"):
+        if value.is_extended_real is not True or value.is_finite is not True:
+            return False if value.is_extended_real is False or value.is_finite is False else None
+        excluded = [safe_parse_expr(p.strip()) for p in domain[len("real_excluding:{"):-1].split(",") if p.strip()]
+        if any(sp.simplify(value - ex) == 0 for ex in excluded):
+            return False
+        return True
+    if domain.startswith("interval:"):
+        m = _INTERVAL_RE.match(domain[len("interval:"):])
+        if not m:
+            return None
+        left, a_str, b_str, right = m.groups()
+        if value.is_extended_real is not True or value.is_finite is not True:
+            return False if value.is_extended_real is False or value.is_finite is False else None
+        a = safe_parse_expr(a_str) if a_str not in ("-oo", "-inf") else -sp.oo
+        b = safe_parse_expr(b_str) if b_str not in ("oo", "inf") else sp.oo
+        left_ok = (value >= a) if left == "[" else (value > a)
+        right_ok = (value <= b) if right == "]" else (value < b)
+        res = sp.simplify(left_ok) and sp.simplify(right_ok)
+        return bool(res) if res in (sp.true, sp.false, True, False) else None
+    if domain.startswith("finite_set:{") and domain.endswith("}"):
+        elements = [safe_parse_expr(p.strip()) for p in domain[len("finite_set:{"):-1].split(",") if p.strip()]
+        for elem in elements:
+            if sp.simplify(value - elem) == 0:
+                return True
+        return False if value.is_number else None
     if not value.is_integer:
         return False if value.is_integer is False or value.is_number else None
     v = int(value)
-    return {"integer": True, "nonnegative_integer": v >= 0, "positive_integer": v >= 1}[domain]
+    if domain == "integer":
+        return True
+    if domain == "nonnegative_integer":
+        return v >= 0
+    if domain == "positive_integer":
+        return v >= 1
+    if domain.startswith("integer_ge_"):
+        return v >= int(domain.split("_ge_")[1])
+    if domain.startswith("integer_gt_"):
+        return v > int(domain.split("_gt_")[1])
+    if domain.startswith("integer_le_"):
+        return v <= int(domain.split("_le_")[1])
+    if domain.startswith("integer_lt_"):
+        return v < int(domain.split("_lt_")[1])
+    return True
 
 
 def domain_label(domain: str) -> str:
-    return {"positive_integer": "positive integers", "nonnegative_integer": "nonnegative integers", "integer": "integers",
-            "rational": "rational numbers", "real": "real numbers", "complex": "complex numbers"}.get(domain, "its domain")
+    if domain == "positive_integer":
+        return "positive integers"
+    if domain == "nonnegative_integer":
+        return "nonnegative integers"
+    if domain == "integer":
+        return "integers"
+    if domain == "rational":
+        return "rational numbers"
+    if domain == "real":
+        return "real numbers"
+    if domain == "complex":
+        return "complex numbers"
+    if domain.startswith("integer_ge_"):
+        return f"integers >= {domain.split('_ge_')[1]}"
+    if domain.startswith("integer_gt_"):
+        return f"integers > {domain.split('_gt_')[1]}"
+    if domain.startswith("integer_le_"):
+        return f"integers <= {domain.split('_le_')[1]}"
+    if domain.startswith("integer_lt_"):
+        return f"integers < {domain.split('_lt_')[1]}"
+    if domain.startswith("finite_set:"):
+        return domain[len("finite_set:"):]
+    if domain.startswith("interval:"):
+        return domain[len("interval:"):]
+    if domain.startswith("real_excluding:"):
+        return f"real numbers excluding {domain[len('real_excluding:'):]}"
+    return "its domain"
 
 
 # Conditions ------------------------------------------------------------------------------------------------------------
@@ -169,8 +349,13 @@ def condition_holds(condition: str, param: str, value: sp.Expr) -> bool | None:
 # Definitions ---------------------------------------------------------------------------------------------------------
 
 _DEF_HEAD_RE = re.compile(r"(?<![\w.'])([A-Za-z][A-Za-z0-9_]{0,15})\s*\(\s*([A-Za-z])\s*\)\s*=(?!=)\s*")
-_DECL_RE = re.compile(r"(?<![\w.])([A-Za-z][A-Za-z0-9_]{0,15})\s*:\s*([A-Za-zℝℤℕℚℂ+_{}>0\s]{1,12}?)\s*(?:->|→)\s*([A-Za-zℝℤℕℚℂ+_{}>0]{1,12})")
-_DEF_CUE_RE = re.compile(r"\b(?:define|defined|definition|let|where|with|given|suppose|consider|be|by|denote|denotes|set)\b|[:\-*•]\s*$", re.I)
+_DECL_RE = re.compile(
+    r"(?<![\w.])([A-Za-z][A-Za-z0-9_]{0,15})\s*:\s*"
+    r"(\{[^}]*\}|\[[^\]]*\]|\([^)]*\)|[A-Za-z0-9ℝℤℕℚℂ+_{}>=≤≥\s.,\\…-]{1,32}?)\s*"
+    r"(?:->|→|\\to\b)\s*"
+    r"(\{[^}]*\}|\[[^\]]*\]|\([^)]*\)|[A-Za-z0-9ℝℤℕℚℂ+_{}>=≤≥\s.,\\…-]{1,32})"
+)
+_DEF_CUE_RE = re.compile(r"\b(?:define|defined|definition|let|where|with|given|suppose|consider|be|by|denote|denotes|set|for)\b|[:\-*•]\s*$", re.I)
 _ACTION_RE = re.compile(
     r"\b(?:prove|show|verify|check|disprove|whether|true\s+that|solve|find|compute|evaluate|calculate|determine|what|"
     r"plot|graph|differentiate|integrate|simplify)\b", re.I)
@@ -180,8 +365,15 @@ _COND_END_RE = re.compile(r"\s*[,;]|\.(?=\s|$)|\s+and\s+(?=[A-Za-z]\w*\s*\()|\n|
 
 
 def _sentence_start(text: str, pos: int) -> int:
-    cut = max(text.rfind(". ", 0, pos), text.rfind("? ", 0, pos), text.rfind("! ", 0, pos), text.rfind("\n", 0, pos))
-    return cut + 1
+    cut = max(
+        text.rfind(". ", 0, pos),
+        text.rfind("? ", 0, pos),
+        text.rfind("! ", 0, pos),
+        text.rfind("; ", 0, pos),
+        text.rfind(";\n", 0, pos),
+        text.rfind("\n", 0, pos),
+    )
+    return cut + 1 if cut >= 0 else 0
 
 
 def _is_definition_site(text: str, start: int) -> bool:
@@ -194,18 +386,24 @@ def _is_definition_site(text: str, start: int) -> bool:
     return not (act and (not cue or act[-1].start() > cue[-1].start()))
 
 
-# Where the question states the domain of a function: a typed declaration, "the domain of q is ...", or a domain phrase
-# in the sentence that defines it ("defined only for positive integers by h(n) = ...", "positive-integer-only").
 def _declared_domain(text: str, name: str) -> str | None:
     n = re.escape(name)
-    m = re.search(rf"(?<![\w.]){n}\s*:\s*(\{{[^}}]*\}}|\([^)]*\)|[^:\n]*?)\s*(?:->|→|\\to\b)", text)
+    m = re.search(rf"(?<![\w.]){n}\s*:\s*(\{{[^}}]*\}}|\[[^\]]*\]|\([^)]*\)|[^:\n]*?)\s*(?:->|→|\\to\b)", text)
     if m:
         dom = _domain_from_symbol(m.group(1)) or domain_from_words(m.group(1))
         if dom:
             return dom
-    m = re.search(rf"\bdomain\s+of\s+{n}\s+(?:is|=|:)\s*([^.;\n]+)", text, re.I)
-    if m:
-        return domain_from_words(m.group(1))
+    for pat in (
+        rf"\b(?:let|assume|given|where|suppose|for)\s+{n}\s+(?:be|is|in|\\in)\s+(?:a\s+|an\s+)?(\{{[^}}]*\}}|\[[^\]]*\]|\([^)]*\)|[^\n.;,]+)",
+        rf"\bdomain\s+of\s+{n}\s+(?:is|=|:)\s*(\{{[^}}]*\}}|\[[^\]]*\]|\([^)]*\)|.+?(?=[.;\n]|\s*,\s*(?:with|where|and)\b|$))",
+        rf"(?<![\w.]){n}\s+(?:has|have|with)\s+(?:the\s+)?domain\s*(?:is|=|:)?\s*(\{{[^}}]*\}}|\[[^\]]*\]|\([^)]*\)|.+?(?=[.;\n]|\s*,\s*(?:with|where|and)\b|$))",
+        rf"(?<![\w.]){n}\s+(?:is|be)\s+defined\s+on\s+(?:the\s+domain\s+)?(\{{[^}}]*\}}|\[[^\]]*\]|\([^)]*\)|.+?(?=[.;\n]|\s*,\s*(?:with|where|and)\b|$))",
+    ):
+        m = re.search(pat, text, re.I)
+        if m:
+            dom = _domain_from_symbol(m.group(1).strip()) or domain_from_words(m.group(1).strip())
+            if dom:
+                return dom
     return None
 
 
@@ -221,6 +419,28 @@ def _sentence_domain(text: str, start: int) -> str | None:
     return domain_from_words(sentence) or (domain_from_words(lead) if re.search(r"(?i)\bfunction|defined|domain\b", lead) else None)
 
 
+def _find_cond_end(tail: str) -> int:
+    """End index of a condition string, avoiding splits on commas inside braces/brackets."""
+    depth = 0
+    for i, ch in enumerate(tail):
+        if i == 0:
+            continue
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth = max(0, depth - 1)
+        elif depth == 0:
+            if ch in ";\n":
+                return i
+            if ch == "." and (i + 1 == len(tail) or tail[i + 1].isspace()):
+                return i
+            if ch == "," and not (i + 1 < len(tail) and tail[i + 1].isdigit()):
+                return i
+            if tail.startswith(" and ", i) and re.match(r"\s+and\s+[A-Za-z]\w*\s*\(", tail[i:]):
+                return i
+    return len(tail)
+
+
 def parse_definitions(text: str) -> tuple[list[dict[str, Any]], list[tuple[int, int]], list[str]]:
     """Function definitions stated in the question -> (definitions, their text spans, problems). A definition the parser
     cannot represent faithfully is reported in problems instead of being guessed."""
@@ -233,6 +453,18 @@ def parse_definitions(text: str) -> tuple[list[dict[str, Any]], list[tuple[int, 
         if dom:
             declared[m.group(1)] = dom
             spans.append(m.span())
+    for pat in (
+        r"\b(?:let|assume|given|where|suppose|for)\s+([A-Za-z][A-Za-z0-9_]{0,15})\s+(?:be|is|in|\\in)\s+(?:a\s+|an\s+)?(\{[^}]*\}|\[[^\]]*\]|\([^)]*\)|[^\n.;,]+)",
+        r"\bdomain\s+of\s+([A-Za-z][A-Za-z0-9_]{0,15})\s+(?:is|=|:)\s*(\{[^}]*\}|\[[^\]]*\]|\([^)]*\)|[^\n.;]+)",
+        r"(?<![\w.])([A-Za-z][A-Za-z0-9_]{0,15})\s+(?:has|have|with)\s+(?:the\s+)?domain\s*(?:is|=|:)?\s*(\{[^}]*\}|\[[^\]]*\]|\([^)]*\)|[^\n.;]+)",
+        r"(?<![\w.])([A-Za-z][A-Za-z0-9_]{0,15})\s+(?:is|be)\s+defined\s+on\s+(?:the\s+domain\s+)?(\{[^}]*\}|\[[^\]]*\]|\([^)]*\)|[^\n.;]+)",
+    ):
+        for m in re.finditer(pat, text, re.I):
+            fn_name = m.group(1)
+            dom = _domain_from_symbol(m.group(2).strip()) or domain_from_words(m.group(2).strip())
+            if dom:
+                declared[fn_name] = dom
+                spans.append(m.span())
     first_at: dict[str, int] = {}
     for m in _DEF_HEAD_RE.finditer(text):
         name, param = m.group(1), m.group(2)
@@ -250,9 +482,9 @@ def parse_definitions(text: str) -> tuple[list[dict[str, Any]], list[tuple[int, 
         cond_text, stop = "", m.end() + (end.start() if end else len(rest))
         if end and re.match(r"\s+(?:for|if|when|whenever|provided|otherwise|else|on)\b", end.group(0)):
             tail = rest[end.start():]
-            c_end = _COND_END_RE.search(tail, 1)
-            cond_text = tail[: c_end.start() if c_end else len(tail)].strip()
-            stop = m.end() + end.start() + (c_end.start() if c_end else len(tail))
+            c_stop = _find_cond_end(tail)
+            cond_text = tail[:c_stop].strip()
+            stop = m.end() + end.start() + c_stop
         if not expr_text:
             continue
         if re.search(rf"(?<![\w.]){re.escape(name)}\s*\(", expr_text):
@@ -283,6 +515,8 @@ def parse_definitions(text: str) -> tuple[list[dict[str, Any]], list[tuple[int, 
         sentence_dom = _sentence_domain(text, first_at.get(name, 0))
         if name in declared or _declared_domain(text, name):
             entry["domain"] = declared.get(name) or _declared_domain(text, name)
+        elif entry.get("parameter") in declared or _declared_domain(text, entry.get("parameter", "")):
+            entry["domain"] = declared.get(entry["parameter"]) or _declared_domain(text, entry["parameter"])
         elif len(branch_domains) == 1:
             entry["domain"] = branch_domains.pop()
         elif sentence_dom:
@@ -392,14 +626,14 @@ _CASES_EXPR_RE = re.compile(
 _ORBIT_RE = re.compile(r"(?i)\b(cycle|orbit|trajectory|sequence|iterates?|iteration)\b")
 _ORBIT_START_RE = re.compile(rf"(?i)\b(?:start(?:ing)?|beginning|begin|from)\s+(?:at|from|with)?\s*(?:[a-z]\s*=\s*)?({_NUMBER})\b")
 _CLAIM_RE = re.compile(
-    r"(?is)\b(?:prove\s+or\s+disprove|prove|show|verify|disprove|demonstrate|determine\s+whether|check\s+whether|"
-    r"decide\s+whether|is\s+it\s+true)\s+(?:that\s+)?(?P<stmt>(?:[^.?!;\n]|!=)+?)\s+"
-    r"(?P<q>for\s+(?:every|all|each|any)\s+(?:[^.?!;\n]|!=|\.\d)+?)\s*(?:[.?;\n]|!(?!=)|$)")
+    r"(?is)\b(?P<verb>prove\s+or\s+disprove|prove|show|verify|disprove|demonstrate|determine\s+whether|check\s+whether|"
+    r"decide\s+whether|is\s+it\s+true|is\s+it|is)\s+(?:that\s+)?(?P<stmt>(?:[^.?!;\n]|!=)+?)\s+"
+    r"(?P<q>for\s+(?:every|all|each|any)\s+(?:[^.?!;\n]|!=|\.\d)+?)\s*(?:[.?;\n?]|!(?!=)|$)")
 _PREDICATE_RE = re.compile(
     r"(?i)^(?P<expr>.+?)\s+is\s+(?:always\s+)?(?:a\s+|an\s+)?(?P<pred>prime|composite|even|odd|positive|negative|"
     r"non-?negative|nonzero|non-zero|integer|perfect\s+square)(?:\s+(?:number|integer))?$")
 _DIVISIBLE_RE = re.compile(r"(?i)^(?P<expr>.+?)\s+is\s+(?:always\s+)?divisible\s+by\s+(?P<d>\S+)$")
-_EVAL_VERB_RE = re.compile(r"(?i)\b(?:compute|evaluate|calculate|find|determine|give|state|what\s+(?:is|are))\b")
+_EVAL_VERB_RE = re.compile(r"(?i)\b(?:compute|evaluate|calculate|find|determine|give|state|request|get|what\s+(?:is|are))\b")
 _NOT_A_VALUE_RE = re.compile(
     r"(?i)\b(?:derivative|integral|limit|roots?|zeros?|solutions?|maximum|minimum|inverse|graph|plot|domain|range|"
     r"period|series|slope|tangent|cycle|orbit|sequence|iterat\w*|whether|prove|show)\b")
@@ -434,9 +668,47 @@ def _mask(text: str, spans: list[tuple[int, int]]) -> str:
 
 
 def _application_tasks(text: str, defs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    names = "|".join(re.escape(d["name"]) for d in defs)
+    names = "|".join(re.escape(d["name"]) for d in defs) if defs else "$^"
     tasks: list[dict[str, Any]] = []
+
+    # 1. Multi-function evaluations across specified points:
+    # "Evaluate a(i) and b(i) separately for i = 0, 1, 2, and check each comparison."
+    m_eval_multi = re.search(
+        r"(?i)\b(?:evaluate|compute|calculate|check)\s+(?P<fns>[^.;:\n]+?)\s+(?:separately\s+)?(?:for|at|when|with)\s+(?:[a-z]\s*=\s*)?(?P<vals>(?:\d+(?:\s*,\s*|\s+and\s+)?)+)",
+        text,
+    )
+    if m_eval_multi and defs:
+        fns_part = m_eval_multi.group("fns")
+        vals_part = m_eval_multi.group("vals")
+        matched_defs = [d for d in defs if re.search(rf"(?<![\w.]){re.escape(d['name'])}(?![\w(])|(?<![\w.]){re.escape(d['name'])}\s*\(", fns_part)]
+        if not matched_defs:
+            matched_defs = defs
+        nums = re.findall(r"\d+", vals_part)
+        for val in nums:
+            for d in matched_defs:
+                expr = f"{d['name']}({val})"
+                tasks.append({"id": expr, "op": "evaluate", "expression": expr})
+        if re.search(r"(?i)\b(?:check\s+each\s+comparison|compare\s+(?:them|each)|check\s+comparisons?)\b", text):
+            if len(matched_defs) == 2:
+                m_rel = re.search(rf"(?<![\w.]){re.escape(matched_defs[0]['name'])}\s*\(\s*[a-z]\s*\)\s*(<=|>=|!=|<|>|=)\s*{re.escape(matched_defs[1]['name'])}\s*\(\s*[a-z]\s*\)", text)
+                rel_sym = m_rel.group(1) if m_rel else ">"
+                for val in nums:
+                    expr = f"{matched_defs[0]['name']}({val}) {rel_sym} {matched_defs[1]['name']}({val})"
+                    tasks.append({"id": expr, "op": "evaluate", "expression": expr})
+
+    m_eval_at = re.search(
+        r"(?i)\b(?:evaluate|compute|calculate|check)\s+(?:(?:at|for)\s+)?(?:[a-z]\s*=\s*)?((?:\d+(?:\s*,\s*|\s+and\s+)?)+)",
+        text,
+    )
+    if m_eval_at and defs and not tasks:
+        nums = re.findall(r"\d+", m_eval_at.group(1))
+        for val in nums:
+            for d in defs:
+                expr = f"{d['name']}({val})"
+                tasks.append({"id": expr, "op": "evaluate", "expression": expr})
     for sentence in re.split(r"(?<=[.?!])\s+|\n+", text):
+        if m_eval_multi and m_eval_multi.group(0).strip() in sentence:
+            continue
         verb = _EVAL_VERB_RE.search(sentence)
         if not verb or not re.search(rf"(?<![\w.])(?:{names})\s*\(", sentence):
             continue
@@ -452,7 +724,8 @@ def _application_tasks(text: str, defs: list[dict[str, Any]]) -> list[dict[str, 
                     closed = not parse_with_definitions(piece, defs).free_symbols and re.search(r"\d", piece)
                 except Exception:  # noqa: BLE001
                     closed = False
-                if closed and not re.search(r"[A-Za-z]{2,}", piece):
+                # Must be a real arithmetic expression with operators, not a bare number fragment like "1" or "2"
+                if closed and not re.search(r"[A-Za-z]{2,}", piece) and re.search(r"[-+*/^]", piece):
                     tasks.append({"id": re.sub(r"\s+", "", piece), "op": "evaluate", "expression": piece})
                 continue
             if re.search(r"[A-Za-z]{3,}", re.sub(rf"(?<![\w.])(?:{names})\s*\(", "(", piece)):
@@ -490,9 +763,22 @@ def _case_tasks(text: str, defs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not cases or not (any(m.group("word") for m in cases) or (len(cases) >= 2 and re.search(r"(?i)\bcases?\b", text))):
         return []
     head = _CASES_EXPR_RE.search(text[: cases[0].start()])
-    if not head:
+    expr = None
+    if head:
+        expr = head.group("expr").strip(" :,")
+    else:
+        tail = _CASES_EXPR_RE.search(text[cases[-1].end():]) or re.search(
+            r"(?i)\b(?:evaluate|compute|calculate|find|determine|work\s+out)\s+(?:the\s+value\s+of\s+)?(?P<expr>[^.;:\n]+)",
+            text[cases[-1].end():],
+        )
+        if tail:
+            expr = re.sub(
+                r"(?i)\s+(?:in\s+each(?:\s+case)?|for\s+each(?:\s+case)?|independently|separately).*$",
+                "",
+                tail.group("expr"),
+            ).strip(" :,")
+    if not expr:
         return []
-    expr = head.group("expr").strip(" :,")
     try:
         parsed = parse_with_definitions(expr, defs)
     except Exception:  # noqa: BLE001
@@ -508,32 +794,117 @@ def _case_tasks(text: str, defs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return tasks
 
 
+_INDEPENDENT_EVAL_RE = re.compile(
+    r"(?i)\b(?:evaluate|compute|calculate|find|determine|work\s+out)\s+(?:the\s+value\s+of\s+)?(?P<expr>[^.;:\n]+)"
+)
+
+
+def _independent_case_tasks(text: str, defs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Parse independent evaluations with local bindings stated before, within, or around the target expression:
+    e.g. 'Three independent calculations, k local to each: k=1, k=3, k=6, evaluate 2k+1.'
+    e.g. 'Three independent items: k=1, k=3, k=6; compute 2k+1 in each, with k local to its item.'
+    e.g. 'Evaluate 2k+1 for k=1, k=3, and k=6 independently.'
+    e.g. 'k=1, k=3, k=6. Evaluate 2k+1 in each.'
+    """
+    m_eval = _INDEPENDENT_EVAL_RE.search(text)
+    if not m_eval:
+        return []
+    expr_raw = m_eval.group("expr").strip(" :,")
+    expr_clean = re.sub(r"(?i)\s+\b(?:for|at|when|where|given)\b.*$", "", expr_raw)
+    expr_clean = re.sub(
+        r"(?i)\s+(?:in\s+each(?:\s+case|\s+item)?|for\s+each(?:\s+case|\s+item)?|independently|separately|"
+        r"with\s+[a-z]\s+local\s+to\s+.*|local\s+to\s+.*).*$",
+        "",
+        expr_clean,
+    ).strip(" :,")
+    if not expr_clean:
+        return []
+    try:
+        parsed = parse_with_definitions(expr_clean, defs)
+    except Exception:  # noqa: BLE001
+        return []
+    if not hasattr(parsed, "free_symbols") or isinstance(parsed, tuple):
+        return []
+    sym_names = {s.name for s in parsed.free_symbols}
+    if not sym_names:
+        return []
+
+    raw_pairs = re.findall(rf"([A-Za-z]\w*)\s*=\s*({_NUMBER})", text)
+    relevant = [(v, val) for v, val in raw_pairs if v in sym_names]
+    if len(relevant) < 2:
+        return []
+
+    is_independent = bool(re.search(
+        r"(?i)\b(?:independent|independently|local to each|in each|for each|separately|separate|cases?)\b",
+        text,
+    ))
+    var_counts = [v for v, _ in relevant]
+    has_repeated_var = len(var_counts) > len(set(var_counts))
+    if not (is_independent or has_repeated_var):
+        return []
+
+    factor = bool(_FACTOR_RE.search(text))
+    tasks = []
+    for i, (v, val) in enumerate(relevant, 1):
+        tasks.append({
+            "id": f"{v} = {val}",
+            "op": "evaluate",
+            "expression": expr_clean,
+            "bindings": {v: val},
+            "factor": factor,
+        })
+    return tasks
+
+
 _SUBSTITUTION_RE = re.compile(
     rf"(?i)\b(?:evaluate|compute|calculate|find|determine|work\s+out)\s+(?:the\s+value\s+of\s+)?(?P<expr>[^.?;]+?)\s+"
     rf"(?:for|at|when|with|if|where|given)\s+(?P<bindings>(?:[A-Za-z]\w*\s*=\s*{_NUMBER}\s*(?:,\s*(?:and\s+)?|\s+and\s+)?)+)"
-    rf"\s*(?:[.?;]|$)")
+    rf"(?:\s+(?:independently|separately|in\s+each\s+case))?\s*(?:[.?;]|$)"
+)
 
 
 def _substitution_tasks(text: str, defs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """"Evaluate n^2 + 1 for n = 3", "compute 2x + y at x = 1, y = 4": one evaluation with its own bindings (read by
-    the generic parsers as the equation n = 3 to solve)."""
+    """"Evaluate n^2 + 1 for n = 3", "compute 2x + y at x = 1, y = 4": evaluation tasks with scoped bindings."""
     tasks = []
     for m in _SUBSTITUTION_RE.finditer(text):
         expr = m.group("expr").strip(" :,")
-        bindings = dict(re.findall(rf"([A-Za-z]\w*)\s*=\s*({_NUMBER})", m.group("bindings")))
+        raw_pairs = re.findall(rf"([A-Za-z]\w*)\s*=\s*({_NUMBER})", m.group("bindings"))
+        if not raw_pairs:
+            continue
         try:
             parsed = parse_with_definitions(expr, defs)
         except Exception:  # noqa: BLE001
             continue
-        if not bindings or not set(bindings) <= {s.name for s in parsed.free_symbols} or not re.search(r"[-+*/^(]", expr):
+        if not hasattr(parsed, "free_symbols") or isinstance(parsed, tuple):
             continue
-        label = ", ".join(f"{k} = {v}" for k, v in bindings.items())
-        tasks.append({"id": f"{expr} at {label}", "op": "evaluate", "expression": expr, "bindings": bindings,
-                      "factor": bool(_FACTOR_RE.search(text))})
+        factor = bool(_FACTOR_RE.search(text))
+        var_names = [v for v, _ in raw_pairs]
+        if len(var_names) > len(set(var_names)):
+            for v, val in raw_pairs:
+                if v in {s.name for s in parsed.free_symbols}:
+                    tasks.append({
+                        "id": f"{v} = {val}",
+                        "op": "evaluate",
+                        "expression": expr,
+                        "bindings": {v: val},
+                        "factor": factor,
+                    })
+        else:
+            bindings = dict(raw_pairs)
+            if not set(bindings) <= {s.name for s in parsed.free_symbols} or not re.search(r"[-+*/^(]", expr):
+                continue
+            label = ", ".join(f"{k} = {v}" for k, v in bindings.items())
+            tasks.append({
+                "id": f"{expr} at {label}",
+                "op": "evaluate",
+                "expression": expr,
+                "bindings": bindings,
+                "factor": factor,
+            })
     return tasks
 
 
-def parse_quantifier(text: str, stmt_symbols: set[str]) -> tuple[str | None, str, list[str]] | None:
+def parse_quantifier(text: str, stmt_symbols: set[str], defs: list[dict[str, Any]] | None = None, full_text: str = "") -> tuple[str | None, str, list[str]] | None:
     """'for every nonnegative integer n' -> ("n", "nonnegative_integer", []); 'for all real x != 0' -> ("x", "real",
     ["x != 0"])."""
     q = _ascii_rel(text)
@@ -547,9 +918,18 @@ def parse_quantifier(text: str, stmt_symbols: set[str]) -> tuple[str | None, str
     if m and dom is None:
         dom = _domain_from_symbol(m.group(1)) or domain_from_words(m.group(1))
     if dom is None:
-        if not re.search(r"\b(?:every|all|each|any)\s+[a-z]\b", q):
+        is_allowed = bool(re.search(rf"\b(?:allowed|valid)\s+(?:values?\s+of\s+)?{re.escape(var)}\b|\b(?:every|all|each|any)\s+(?:(?:allowed|valid)\s+)?(?:values?\s+of\s+)?{re.escape(var)}\b", q))
+        is_generic = bool(re.search(r"\b(?:every|all|each|any)\s+[a-z]\b", q))
+        if not (is_allowed or is_generic):
             return None
-        dom = "unspecified"
+        if defs:
+            owner = next((d for d in defs if d.get("parameter") == var), None) or (defs[0] if len(defs) == 1 else None)
+            if owner and owner.get("domain") and owner["domain"] != "unspecified":
+                dom = owner["domain"]
+        if dom is None and full_text:
+            dom = _declared_domain(full_text, var) or domain_from_words(full_text)
+        if dom is None:
+            dom = "unspecified"
     return var, dom, conds
 
 
@@ -557,7 +937,7 @@ def parse_quantifier(text: str, stmt_symbols: set[str]) -> tuple[str | None, str
 # declared domain (the definition's own, e.g. "where s is complex").
 _CLAIM_IMPLICIT_RE = re.compile(
     r"(?i)\b(?:prove|show|verify|demonstrate)\s+(?:that\s+)?"
-    r"(?P<stmt>[^.?!;\n,]*?[A-Za-z]\w*\s*\([^()]*\)[^.?!;\n,]*?(?:<=|>=|!=|=|<|>)[^.?!;\n,]+?)"
+    r"(?P<stmt>[^.?!;\n,]*?[A-Za-z]\w*(?:\s*\([^()]*\))?[^.?!;\n,]*?(?:<=|>=|!=|=|<|>)[^.?!;\n,]+?)"
     r"\s*(?=[,.;?!\n]|\s+and\s+|$)")
 
 
@@ -572,7 +952,12 @@ def _implicit_claims(text: str, defs: list[dict[str, Any]], taken: list[tuple[in
             continue
         lhs, rhs = stmt[: rel.start()].strip(), stmt[rel.end():].strip()
         fnames = {d["name"] for d in defs}
-        if not any(re.search(rf"(?<![\w.]){re.escape(f)}\s*\(", stmt) for f in fnames):
+        var = None
+        if lhs in fnames and rhs in fnames:
+            var = defs[0]["parameter"]
+            lhs = f"{lhs}({var})"
+            rhs = f"{rhs}({var})"
+        elif not any(re.search(rf"(?<![\w.]){re.escape(f)}\s*\(", stmt) for f in fnames):
             continue  # only statements about the question's own definitions
         try:
             symbols = {s.name for side in (lhs, rhs) for s in parse_with_definitions(side, defs).free_symbols}
@@ -585,6 +970,22 @@ def _implicit_claims(text: str, defs: list[dict[str, Any]], taken: list[tuple[in
         if owner is None:
             continue
         domain = owner.get("domain") or "unspecified"
+        if domain == "unspecified":
+            dw = domain_from_words(text)
+            if dw:
+                domain = dw
+            else:
+                m_dom = re.search(r"\b(?:non[\s-]?negative\s+integer|positive\s+integer|integer|natural|real)\b", text, re.I)
+                if m_dom:
+                    d_str = m_dom.group(0).lower().replace(" ", "_").replace("-", "")
+                    if "nonnegative" in d_str:
+                        domain = "nonnegative_integer"
+                    elif "positive" in d_str:
+                        domain = "positive_integer"
+                    elif "integer" in d_str or "natural" in d_str:
+                        domain = "integer"
+                    elif "real" in d_str:
+                        domain = "real"
         n = first_id + len(tasks)
         tasks.append({"id": "claim" if n == 0 else f"claim {n + 1}", "op": "claim", "lhs": lhs, "relation": rel.group(1),
                       "rhs": rhs, "variable": var, "domain": domain, "conditions": [],
@@ -638,6 +1039,9 @@ def _claim_tasks_explicit(text: str, defs: list[dict[str, Any]]) -> list[dict[st
             rel = re.search(r"(<=|>=|!=|<|>|=)", stmt)
             if not rel:
                 continue
+            verb = (m.group("verb") or "").lower()
+            if not defs and rel.group(1) == "=" and verb in ("is", "is it"):
+                continue
             claim.update(lhs=stmt[: rel.start()].strip(), relation=rel.group(1), rhs=stmt[rel.end():].strip())
             sides = [claim["lhs"], claim["rhs"]]
         try:
@@ -646,7 +1050,7 @@ def _claim_tasks_explicit(text: str, defs: list[dict[str, Any]]) -> list[dict[st
             continue
         fnames = {d["name"] for d in defs}
         symbols |= {v for side in sides for v in re.findall(r"(?<![\w.])([a-z])(?![\w(])", side) if v not in fnames}
-        quant = parse_quantifier(m.group("q"), symbols)
+        quant = parse_quantifier(m.group("q"), symbols, defs=defs, full_text=text)
         if quant is None:
             continue
         claim["variable"], claim["domain"], claim["conditions"] = quant
@@ -708,6 +1112,8 @@ def parse_structured(text: str) -> tuple[dict[str, Any] | None, list[str]]:
     if defs:
         tasks += _reaches_tasks(rest, defs)
     tasks += _case_tasks(rest, defs)
+    if not tasks:
+        tasks += _independent_case_tasks(rest, defs)
     if not tasks:
         tasks += _substitution_tasks(rest, defs)
     tasks += _claim_tasks(rest, defs)
@@ -778,6 +1184,21 @@ def domain_values(domain: str, limit: int = CLAIM_SEARCH_LIMIT) -> list[sp.Expr]
         return [sp.Integer(k) for k in range(1, limit + 1)]
     if domain == "nonnegative_integer":
         return [sp.Integer(k) for k in range(limit)]
+    if domain.startswith("integer_ge_"):
+        k = int(domain.split("_ge_")[1])
+        return [sp.Integer(k + i) for i in range(limit)]
+    if domain.startswith("integer_gt_"):
+        k = int(domain.split("_gt_")[1])
+        return [sp.Integer(k + 1 + i) for i in range(limit)]
+    if domain.startswith("integer_le_"):
+        k = int(domain.split("_le_")[1])
+        return [sp.Integer(k - i) for i in range(limit)]
+    if domain.startswith("integer_lt_"):
+        k = int(domain.split("_lt_")[1])
+        return [sp.Integer(k - 1 - i) for i in range(limit)]
+    if domain.startswith("finite_set:{") and domain.endswith("}"):
+        elems = [safe_parse_expr(p.strip()) for p in domain[len("finite_set:{"):-1].split(",") if p.strip()]
+        return elems[:limit]
     if domain == "integer":
         out = [sp.Integer(0)]
         for k in range(1, limit // 2 + 1):
@@ -829,6 +1250,16 @@ def _run_claim(task: dict[str, Any], defs: list[dict[str, Any]]) -> dict[str, An
     extra = {var.name: var}
     conds = task.get("conditions") or []
     domain = task.get("domain") or "unspecified"
+
+    # If domain is unspecified, check if any defined function applied to var has a declared domain
+    claim_exprs = str(task.get("lhs", "")) + " " + str(task.get("rhs", "")) + " " + str(task.get("expression", ""))
+    applied_fns = [d for d in defs if re.search(rf"(?<![\w.]){re.escape(d['name'])}\s*\(\s*{re.escape(task['variable'])}\s*\)", claim_exprs)]
+    if domain == "unspecified" and applied_fns:
+        for fn in applied_fns:
+            fn_dom = fn.get("domain") or "unspecified"
+            if fn_dom != "unspecified" and (domain == "unspecified" or is_proper_subdomain(fn_dom, domain)):
+                domain = fn_dom
+
     steps: list[str] = []
     trace: list[dict[str, Any]] = []
 
@@ -849,7 +1280,14 @@ def _run_claim(task: dict[str, Any], defs: list[dict[str, Any]]) -> dict[str, An
         return ok, f"{task['lhs']} = {_value_text(sp.simplify(lhs))}, {task['rhs']} = {_value_text(sp.simplify(rhs))}"
 
     def admissible(v: sp.Expr) -> bool:
-        return in_domain(v, domain) is not False and all(condition_holds(c, var.name, v) is True for c in conds)
+        if in_domain(v, domain) is False:
+            return False
+        if not all(condition_holds(c, var.name, v) is True for c in conds):
+            return False
+        for fn in applied_fns:
+            if in_domain(v, fn.get("domain") or "unspecified") is False:
+                return False
+        return True
 
     # Symbolic proof of an equation: substitute the definitions, simplify, then look at points where the written
     # expression is undefined but the quantifier still includes them.
@@ -881,10 +1319,55 @@ def _run_claim(task: dict[str, Any], defs: list[dict[str, Any]]) -> dict[str, An
                         "text": f"True: {task['statement']}. " + "; ".join(_pretty(x) for x in steps) + "."}
         except DefinitionError as exc:
             steps.append(str(exc))
+    elif task.get("relation") in ("<", "<=", ">", ">=", "!="):
+        try:
+            lhs = evaluate(parse_with_definitions(task["lhs"], defs, extra), defs, trace)
+            rhs = evaluate(parse_with_definitions(task["rhs"], defs, extra), defs, trace)
+            for t in trace:
+                defn = next((d for d in defs if d["name"] == t["function"]), None)
+                if defn:
+                    steps.append(f"{t['function']}({t['argument']}) = {_pretty(t['value'])} by the definition of {defn['name']}")
+            diff = sp.simplify(lhs - rhs)
+            rel_op = task["relation"]
+            proved = False
+            if domain == "nonnegative_integer":
+                k = sp.Symbol("_k", integer=True, nonnegative=True)
+                d_sub = sp.simplify(diff.subs(var, k))
+                rel_val = _REL_OPS[rel_op](d_sub, 0)
+                if rel_val is sp.true or rel_val is True:
+                    proved = True
+            elif domain == "positive_integer":
+                k = sp.Symbol("_k", integer=True, nonnegative=True)
+                d_sub = sp.simplify(diff.subs(var, k + 1))
+                rel_val = _REL_OPS[rel_op](d_sub, 0)
+                if rel_val is sp.true or rel_val is True:
+                    proved = True
+            elif domain.startswith("integer_ge_"):
+                k_val = int(domain.split("_ge_")[1])
+                k = sp.Symbol("_k", integer=True, nonnegative=True)
+                d_sub = sp.simplify(diff.subs(var, k + k_val))
+                rel_val = _REL_OPS[rel_op](d_sub, 0)
+                if rel_val is sp.true or rel_val is True:
+                    proved = True
+            elif domain == "real":
+                rel_val = _REL_OPS[rel_op](diff, 0)
+                if rel_val is sp.true or rel_val is True:
+                    proved = True
+            if proved:
+                step_pf = f"For every {var} in {domain_label(domain)}, {task['lhs']} - ({task['rhs']}) = {_pretty(sp.sstr(diff))} {rel_op} 0"
+                steps.append(step_pf)
+                return {
+                    "status": "proved",
+                    "steps": steps,
+                    "method": "algebraic difference sign analysis",
+                    "text": f"True: {task['statement']}. {step_pf}.",
+                }
+        except DefinitionError as exc:
+            steps.append(str(exc))
     proof = _residue_proof(task, defs, var, domain)
     if proof is not None:
         return proof
-    for v in domain_values(domain if domain in _INTEGER_DOMAINS else "real"):
+    for v in domain_values(domain if is_integer_domain(domain) else "real"):
         if not admissible(v):
             continue
         try:
@@ -907,7 +1390,7 @@ def _run_claim(task: dict[str, Any], defs: list[dict[str, Any]]) -> dict[str, An
                          "one counterexample refutes the universal statement.")
             return {"status": "disproved", "counterexample": _value_text(v), "detail": detail, "steps": steps,
                     "text": f"False: at {var} = {v}, {detail}" + (", which is not prime." if task.get("predicate") == "prime" else ".")}
-    searched = f"{domain_label(domain)}" + (f" up to {CLAIM_SEARCH_LIMIT} values" if domain in _INTEGER_DOMAINS else " on a grid of rational points")
+    searched = f"{domain_label(domain)}" + (f" up to {CLAIM_SEARCH_LIMIT} values" if is_integer_domain(domain) else " on a grid of rational points")
     return {"status": "unresolved", "steps": steps, "searched": searched,
             "text": f"No counterexample among the {searched}; this is evidence, not a proof."}
 
@@ -1234,7 +1717,7 @@ def _run_zeros(task: dict[str, Any], defs: list[dict[str, Any]]) -> dict[str, An
         sset = sp.solveset(expr, var, domain=sp.S.Reals if domain in ("real", "rational") else sp.S.Complexes)
         if not isinstance(sset, sp.FiniteSet):
             return {"status": "unresolved", "steps": steps, "text": f"{task['id']}: the zero set is {sset}, not a finite list"}
-        roots, degree, complete = {z: 1 for z in sset}, None, True
+        roots, degree, complete = dict.fromkeys(sset, 1), None, True
         steps.append(f"{defn['name']}({var}) = 0 has exactly the solutions {', '.join(_value_text(z) for z in sset)}")
     else:
         poly = sp.Poly(expr, var)
@@ -1382,6 +1865,8 @@ def _second_route(expr_text: str, defs: list[dict[str, Any]], bindings: dict[str
             arg = walk(e.args[0])
             defn = by_name[e.func.__name__]
             val = sp.Rational(arg.numerator, arg.denominator)
+            if in_domain(val, defn.get("domain") or "unspecified") is False:
+                raise DefinitionError(f"{val} is outside {defn['name']} domain")
             branch = None
             for b in defn["branches"]:
                 if b["condition"] != "otherwise" and condition_holds(b["condition"], defn["parameter"], val):
@@ -1424,23 +1909,34 @@ _RESTRICTIONS = (
     ("rational", re.compile(r"\brationals?\b|ℚ", re.I)),
     ("real", re.compile(r"\breals?\b|\breal\s+numbers?\b|ℝ", re.I)),
 )
-_DOMAIN_RANK = {"positive_integer": 0, "nonnegative_integer": 1, "integer": 2, "rational": 3, "real": 4, "complex": 5,
-                "unspecified": 6}
 
 
 def stated_domains(question: str, names: set[str]) -> dict[str, str]:
-    """The narrowest domain the question states for each function, read sentence by sentence."""
+    """The narrowest domain the question states for each function, read sentence by sentence or from explicit declarations."""
     out: dict[str, str] = {}
-    for sentence in re.split(r"(?<=[.?!;])\s+|\n+", question or ""):
+    q = question or ""
+    for name in names:
+        decl = _declared_domain(q, name)
+        if decl:
+            out[name] = decl
+
+    for sentence in re.split(r"(?<=[.?!;])\s+|\n+", q):
         clean = re.sub(r"(?i)\bfor\s+(?:every|all|each|any)\b[^,.;]*", " ", sentence)  # a claim's quantifier
         for name in names:
             n = re.escape(name)
-            if not re.search(rf"(?<![\w.]){n}\s*(?:\(\s*[A-Za-z]\s*\)\s*=|:|\s+(?:is|be)\s+(?:defined|a\s+function))|\bdomain\s+of\s+{n}\b|\b{n}\s+be\b", clean):
+            if not re.search(rf"(?<![\w.]){n}\s*(?:\(\s*[A-Za-z]\s*\)\s*=|:|\s+(?:is|be)\s+(?:defined|a\s+function))|\bdomain\s+of\s+{n}\b|\b{n}\s+be\b|\b{n}\s+(?:has|have|with)\b", clean):
                 continue
-            for dom, rx in _RESTRICTIONS:
+            dom = domain_from_words(clean)
+            if dom:
+                curr = out.get(name, "unspecified")
+                if is_proper_subdomain(dom, curr):
+                    out[name] = dom
+                continue
+            for dom_pat, rx in _RESTRICTIONS:
                 if rx.search(clean):
-                    if _DOMAIN_RANK[dom] < _DOMAIN_RANK.get(out.get(name, "unspecified"), 6):
-                        out[name] = dom
+                    curr = out.get(name, "unspecified")
+                    if is_proper_subdomain(dom_pat, curr):
+                        out[name] = dom_pat
                     break
     return out
 
@@ -1467,6 +1963,19 @@ def check_structured(params: dict[str, Any], data: dict[str, Any], question: str
     results = {r["id"]: r for r in data.get("results") or []}
     out: list[tuple[str, bool | None, int, str]] = []
 
+    from .correspondence import is_tautology_claim
+    tautologies = [
+        str(t.get("id") or t) for t in tasks
+        if isinstance(t, dict) and is_tautology_claim(t) and not (
+            question and re.search(
+                rf"(?i)\b(?:evaluate|compute|calculate|prove|verify)\s+(?:the\s+value\s+of\s+)?{re.escape(str(t.get('expression') or t.get('id') or ''))}\b|{re.escape(str(t.get('expression') or t.get('id') or ''))}\s*=\s*{re.escape(str(t.get('expression') or t.get('id') or ''))}",
+                question,
+            )
+        )
+    ]
+    out.append(("validity: no trivial tautological claims", not tautologies, 1,
+                f"trivial tautology task(s) detected: {', '.join(tautologies)}" if tautologies else "all tasks are non-tautological"))
+
     names = {d["name"] for d in defs}
     misread = sorted({n for t in tasks for key in ("expression", "lhs", "rhs") if t.get(key)
                       for n in names if re.search(rf"(?<![\w.]){re.escape(n)}(?!\w)(?!\s*\()", t[key])})
@@ -1478,7 +1987,7 @@ def check_structured(params: dict[str, Any], data: dict[str, Any], question: str
     for d in defs:
         want = stated.get(d["name"])
         used = d.get("domain") or "unspecified"
-        if want and _DOMAIN_RANK[want] < _DOMAIN_RANK.get(used, 6):
+        if want and (is_proper_subdomain(want, used) or domain_rank(want) < domain_rank(used)):
             domain_bad.append(f"the question restricts {d['name']} to {domain_label(want)}; the computation used "
                               f"{domain_label(used) if used != 'unspecified' else 'no restriction'}")
     for t in tasks:
@@ -1515,9 +2024,25 @@ def check_structured(params: dict[str, Any], data: dict[str, Any], question: str
                 pass  # confirmed: an argument lies outside the domain or no branch applies
         if t["op"] == "claim" and r.get("counterexample") is not None:
             w = _exact_value(r["counterexample"])
-            if in_domain(w, t.get("domain") or "unspecified") is False or not all(
+            claim_dom = t.get("domain") or "unspecified"
+            if in_domain(w, claim_dom) is False or not all(
                     condition_holds(c, t["variable"], w) is True for c in t.get("conditions") or []):
-                domain_bad.append(f"witness {t['variable']} = {w} is outside {domain_label(t.get('domain', ''))}")
+                domain_bad.append(f"witness {t['variable']} = {w} is outside {domain_label(claim_dom)}")
+            claim_txt = str(t.get("lhs", "")) + " " + str(t.get("rhs", "")) + " " + str(t.get("expression", ""))
+            for d in defs:
+                if re.search(rf"(?<![\w.]){re.escape(d['name'])}\s*\(\s*{re.escape(t['variable'])}\s*\)", claim_txt):
+                    fn_dom = d.get("domain") or "unspecified"
+                    if in_domain(w, fn_dom) is False:
+                        domain_bad.append(f"witness {t['variable']} = {w} is outside domain of {d['name']} ({domain_label(fn_dom)})")
+                    want_fn = stated.get(d["name"])
+                    if want_fn and in_domain(w, want_fn) is False:
+                        domain_bad.append(f"witness {t['variable']} = {w} is outside question domain of {d['name']} ({domain_label(want_fn)})")
+            if question:
+                qm = re.search(rf"\bfor\s+(?:(?:every|all|each|any)\s+)?([^.?!;\n]*?\b{re.escape(t['variable'])}\b[^,;:.?!(\n]*)", question, re.I)
+                if qm:
+                    q_dom = domain_from_words(qm.group(0)) or domain_from_words(qm.group(1))
+                    if q_dom and in_domain(w, q_dom) is False:
+                        domain_bad.append(f"witness {t['variable']} = {w} violates question condition {qm.group(0).strip()}")
         if t["op"] == "orbit":
             defn = next((d for d in defs if d["name"] == t["function"]), None)
             if defn is not None:
@@ -1582,17 +2107,23 @@ def check_structured(params: dict[str, Any], data: dict[str, Any], question: str
             elif r.get("status") == "disproved" and r.get("counterexample") is not None:
                 checked += 1
                 w = r["counterexample"]
-                if t.get("predicate"):
+                w_val = _exact_value(w)
+                claim_dom = t.get("domain") or "unspecified"
+                if in_domain(w_val, claim_dom) is False:
+                    comp_bad.append(f"{t['id']}: counterexample {t['variable']} = {w} lies outside domain {domain_label(claim_dom)}")
+                elif t.get("predicate"):
                     val = _second_route(t["expression"], defs, {t["variable"]: w})
                     div = _second_route(t["divisor"], defs, {t["variable"]: w}) if t.get("divisor") else None
                     still = None if val is None else _predicate(t["predicate"], sp.Rational(val.numerator, val.denominator),
                                                                 None if div is None else sp.Rational(div.numerator, div.denominator))
+                    if still is not False:
+                        comp_bad.append(f"{t['id']}: the counterexample {t['variable']} = {w} does not refute the claim on recomputation")
                 else:
                     lv = _second_route(t["lhs"], defs, {t["variable"]: w})
                     rv = _second_route(t["rhs"], defs, {t["variable"]: w})
                     still = None if lv is None or rv is None else bool(_REL_OPS[t["relation"]](sp.Rational(lv.numerator, lv.denominator), sp.Rational(rv.numerator, rv.denominator)))
-                if still is not False:
-                    comp_bad.append(f"{t['id']}: the counterexample {t['variable']} = {w} does not refute the claim on recomputation")
+                    if still is not False:
+                        comp_bad.append(f"{t['id']}: the counterexample {t['variable']} = {w} does not refute the claim on recomputation")
             elif r.get("status") == "proved" and t.get("predicate"):
                 for v in [v for v in domain_values(t.get("domain") or "integer", 60) if all(
                         condition_holds(c, t["variable"], v) is True for c in t.get("conditions") or [])][:30]:
@@ -1606,7 +2137,7 @@ def check_structured(params: dict[str, Any], data: dict[str, Any], question: str
                         comp_bad.append(f"{t['id']}: fails at {t['variable']} = {v}")
                         break
             elif r.get("status") == "proved" and t.get("relation") == "=":
-                pts = [v for v in domain_values(t.get("domain") if t.get("domain") in _INTEGER_DOMAINS else "real", 40)
+                pts = [v for v in domain_values(t.get("domain") if is_integer_domain(t.get("domain", "")) else "real", 40)
                        if in_domain(v, t.get("domain") or "unspecified") is not False and all(condition_holds(c, t["variable"], v) is True for c in t.get("conditions") or [])]
                 for v in pts[:12]:
                     lv = _second_route(t["lhs"], defs, {t["variable"]: str(v)})
@@ -1616,6 +2147,19 @@ def check_structured(params: dict[str, Any], data: dict[str, Any], question: str
                     checked += 1
                     if lv != rv:
                         comp_bad.append(f"{t['id']}: differs at {t['variable']} = {v}")
+                        break
+            elif r.get("status") == "proved" and t.get("relation") in ("<", "<=", ">", ">=", "!="):
+                pts = [v for v in domain_values(t.get("domain") if is_integer_domain(t.get("domain", "")) else "real", 40)
+                       if in_domain(v, t.get("domain") or "unspecified") is not False and all(condition_holds(c, t["variable"], v) is True for c in t.get("conditions") or [])]
+                for v in pts[:12]:
+                    lv = _second_route(t["lhs"], defs, {t["variable"]: str(v)})
+                    rv = _second_route(t["rhs"], defs, {t["variable"]: str(v)})
+                    if lv is None or rv is None:
+                        continue
+                    checked += 1
+                    rel_holds = bool(_REL_OPS[t["relation"]](sp.Rational(lv.numerator, lv.denominator), sp.Rational(rv.numerator, rv.denominator)))
+                    if not rel_holds:
+                        comp_bad.append(f"{t['id']}: relation {t['relation']} fails at {t['variable']} = {v}")
                         break
     for t in tasks:
         r = results.get(t["id"]) or {}
@@ -1650,6 +2194,8 @@ def check_structured(params: dict[str, Any], data: dict[str, Any], question: str
                 "; ".join(comp_bad)[:400] if comp_bad else f"{checked} recomputation(s) agree"))
 
     missing = [t["id"] for t in tasks if t["id"] not in results or results[t["id"]].get("status") == "error"]  # "undefined" is an answer
+    if question and re.search(r"(?i)\b(?:prove|disprove|show\s+that|verify\s+that)\b", question) and not any(t.get("op") in ("claim", "reaches") or t.get("proof") for t in tasks):
+        missing.append("proof obligation")
     out.append(("coverage: every requested item has a result", not missing, 1,
                 ("no result for " + ", ".join(missing)) if missing else f"{len(tasks)} item(s) answered"))
     return out
@@ -1663,9 +2209,15 @@ __all__ = [
     "axiom_structured",
     "check_structured",
     "domain_from_words",
+    "domain_label",
+    "domain_rank",
+    "domain_values",
     "evaluate",
     "factor_text",
     "in_domain",
+    "is_integer_domain",
+    "is_proper_subdomain",
+    "is_valid_domain",
     "misread_functions",
     "parse_definitions",
     "parse_structured",

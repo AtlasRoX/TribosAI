@@ -20,6 +20,7 @@ import type { Message } from "../types/chat";
 import type { AgentOptionsSettings } from "../types/agentic";
 import { normalizeLegacyAgentName } from "../lib/legacyNames.ts";
 import { afterProjectDeleted, migrateThreads, moveThread } from "../lib/sidebarData.ts";
+import { IdbHistoryStore } from "./idbHistoryStore.ts";
 
 export interface InvestigationItem {
   id: string;
@@ -287,10 +288,12 @@ export class LocalStorageService {
     }
   }
 
-  /** Where conversation history goes under the current preference. */
+  /** Where conversation history goes under the current preference. History kept on this device lives in IndexedDB
+   *  once it has loaded (whenReady), so it is no longer bounded by localStorage's few megabytes. */
   private store(): KV | null {
     const mode = this.getHistoryPrefs().mode;
     if (mode === "off") return this.memory;
+    if (mode === "device" && this.idbReady && this.idb) return this.idb;
     const w = this.win();
     try {
       if (!w) return null;
@@ -298,6 +301,37 @@ export class LocalStorageService {
     } catch {
       return null;
     }
+  }
+
+  private idb: IdbHistoryStore | null = null;
+  private idbReady = false;
+  private idbStarted: Promise<boolean> | null = null;
+
+  /**
+   * Resolves once saved history can be read: IndexedDB loaded (history in localStorage moved into it on first use),
+   * or unavailable, in which case history stays in localStorage as before. Read history only after this.
+   */
+  public whenReady(): Promise<boolean> {
+    if (this.idbStarted) return this.idbStarted;
+    const w = this.win();
+    if (!w || typeof indexedDB === "undefined") return (this.idbStarted = Promise.resolve(false));
+    const isHistoryKey = (k: string) =>
+      k.startsWith(STORAGE_KEYS.INVESTIGATIONS) ||
+      k.startsWith(STORAGE_KEYS.ACTIVE_THREAD) ||
+      k.startsWith(STORAGE_KEYS.THREAD_MESSAGES_PREFIX) ||
+      k.startsWith(STORAGE_KEYS.DRAFT_PREFIX);
+    this.idb = new IdbHistoryStore(this.device(), isHistoryKey, () =>
+      this.notify({
+        kind: "not_saved",
+        message: "The latest change to your history could not be written to this browser's database. It stays on screen until you reload.",
+        threadIds: [],
+      })
+    );
+    this.idbStarted = this.idb.ready.then((ok) => {
+      this.idbReady = ok;
+      return ok;
+    });
+    return this.idbStarted;
   }
 
   private isAvailable(): boolean {
@@ -633,6 +667,38 @@ export class LocalStorageService {
       this.store()!.removeItem(this.draftKey(id));
     } catch {
       // ignore
+    }
+  }
+
+  /**
+   * Cleans up abandoned empty threads (0 messages, no draft, not pinned),
+   * while preserving the specified active thread.
+   */
+  public pruneEmptyThreads(keepThreadId?: string): void {
+    if (!this.isAvailable()) return;
+    const list = this.getInvestigations();
+    const toDelete: string[] = [];
+    for (const inv of list) {
+      if (inv.id === keepThreadId) continue;
+      if (inv.pinned) continue;
+      const msgs = this.getMessages(inv.id);
+      if (msgs.length > 0) continue;
+      const draft = this.getDraft(inv.id);
+      if (draft && draft.trim().length > 0) continue;
+      toDelete.push(inv.id);
+    }
+    if (toDelete.length > 0) {
+      const deleteSet = new Set(toDelete);
+      const kept = list.filter((i) => !deleteSet.has(i.id));
+      this.saveInvestigationsList(kept);
+      for (const id of toDelete) {
+        try {
+          this.store()!.removeItem(this.msgKey(id));
+          this.store()!.removeItem(this.draftKey(id));
+        } catch {
+          // ignore
+        }
+      }
     }
   }
 

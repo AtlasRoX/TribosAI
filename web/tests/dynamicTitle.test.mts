@@ -39,3 +39,10 @@ test("generateDynamicTitle drops punctuation left at the cut", () => {
   );
   assert.ok(!/[,.:;]$/.test(title), title);
 });
+
+test("LaTeX in a question becomes plain text in its title", () => {
+  const title = generateDynamicTitle("If $x = 2$ and $y = 5$, then what is the value of $\frac{x^4+2y^2}{6}$ ?");
+  assert.ok(!title.includes("$") && !title.includes("\\"), title);
+  assert.match(title, /x = 2 and y = 5/);
+  assert.equal(generateDynamicTitle("Sam earns $\$$60 a day"), "Sam Earns $60 a Day");
+});

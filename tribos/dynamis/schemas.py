@@ -7,6 +7,17 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+class DynamisMonteCarloInput(BaseModel):
+    expression: str = Field(..., min_length=1, max_length=2000)
+    lower: float
+    upper: float
+    num_samples: int = Field(..., ge=2, le=2_000_000)
+    seed: int = Field(..., ge=0, lt=2**64)
+    variable: str = Field(default="x", pattern=r"^[A-Za-z][A-Za-z0-9_]*$")
+    reference: float | None = None
+    generator: str = Field(default="PCG64", pattern=r"^PCG64$")
+
+
 class DynamisSimulateOdeInput(BaseModel):
     rhs: dict[str, str] | None = Field(
         default=None,
@@ -26,7 +37,7 @@ class DynamisSimulateOdeInput(BaseModel):
     )
     method: str = Field(
         default="RK45",
-        description="SciPy solve_ivp integration method: RK45, RK23, DOP853, Radau, BDF, or LSODA",
+        description="Fixed-step RK4 (requires step_size or num_steps), or adaptive RK45, RK23, DOP853, Radau, BDF, LSODA",
     )
     num_points: int = Field(
         default=200,
@@ -38,6 +49,10 @@ class DynamisSimulateOdeInput(BaseModel):
         default=None,
         description="Optional built-in preset name (harmonic_oscillator, damped_oscillator, lorenz, lotka_volterra, van_der_pol, sir, pendulum, rc_circuit, rlc_circuit)",
     )
+    step_size: float | None = Field(default=None, gt=0, description="Exact RK4 step in the time variable's units.")
+    num_steps: int | None = Field(default=None, ge=1, le=9999, description="Exact number of RK4 steps, not output points.")
+    analytic_reference: bool = Field(default=False, description="Compare the endpoint to a matrix-exponential solution if the system is autonomous affine linear.")
+    units: dict[str, str] | None = Field(default=None, description="Units of the supplied numerical state values, for labels (no numerical conversion is performed here).")
 
 
 class DynamisEquilibriumInput(BaseModel):
@@ -125,6 +140,9 @@ class DynamisFitParametersInput(BaseModel):
     param_names: list[str] | None = Field(default=None, max_length=12, description="Parameters to estimate; defaults to the preset's parameters")
     x_data: list[float] | None = Field(default=None, max_length=5000)
     y_data: list[float] | None = Field(default=None, max_length=5000)
+    y_sigma: list[float] | None = Field(
+        default=None, max_length=5000, description="One standard uncertainty per y value (expression fits); weights the fit"
+    )
     initial_guess: dict[str, float] | None = None
     rhs: dict[str, str] | None = Field(default=None, max_length=12)
     initial_state: dict[str, float] | None = None

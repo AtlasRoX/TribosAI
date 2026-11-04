@@ -47,25 +47,20 @@ def render_latex_to_png(latex_str: str, dpi: int = 180) -> bytes:
         math_to_image(f"${clean}$", buf, dpi=dpi, format="png")
         return buf.getvalue()
     except Exception:
-        # Fallback 1: render via plt.figure text
-        try:
+        # Fallback 1: the formula as mathtext; fallback 2: the cleaned string as plain text. Each figure is closed in
+        # `finally`: a savefig that raised left its figure open, and a long-running server accumulated them.
+        for text, size in ((f"${clean}$", 11), (clean, 10)):
             fig = plt.figure(figsize=(0.01, 0.01))
-            fig.text(0, 0, f"${clean}$", fontsize=11)
-            fallback_buf = io.BytesIO()
-            fig.savefig(fallback_buf, format="png", dpi=dpi, transparent=True, bbox_inches="tight", pad_inches=0.02)
-            plt.close(fig)
-            return fallback_buf.getvalue()
-        except Exception:
-            # Fallback 2: render clean string as text
             try:
-                fig = plt.figure(figsize=(0.01, 0.01))
-                fig.text(0, 0, clean, fontsize=10)
-                text_buf = io.BytesIO()
-                fig.savefig(text_buf, format="png", dpi=dpi, transparent=True, bbox_inches="tight", pad_inches=0.02)
+                fig.text(0, 0, text, fontsize=size)
+                out = io.BytesIO()
+                fig.savefig(out, format="png", dpi=dpi, transparent=True, bbox_inches="tight", pad_inches=0.02)
+                return out.getvalue()
+            except Exception:  # noqa: BLE001 - try the next, simpler rendering
+                continue
+            finally:
                 plt.close(fig)
-                return text_buf.getvalue()
-            except Exception:
-                return b""
+        return b""
 
 
 def render_latex_to_data_uri(latex_str: str, dpi: int = 180) -> str:

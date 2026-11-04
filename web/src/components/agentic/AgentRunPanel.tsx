@@ -86,7 +86,7 @@ export function groupPhases(phases: any[]): PhaseGroup[] {
 export interface CorePhaseStatus {
   phase?: string;
   label?: string;
-  status?: string; // ok | fallback | llm_unavailable | budget | error | skipped | not_run
+  status?: string; // ok | not_needed | fallback | llm_unavailable | budget | error | skipped | not_run
   reason?: string;
 }
 
@@ -94,7 +94,8 @@ export interface CorePhaseStatus {
 export function corePhaseChip(core: CorePhaseStatus | null | undefined): { text: string; tone: "warn" | "bad"; title: string } | null {
   if (!core || typeof core !== "object") return null;
   const status = str(core.status) || "ok";
-  if (status === "ok" || status === "not_run") return null;
+  // not_needed: the phase judged the question needs no tool plan (a deliberate choice, not a failure).
+  if (status === "ok" || status === "not_run" || status === "not_needed") return null;
   const reason = str(core.reason);
   if (status === "fallback") return { text: "fallback plan", tone: "warn", title: reason || "The model gave no usable reply; a fixed plan ran." };
   const why: Record<string, string> = {
@@ -154,12 +155,20 @@ function SubQuestions({ items }: { items: SubQuestion[] }) {
             <StatusIcon status={q.status} />
             <div className={styles.subqBody}>
               <span className={styles.subqText}>{q.text || "(empty sub-question)"}</span>
-              {q.status && tone !== "ok" && (
+              {q.check_state === "checked" || q.status === "verified" ? (
+                <> <Pill tone="ok">tool checked</Pill></>
+              ) : q.check_state === "supported_by_retrieval" ? (
+                <> <Pill tone="info">retrieval</Pill></>
+              ) : q.check_state === "failed" ? (
+                <> <Pill tone="bad">failed check</Pill></>
+              ) : q.answer_state === "answered" && q.check_state === "unverified" ? (
+                <> <Pill tone="neutral">answered</Pill></>
+              ) : q.status && tone !== "ok" ? (
                 <>
                   {" "}
                   <Pill tone={tone}>{humanize(str(q.status)).toLowerCase()}</Pill>
                 </>
-              )}
+              ) : null}
               {arr(q.depends_on).length > 0 && <span className={styles.meta}> · after {arr<string>(q.depends_on).join(", ")}</span>}
               {q.note && <span className={styles.toggleHint}>{q.note}</span>}
               {names.length > 0 && (
@@ -314,12 +323,16 @@ export function AgentRunPanel({ data, routing }: { data: AgentRunArtifact; routi
   const sumOf = (gs: PhaseGroup[]) => gs.reduce((sum, g) => sum + (g.seconds ?? 0), 0);
   const pipelineTotal = sumOf(pipelineGroups);
   const agentTotal = sumOf(agentGroups);
-  const runSeconds = isNum(used.seconds) ? used.seconds : null;
+  const durationSec = isNum((data as any).duration_seconds) ? (data as any).duration_seconds : null;
+  const runSeconds = durationSec ?? (isNum(used.seconds) ? used.seconds : null);
   // Agent phases run inside pipeline stages, so the two sums are shown apart and never added up.
+  const totalSec = runSeconds ?? (pipelineTotal > 0 ? pipelineTotal : null);
   const timing = [
-    pipelineGroups.length && pipelineTotal > 0 ? `pipeline ${formatSeconds(pipelineTotal)}` : "",
+    totalSec != null ? `total ${formatSeconds(totalSec)}` : "",
+    pipelineGroups.length && pipelineTotal > 0 && (runSeconds == null || Math.abs(pipelineTotal - runSeconds) >= 1.0)
+      ? `pipeline ${formatSeconds(pipelineTotal)}`
+      : "",
     agentGroups.length && agentTotal > 0 ? `agent phases ${formatSeconds(agentTotal)}` : "",
-    runSeconds != null ? `run time ${formatSeconds(runSeconds)}` : "",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -334,11 +347,22 @@ export function AgentRunPanel({ data, routing }: { data: AgentRunArtifact; routi
     runSeconds != null && runSeconds > 0 && Math.max(pipelineTotal, agentTotal) < 0.8 * runSeconds
       ? `Timed stages cover ${formatSeconds(Math.max(pipelineTotal, agentTotal))} of ${formatSeconds(runSeconds)}; the rest (model streaming, waiting, untimed steps) is not broken down.`
       : "";
-  const answered = subs.filter((q) => statusTone(q.status) === "ok").length;
+  const answered = subs.filter((q) => q.answer_state === "answered" || statusTone(q.status) === "ok").length;
+  const checked = subs.filter((q) => q.check_state === "checked" || q.status === "verified").length;
+  const retrieved = subs.filter((q) => q.check_state === "supported_by_retrieval").length;
+
+  const subSummaryText = subs.length
+    ? checked > 0 && checked === subs.length
+      ? `${checked} of ${subs.length} sub-question${subs.length === 1 ? "" : "s"} checked by tools`
+      : checked > 0
+      ? `${answered} of ${subs.length} sub-question${subs.length === 1 ? "" : "s"} answered (${checked} checked by tools)`
+      : retrieved > 0
+      ? `${answered} of ${subs.length} sub-question${subs.length === 1 ? "" : "s"} answered (${retrieved} literature-supported)`
+      : `${answered} of ${subs.length} sub-question${subs.length === 1 ? "" : "s"} answered`
+    : "";
 
   const meta = [
-    // Audit I39: the counter tracks tool-backed evidence per sub-question, not whether the final prose addresses it.
-    subs.length ? `${answered} of ${subs.length} sub-question${subs.length === 1 ? "" : "s"} backed by tool evidence` : "",
+    subSummaryText,
     trace.length ? `${trace.length} tool call${trace.length === 1 ? "" : "s"}${failures ? ` (${failures} failed)` : ""}` : "",
     isNum(data.draft_rounds) ? `${data.draft_rounds} draft round${data.draft_rounds === 1 ? "" : "s"}` : "",
   ]
@@ -383,7 +407,7 @@ export function AgentRunPanel({ data, routing }: { data: AgentRunArtifact; routi
           <div className={styles.sectionHead}>
             <span className={styles.sectionTitle}>Sub-questions</span>
             <span className={styles.meta}>
-              {answered} of {subs.length} backed by tool evidence
+              {subSummaryText}
             </span>
           </div>
           <SubQuestions items={subs} />

@@ -354,9 +354,19 @@ class GapPhase(AgentPhase):
     def applies(self, state: Any) -> bool:
         if getattr(state.ctx, "scope", "research") != "research" or not (state.draft or "").strip():
             return False
+        # When search is explicitly asked to be limited or narrow, skip gap re-retrieval
+        q_text = (getattr(state, "query", "") or getattr(state, "clean_query", "") or "").lower()
+        if re.search(
+            r"\b(?:keep\s+search(?:ing)?\s+limited|limited\s+search|narrow\s+search|brief\s+search|skip\s+deep\s+search|few\s+sources)\b",
+            q_text,
+        ):
+            return False
         # A pure mathematics or physics derivation is answered by computation, not by papers: no gap re-retrieval.
         if is_pure_derivation(state):
             return False
+        need = getattr(state.ctx, "evidence_need", None)
+        if need is not None and need.skip_retrieval:
+            return False  # no outside evidence applies: a gap search would only fetch unrelated pages
         if state.draft_round in (state.bag.get("gap_rounds_done") or []):
             return False
         return self._lit_ok(state) or self._web_ok(state)
@@ -655,17 +665,25 @@ class GapPhase(AgentPhase):
                 for k in keys:
                     q.add_evidence(k, evidence_key_label(k, round_no))
                 q.status = "partial" if it["status"] != "answered" else "answered"
+                q.answer_state = "answered" if it["status"] == "answered" else "partial"
+                q.check_state = "supported_by_retrieval"
                 q.note = f"new evidence retrieved in gap round {round_no + 1}"
             elif it["status"] == "missing" and it["id"] in searched:
                 outcome = (outcomes or {}).get(it["id"], "empty")
                 if outcome in DEFINITIVE_OUTCOMES:
                     q.status = "unanswerable"
+                    q.answer_state = "missing"
+                    q.check_state = "unverified"
                     q.note = "no evidence found after re-retrieval"
                 else:  # a failed, timed-out or off-topic search does not show the evidence is absent
                     q.status = "missing"
+                    q.answer_state = "missing"
+                    q.check_state = "unverified"
                     q.note = GapPhase._OUTCOME_NOTES.get(outcome, "unresolved")
             else:
                 q.status = it["status"] if it["status"] in ("answered", "partial") else q.status
+                if q.status == "answered":
+                    q.answer_state = "answered"
 
 
 GAP_PHASE = GapPhase()

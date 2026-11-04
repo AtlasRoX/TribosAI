@@ -113,6 +113,18 @@ def test_a_long_worked_problem_is_searched_by_its_subject_not_its_paragraph():
     assert literature_query(ctx, short) == short
 
 
+def test_a_numbered_task_list_is_never_searched_as_its_list_number():
+    """Live run: no named entity and a numbered list made the query "1.", which searched arXiv for the digit 1."""
+    tasks = ("1. How many primes are there below 100000, how many twin-prime pairs are there below 100000? "
+             "2. For the Collatz map, find the starting value below 100000 with the longest total stopping time. "
+             "3. Verify Goldbach's conjecture for every even number from 4 to 100000. 4. Is it proven?")
+    no_terms = SimpleNamespace(focus_terms=lambda: [], search_plan=None)
+    planned = SimpleNamespace(question_type="proof", web_query="primes twin-prime pairs")
+    assert literature_query(no_terms, tasks, planned) == "primes twin-prime pairs proof"
+    first = literature_query(no_terms, tasks, SimpleNamespace(question_type="proof", web_query=""))
+    assert first.startswith("How many primes are there below 100000")
+
+
 def test_subquestions_show_the_restated_problem_once():
     problem = "the forced damped mass–spring system with m = 2 kg, c = 3 N·s/m, k = 50 N/m, F0 = 10 N"
     subs = [
