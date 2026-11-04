@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import platform
+import re
 import statistics
 import sys
 import time
@@ -75,6 +76,17 @@ class RunConfig:
     cassette: str | None = None  # "record" | "replay": answer-level calls are recorded to / replayed from cassettes
     cassette_dir: str | None = None  # default tribos/evals/cassettes
     replay_lenient: bool = False  # replay: a missed call gets the nearest recorded reply instead of failing the case
+    # "tribos": the full pipeline. "direct": the same model answers alone, with no tools, retrieval or verification
+    # (the ablation baseline: the difference between the two is what the harness adds). Graded identically.
+    system: str = "tribos"
+
+
+# The standard benchmark prompt for the direct baseline (as used for MATH, GSM8K and GPQA reports).
+DIRECT_SYSTEM_PROMPT = (
+    "You are an expert in mathematics, physics, chemistry and engineering. Solve the problem. Reason step by step, "
+    "then give the final answer. Put a mathematical or numeric final answer within \\boxed{}; for a multiple-choice "
+    "question, end with 'Answer: <option>'. Include units when the question asks for them."
+)
 
 
 def source_fingerprint() -> str:
@@ -310,6 +322,25 @@ class Evaluator:
         )
         return result_payload(res)
 
+    async def _ask_direct(self, case: EvalCase, query: str, thread: str, *, setup_turn: bool,
+                          model: str | None = None, web: bool | None = None) -> dict[str, Any]:
+        """The baseline: one call to the same model, no tools, no retrieval, no verification."""
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        from ..utils.llm.llm_factory import get_llm
+
+        llm = get_llm(model_name=model or self._model(), temperature=0.0, max_tokens=32000, reasoning_effort="medium",
+                      timeout=self._timeout(case))
+        reply = await llm.ainvoke([SystemMessage(content=DIRECT_SYSTEM_PROMPT), HumanMessage(content=query)])
+        content: Any = getattr(reply, "content", "")
+        if isinstance(content, list):
+            content = "".join(str(p.get("text", "")) if isinstance(p, dict) else str(p) for p in content)
+        text = re.sub(r"(?s)^\s*<think>.*?</think>\s*", "", str(content)).strip()
+        usage = getattr(reply, "usage_metadata", None) or {}
+        tokens = usage.get("total_tokens") if isinstance(usage, dict) else None
+        return {"response": text, "framework_used": "direct",
+                "execution_artifacts": {"agent_run": {"budget": {"used": {"llm_calls": 1, "tokens_estimated": tokens}}}}}
+
     def _http(self) -> Any:
         if self._http_client is None:
             import httpx
@@ -402,7 +433,7 @@ class Evaluator:
                 ask_kwargs = {"model": self.cfg.model_name or cassette.meta.get("model"),
                               "web": self.cfg.web_search if self.cfg.web_search is not None else cassette.meta.get("web_search")}
             _ = self.orchestrator  # built (and its modules imported) before the hooks scan the loaded modules
-        ask = self._ask_http if self.cfg.via else self._ask_local
+        ask = self._ask_direct if self.cfg.system == "direct" else (self._ask_http if self.cfg.via else self._ask_local)
         thread = f"eval-{self.run_id}-{case.id}"
         try:
             with cassette.activate() if cassette is not None else nullcontext():
@@ -466,7 +497,27 @@ class Evaluator:
             *(case.retrieval.gold_pmids if case.retrieval else []),
             *(case.retrieval.gold_dois if case.retrieval else []),
         ]
+        # The final answer to grade, found the same way for every system: the \boxed{} value when there is one, else
+        # the grader model's reading of the stated final answer (kept, so rescore reuses it without asking again).
+        final_source = None
+        if (expect.numeric_answer is not None or expect.symbolic_answer is not None) and response:
+            if scoring.extract_boxed(response) is not None:
+                observed.pop("final_answer", None)
+                final_source = "boxed"
+            elif previous.get("final_answer_source") == "model" and previous.get("final_answer") and not judge:
+                observed["final_answer"], final_source = previous["final_answer"], "model"
+            elif self.cfg.grade_with_model:
+                final = await grading.extract_final_answer(case.query, response, llm_factory=self.llm_factory,
+                                                           model_name=self.cfg.judge_model)
+                if final:
+                    observed["final_answer"], final_source = final, "model"
+            if final_source is None:
+                final_source = "heuristic"
         checks, metrics = scoring.answer_checks(expect, observed, gold)
+        if final_source is not None:
+            metrics["final_answer_source"] = final_source
+            if observed.get("final_answer"):
+                metrics["final_answer"] = observed["final_answer"]
         if case.retrieval is not None and (case.retrieval.gold_pmids or case.retrieval.gold_dois or case.retrieval.gold_arxiv_ids):
             # Retrieved-set recall from the run manifest (unordered), informational at this level.
             unranked = RetrievalExpect(
@@ -656,6 +707,7 @@ class Evaluator:
             "n_cases": n_cases,
             "config": asdict(self.cfg),
             "model": self._model(),
+            "system": self.cfg.system,
             "source_fingerprint": source_fingerprint(),
             "env": _safe_env(),
             "python": sys.version.split()[0],

@@ -388,11 +388,43 @@ def parse_sympy_expr(raw: str) -> Any:
         return None
 
 
+_FRAC_SHORT_RE = (
+    (re.compile(r"\\([dt]?frac)\s*([0-9A-Za-z])\s*([0-9A-Za-z])"), r"\\\1{\2}{\3}"),   # \frac14 -> \frac{1}{4}
+    (re.compile(r"\\([dt]?frac)\s*([0-9A-Za-z])\s*\{"), r"\\\1{\2}{"),                  # \frac1{x} -> \frac{1}{x}
+    (re.compile(r"\\([dt]?frac)\s*(\{[^{}]*\})\s*([0-9A-Za-z])"), r"\\\1\2{\3}"),       # \frac{a}2 -> \frac{a}{2}
+    (re.compile(r"\\sqrt\s*([0-9A-Za-z])"), r"\\sqrt{\1}"),                               # \sqrt2 -> \sqrt{2}
+)
+_TEXT_WRAP_RE = re.compile(r"\\(?:text|textbf|textit|mathrm|mathbf|operatorname)\s*\{([^{}]*)\}")
+
+
+def expand_latex_shorthand(expr: str) -> str:
+    """Brace-less LaTeX shorthands that answers commonly use, written out (\\frac14 is \\frac{1}{4})."""
+    out = expr or ""
+    for pattern, repl in _FRAC_SHORT_RE:
+        out = pattern.sub(repl, out)
+    return out
+
+
+def _plain_text_answer(expr: str) -> str:
+    """A text answer without its LaTeX wrapping: \\text{Evelyn} and Evelyn are the same answer."""
+    t = _TEXT_WRAP_RE.sub(r"\1", expr or "")
+    t = re.sub(r"\\[,;!: ]|\$|\\left|\\right", "", t)
+    return re.sub(r"\s+", " ", t).strip().strip(".").strip()
+
+
 def symbolic_equivalent(expr_a: str, expr_b: str, *, rtol: float = 1e-5, atol: float = 1e-7) -> bool:
     """Check whether two mathematical/LaTeX expressions are symbolically equivalent using SymPy
     (`sympy.simplify(a - b) == 0`) plus deterministic numeric spot checks."""
     if not expr_a or not expr_b:
         return False
+    # Text answers ("\text{Evelyn}" against "Evelyn"): the same words are the same answer. Case is ignored only when
+    # the reference is itself text, so variable names stay case-sensitive.
+    plain_a, plain_b = _plain_text_answer(expr_a), _plain_text_answer(expr_b)
+    if plain_a and plain_a == plain_b:
+        return True
+    if _TEXT_WRAP_RE.search(expr_b) and plain_a.lower() == plain_b.lower() and plain_a:
+        return True
+    expr_a, expr_b = expand_latex_shorthand(expr_a), expand_latex_shorthand(expr_b)
     if latex_to_sympy_str(expr_a).replace(" ", "") == latex_to_sympy_str(expr_b).replace(" ", ""):
         return True
     try:
@@ -450,6 +482,13 @@ def _parse_numeric_str(raw: str) -> float | None:
     s = normalize(raw or "").strip().strip("$").strip()
     if not s:
         return None
+    # LaTeX thousands separators: 10{,}000 and 10\,000 are 10000.
+    s = re.sub(r"(?<=\d)(?:\{,\}|\\,|\\ )(?=\d{3})", "", s)
+    # Brace-less shorthand and sizing commands: -\frac12 is -1/2, \sin\left(x\right) is \sin(x).
+    s = re.sub(r"\\(?:left|right|big|Big|bigl|bigr)\b", "", expand_latex_shorthand(s))
+    # "expression \approx 2.534": the stated value is the answer.
+    if re.search(r"\\approx|≈", s):
+        s = re.split(r"\\approx|≈", s)[-1].strip()
     # Strip trailing units after a number if simple, or try direct float first
     s_clean = s.replace(",", "").strip()
     try:
@@ -484,7 +523,7 @@ def extract_numeric_answer(text: str) -> float | None:
     """Extract the primary numerical answer from text (prioritizing \\boxed{...}, #### <num>, Result/Answer lines, or final number)."""
     if not text:
         return None
-    norm = normalize(text)
+    norm = re.sub(r"(?<=\d)(?:\{,\}|\\,|\\ )(?=\d{3})", "", normalize(text))  # 10{,}000 -> 10000
     boxed = extract_boxed(norm)
     if boxed is not None:
         v = _parse_numeric_str(boxed)
@@ -635,14 +674,28 @@ def answer_checks(expect: AnswerExpect, observed: dict[str, Any], gold_pmids: Se
     for pat in expect.must_not_mention:
         hit = re.search(pat, text, re.I)
         checks.append(Check(name="answer.avoids", passed=not hit, detail=f"/{pat}/ {'present: ' + hit.group(0) if hit else 'absent'}"))
+    # One final answer per response, found the same way for every system (runner._score_answer): the \boxed{} value
+    # when there is one, else the grader's reading of the stated final answer. Checked strictly: no number elsewhere
+    # in the working can rescue it.
+    final = observed.get("final_answer")
+    graded_text = f"\\boxed{{{final}}}" if isinstance(final, str) and final.strip() else text
     if expect.numeric_answer is not None:
         n_check, n_metrics = numeric_answer_check(
-            expect.numeric_answer, text, abs_tol=expect.numeric_tolerance, rel_tol=expect.numeric_rel_tol
+            expect.numeric_answer, graded_text, abs_tol=expect.numeric_tolerance, rel_tol=expect.numeric_rel_tol
         )
+        if not n_check.passed and expect.numeric_scale:
+            # The same quantity in base units: 4.8e6 for "4.76, in 10^6" (relative tolerance only).
+            scaled = expect.numeric_answer * expect.numeric_scale
+            s_check, s_metrics = numeric_answer_check(scaled, graded_text, abs_tol=expect.numeric_tolerance * expect.numeric_scale,
+                                                      rel_tol=expect.numeric_rel_tol)
+            if s_check.passed:
+                n_check = Check(name="answer.numeric", passed=True,
+                                detail=f"{s_check.detail} (base units for {expect.numeric_answer:g} in units of {expect.numeric_scale:g})")
+                n_metrics = {**s_metrics, "numeric_expected": expect.numeric_answer, "numeric_scale": expect.numeric_scale}
         checks.append(n_check)
         extra_metrics.update(n_metrics)
     if expect.symbolic_answer is not None:
-        s_check, s_metrics = symbolic_answer_check(expect.symbolic_answer, text)
+        s_check, s_metrics = symbolic_answer_check(expect.symbolic_answer, graded_text)
         checks.append(s_check)
         extra_metrics.update(s_metrics)
     if expect.abstain is True:
@@ -1062,8 +1115,22 @@ def heuristic_yesno(text: str, options: Sequence[str] = ("yes", "no", "maybe")) 
     return m.group(1) if m and m.group(1) in options else None
 
 
+_CHOICE_LETTER_RE = re.compile(
+    # Keywords in any case; the letter itself must be a capital, so "the answer is a reaction" is not option (A).
+    r"(?:(?i:answer)\s*(?i:is)?\s*[:=]?\s*\**\(?([A-Z])\)?\**(?![A-Za-z])|\\boxed\{\s*\(?([A-Z])\)?\s*\}"
+    r"|\b(?i:option|choice)\s*\(?([A-Z])\)(?![A-Za-z]))")
+
+
 def heuristic_choice(text: str, options: Sequence[str]) -> str | None:
-    """The single option the answer names (ignoring the insufficient-information option), else None."""
+    """The single option the answer names (ignoring the insufficient-information option), else None.
+
+    Lettered options ((A) ... (D), in the order of `options`): the last "Answer: B", \\boxed{B} or "option (B)" in the
+    answer picks options[1]."""
+    letters = [next(g for g in m.groups() if g) for m in _CHOICE_LETTER_RE.finditer(normalize(text or ""))]
+    if letters and 1 < len(options) <= 26:
+        index = ord(letters[-1]) - 65
+        if 0 <= index < len(options):
+            return options[index]
     low = normalize(text).lower()
     named = [o for o in options if not o.lower().startswith("insufficient") and re.search(rf"(?<!\w){re.escape(o.lower())}(?!\w)", low)]
     if len(named) == 1:

@@ -1,0 +1,10 @@
+{
+  "_about": "Benchmark items whose reference answer is wrong. They are excluded from accuracy and listed in the report, for every system alike. Each entry states the evidence; add one only when the reference's own working shows the error.",
+  "gsm8k-454": {
+    "question": "Marin and his neighbor Nancy each eat 4 apples a day. How many apples do they eat in 30 days?",
+    "reference_answer": "150",
+    "correct_answer": "240",
+    "evidence": "The reference computes 4 + 1 = 5 apples a day; two people eating 4 apples each eat 8 a day, so 8 x 30 = 240.",
+    "found": "2026-11-04 pilot: both systems answered 240 and were graded wrong"
+  }
+}

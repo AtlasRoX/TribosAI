@@ -4,8 +4,7 @@ each literature document carries, and the retrieval date that time-sensitive fac
 """
 
 import re
-import time
-from datetime import date
+from datetime import UTC, datetime
 
 import pytest
 
@@ -92,7 +91,8 @@ def test_synthesis_request_is_dated():
     assert "<retrieval_date>2026-10-16</retrieval_date>" in req
     assert req.index("<retrieval_date>") < req.index("<user_query")
     default = build_synthesis_request("<evidence></evidence>", "<tool_status></tool_status>", "none", "q")
-    assert f"<retrieval_date>{date.today().isoformat()}</retrieval_date>" in default
+    # The answer is dated in UTC (draft.retrieval_date); a local date differs around midnight.
+    assert f"<retrieval_date>{datetime.now(UTC).date().isoformat()}</retrieval_date>" in default
 
 
 @pytest.mark.asyncio
@@ -126,6 +126,6 @@ async def test_orchestrator_sends_date_and_evidence_levels(offline_orchestrator,
     monkeypatch.setattr(orch_module, "get_llm", lambda *a, **k: FakeLLM())
     await orch.execute_inquiry("Find KRAS papers only.", thread_id="t-format", enable_web_search=True)
     _system, human = captured["messages"]
-    assert f"<retrieval_date>{time.strftime('%Y-%m-%d')}</retrieval_date>" in human.content
+    assert f"<retrieval_date>{datetime.now(UTC).date().isoformat()}</retrieval_date>" in human.content
     assert 'evidence_level="peer-reviewed journal/conference"' in human.content
     assert 'evidence_level="preprint"' in human.content

@@ -118,6 +118,9 @@ class AnswerExpect(BaseModel):
     numeric_answer: float | None = None  # expected numerical value (from \boxed{...} or final answer)
     numeric_tolerance: float = 1e-3  # absolute tolerance for numeric_answer
     numeric_rel_tol: float = 1e-2  # relative tolerance for numeric_answer
+    # The question asks for the value in a power-of-ten unit ("in 10^6"); the same quantity written out in base units
+    # (expected x numeric_scale, e.g. 4.8e6 for 4.76 in 10^6) is equally right.
+    numeric_scale: float | None = None
     symbolic_answer: str | None = None  # expected symbolic/LaTeX expression (checked via SymPy simplify(a-b)==0 + spot checks)
     # Benchmark labels: graded from the free-text answer.
     label: str | None = None  # yes|no|maybe, or the correct option text

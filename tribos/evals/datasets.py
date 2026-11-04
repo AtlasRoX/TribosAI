@@ -23,6 +23,7 @@ Where evaluation cases come from.
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import os
 import random
@@ -232,6 +233,12 @@ def load_theoremqa(refresh: bool = False) -> list[EvalCase]:
 # SciBench (xw27/scibench, MIT): collegiate physics, chemistry and mathematics numerical problems
 # ---------------------------------------------------------------------------------------------------------------
 
+def _unit_scale(unit: str) -> float | None:
+    """The power of ten a SciBench unit asks the answer in ("$10^6$", "$10^{-4} \\mathrm{~m}$" -> 1e6, 1e-4)."""
+    m = re.search(r"10\s*\^\s*\{?\s*([+-]?\d+)\s*\}?", unit or "")
+    return 10.0 ** int(m.group(1)) if m else None
+
+
 def load_scibench(refresh: bool = False) -> list[EvalCase]:
     rows = _fetch_hf_rows("xw27/scibench", cache_dir() / "scibench_rows.json", config="default", split="train", refresh=refresh)
     cases: list[EvalCase] = []
@@ -252,6 +259,7 @@ def load_scibench(refresh: bool = False) -> list[EvalCase]:
                 numeric_answer=num if num is not None else 0.0,
                 numeric_rel_tol=0.02,
                 numeric_tolerance=1e-2,
+                numeric_scale=_unit_scale(unit),
                 verified=None,
             ),
             reference=str(row.get("solution") or ""),
@@ -372,15 +380,21 @@ def load_gpqa(refresh: bool = False) -> list[EvalCase]:
         ] or _as_list(row.get("distractors"))
         domain = str(row.get("Subdomain") or row.get("High-level domain") or "physics").lower().replace(" ", "_")
         cid = row.get("Record ID") or row.get("id") or i
+        # GPQA is multiple choice: the four options are shown, lettered, in an order shuffled per question with a seed
+        # from its id (reproducible; the correct answer is not always first). They were once left out entirely, so
+        # answers were free-form and a quarter could not be matched to any option.
+        options = [correct, *distractors]
+        random.Random(int(hashlib.sha256(str(cid).encode()).hexdigest()[:12], 16)).shuffle(options)
+        lettered = "\n".join(f"({chr(65 + k)}) {o}" for k, o in enumerate(options))
         cases.append(EvalCase(
             id=f"gpqa-{cid}",
             suite="gpqa",
             category=domain,
-            query=q,
+            query=f"{q}\n\nAnswer choices:\n{lettered}\n\nChoose the single correct option and end with 'Answer: <letter>'.",
             answer=AnswerExpect(
                 answer_type="choice",
                 label=correct,
-                options=[correct, *distractors],
+                options=options,
                 verified=None,
             ),
             reference=str(row.get("Explanation") or ""),

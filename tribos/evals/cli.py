@@ -131,7 +131,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         judge_min=args.judge_min, grade_with_model=not args.no_model_grading,
         web_search=False if args.no_web else None, retries=args.retries, answer_retries=args.answer_retries,
         framework=args.framework, via=args.via, repeat=max(1, args.repeat), flaky_sd=args.flaky_sd,
-        cassette=cassette, cassette_dir=args.cassette_dir, replay_lenient=args.replay_lenient,
+        cassette=cassette, cassette_dir=args.cassette_dir, replay_lenient=args.replay_lenient, system=getattr(args, 'system', 'tribos'),
     )
     if args.via and "answer" not in levels:
         print("--via only applies to the answer level; plan and retrieval still run in-process", file=sys.stderr)
@@ -296,6 +296,8 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--retries", type=int, default=1, help="re-run failed live plan/retrieval cases (default 1); passes on retry count as flaky")
     r.add_argument("--answer-retries", type=int, default=0, help="re-run failed answers (default 0)")
     r.add_argument("--framework", help="orchestration framework for every case (overrides each case's framework)")
+    r.add_argument("--system", choices=("tribos", "direct"), default="tribos",
+                   help="answer level: tribos (the full pipeline) or direct (the same model alone, no tools: the ablation baseline)")
     r.add_argument("--via", help="base URL of a running API (http://127.0.0.1:8000): answer cases POST /api/chat; "
                                  "a bearer token is read from TRIBOS_EVAL_TOKEN")
     r.add_argument("--repeat", type=int, default=1, help="runs per case: mean/SD per metric and a flaky flag (default 1)")

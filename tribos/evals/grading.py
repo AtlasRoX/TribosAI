@@ -27,6 +27,13 @@ _EXTRACT_SYSTEM = (
     'insufficient option if one is listed, otherwise "none". Reply with JSON only: {"choice": "<option text exactly>"}'
 )
 
+_FINAL_SYSTEM = (
+    "You read an answer to a question and report the single final answer it commits to: the value, expression or "
+    "option it gives as its answer to the question, exactly as written (LaTeX allowed), without units. Not an "
+    "intermediate value, not a restatement of given data. If the answer gives no final answer, reply with null. "
+    'Reply with JSON only: {"final": "<final answer>"} or {"final": null}'
+)
+
 JUDGE_DIMENSIONS = ("correctness", "grounding", "completeness", "calibration", "clarity")
 _JUDGE_SYSTEM = (
     "You are a senior physicist, mathematician, and research engineer grading an AI scientific assistant's answer. "
@@ -81,17 +88,37 @@ async def _ask(llm_factory: LLMFactory | None, model_name: str | None, system: s
     return _first_json(_strip_think(str(content)))
 
 
+async def extract_final_answer(
+    question: str, answer: str, *, llm_factory: LLMFactory | None, model_name: str | None = None, timeout_s: float = 60.0,
+) -> str | None:
+    """The final answer a response commits to, as written; None when it gives none or the grader is unavailable.
+
+    Used identically for every system under test whose response has no \\boxed{} answer, so a prose answer ("They
+    eat 2 x 4 x 30 = 240 apples") is graded on its stated result, neither on the last number written nor on any
+    number that happens to match somewhere in the working.
+    """
+    obj = await _ask(llm_factory, model_name, _FINAL_SYSTEM,
+                     f"<question>{question[:4000]}</question>\n<answer>\n{answer[:8000]}\n</answer>", timeout_s)
+    final = (obj or {}).get("final")
+    text = str(final).strip() if final is not None else ""
+    return text[:400] or None
+
+
 async def extract_label(
     question: str, answer: str, options: Sequence[str], *, llm_factory: LLMFactory | None, model_name: str | None = None,
     timeout_s: float = 60.0,
 ) -> str | None:
     """The option the answer commits to, matched back to the option list; None when undecidable."""
-    listed = "\n".join(f"- {o}" for o in options)
+    # Lettered, in the order the question showed them, so an answer that names a letter ("Answer: B") can be read.
+    listed = "\n".join(f"({chr(65 + k)}) {o}" for k, o in enumerate(options))
     obj = await _ask(llm_factory, model_name, _EXTRACT_SYSTEM,
                      f"<question>{question}</question>\n<options>\n{listed}\n</options>\n<answer>\n{answer[:6000]}\n</answer>", timeout_s)
     choice = str((obj or {}).get("choice") or "").strip().lower()
     if not choice or choice == "none":
         return None
+    letter = re.fullmatch(r"\(?([a-z])\)?[.:]?(?:\s.*)?", choice)
+    if letter and len(options) <= 26 and ord(letter.group(1)) - 97 < len(options) and (len(choice) <= 3 or choice[1] == ")"):
+        return options[ord(letter.group(1)) - 97]
     for o in options:
         if choice == o.lower() or choice.strip(" .\"'") == o.lower():
             return o

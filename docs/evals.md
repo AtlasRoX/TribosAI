@@ -33,18 +33,41 @@ Each run writes `eval_runs/<time>_<suites>_<levels>/`:
 
 ## Suites
 
+`python -m tribos.evals list` prints the current set.
+
 | Suite | Cases | Purpose |
 |---|---|---|
-| `clinical` | 20 | Treatment, pharmacology, diagnosis, epidemiology, mechanism, safety, trials, genetics, target, methods, statistics, comparison, biomarker, regulatory. Each case has gold landmark PMIDs (each resolved by exact title on EuropePMC), required facts, and an expert reference answer |
-| `behavior` | 25 | Greetings and typos, gibberish, thanks, papers-only and no-simulation requests, simulations, single-cell with and without data, memory follow-up, vague questions, a hallucination trap, prompt injection |
-| `golden` | 7 | Live only. Long questions, one or more per orchestration framework (KRAS G12C, BRCA2/SOLO-1, adjuvant PD-1 melanoma, KRAS repurposing, PARP/HRD, EGFR T790M/C797S, MYC in glioblastoma), each with structured golden facts: FDA application numbers, approval dates, hazard ratios with CIs |
-| `audit` | 23 | Live only. The former `scripts/audit_evaluation_runner.py` cases (web search off) with assertions: greeting runs no tools, memory follow-up via `setup`, prompt injection must not obey or disclose secrets, simulations, single-cell states |
-| `pubmedqa` | 1,000 | PubMedQA PQA-L: yes/no/maybe questions with expert labels and their source PMID. Downloaded on first use (MIT) |
-| `litqa2` | 199 | LAB-Bench LitQA2: multiple choice with an "insufficient information" option and source DOIs. Downloaded on first use (CC BY-SA; carries a training-data canary, so it is never stored in the repo) |
-| `bioasq` | — | BioASQ task B: yes/no, factoid, list and summary questions with gold documents. Registration is required, so download the JSON and pass `--bioasq-file` |
+| `math`, `physics`, `engineering` | 12 each | Curated STEM questions across analysis, ODEs, number theory, mechanics, electromagnetism, thermodynamics, structures, control and more, with plan, retrieval and answer expectations |
+| `behavior` | 17 | Routing, abstention, scope, safety, memory and simulation behaviour |
+| `golden` | 5 | Live only. Long questions with structured golden facts, one or more per orchestration framework |
+| `stem` | 11 | Algebra, number theory, ODEs, PDEs, proofs, simulation and an open problem |
+| `math500` | 500 | MATH-500 competition mathematics (HuggingFaceH4/MATH-500, MIT); symbolic answers |
+| `gsm8k` | 1,319 | GSM8K grade-school word problems (openai/gsm8k, MIT); numeric answers |
+| `theoremqa` | 350+ | TheoremQA across math, physics, EE and CS (MIT); numeric, boolean, choice or symbolic |
+| `scibench` | — | SciBench collegiate physics, chemistry and math numerics (MIT); numeric within 2% |
+| `phybench` | — | PHYBench symbolic physics (MIT) |
+| `engdesign` | — | Engineering analysis and design (MIT / Apache-2.0); numeric within 5% or required terms |
+| `ugphysics` | — | Undergraduate physics (CC BY-NC 4.0; needs `--allow-noncommercial`) |
+| `gpqa` | 198 | GPQA Diamond PhD-level science multiple choice (gated: accept the terms on Hugging Face and set `HF_TOKEN`) |
 | `path/to/file.jsonl` | — | Your own cases |
 
-Benchmarks are run open-domain: Tribos retrieves its own evidence, so a PubMedQA question also measures whether the source abstract was found. Sample them with `--limit 50 --seed 1`. LitQA2 asks about papers published after many models' training data; read its accuracy together with coverage (how often the answer committed to an option).
+External benchmarks are downloaded on first use and cached. Sample them with `--limit 50 --seed 1`; the same seed
+gives the same cases on every run, so two systems can be compared on an identical sample.
+
+## Benchmarking against the base model (`--system direct`)
+
+`--system direct` answers each case with the same model alone: one call with a standard benchmark prompt (reason
+step by step, final answer in `oxed{}` or as `Answer: <option>`), no tools, retrieval or verification. It is graded
+exactly as the full pipeline is, so the difference between the two runs is what the Tribos harness adds.
+
+```bash
+python -m tribos.evals run --suite math500 --level answer --limit 50 --seed 1 --system direct --out runs/direct
+python -m tribos.evals run --suite math500 --level answer --limit 50 --seed 1 --system tribos --out runs/tribos
+```
+
+`meta.json` records the system. `python -m tribos.evals.benchmark_report <root>` pairs the two runs by case and
+reports accuracy with Wilson intervals, the paired difference with an exact McNemar test, Tribos's verified
+precision, abstention and latency, as HTML, Markdown and PDF.
 
 ## Options worth knowing
 

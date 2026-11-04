@@ -44,7 +44,8 @@ dependencies = [
   "tqdm==4.67.1",
   "transformers==4.55.2",
   "xlsxwriter==3.2.9",
-  "pyarrow==26.0.0",
+  # pyarrow 24+ wheels require numpy 2 (numpy is pinned to 1.26 above): 26.0.0 made every parquet read fail.
+  "pyarrow==23.0.1",
   "beautifulsoup4==4.14.2",
   "python-dotenv>=1.0.0",
   "python-multipart==0.0.32",
