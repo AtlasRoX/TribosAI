@@ -41,7 +41,7 @@ dependencies = [
   "tqdm==4.67.1",
   "transformers==4.55.2",
   "xlsxwriter==3.2.9",
-  "pyarrow==21.0.0",
+  "pyarrow==26.0.0",
   "beautifulsoup4==4.14.2",
   "python-dotenv>=1.0.0",
   "python-multipart==0.0.32",
