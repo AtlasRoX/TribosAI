@@ -301,7 +301,7 @@ function FindingCard({ f, c, test, blocks, focus, backendUrl, authHeaders }: {
           {okCells.length > 0 && (
             <div className={styles.codeDrawer}>
               <button type="button" onClick={() => setCodeOpen((o) => !o)} aria-expanded={codeOpen}>
-                <Code2 aria-hidden="true" /> Code ({okCells.length} cell{okCells.length === 1 ? "" : "s"}){f.replication?.code ? " + independent re-implementation" : ""}
+                <Code2 aria-hidden="true" /> Code ({okCells.length} cell{okCells.length === 1 ? "" : "s"}){f.replication?.code ? " + separate re-implementation" : ""}
                 <ChevronDown className={codeOpen ? styles.rot : ""} aria-hidden="true" />
               </button>
               {codeOpen && (

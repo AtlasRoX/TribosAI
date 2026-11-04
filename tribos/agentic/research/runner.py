@@ -62,7 +62,8 @@ def _test_prompt(test: dict[str, Any], goal: str, context: str) -> str:
 
 
 async def _codeact(model: ResearchModel, prompt: str, *, quantities: list[str], steps: int, effort: str,
-                   timeout_s: int, replicate: bool, on_cell: Callable[[int, dict[str, Any]], Awaitable[None]] | None):
+                   timeout_s: int, replicate: bool, on_cell: Callable[[int, dict[str, Any]], Awaitable[None]] | None
+                   ) -> tuple[dict[str, Any], Any, list[dict[str, Any]]]:
     from ..codeact import solve
     from ..sandbox import research_ceiling
     from ..sandbox.policy import ALLOWED_MODULE_ROOTS
@@ -91,6 +92,20 @@ async def _codeact(model: ResearchModel, prompt: str, *, quantities: list[str], 
     return data, result, figures[-4:]
 
 
+def _exact_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def replication_model() -> ResearchModel | None:
+    """The model that re-implements numeric results, when TRIBOS_RESEARCH_REPLICATION_MODEL names one; otherwise the
+    same model replicates (a separate session with a different algorithm, which the finding records)."""
+    from ...config.settings import get_str
+    from .model import LiveModel
+
+    name = str(get_str("TRIBOS_RESEARCH_REPLICATION_MODEL") or "").strip()
+    return LiveModel(name) if name else None
+
+
 async def run_compute(model: ResearchModel, test: dict[str, Any], *, goal: str, context: str, finding_id: str,
                       files_dir: str, steps: int, effort: str, timeout_s: int, cross_check: bool,
                       on_progress: Callable[[str], Awaitable[None]] | None = None) -> dict[str, Any]:
@@ -116,28 +131,41 @@ async def run_compute(model: ResearchModel, test: dict[str, Any], *, goal: str, 
     wants_replication = test.get("tier") in ("replicated", "certified") or (cross_check and test.get("tier") != "computed")
     if ok and cross_check and wants_replication and quantities:
         if on_progress is not None:
-            await on_progress(f"{test['id']}: independent re-implementation")
+            await on_progress(f"{test['id']}: separate re-implementation")
         try:
-            data_b, result_b, _ = await _codeact(model, prompt, quantities=[q["name"] for q in quantities],
+            replicator = replication_model() or model
+            data_b, result_b, _ = await _codeact(replicator, prompt, quantities=[q["name"] for q in quantities],
                                                  steps=steps, effort=effort, timeout_s=timeout_s, replicate=True,
                                                  on_cell=None)
             keys = [q["name"] for q in quantities]
             cmp = compare_results(result if isinstance(result, dict) else {"result": result},
                                   result_b if isinstance(result_b, dict) else {"result": result_b},
                                   rtol=1e-6, atol=1e-9, keys=keys)
+            same_model = getattr(replicator, "model_name", None) == getattr(model, "model_name", None)
             replication = {"status": cmp["status"], "agree": cmp["agree"], "disagree": cmp["disagree"],
                            "missing": cmp["missing"], "rows": cmp["rows"][:40],
+                           "model": getattr(replicator, "model_name", None), "same_model": same_model,
+                           "method": "a separate session, told to use a different algorithm, without the first code",
                            "code": "\n\n# ---\n\n".join(c["code"] for c in data_b["cells"] if c["status"] == "ok")[:20000]}
             all_agree = cmp["status"] == "agree"
             replication["conflicts"] = cmp["disagree"] - cmp["missing"]
-            checks.append({"name": "independent re-implementation", "passed": all_agree,
-                           "detail": cmp["note"] if all_agree else
-                           f"{cmp['agree']} of {cmp['compared']} quantities agree; {cmp['disagree'] - cmp['missing']} "
-                           f"differ; {cmp['missing']} missing from one run"})
+            who = "the same model" if same_model else f"a second model ({replication['model']})"
+            checks.append({"name": "separate re-implementation", "passed": all_agree,
+                           "detail": (f"{cmp['note']} (re-implemented by {who} with a different algorithm)" if all_agree
+                                      else f"{cmp['agree']} of {cmp['compared']} quantities agree; "
+                                           f"{cmp['disagree'] - cmp['missing']} differ; {cmp['missing']} missing from one run")})
             if all_agree:
                 tier = "replicated"
+                # Exact arithmetic reproduced exactly: every compared quantity is an integer in both runs (Python
+                # integers are exact) and the two separately written computations agree to the last digit. This is
+                # the `certified` level (AUDIT-107); floating-point results stop at `replicated`.
+                if cmp["rows"] and all(_exact_int(r.get("a")) and _exact_int(r.get("b")) and r.get("a") == r.get("b")
+                                       for r in cmp["rows"]):
+                    tier = "certified"
+                    checks.append({"name": "exact arithmetic", "passed": True,
+                                   "detail": f"all {len(cmp['rows'])} quantities are exact integers, reproduced exactly"})
         except Exception as exc:  # noqa: BLE001 - the first run still stands as computed
-            checks.append({"name": "independent re-implementation", "passed": False,
+            checks.append({"name": "separate re-implementation", "passed": False,
                            "detail": f"could not run: {type(exc).__name__}: {str(exc)[:200]}"})
     figs = save_figures(files_dir, finding_id, figures) if ok else []
     status = "passed" if ok else "failed"

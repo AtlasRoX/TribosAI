@@ -361,7 +361,7 @@ document.addEventListener("DOMContentLoaded", function () {{
 <div class="page">
 <nav class="toc"><h2>Contents</h2><ol>{toc}</ol>
 <p class="note">Every value in this thesis comes from code run in the Tribos sandbox (Appendix A) or from a cited source,
-and carries its verification level: Lean-verified, certified, replicated (two independent implementations agree),
+and carries its verification level: Lean-verified, certified, replicated (a separately written re-implementation with a different algorithm agrees),
 computed, sourced or argued.</p></nav>
 {''.join(body)}
 </div></body></html>"""
@@ -534,10 +534,18 @@ def thesis_bundle(campaign: dict[str, Any], files_dir: str) -> bytes:
         z.writestr("ledger.json", json.dumps({"goal": campaign.get("goal"), "charter": campaign.get("charter"),
                                               "findings": slim, "rounds": campaign.get("rounds")},
                                              indent=2, ensure_ascii=False, default=str))
-        z.writestr("README.md", "# Reproducing this thesis\n\nEach file in `code/` reproduces the values of one finding "
-                                "(run with Python 3.12 and numpy, scipy, sympy, mpmath, matplotlib). `proofs/` holds "
-                                "Lean 4 proofs that compiled. `ledger.json` lists every finding with its verification "
-                                "level.\n")
+        environment = thesis.get("environment")
+        if not environment:  # a thesis written before manifests existed: record the exporting environment instead
+            from ..agentic.research.manifest import environment_manifest
+
+            environment = {**environment_manifest(campaign), "note": "recorded at export, not when the thesis was written"}
+        z.writestr("manifest.json", json.dumps(environment, indent=2, ensure_ascii=False, default=str))
+        z.writestr("README.md", "# Reproducing this thesis\n\nEach file in `code/` reproduces the values of one finding; "
+                                "`manifest.json` records the software, library, Lean and model versions, the sandbox "
+                                "it ran in, and the sources with their retrieval times. `proofs/` holds Lean 4 proofs "
+                                "that compiled with no axioms beyond Lean's standard three. `ledger.json` lists every "
+                                "finding with its verification level. The plan, judgements and prose were written by a "
+                                "language model and are not reproducible bit for bit; see `limits` in the manifest.\n")
     return out.getvalue()
 
 

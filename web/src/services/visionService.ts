@@ -67,7 +67,7 @@ export function readingSummary(reading: Pick<ImageReading, "engines" | "vision_c
   if (reading.vision_checked) {
     switch (reading.consensus) {
       case "agreed":
-        vision = "two independent vision readings agreed";
+        vision = "two separate vision readings agreed";
         break;
       case "settled":
         vision = `two vision readings differed in ${places || "some"} ${places === 1 ? "place" : "places"}, settled against the image`;

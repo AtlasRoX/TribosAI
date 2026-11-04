@@ -64,6 +64,18 @@ MAX_STATEMENTS = 400
 MAX_TOOL_NUMBERS = 50_000
 
 _CODE_RE = re.compile(r"```.*?```|`[^`\n]*`", re.S)
+def _sentence_at(document: str, position: int) -> str:
+    """The sentence of `document` that contains character `position` (a statement's surrounding words)."""
+    if not document or position < 0:
+        return ""
+    start = max(document.rfind(". ", 0, position), document.rfind("\n", 0, position)) + 1
+    ends = [i for i in (document.find(". ", position), document.find("\n", position)) if i != -1]
+    return document[start:(min(ends) + 1) if ends else len(document)]
+
+
+# A statement over all real numbers: "for all real x", "for every real number", "x ∈ ℝ", "x \in \mathbb{R}".
+_ALL_REALS_RE = re.compile(r"(?i)\bfor\s+(?:all|every|any)\s+real\b|(?:∈|\\in)\s*(?:ℝ|\\mathbb\s*\{?R\}?|\\R\b)"
+                           r"|\bover\s+(?:the\s+)?reals\b")
 # Inline math may end in a spacing command right before a unit ("$0.1\,$m"): the closing $ then touches a letter.
 _SEG_RE = re.compile(
     r"\$\$(?P<d1>.+?)\$\$|\\\[(?P<d2>.+?)\\\]|\\\((?P<i1>.+?)\\\)"
@@ -1401,6 +1413,8 @@ class _Auditor:
             negative = self._negative_counterexample(syms, is_int_sym, fa, fb, a, b, rel, integral, extra_abs,
                                                      extra_rel)
             if negative:
+                if getattr(self, "_all_reals_stated", False):
+                    return FAILED, f"false for all real numbers: differs at {negative}"
                 return INCONCLUSIVE, f"holds for positive values only; differs at {negative}"
         return PASSED, ""
 
@@ -1676,6 +1690,11 @@ class _Auditor:
                 # A restatement: checked against the earlier statement as it was then, then rebound.
                 defined = head
                 a = self._snapshot(head, a)
+            # Does the statement range over all real numbers ("for all real x", "x ∈ ℝ")? Then a counterexample at a
+            # negative value is inside its stated domain and refutes it (AUDIT-111).
+            self._all_reals_stated = bool(_ALL_REALS_RE.search(
+                f"{claim.context} {claim.lead} {claim.domain} {' '.join(claim.quantifiers)} "
+                f"{_sentence_at(getattr(self, 'document', ''), claim.position)}"))
             quantified = self._quantified_compare(a, b, rel, st)
             status, detail = quantified if quantified is not None else self.compare(a, b, rel)
             if status == "equation":
@@ -1687,7 +1706,8 @@ class _Auditor:
                 or (b.expr and any(canonical_name(s.name) in self.env.values for s in b.expr.free_symbols))
             )
             is_ineq = rel in ("lt", "gt", "le", "ge", "ne")
-            has_quantifier = bool(st.quantifiers)
+            # "for all real x" in the sentence quantifies the statement: an identity, not an equation to solve.
+            has_quantifier = bool(st.quantifiers) or bool(getattr(self, "_all_reals_stated", False))
             if status == FAILED and not is_ineq and not has_quantifier and not (a.refs or b.refs or has_bound_var or (i == 1 and defined)) and not self._numeric_only(a, b):
                 # An identity that fails without referring to anything bound may be an equation to solve.
                 claim.links.append(Link(a.text[:120], b.text[:120], rel, INCONCLUSIVE, "pending: possibly an equation"))
@@ -2320,6 +2340,7 @@ def audit_answer(
         functions.discard(variable)  # the independent variable cannot also be inferred as its own function
     auditor = _Auditor(query, record, _tool_numbers(tool_results), variable, functions,
                        _unknowns(md, problem, physical=_physical_question(query)) | _independent_variables(md, query))
+    auditor.document = md  # statements' positions index into it (their sentences state domains, AUDIT-111)
     for defn in _answer_case_definitions(md):
         c = canonical_name(defn["name"])
         if c not in auditor.env.defined:  # the question's own definition of the name stays authoritative

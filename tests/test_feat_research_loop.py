@@ -128,7 +128,8 @@ def test_a_project_loops_to_its_conclusion_and_writes_a_checked_thesis(tmp_path,
     # Background jobs never recall the user's other conversations.
     assert requests and all(r["recall_memory"] is False and r["persist_memory"] is False for r in requests)
     tiers = {f["test_id"]: f["tier"] for f in c["ledger"]}
-    assert tiers == {"T1": "replicated", "T2": "formal", "T3": "sourced"}
+    # T1 reports exact integers that the separate re-implementation reproduces exactly: certified (AUDIT-107).
+    assert tiers == {"T1": "certified", "T2": "formal", "T3": "sourced"}
     t1 = next(f for f in c["ledger"] if f["test_id"] == "T1")
     assert {q["name"]: q["value"] for q in t1["quantities"]} == {"s_10": 385, "s_100": 338350, "s_1000": 333833500}
     assert t1["series"] and t1["figures"]
@@ -166,6 +167,7 @@ def test_the_judge_cannot_mark_a_deliverable_done_without_strong_enough_evidence
         {"id": "D1", "title": "a", "tier": "replicated"}, {"id": "D2", "title": "b", "tier": "computed"},
         {"id": "D3", "title": "c"}]}, "g"),
         "ledger": [{"id": "F1", "test_id": "T1", "status": "passed", "tier": "computed"}]}
+    camp["charter"]["tests"][0]["serves"] = ["D1", "D2"]  # evidence counts only for what its test serves (AUDIT-106)
     out = jd.apply_judgement(camp, {"deliverables": [{"id": "D1", "status": "done", "evidence": ["F1"]},
                                                      {"id": "D2", "status": "done", "evidence": ["F1"]},
                                                      {"id": "D3", "status": "done", "evidence": ["F9"]}],
@@ -251,6 +253,7 @@ def test_an_empty_judgement_keeps_earlier_verdicts_and_evidence():
         "deliverables": [{"id": "D1", "title": "a", "tier": "computed"}],
         "hypotheses": [{"id": "H1", "statement": "s", "falsification": "f"}]}, "g"),
         "ledger": [{"id": "F1", "test_id": "T1", "status": "passed", "tier": "replicated"}]}
+    camp["charter"]["tests"][0]["hypotheses"] = ["H1"]  # T1 was planned for H1 (verdict evidence must be, AUDIT-106)
     jd.apply_judgement(camp, {"deliverables": [{"id": "D1", "status": "partial", "evidence": ["F1"], "note": "kept"}],
                               "hypotheses": [{"id": "H1", "verdict": "supported", "evidence": ["F1"], "note": "why"}]})
     jd.apply_judgement(camp, {})  # e.g. a judgement that came back empty

@@ -15,7 +15,7 @@ import logging
 import os
 import re
 import time
-from typing import Any
+from typing import Any, cast
 
 from .charter import CHARTER_SYSTEM, add_tests, goal_items, validate_charter
 from .dashboard import build_dashboard
@@ -89,12 +89,12 @@ def round_seconds(campaign: dict[str, Any], rnd: dict[str, Any]) -> float:
     for a, b in sorted(intervals):
         if cur_end is None or a > cur_end:
             if cur_end is not None:
-                total += cur_end - cur_start
+                total += cur_end - cast(float, cur_start)
             cur_start, cur_end = a, b
         else:
             cur_end = max(cur_end, b)
     if cur_end is not None:
-        total += cur_end - cur_start
+        total += cur_end - cast(float, cur_start)
     wall = float(rnd.get("finished_at") or 0) - float(rnd.get("started_at") or 0)
     return min(total, wall) if wall > 0 and total > 0 else (total or max(0.0, wall))
 
@@ -207,7 +207,7 @@ class ResearchLoop:
         self.save()
 
     def cancelled(self) -> bool:
-        return self.m._cancelled_elsewhere(self.c)
+        return cast(bool, self.m._cancelled_elsewhere(self.c))
 
     async def job(self, request: dict[str, Any]) -> dict[str, Any]:
         """Run one orchestrator job and wait for it: {"status", "result", "error", "job_id"}."""
@@ -257,7 +257,7 @@ class ResearchLoop:
         req = self.base_request(web=True)
         req["message"] = f"{REVIEW_PROMPT}\n\nResearch goal: {self.c['goal']}"
         req["display_message"] = f"[Research project · Literature review] {self.c['title']}"
-        out = {"status": "failed", "error": "not run"}
+        out: dict[str, Any] = {"status": "failed", "error": "not run"}
         for _ in range(2):
             rec["attempts"] = int(rec.get("attempts") or 0) + 1
             out = await self.job(req)
@@ -382,7 +382,7 @@ class ResearchLoop:
             t["last_error"] = str(finding.get("error") or "failed")[:600]
             self.activity(f"{t['id']} failed: {t['last_error'][:160]}", t["id"])
             self.save()
-        st = finding.get("status")
+        st: Any = finding.get("status")
         t["status"] = {"passed": "passed", "disputed": "disputed", "refuted": "passed"}.get(st, "blocked")
         self.end_stage(rec, "succeeded" if t["status"] != "blocked" else "failed",
                        None if t["status"] != "blocked" else t.get("last_error"))

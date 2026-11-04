@@ -254,9 +254,11 @@ def test_phase_c_trust_boundary_rejects_adversarial_fresh_namespace_axiom():
     unproved_fake = uses_unproved(code_fake_choice)
     assert any("asserts False" in u or "Classical.choice" in u for u in unproved_fake)
 
-    # 4. Standard foundational axiom declarations without cheat types pass
+    # 4. Even a declaration that copies a standard axiom's name and type is refused: Lean already provides the real
+    # ones, so model code never needs to declare any, and a name allowlist once certified 2 + 2 = 5 (AUDIT-101).
+    # The standard axioms are accepted only from the kernel's own report (#print axioms; runner.STANDARD_AXIOMS).
     code_trusted = "axiom Classical.choice {α : Sort u} : Nonempty α → α"
-    assert uses_unproved(code_trusted) == []
+    assert uses_unproved(code_trusted) == ["axiom Classical.choice"]
 
 
 def test_phase_c_statement_correspondence_issues():

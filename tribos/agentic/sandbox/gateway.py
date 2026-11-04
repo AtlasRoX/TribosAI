@@ -96,7 +96,11 @@ def _select_backend(engine: str) -> tuple[Any | None, str | None]:
     from . import sandbox_allow_unisolated, sandbox_backend, sandbox_strict_limits
 
     if engine == ENGINE_SAGE:
-        # SageMath has its own interpreter and command discovery; the container backend does not carry it yet.
+        # SageMath has its own interpreter and command discovery; the container backend does not carry it yet, so it
+        # runs without an OS-level boundary and strict isolation refuses it like the subprocess backend (AUDIT-103).
+        if sandbox_strict_limits() and not sandbox_allow_unisolated():
+            return None, ("the sandbox is configured for strict isolation, and SageMath runs without an OS-level "
+                          "boundary (the container backend does not carry it); set TRIBOS_SANDBOX_ALLOW_UNISOLATED=1")
         return SageBackend(), None
 
     backend_name = sandbox_backend()

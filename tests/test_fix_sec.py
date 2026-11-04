@@ -1,6 +1,6 @@
 """Regression tests for the security and configuration fixes (SEC-1/3/4/6/7, CI-3/5/6, sandbox polish).
 
-These assert the escapes in CODEBASE_AUDIT.md stay closed and the configuration wiring stays correct. The
+These assert the escapes in docs/history/CODEBASE_AUDIT.md stay closed and the configuration wiring stays correct. The
 sandbox cases run real subprocesses, so they are slower; they match the style of tests/test_sandbox.py.
 """
 

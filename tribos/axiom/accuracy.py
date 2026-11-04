@@ -119,6 +119,7 @@ def interval_verify(expression: str, bounds: dict[str, list[float]], claim: str 
                         "interval may be wider than the true range; it is never narrower.",
                 "certificate": _interval_script(str(expr), names, bounds, "enclose")}
     label, proves, refutes = _CLAIMS[claim]
+    undecided: list[list[Any]]
     stack, proved_boxes, undecided = [box0], 0, []
     while stack:
         if proved_boxes + len(undecided) + len(stack) > max_boxes or time.perf_counter() - started > time_limit_s:
@@ -213,7 +214,7 @@ def precision_check(expression: str, values: dict[str, Any] | None = None,
         raise ValueError(f"give a value for {', '.join(missing)}")
     exact = {sp.Symbol(k): sp.Rational(str(v)) for k, v in values.items() if k in names}
     precisions = sorted({int(d) for d in (digits or [15, 30, 60, 120]) if 5 <= int(d) <= 500})
-    evaluated = []
+    evaluated: list[dict[str, Any]] = []
     for d in precisions:
         v = sp.N(expr.subs(exact), d)
         evaluated.append({"digits": d, "value": str(v)})
@@ -300,7 +301,7 @@ def counterexample_search(claim: str, domain: dict[str, dict[str, Any]], *, samp
     samples = max(10, min(int(samples), MAX_SAMPLES))
     rng = random.Random(seed)
     axes: list[list[Any]] = []
-    sizes = []
+    sizes: list[int | None] = []
     for n in names:
         spec = domain[n] or {}
         kind = str(spec.get("type", "real")).lower()
@@ -338,6 +339,7 @@ def counterexample_search(claim: str, domain: dict[str, dict[str, Any]], *, samp
                                           max(a[1], min(a[2], Fraction(1))), (a[1] + a[2]) / 2}))
         import itertools
 
+        p: tuple[Any, ...] | list[Any]
         for p in itertools.islice(itertools.product(*edge_lists), samples // 4):
             yield p
         while True:

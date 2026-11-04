@@ -4,1386 +4,1122 @@
 
 | Item | Value |
 |---|---|
-| Repository | `X:\tribois` (Tribos), package version 1.49.1 (`pyproject.toml`) |
-| Branch / HEAD | `feat/agentic-engineering-harness-and-memory` @ `16d0302` |
-| Working tree | ~136 modified or untracked files; **the working tree as on disk was audited**, not HEAD |
-| Audit date | 2026-10-30 |
-| Auditor | Claude Code (Opus 5.5), single-session audit (no sub-agents completed; see §48) |
-| Runtime | Windows 11, Python 3.12 (`.venv`), Node (web `node_modules` present) |
-| Application changes | **None.** Only this file was created. Scratch scripts and logs live outside the repository. |
+| Repository | `X:\tribois` (Tribos), package version 1.49.1 (installed `tribos-1.49.1.dist-info`) |
+| Branch / HEAD | `feat/agentic-engineering-harness-and-memory` @ `40537ca` |
+| Working tree | Clean at the start of the audit. This audit changed only this file |
+| Audit date | 2026-11-04 |
+| Previous audit | `AUDIT_REPORT.md` of 2026-10-30 @ `16d0302`, preserved in git history (`git show 7eb203a:AUDIT_REPORT.md`). Its 25 findings are re-checked in §12a |
+| Auditor | Claude Code (Opus 5.5), one session, no sub-agents. **Independence caveat:** the same assistant wrote the research loop, thesis export, accuracy tools and vision ensemble earlier in this conversation. To offset that, every claim about that code rests on executed probes rather than on reading alone (§48) |
+| Runtime | Windows 11 Pro 10.0.26200, Python 3.12 (`.venv`), Node 24.19.0, Lean 4 with Mathlib (`TRIBOS_LEAN_PROJECT` set), Tesseract 5.5.3, no running container runtime (Podman installed, daemon stopped) |
+| Finding IDs | This audit uses AUDIT-101 to AUDIT-119. Prior findings are referenced as "prior AUDIT-0xx" |
 
 ## 2. Executive Assessment
 
-**Can this software be trusted to produce correct, reproducible, secure, understandable and scientifically
-defensible results?** *Partially.* The answer differs by subsystem:
+**What the software is.** Tribos is a multi-agent STEM research assistant. It has:
+- a FastAPI backend (106 routes);
+- a Next.js web app;
+- deterministic scientific engines: constants and units (Physis), symbolic and interval mathematics (Axiom), ODEs and fitting (Dynamis), engineering calculators (engcalc);
+- an LLM-driven orchestration layer: chat answers, a math agent, and a research loop that writes a thesis;
+- a sandbox that runs model-written Python;
+- a Lean 4 formal-proof checker;
+- an image-reading ensemble (OCR plus a vision model).
 
-- **Trustworthy with evidence:**
-  - the core numerical and engineering calculators (`tribos/engcalc`, the Monte Carlo integrator, Physis
-    constants and units);
-  - authentication and the main data routes;
-  - the sandbox's policy layer;
-  - run provenance;
-  - the math agent's own status labels, in the probes run.
-- **Not trustworthy — the engineering "substrate" layer** (`tribos/substrate`, `tribos/memory/semantic.py`,
-  `app/backend/routers/harness.py`), added on this branch. Executed evidence shows it:
-  - certifies any spherical pressure vessel as ASME-compliant without calculating anything (AUDIT-001);
-  - fabricates CAD mass properties (AUDIT-002);
-  - reports "FEA results fully verified against 14-gate criteria" for all-zero inputs, with only 5 gates
-    implemented (AUDIT-003);
-  - exposes every project's threads, revisions, sign-offs and costs to any authenticated user (AUDIT-004).
+**Answer to the primary question:** *Can this software be trusted to produce correct, reproducible, secure, understandable and scientifically defensible results?*
 
-  Both the REST API and the LLM tool registry can reach these functions.
-- **Verification-status integrity has gaps:**
-  - the written-answer checker accepts false real-domain identities such as `√(x²) = x` (AUDIT-005);
-  - the derivation card labels every *executed* math step "Verified", including a step whose own output says
-    `verified: False` (AUDIT-006);
-  - curve fits are `verified: true` whenever the RMSE is finite, and report standard error 0 when the
-    covariance is undefined (AUDIT-007).
-- **Security posture:** sound at the HTTP layer. However:
-  - by default, model-written code runs without an OS isolation boundary, including inside the shipped Docker
-    API container (AUDIT-008);
-  - the locked Python environment carries 385 published advisories across 41 packages, including the parsers
-    used on uploads (pypdf, Pillow) and the JWT library (AUDIT-009).
-- **Quality gates:** the Python suite is **red: 10 failed, 2142 passed, 28 skipped**. This contradicts the
-  AGENTS.md baseline of "0 failed".
+- **The deterministic engines: yes, on the evidence here.** Every known-answer test run in this audit passed:
+  - CODATA constants (7 of 7 exact);
+  - unit conversions, including offset temperatures (7 of 7);
+  - GUM propagation (6 ± 0.5 exact);
+  - ODE against the analytic solution (error 2.3 × 10⁻⁹);
+  - curve fitting against closed-form OLS (parameters and standard errors identical);
+  - beam deflection (PL³/48EI exact);
+  - interval proofs and refutations, counterexample search, and normality tests.
+- **The "Lean-verified" label: no.** The formal checker certified `2 + 2 = 5` as `verified` in three different ways (**AUDIT-101, CRITICAL**). No stored proof currently uses the bypass, but the top verification tier cannot be trusted until it is fixed.
+- **Model-written code on a host without a container runtime: no.** The sandbox's Python-level guards were escaped in a live test (**AUDIT-102, HIGH**):
+  - native Win32 calls through `numpy.ctypeslib`;
+  - creating a file outside the work directory through `h5py`;
+  - launching an external executable through matplotlib's animation writer.
 
-**Bottom line:**
-- Results from `engcalc`, Dynamis ODE/Monte Carlo, Physis, and math-agent answers marked `verified` are supported
-  by evidence.
-- Results from the substrate tools (standards compliance, materials at temperature, geometry, CAE review) must not
-  be trusted.
-- Neither "Verified" pills on derivation steps nor `verified` on fits should be read as independent verification.
+  The documented Docker deployment refuses unisolated execution by default; the local setup this machine runs does not.
+- **The research thesis's verification language overstates what is checked** (AUDIT-104 to AUDIT-107):
+  - "number-checked" means each number appears somewhere in the evidence, not that it is attached to the right quantity;
+  - "replicated" means the same model re-implemented the test, not an independent implementation;
+  - hypothesis verdicts have no tier or direction rule;
+  - the `certified` tier can be required but never produced.
+- **Security of the API: good.** Bearer authentication fails closed. Cross-tenant probes across projects, members, memory, harness, campaigns, figure files and datasets were all refused with 404. Path traversal on project files is refused. Thesis HTML escapes model text.
+- **Reproducibility: partial.** Code, ledger and proofs are exported. There is no environment, version, seed or retrieval-date provenance, and results depend on a non-deterministic LLM (AUDIT-110).
+- **Software health:**
+  - pytest: **2546 passed, 0 failed, 28 skipped**;
+  - web tests: 227/227;
+  - tsc: clean; eslint: 0 errors (185 warnings);
+  - ruff F/E9: clean;
+  - bandit: 0 high;
+  - pip-audit: 113 advisories remain in 18 of 245 packages (AUDIT-109);
+  - strict mypy: 617 errors (non-blocking by design).
+
+**Fix first:** AUDIT-101 (reject every axiom, and check with `#print axioms`), then AUDIT-102 (refuse unisolated execution by default, or block the escape primitives at runtime).
 
 ## 3. Audit Scope and Method
 
-1. Reconstructed the architecture from AGENTS.md, README, `pyproject.toml`, the router mount list in
-   `app/backend/main.py`, and a full file and line inventory (§4).
-2. Ran the project's own gates (§47): pytest, ruff, bandit, the env-reference check, web typecheck, eslint, web
-   tests, pip-audit and npm audit.
-3. Read the highest-risk code: authentication and middleware, every route's authorization, the sandbox
-   selection and policy, the engineering substrate, standards and materials, Dynamis fitting, the math-claim
-   checker, and the UI status rendering.
-4. **Executed** suspected defects against the real functions, with adversarial and known-answer inputs. Every
-   CONFIRMED finding below has an executed reproduction or an unambiguous code path.
-5. Used repository-wide grep for breadth: callers, dead code, SQLite concurrency controls, XSS sinks, CI gating,
-   biomedical leftovers.
-
-The method was deliberately *depth on risk, breadth by grep*. Reading every file in full was not done (see §46
-and §48). Findings are limited to what was verified.
+1. **Architecture reconstruction:**
+   - entry points (`app/backend/main.py`, the routers, `web/src/app`);
+   - an AST scan of every route handler for the authentication dependency (`scratchpad/audit/route_auth.py`);
+   - router, store and engine structure, mapped by search.
+2. **Re-verification of the previous audit's 25 findings**, against current code, tests and probes (§12a).
+3. **Deep review of components added since the previous audit:**
+   - research loop (`tribos/agentic/research/`);
+   - thesis export (`tribos/export/thesis.py`, `svgchart.py`);
+   - accuracy tools (`tribos/axiom/accuracy.py`);
+   - campaigns API;
+   - Lean import handling;
+   - vision ensemble (`tribos/vision/`).
+4. **Executed probes.** All ran against the real code. Probes that touch persistent state used throw-away directories:
+   - a cross-tenant access probe (two bearer users, TestClient, temp storage);
+   - two rounds of sandbox escape canaries (harmless payloads only);
+   - a Lean axiom-bypass probe against the installed Lean and Mathlib;
+   - three rounds of scientific known-answer tests;
+   - number-check binding tests.
+5. **Gates:**
+   - full pytest;
+   - web tests;
+   - tsc and eslint;
+   - ruff;
+   - mypy;
+   - bandit (JSON triage);
+   - pip-audit;
+   - checks on GitHub Action pinning and calibration-hash binding.
+6. **Not done:**
+   - a full read of all source (about 10% read line by line this session; see §46);
+   - container-backend isolation tests (no runtime);
+   - npm audit;
+   - LLM-driven end-to-end runs during the audit. An earlier Collatz research run exists and was inspected read-only.
 
 ## 4. Repository Inventory
 
-Tracked plus untracked source, excluding `.venv`, `node_modules`, caches and binaries. Line counts include
-blanks and comments.
-
-| Path | Type | Actual purpose (from code) | Lines | Entry/exit role | Status |
-|---|---|---|---:|---|---|
-| `app/backend/` | FastAPI | API: chat and streaming, jobs, runs, projects, datasets, export, MCP, A2A, vision, simulate, harness | 4,137 | HTTP entry | COMPLETE (harness: see AUDIT-004/017) |
-| `tribos/agentic/` | Python | Router, planner, plan DAG, executor, specialists, topologies, NLI, confidence, jobs, memory adapters, sandbox | 19,995 | Core pipeline | PARTIAL (not read in full) |
-| `tribos/agents/` | Python | Classic orchestrator, query planning, evidence rendering, prompts, drafting, verification, finalize | 14,617 | Core pipeline | UNVERIFIED in depth |
-| `tribos/axiom/` | Python | Symbolic engine (SymPy), math agent, problem parser, independent verifier | 10,649 | Scientific | COMPLETE (probed) |
-| `tribos/verify/` | Python | Citation grounding, math-claim audit, units audit, Lean runner | 7,372 | Verification | PARTIAL (AUDIT-005) |
-| `tribos/dynamis/` | Python | ODE/PDE/fit/root/Monte Carlo (SciPy) | 3,684 | Scientific | COMPLETE with defects (AUDIT-007) |
-| `tribos/physis/` | Python | CODATA constants (via scipy), Pint units, uncertainty | 1,750 | Scientific | COMPLETE |
-| `tribos/engcalc/` | Python | Structural, fatigue, thermofluid, electrical calculators with validity checks | 1,650 | Scientific | COMPLETE |
-| `tribos/scientific/` | Python | Scientific execution contracts, worker, assembly | 2,454 | Scientific | UNVERIFIED |
-| `tribos/substrate/` + `tribos/memory/semantic.py` | Python | Materials catalogue, ASME clause check, STL inspector, CAE gates | ~600 | REST + LLM tool | **BROKEN / MOCKED** (AUDIT-001/002/003/010) |
-| `tribos/harness/` | Python | Checkpoints, cost ledger, HITL sign-off, tracing | 748 | REST only | **PLACEHOLDER** (AUDIT-017) |
-| `tribos/memory/` | Python | Threads, turns, revisions, episodic/semantic memory | 1,398 | REST only | BACKEND-ONLY |
-| `tribos/archivon/`, `tribos/sources/`, `tribos/papers/` | Python | Literature clients, identifiers, retraction status, paper extraction | ~3,900 | Data ingestion | UNVERIFIED in depth |
-| `tribos/provenance/` | Python | Run manifest, run store, source versions, rerun | 2,150 | Provenance | COMPLETE |
-| `tribos/export/` | Python | PDF/DOCX/notebook/bundle export | 3,370 (+fonts) | Output | UNVERIFIED |
-| `tribos/evals/` | Python | Eval harness, cassettes, scoring | 4,947 | Dev tooling | UNVERIFIED |
-| `tribos/utils/`, `tribos/datasets/`, `tribos/tools/` | Python | HTTP, LLM factory, project and research stores, dataset store/validators, tool registry | ~8,800 | Infrastructure | PARTIAL |
-| `web/src/` | Next.js 16 / React 19 | Chat UI, result cards, services, local persistence | ~25,000 | UI | PARTIAL (AUDIT-006) |
-| `tests/` | pytest | ~170 test files | 35,937 | Verification | 10 failing (AUDIT-011) |
-| `web/tests/` | node:test | 31 files | — | Verification | 209/209 pass |
-| `.github/workflows/` | CI | 11 workflows | 1,193 | CI/CD | PARTIAL (AUDIT-019) |
-| `docker/` | Infrastructure | API, web and sandbox images; compose | 324 | Deployment | PARTIAL (AUDIT-008) |
-| `scripts/` | Python/PS | Env-doc generator, calibration, sandbox boundary check, archive | 1,306 | Tooling | UNVERIFIED |
+| Path | Type | Actual purpose (from code) | Size | Entry/exit role |
+|---|---|---|---:|---|
+| `app/backend/main.py` | FastAPI app | Middleware (security, CORS), chat and stream, memory, health, router registration | 1,100 lines | HTTP entry |
+| `app/backend/routers/*.py` | 14 routers | campaigns, datasets, export/runs, files, feedback, harness, jobs, mcp, a2a, projects, simulate, vision, agent_runs | 3,522 lines | HTTP entry |
+| `app/backend/{auth,security,limits}.py` | Security | Bearer auth (static tokens and HS256 JWT); body, Origin and Host checks; per-user 429 limits | 495 lines | Middleware and dependency |
+| `tribos/agentic/` | Orchestration | Jobs, campaigns, research loop, math agent, sandbox, formal proof stage | 24,161 lines (57 files) | Core |
+| `tribos/agents/` | Answer pipeline | Routing, decomposition, drafting, evidence need, question parsing | 17,242 (32) | Core |
+| `tribos/axiom/` | Mathematics | Safe parsing, CAS, verifier, certified critical points, accuracy tools, calibration | 11,740 (18) | Scientific |
+| `tribos/verify/` | Verification | Written-answer math claims, Lean runner, statement correspondence | 8,209 (12) | Scientific |
+| `tribos/dynamis/` | Numerics | ODE, fitting, PDE, Monte Carlo, equilibrium, optimisation | 3,759 (14) | Scientific |
+| `tribos/physis/` | Physical data | CODATA constants, pint units, uncertainty, external clients | 1,750 (6) | Scientific |
+| `tribos/engcalc/` | Engineering | Beam, buckling, pressure vessel, shaft, bolt, fatigue, electrical, thermofluid | 1,650 (7) | Scientific |
+| `tribos/export/` | Export | PDF, DOCX and notebook renderers, thesis HTML/PDF/DOCX/bundle, SVG charts | 4,118 (11) | Output |
+| `tribos/datasets/` | Ingestion | Upload validation and storage (single-cell oriented; AUDIT-108) | 1,607 (7) | Data entry |
+| `tribos/vision/` | Image input | Indra OCR, Tesseract, vision model, consensus | 1,223 (6) | Data entry |
+| other `tribos/*` | Support | evals, utils (LLM factory, memory stores), extensions (tool registry), writer, archivon (literature), tools, scientific, provenance, memory, harness, config, sources, substrate, files, papers, skills | ~33,000 | Mixed |
+| `tests/` | pytest | 157 files | 40,846 | Verification |
+| `web/src/` | Next.js and TypeScript | components (16,991), lib (4,457), app (3,770), services (3,168), types (1,312), hooks (283) | 29,981 (152 files) | UI |
+| `web/tests/` | node:test | 227 tests | | Verification |
+| `.github/workflows/` | CI | 11 workflows; 60 action references, all SHA-pinned | | CI |
+| `docker/` | Infrastructure | backend, web and sandbox Dockerfiles; compose | | Deployment |
+| `scripts/` | Tooling | start script, environment-reference generator, and others | 1,715 | Ops |
+| **Excluded** | `web/node_modules`, `.venv`, `__pycache__`, `.mypy_cache`, `.ruff_cache`, `data/`, `logs/`, `.tribos_*` runtime stores, root archives and PDFs (`*.zip`, `gofullpage-*.pdf`; git-ignored) | Generated, vendored or runtime output | | |
 
 ## 5. Technology and Runtime Architecture
 
 - **Backend:**
-  - Python ≥3.12, FastAPI 0.143, uvicorn, Pydantic 2.11.
-  - Scientific stack: SymPy 1.14, SciPy 1.16.2, NumPy 1.26.4, Pint 0.26.2, mpmath.
-  - Models: LangChain 0.3 / OpenAI SDK, torch 2.8, transformers 4.55 (NLI and embeddings), mem0ai with embedded
-    Qdrant.
-  - Storage: SQLite.
-- **Frontend:** Next.js ^16.4, React 19.3, react-markdown 10, KaTeX 0.19 / rehype-katex.
-- **Isolation:** container backend (docker/podman, `--network none`, non-root) *or* subprocess backend (AST
-  policy, scrubbed environment, Windows Job Object or POSIX rlimits). Optional SageMath and Lean.
-- **Pinning:** Python dependencies are exact-pinned in `pyproject.toml` with `uv.lock`; the web uses caret
-  ranges with `package-lock.json`.
+  - FastAPI with uvicorn, Python 3.12;
+  - LangChain-based LLM factory (`tribos/utils/llm/llm_factory.py`), with providers Meta (muse-spark-1.3) and NVIDIA NIM;
+  - SQLite stores (jobs, projects, research memory);
+  - JSON files (campaigns);
+  - filesystem stores (datasets, files, figures).
+- **Scientific stack:** NumPy, SciPy, SymPy, mpmath (interval arithmetic), pint, pandas, statsmodels, h5py and matplotlib; Lean 4 with Mathlib (subprocess); optional SageMath.
+- **Sandbox:**
+  - an AST policy (`policy.py`) followed by a subprocess runner with runtime guards (`runner.py`);
+  - or a container backend (`container.py`);
+  - selected by `gateway._select_backend`.
+- **Web:** Next.js (App Router), React, KaTeX.
+- **Export:** markdown-it to HTML, then Playwright Chromium to PDF (fpdf2 as fallback); python-docx; pypdf (merging PDFs).
+- **Vision:** Indra OCR (ONNX), Tesseract 5 (binary), and the cloud vision model.
 
 ## 6. Architecture Reconstruction
 
-```text
-Browser (web/src/app/page.tsx, 3,381 lines) ── fetch/SSE + Bearer ──▶ SecurityMiddleware ▶ CORS ▶ FastAPI routes
-  main.py: /api/chat, /api/chat/stream, /api/memory/*, /api/route/preview ...
-  routers: jobs, agent_runs, projects (RBAC), datasets, export/runs (rerun), mcp, a2a, vision, simulate, harness
-        │
-        ▼
-Framework router (tribos/agentic/router.py) ─▶ classic orchestrator (tribos/agents/*) or agentic topologies
-        │                                       (plan-execute, supervisor, swarm, debate)
-        ▼
-Tool registry (tribos/tools/registry.py) ─▶ engines: axiom | dynamis | physis | engcalc | archivon | sandbox | substrate
-        │
-        ▼
-Evidence renderer (tribos/agents/stem_evidence.py) ─▶ LLM synthesis ─▶ verification (verify/verifier.py, math_claims.py)
-        │
-        ▼
-execution_artifacts{key: payload} ─▶ web result cards (web/src/components/**) ; RunRecorder ─▶ run manifest (provenance)
-```
-
-Architectural observations:
-
-- **Parallel, divergent engineering stacks.** `tribos/engcalc` (validity ranges, steel-only rules enforced,
-  warnings) and `tribos/substrate` + `tribos/memory/semantic.py` (no validity checks, default-to-pass) both
-  compute engineering quantities. Both are registered as tools. Only the second is used by the harness API.
-- **Unintegrated subsystem.** The harness API (`app/backend/routers/harness.py`) is mounted, but it is neither
-  wired into the pipeline nor used by the web UI (AUDIT-017). Its `project_id` namespace is separate from the
-  RBAC project store (AUDIT-004).
-- **Two parallel persistence systems for conversations.** `tribos/utils/memory/research_memory.py` is
-  user-scoped and used by `/api/memory/*`. `tribos/memory/engine.py` is unscoped and used by
-  `/api/harness/threads/*`.
+- **Boundaries.** The browser calls the API with a bearer token. The API resolves `user_id` (`auth.get_current_user`) and scopes every store call by it; the cross-tenant probes in §25 confirm this. Background work runs as jobs (`tribos/agentic/jobs.py`) and campaigns (`tribos/agentic/campaign.py`). Campaigns are driven by one owner process, under a lock file with heartbeats.
+- **Layering.** Scientific engines (Physis, Axiom, Dynamis, engcalc) are pure Python, called through a tool registry (`tribos/extensions/`) by the agent layer. They do not import presentation code. Dependency direction: engines ← tools ← agents ← API. No circular dependency between those layers was found by search; a full import-graph analysis was not run.
+- **Leakage.** Dataset ingestion (`tribos/datasets/`) carries a single-cell-transcriptomics domain model into a STEM product (AUDIT-108; prior AUDIT-020).
+- **Router isolation.** Routers that fail to import are skipped and listed in `/api/health` (`main.py:172-194`). `TRIBOS_STRICT_ROUTERS=1` makes such a failure fatal.
 
 ## 7. Complete Data Flow
 
-**User question to answer (classic path):**
-1. `page.tsx` builds a request with the Bearer token.
-2. `POST /api/chat/stream` (`main.py:933`) passes through `SecurityMiddleware` (`security.py:157`):
-   loopback/Host/Origin checks and body limits.
-3. `get_current_user` (`auth.py:98`) resolves the user.
-4. The `ChatRequest` validators run (`main.py:282-311`).
-5. The orchestrator plans the query and gathers evidence (`orchestration/gather.py`). STEM tools run through the
-   registry with per-tool timeouts. Results are rendered as XML evidence (`stem_evidence.py`).
-6. The LLM drafts the answer. `math_claims.audit_answer` re-checks the equations; section repair and finalize
-   follow.
-7. The result is streamed as SSE: text plus `execution_artifacts`.
-8. The browser persists the chat in localStorage (`localStorageService.ts`). The server writes a run manifest.
-
-**Uploads:**
-1. `POST /api/datasets` streams the file, enforcing size and extension limits (`datasets.py:75-123`).
-2. Validators run; NaN or infinite values are rejected (`validators.py:438`).
-3. The dataset store hashes and stores the file.
-4. The sandbox can read it only through a user-scoped binding (`sandbox/__init__.py` docstring,
-   `resolve_for_user`).
-
-**Harness:** client → `/api/harness/*` → `tribos/memory/engine.py` SQLite (no user scoping) and the
-substrate functions. Results go directly back to the caller.
+1. **Chat question.**
+   - Path: UI composer, `POST /api/chat/stream` (`main.py:1031`), security middleware, `get_current_user`, a per-user slot (429), routing and decomposition (`tribos/agents`), tools (engines and sandbox), the draft, the math-claims audit, then SSE back to the UI.
+   - Persistence: thread memory, run manifest.
+2. **Image question.**
+   - Path: UI, `POST /api/vision/read` (auth, Content-Length cap, busy 429), the reader ensemble (Indra and Tesseract, then two vision readings, consensus, coverage gate), a transcription the user can review, then into the chat path.
+   - The image is not stored server-side; readings are cached in memory by content hash.
+3. **Research project.**
+   - Start: `POST /api/campaigns`, then the queue (`TRIBOS_CAMPAIGN_MAX_ACTIVE=1`), then the `ResearchLoop`.
+   - Loop: review, charter, then rounds (ready tests run in the sandbox or Lean, plus an optional same-model replication), the findings ledger, analysis, the judge (deterministic rules), and a stop rule.
+   - End: the thesis (model chapters plus deterministic tables, figures and theorems, then the number check) and exports.
+   - Persistence: campaign JSON (atomic replace), `<id>_files/` figures.
+4. **Dataset upload.** `POST /api/datasets` (multipart, provenance JSON required), validators (single-cell oriented), then the store, keeping the sha256 and recording provenance.
 
 ## 8. Scientific Processing Pipeline
 
-| Stage | Inputs | Algorithm | Output | Verification |
-|---|---|---|---|---|
-| Problem parse | prose/LaTeX | `axiom/problem.py` → `ProblemSpec` | typed spec + ambiguities | parse-fidelity rule |
-| Symbolic solve | spec | SymPy strategy ladder | answer + steps | `axiom/verifier.py` level 1 (encodes the question) + level 2 (independent check) |
-| ODE simulation | RHS, initial conditions, parameters | `solve_ivp` rtol 1e-8 / atol 1e-10, or fixed RK4 | trajectories, extrema | success flag + optional invariant drift ≤ 1e-4·max(1, \|I₀\|) (`dynamis/engine.py:259-266`) |
-| Curve fit | x, y, model | `scipy.optimize.curve_fit` (unweighted) | parameters, SE, R² | `verified = isfinite(rmse)` (**AUDIT-007**) |
-| Monte Carlo | integrand, bounds, seed | crude MC, PCG64 | estimate ± SE (ddof = 1) | reference z-score |
-| Constants | name | `scipy.constants` (CODATA 2022) | value, unit, uncertainty | n/a |
-| Engineering calculators | typed inputs (SI) | textbook correlations | results + validity checks + warnings | built-in range checks |
-| Substrate | free numbers | ad-hoc formulas | compliant / verified booleans | **none effective** (AUDIT-001..003) |
-| Written-answer audit | final Markdown | numeric comparison; identities sampled at 6 points | passed / failed / inconclusive per statement | **AUDIT-005** |
+| Stage | Implementation | Assumptions | Verification in code |
+|---|---|---|---|
+| Constants | `physis/constants.py` (CODATA via scipy) | CODATA release bundled with SciPy | Exact match (§15) |
+| Units | `physis/units.py` (pint) | pint registry definitions | 7 of 7 known answers |
+| Uncertainty | `physis/uncertainty.py` (GUM linear and Monte Carlo) | First-order linearisation; correlations as given | GUM exact for x·y |
+| ODE | `dynamis/engine.py` (solve_ivp RK45, rtol 1e-8, atol 1e-10) | Smooth right-hand side | Error 2.3e-9 against analytic |
+| Fitting | `dynamis/engine.py:612` (curve_fit) | Least squares; SE scaled by residual variance unless `y_sigma` | Identical to closed-form OLS |
+| Engineering | `engcalc/structural.py` | Euler–Bernoulli beam, linear elastic | PL³/48EI exact |
+| Interval proofs | `axiom/accuracy.py` (mpmath.iv bisection) | Interval arithmetic soundness of mpmath.iv | proved, refuted and enclosure correct |
+| Research tiers | `research/runner.py`, `judge.py`, `ledger.py` | The model writes the code, judgements and prose | AUDIT-101, 104 to 107 |
+| Formal proofs | `verify/formal/prove.py` and `runner.py` (Lean 4) | The kernel checks the proof; axioms must be rejected | **AUDIT-101** |
+| Written-answer audit | `verify/math_claims.py` | Sampled identity checking | AUDIT-111 |
 
 ## 9. Feature Inventory
 
-Chat Q&A (classic + 5 agentic frameworks), the verified math agent, ODE/PDE simulation with an interactive
-simulator, curve fitting, Monte Carlo integration, constants and units, engineering calculators, literature
-search and citation grounding, retraction status, sandboxed code (Calcula), SageMath, Lean proofs, dataset
-uploads, paper reproduction, image/OCR input, report export (PDF/DOCX/notebook/bundle), run manifests and
-reruns, background jobs with SSE, HITL approval/steer/skip/cancel, projects (RBAC, memory, files, activity),
-MCP server, A2A agent card, and the harness (threads, revisions, checkpoints, sign-off, cost, substrate tools).
+The main features are:
+- chat Q&A with tools;
+- the math agent;
+- the research loop and thesis;
+- thesis exports (PDF, DOCX, Markdown, HTML, bundle);
+- dataset upload and analysis;
+- image and PDF question reading;
+- projects, members and memory;
+- jobs and run manifests, with re-runs;
+- the harness (threads, revisions, sign-off);
+- the simulate API;
+- the MCP and A2A endpoints;
+- the accuracy tools in the tool registry;
+- engineering calculators;
+- exports of chat answers.
 
 ## 10. Feature Status Matrix
 
 | Feature | Status | Evidence |
 |---|---|---|
-| Auth (static tokens / JWT / disabled-loopback) | COMPLETE | `auth.py`, `security.py` read in full |
-| Run control (approve/steer/skip/cancel) | COMPLETE | `agent_runs.py:45-49` scopes by owner |
-| Jobs | COMPLETE (logic not deeply audited) | `jobs.py:120-144` scope by `user_id` |
-| Projects (RBAC) | COMPLETE | `projects.py` role model; app-level cascade delete (`project_store.py:424-428`) |
-| Research memory `/api/memory/*` | COMPLETE | `main.py:738-792`, all user-scoped |
-| Math agent | COMPLETE | 10 adversarial probes: no false `verified` (§45) |
-| Written-answer math audit | PARTIAL | false identity passes (AUDIT-005) |
-| ODE simulation | COMPLETE | `engine.py:146-151` rejects failed or non-finite solves |
-| Curve fitting | PARTIAL | AUDIT-007 |
-| Monte Carlo | COMPLETE | `monte_carlo.py` read in full |
-| Physis constants and units | COMPLETE | CODATA 2022 values confirmed; offset units correct |
-| engcalc | COMPLETE | formulas checked against textbook forms (§15) |
-| Sandbox (Calcula) | PARTIAL | policy works; isolation silently degraded (AUDIT-008) |
-| SageMath | UNVERIFIED | not installed; tests skipped |
-| Lean formal proofs | UNVERIFIED | Lean not installed; 2 tests skipped |
-| Container sandbox | UNVERIFIED | no runtime; 5 tests skipped |
-| Uploads / datasets | COMPLETE | streamed limits, NaN rejection |
-| Literature / retraction | UNVERIFIED (code exists) | `archivon/integrity.py` uses Crossref `updated-by` + OpenAlex; not exercised offline |
-| Provenance / manifests | COMPLETE | `run_manifest.py:940-1010` |
-| Export | UNVERIFIED | not audited in depth |
-| Harness: threads/revisions | BACKEND-ONLY, insecure | AUDIT-004; no web caller |
-| Harness: checkpoints / resume | PLACEHOLDER | `save_checkpoint` has 0 callers |
-| Harness: cost ledger | PLACEHOLDER | `CostLedger.record_usage` has 0 callers |
-| Harness: HITL sign-off | PARTIAL | unkeyed hash, no artifact binding (AUDIT-017) |
-| Substrate: standards check | BROKEN | AUDIT-001, AUDIT-018 |
-| Substrate: materials | BROKEN | AUDIT-010, AUDIT-015 |
-| Substrate: geometry | MOCKED | AUDIT-002 |
-| Substrate: CAE review | BROKEN | AUDIT-003 |
-| Mem0 memory | PARTIAL | single-process lock (AUDIT-012) |
+| Auth (static tokens, JWT) | COMPLETE | `auth.py`; 401 and 503 paths; probe |
+| Tenant isolation (projects, campaigns, datasets, harness) | COMPLETE | §25 probe: 27 cross-user attempts, all 404 |
+| Research loop | PARTIAL | Works end to end (stored Collatz run). Tier semantics defective (AUDIT-104 to 107) |
+| Formal verification tier | BROKEN (soundness) | AUDIT-101 |
+| Thesis exports | COMPLETE | Collatz PDF, DOCX, MD and bundle exist. Escaping verified |
+| Sandbox (subprocess backend) | PARTIAL (not a boundary) | AUDIT-102 |
+| Sandbox (container backend) | UNVERIFIED | No container runtime available |
+| Accuracy tools | COMPLETE | Known answers pass (§15) |
+| Dataset upload | PARTIAL | Rejects two-column and short tables (AUDIT-108) |
+| Image reading ensemble | COMPLETE | 12 of 12 benchmark images exact (earlier in this session); probe |
+| Engineering calculators | COMPLETE (beam verified; others by tests only) | §15 |
+| Math-agent calibrated confidence | DEAD (suppressed) | AUDIT-114 |
+| Harness cost ledger | PLACEHOLDER (honestly labelled) | Prior AUDIT-017 |
 
 ## 11. Critical Findings
 
-### AUDIT-001 – Spherical (and every non-cylindrical) ASME clause is always reported "compliant"
+### AUDIT-101 – The Lean checker certifies false theorems that rest on a model-declared axiom
 
-**Severity:** CRITICAL · **Confidence:** CONFIRMED · **Category:** Scientific Correctness / Safety
+**Severity:** CRITICAL
+**Confidence:** CONFIRMED (executed against the installed Lean 4 with Mathlib)
+**Category:** Scientific correctness, verification soundness
 
-**Location:** `tribos/memory/semantic.py`, `StandardClause.evaluate_compliance`, lines 142-175 (fall-through at
-171-175). Reached from:
-- `tribos/substrate/standards/__init__.py:12-18`;
-- `app/backend/routers/harness.py:330-342` (`POST /api/harness/substrate/standards/check`);
-- the LLM tool `substrate_standards_check` (`tribos/tools/registry.py:724-740`).
+#### Location
+`tribos/verify/formal/runner.py`. Symbols: `_AXIOM_RE` (line 61), `_TRUSTED_FOUNDATIONAL_AXIOMS` (lines 64-72), `uses_unproved` (lines 104-126), `check_lean` (line 218). Consumers:
+- `tribos/agentic/research/runner.py:184-186`: tier `formal`;
+- `tribos/agentic/research/thesis.py:260`: the "Lean-verified" label;
+- `tribos/export/thesis.py:124`;
+- `web/src/components/campaigns/ResearchLab.tsx:348`.
 
-**Problem:** Only `ASME_VIII_1_UG27_CYL` is evaluated. Any other clause, including the catalogued
-`ASME_VIII_1_UG27_SPH` (whose `formula_latex` shows `t = PR/(2SE − 0.2P)`), returns `{"compliant": True}`
-without computing anything.
+#### Problem
+A proof counts as `verified` when it compiles and `uses_unproved` finds no `sorry`, `admit` or new axiom. The axiom detection has three gaps:
+1. Any axiom whose bare name is in the trusted list (`choice`, `funext`, `propext`, `Quot.lift` and others) is accepted unless its type mentions `False`.
+2. The regex requires `axiom` at the start of a line, so `@[simp] axiom` is missed.
+3. A namespaced redeclaration (`namespace Foo axiom propext …`) matches the trusted name.
 
-**Evidence:**
-```python
-        return {
-            "compliant": True,
-            "clause": self.clause_ref,
-            "note": "Standard clause evaluation completed",
-        }
-```
+`#print axioms` is never run, so the kernel's own record of a theorem's axioms is never consulted.
 
-Executed: `check_asme_compliance({'pressure_mpa':50,'radius_mm':1000,'allowable_stress_mpa':100,'joint_efficiency':1,'wall_thickness_mm':0.001}, clause_id='ASME_VIII_1_UG27_SPH')`
-returned `{'compliant': True, 'clause': 'ASME BPVC VIII-1 UG-27(d)', 'note': 'Standard clause evaluation completed'}`.
+#### Evidence
+`scratchpad/audit/lean_axiom_probe.py`. Every case proves `(2:Nat) + 2 = 5`:
 
-**Failure mechanism:** default-to-pass `else` branch.
+| Lean code | `uses_unproved` | `check_lean` |
+|---|---|---|
+| `axiom bogus : … ` (control) | `['axiom bogus']` | `failed` (correct) |
+| `axiom choice : (2:Nat) + 2 = 5` | `[]` | **`verified`** |
+| `@[simp] axiom helper : …` | `[]` | **`verified`** |
+| `namespace Foo axiom propext : … end Foo` | `[]` | **`verified`** |
 
-**Failure scenario:** a 1 µm-thick sphere of 1 m radius at 50 MPa is certified compliant with UG-27(d).
+#### Failure mechanism
+1. The model writes the Lean formalisation (`prove.py:143`), which may come from proof search or from injected text.
+2. A declaration using one of these spellings passes the text filter.
+3. Lean compiles cleanly, because axioms do not produce warnings.
+4. The status becomes `verified`, the tier becomes `formal`, and the thesis and UI show **Lean-verified**.
 
-**Impact:** a pressure-vessel safety determination is fabricated. The tool description also advertises
-"API 650", which has no clause at all.
+#### Failure scenario
+Proof search in the research loop fails to find a real proof and "repairs" the attempt by adding `axiom choice : <goal>`. The theorem enters the thesis as machine-checked.
 
-**Root cause:** stub implementation shipped as a real check; no negative tests (§31).
+#### Impact
+The strongest verification claim in the product can be attached to a false statement.
 
-**Recommended fix:**
-- Implement UG-27(d), or return `compliant: None` / `status: "not_evaluated"` for unknown or unimplemented
-  clauses.
-- Remove the API 650 claim.
+**Current data.** The only formal-tier finding in the stored Collatz project (F32) declares no axiom; it was checked read-only. The defect is therefore latent, not yet realised.
 
-**Verification:**
-- Known-answer tests: sphere P = 1 MPa, R = 1000 mm, S = 138 MPa, E = 1 → t_req = 1000/(276 − 0.2) mm.
-- A negative test asserting an unimplemented clause is never `True`.
+#### Root cause
+Soundness is checked by pattern-matching the source, with a name-based allowlist, instead of asking the kernel.
 
-**Related:** AUDIT-018, AUDIT-003.
+#### Recommended fix
+- Reject every `axiom` declaration in model-written code, with no allowlist; real foundational axioms are already in Lean core and Mathlib, not in the user file.
+- After compiling, run `#print axioms <theorem>` and accept only `propext`, `Classical.choice` and `Quot.sound`.
+- Treat `@[…] axiom`, `opaque` and `constant` declarations the same way.
 
-### AUDIT-002 – CAD geometry tool fabricates mass properties and returns a default part for missing input
+#### Verification
+Regression tests with the four probe cases, run against real Lean (skipped when Lean is absent), plus a `#print axioms` assertion test.
 
-**Severity:** CRITICAL · **Confidence:** CONFIRMED · **Category:** Mock data / Scientific Correctness
+#### Related findings
+AUDIT-105, AUDIT-107 (tier semantics).
 
-**Location:**
-- `tribos/substrate/cad/inspector.py`, `GeometryInspector.inspect_stl_ascii`, lines 90-101 (default geometry)
-  and 112-118 (estimates);
-- LLM tool `substrate_geometry_inspect`, `tribos/tools/registry.py:742-759`; its schema says
-  "ASCII STL geometry content **or filepath**" (`registry.py:488`).
-
-**Problem:**
-- With no parsable vertices (empty input, a file path, a binary STL), the tool returns a hard-coded
-  100×50×20 mm part (volume 100,000 mm³, area 16,000 mm²).
-- With real vertices, it reports volume = 70% of the bounding box ("typical bracket topology"), surface area =
-  the area of the bounding box, and centre of gravity = the centre of the bounding box.
-- Nothing in the output marks these as estimates or defaults. The tool description says it is "calculating
-  … volume, surface area, mass, and center of gravity".
-
-**Evidence:**
-- `GeometryInspector.inspect_stl_ascii('/etc/passwd')` → `{'dimensions_mm': {'length': 100.0, 'width': 50.0, 'height': 20.0}, 'volume_mm3': 100000.0, 'mass_kg': 0.27, ...}`.
-- A single right triangle with 10 mm legs (true area 50 mm²) → `surface_area_mm2: 200.0`.
-
-**Failure scenario:** the LLM passes a file path; the user receives a confident mass of 0.27 kg for a part that
-was never read.
-
-**Impact:** fabricated engineering data presented as measurement.
-
-**Root cause:** test-fixture behaviour left in production code. The test (`tests/test_harness_and_memory.py:478-481`)
-asserts the fabricated 100/50/20 dimensions.
-
-**Recommended fix:**
-- Return an error when no geometry is parsed.
-- Compute area and volume from facets (divergence theorem) and the centroid from the tetrahedral decomposition.
-- Never accept paths from the model.
-
-**Verification:** known-answer tests on a unit cube (V = 1000 mm³ for 10 mm sides, A = 600 mm²) and a
-tetrahedron.
-
-**Related:** AUDIT-003.
-
-### AUDIT-025 – A canned benchmark report is appended to unrelated answers, with hard-coded fallback numbers
-
-**Severity:** CRITICAL · **Confidence:** CONFIRMED · **Category:** Mock data / Scientific integrity
-
-*Found during remediation, 2026-10-30; it was not in the original audit.*
-
-**Location:**
-- `tribos/scientific/assembly.py`: `assemble_eight_part_answer` (untracked file), and
-  `check_and_repair_truncation`.
-- Callers: `tribos/agents/orchestration/draft.py` (around lines 340-348 and 572-576) and
-  `tribos/agents/orchestration/scientific.py`.
-
-**Problem:**
-- `check_and_repair_truncation` ran on every drafted answer whenever the run held *any* `execution_artifacts`. It
-  appended whichever "### Section 1-8" blocks of a fixed eight-part benchmark report the answer lacked:
-  "2k+1 for k ∈ {1,3,6}", RC circuit, cantilever beam, oscillator, FTCS heat, Monte Carlo, references.
-- Every number in those blocks had a hard-coded default (for example `rc.get("time_constant", 1.034)`,
-  `beam.get("max_deflection", 0.00768)`, `mc.get("estimate", 0.5921…)`).
-- The assembler read only the keys `"oscillator"` and `"heat"`, while the composite run stores `"ode_rk4"` and
-  `"heat_ftcs"`. So the ODE and heat sections always showed the stored example values, even on the intended path.
-
-**Evidence:** `tests/test_streaming.py` ("Find KRAS papers only.") streamed
-"…### Section 1: Arithmetic &…adaptive Gauss-Kronrod quadrature…". The appended text then triggered a revision,
-which in turn caused four of the ten red tests (AUDIT-011).
-
-**Impact:** fabricated scientific content, presented as computed results, on arbitrary questions.
-
-**Status:** Fixed (§50).
+### Prior critical findings
+Prior AUDIT-001, 002 and 025 are fixed per their regression tests (§12a).
 
 ## 12. High-Severity Findings
 
-### AUDIT-003 – CAE review reports "fully verified against 14-gate criteria" for meaningless inputs; only 5 gates exist
-
-**Severity:** HIGH · **Confidence:** CONFIRMED · **Category:** Scientific Correctness / UI-claim integrity
-
-**Location:**
-- `tribos/substrate/cae/review.py`: docstring line 1; zero-denominator guards at lines 39, 59, 113;
-  verdict at lines 158-160.
-- `tribos/tools/registry.py:762-772`: `stress_gradient_ratio` defaults to 1.8 and is absent from
-  `SubstrateCAEInput` (`registry.py:493-499`).
-
-**Problem:**
-- Each guard `... if denominator else 0.0` turns a zero denominator into a 0% deviation, which passes.
-- The verdict string claims 14 gates; 5 exist.
-- The singularity gate always receives 1.8 (≤ 3.0) through the tool path, so it always passes.
-
-**Evidence:** `run_full_cae_audit(applied_load_n=0, reaction_force_n=1e9, coarse_stress_mpa=0, fine_stress_mpa=0, yield_strength_mpa=250, analytical_stress_mpa=0)`
-→ `cae_verified: True`, `verdict: "FEA results fully verified against 14-gate criteria"`.
-
-**Impact:**
-- False assurance that an FEA model is in equilibrium and mesh-converged.
-- The equilibrium gate passes with an unbalanced reaction of 1e9 N.
-
-**Fix:**
-- Treat zero or invalid denominators as `not_evaluable`.
-- Require `stress_gradient_ratio`, or mark the singularity gate not evaluated.
-- Make the verdict state the number of gates actually run.
-
-**Verification:** property tests: any zero or negative load or stress → `cae_verified` must not be `True`.
-
-**Related:** AUDIT-001, AUDIT-002.
-
-### AUDIT-004 – Harness API has no ownership or authorization checks (cross-tenant read/write)
-
-**Severity:** HIGH · **Confidence:** CONFIRMED (code path) · **Category:** Authorization
-
-**Location:** `app/backend/routers/harness.py:98-298` — all 17 routes. The file has 18 `get_current_user`
-dependencies and **0** uses of the user id for scoping.
-
-**Problem:** every route authenticates and then ignores the identity. Any authenticated user can:
-- list or create threads and append turns in any `project_id` / `thread_id` (`:98-146`);
-- create and list answer revisions with a free-text `author` field (`:150-201`);
-- read any run's checkpoints, including `state_payload` through `/resume` (`:205-235`);
-- sign off any artifact for any project (`:239-259`);
-- read any run's or project's spend (`:285-298`).
-
-The project RBAC in `routers/projects.py` (non-member → 404) is bypassed, because this router uses a separate
-store (`tribos/memory/engine.py`) keyed only by the caller-supplied `project_id`.
-
-**Evidence:**
-```python
-async def list_threads(project_id: str, user: str = Depends(get_current_user)) -> dict[str, Any]:
-    threads = _mem_engine.list_project_threads(project_id)
-```
-
-**Failure scenario:**
-1. User B (a valid token) calls `GET /api/harness/threads/<thread_id>/turns` and reads user A's conversation.
-2. User B posts an `approved` sign-off on user A's artifact.
-
-**Impact:** confidentiality and integrity of engineering records and sign-offs. In `TRIBOS_AUTH_MODE=disabled`
-there is only one user, so the risk applies to bearer deployments.
-
-**Root cause:** the router was added without adopting the project-store membership checks.
-
-**Fix:** resolve `project_id` through `get_project_store()` with role checks, store `user_id` on threads,
-revisions, reviews, checkpoints and cost rows, and filter every query by it.
-
-**Verification:** a TestClient security test with two tokens asserting 404/403 across all 17 routes.
-
-**Related:** AUDIT-017.
-
-### AUDIT-005 – Written-answer checker passes false real-domain identities (`√(x²) = x`, `ln(x²) = 2 ln x`, `|x| = x`)
-
-**Severity:** HIGH · **Confidence:** CONFIRMED · **Category:** Scientific Correctness / Verification
-
-**Location:** `tribos/verify/math_claims.py`, identity sampling at lines 1247-1341. The sample points come from
-`t_values = [... 0.37, 1.13, 2.71, 4.4, 6.9, 0.05]` (line 1279), and other symbols use
-`rng.uniform(max(0.35, b_low), …)` (line 1292). PASSED is returned when ≥ 3 samples agree (line 1339).
-
-**Problem:** identities are tested only at positive points, regardless of the stated domain.
-
-**Evidence (executed):** answer text "For every real number $x$ … $\sqrt{x^2}=x$ … $\ln(x^2)=2\ln(x)$ … $|x|=x$",
-with query "Simplify sqrt(x^2) for real x", produced:
-`4 mathematical statement(s): 3 passed, 1 not checkable`, and each false identity has status `passed`.
-
-**Impact:** the README states that "a contradicted statement fails verification". Here false statements are
-reported as passed checks and counted in the verification coverage shown to users.
-
-**Root cause:** the sampling domain is fixed and positive, ignoring the problem's domain and the absence of
-`positive=True` assumptions.
-
-**Fix:**
-- Include negative and complex-boundary points when the domain is real or unspecified.
-- Only report PASSED for identities proven by `simplify` under the declared assumptions; label sampled agreement
-  "agrees at N points".
-
-**Verification:** regression tests with the three identities above plus `x/x = 1` near 0, `sqrt(a*b) = sqrt(a)*sqrt(b)`.
-
-### AUDIT-006 – Derivation card labels every executed math-agent step "Verified" and hides the run status
-
-**Severity:** HIGH · **Confidence:** HIGH (backend payload executed; UI path traced in code, not rendered in a
-browser) · **Category:** UI/UX scientific trust
-
-**Location:**
-- `web/src/components/DerivationArtifact.tsx:161`: `const ok = step.verified ?? (step.status ? step.status === "ok" : true);`
-- `DerivationArtifact.tsx:168`: renders the "Verified" pill.
-- `DerivationArtifact.tsx:47,74-75`: the header reads `data.verified` / `data.is_equal` only.
-- Classic path wiring: `web/src/components/MessageArtifacts.tsx:86-87,193-195` (`artifacts.axiom`) and
-  `tribos/agents/orchestration/gather.py:219-228`.
-
-**Problem:**
-- Math-agent steps carry `status: "ok"`, which means the tool executed. The card maps that to **"Verified"**.
-- A step with no status at all defaults to `true`.
-- The agent's run-level status (`verified` / `partially_verified` / `unverified` / `failed`) lives in
-  `status` / `verification.status`. The card never reads it, so no status pill is shown for the run.
-
-**Evidence:** `solve_problem_tool('Compute the integral of 1/x from -1 to 1')` returns `status: partially_verified`
-and `answer.text: "nan"`. Its steps have `status: 'ok'`, and the `axiom_calculus` step output contains
-`'verified': False`. Each of these steps would render a green "Verified" pill.
-
-**Impact:** users see per-step "Verified" badges for unchecked or failed computations, which is the
-"makes preliminary results look final" failure mode.
-
-**Fix:**
-- Rename the step pill to "Ran", or derive it from the step output's `verified` field.
-- Default unknown to "Not checked".
-- Show `data.status` / `data.verification.status` in the header.
-
-**Verification:** a web unit test rendering the payload above and asserting no "Verified" text.
-
-**Related:** AUDIT-014.
-
-### AUDIT-007 – Curve fit: `verified` = "RMSE is finite", `converged` hard-coded, undefined covariance reported as SE = 0
-
-**Severity:** HIGH · **Confidence:** CONFIRMED · **Category:** Numerical / Uncertainty
-
-**Location:**
-- `tribos/dynamis/engine.py`, `dynamis_fit_parameters`: lines 629-634 (SE), 650 (`"converged": True`),
-  651 (`"verified": bool(math.isfinite(rmse))`).
-- The values reach the LLM via `tribos/agents/stem_evidence.py:192-199`.
-
-**Evidence (executed):**
-- Zero degrees of freedom (`a + b*x`, 2 points) → `std_errors {'a': 0.0, 'b': 0.0}`, `verified True`.
-- Model `a*x` fitted to `sin(3x)` → `R² = -0.005`, `verified True`, `converged True`.
-- Unidentifiable `a*b*x` → `verified True` (SE ≈ 4e6, correctly huge).
-
-**Problem:**
-- `pcov` is `inf` when the parameters are not estimable; the code substitutes 0.0. That turns "unknown
-  uncertainty" into "exact".
-- A failed or meaningless fit is labelled verified.
-- Fits are unweighted, with no `sigma` / `absolute_sigma`, so measurement uncertainty is ignored.
-
-**Impact:** fitted parameters are presented to the writer model with zero uncertainty, together with a
-"verified" flag.
-
-**Fix:**
-- Report `None` / "not estimable" for non-finite variances.
-- Set `converged` from the optimiser's `ier`.
-- Derive `verified` from goodness-of-fit plus degrees of freedom > 0, or rename it.
-- Accept `sigma`.
-
-**Verification:** known-answer tests: an exact-linear dataset with noise (analytic SE formula); zero-dof → SE not
-estimable; a poor model → not verified.
-
-### AUDIT-008 – Model-written code runs without OS isolation by default, including inside the API container
-
-**Severity:** HIGH · **Confidence:** CONFIRMED · **Category:** Security / Infrastructure
-
-**Location:**
-- `tribos/agentic/sandbox/gateway.py:119-128` (auto mode falls back to `SubprocessBackend` unless
-  `STRICT_LIMITS` **and** not `ALLOW_UNISOLATED`);
-- defaults `TRIBOS_SANDBOX=True`, `TRIBOS_SANDBOX_STRICT_LIMITS=False` (`tribos/config/settings.py:304,324`);
-- `docker/compose.yml` (the backend service has no container runtime or socket);
-- `docker/backend.Dockerfile:43` ("This image is the API … it must never run model-written code").
-
-**Evidence (executed, default settings):** `container_available()` → `(False, 'the podman.EXE daemon is not running')`,
-and `_select_backend('python')` → `SubprocessBackend None`.
-
-**Problem:**
-- In the documented compose deployment, the backend cannot reach a container runtime, so every Calcula
-  execution runs as a subprocess of the API container, which holds the LLM credentials (`env_file: ../.env`).
-- The setting `TRIBOS_SANDBOX_ALLOW_UNISOLATED=false` reads as if it forbids this, but it only applies in strict
-  mode.
-- The docs (`docs/agentic/sandbox-operations.md:73`) do say "falls back silently".
-
-**Mitigations verified:**
-- The AST policy blocked the escapes tried (ctypes, `os` via attributes, dunder chains, absolute-path readers,
-  `pandas.eval`).
-- The runtime refused SymPy string `__` payloads.
-- The child environment is an allowlist (`process.py:28-34`).
-
-**Residual risk:** native code inside allowed packages can bypass Python-level guards (acknowledged in
-`backends.py:9-11`). The same uid can read the parent's `/proc/<pid>/environ` on Linux (UNVERIFIED exploit
-path).
-
-**Fix:**
-- Default `STRICT_LIMITS=1` in production profiles, or make `ALLOW_UNISOLATED=false` effective in auto mode.
-- Run the sandbox as a sidecar service in compose.
-- Surface the active backend in `/api/health`.
-
-**Verification:** a deployment test asserting the selected backend is `ContainerBackend` in compose.
-
-### AUDIT-009 – 385 published advisories in 41 locked Python packages, including untrusted-input parsers and the JWT library
-
-**Severity:** HIGH · **Confidence:** CONFIRMED (advisories exist per pip-audit; exploitability per advisory
-UNVERIFIED) · **Category:** Dependencies / Supply chain
-
-**Evidence:** `python -m pip_audit -l` on `.venv`:
-
-| Package | Version | Advisories |
-|---|---|---:|
-| pypdf | 6.1.1 | 59 |
-| pillow | 11.3.0 | 56 |
-| nltk | 3.9.2 | 42 |
-| aiohttp | 3.12.15 | 40 |
-| gitpython | 3.1.45 | 34 |
-| authlib | 1.6.1 | 17 |
-| pyjwt | 2.10.1 | 17 |
-| tornado | 6.5.2 | 17 |
-| virtualenv | 20.34.0 | 16 |
-| transformers | 4.55.2 | 10 |
-| torch | 2.8.0 | 8 |
-| cryptography | 45.0.6 | 7 |
-| urllib3 | 2.5.0 | 6 |
-
-…41 packages in total. The environment includes dev extras.
-
-Runtime use on untrusted input:
-- `pypdf` in `tribos/papers/extract.py` and `tribos/datasets/validators.py` (uploaded papers);
-- `PIL` in `tribos/vision/reader.py` (uploaded images);
-- `jwt` in `app/backend/auth.py` (every bearer request).
-
-`npm audit --omit=dev`: 0 vulnerabilities.
-
-**Root cause:** exact pins with no refresh. CI's pip-audit gate does block (see the AUDIT-019 correction), so the
-security workflow was failing rather than silently passing.
-
-**Fix:** upgrade the runtime packages to fixed versions (watch the numpy 1.26 pin constraint noted in
-`pyproject.toml`), and make pip-audit blocking for runtime dependencies.
-
-**Verification:** a pip-audit gate with an explicit, reviewed ignore list.
-
-### AUDIT-010 – Material property model at temperature is unsourced and unbounded
-
-**Severity:** HIGH · **Confidence:** HIGH (code CONFIRMED; the magnitude comparison relies on external
-handbook data, flagged for domain review) · **Category:** Scientific validity
-
-**Location:** `tribos/memory/semantic.py:33-43` (`e_at_temp`, `yield_at_temp`) and catalogue lines 59-130.
-Exposed through `/api/harness/substrate/materials/lookup` and the tool `substrate_material_lookup`.
-
-**Problem:**
-- Yield is derated by a single factor `1 − 0.0006·ΔT` (floor 0.2) for **all** alloys.
-- E is linear with a per-alloy coefficient.
-- There is no source, no valid temperature range, and no warning. Cold temperatures are never adjusted.
-
-**Evidence (executed):** Al 6061-T6 at 260 °C → yield 236.3 MPa, E 60.6 GPa. Published elevated-temperature
-data for precipitation-hardened 6061-T6 show a much larger strength loss in this range (ASM-type handbook data;
-external — requires domain verification). The code's 0.0006/°C factor cannot represent alloy-specific
-overaging.
-
-**Impact:** unconservative strength values feed into design checks.
-
-**Fix:**
-- Use tabulated, cited property-versus-temperature data with validity ranges.
-- Refuse extrapolation.
-- Include the source in the output.
-
-**Verification:** reference-dataset tests against the cited tables.
+### AUDIT-102 – The sandbox's Python-level guards can be escaped; the default `auto` backend runs model code without isolation
+
+**Severity:** HIGH
+**Confidence:** CONFIRMED (escape primitives executed). The end-to-end chain from prompt injection to model code is HIGH confidence, not demonstrated.
+**Category:** Security
+
+#### Location
+- `tribos/agentic/sandbox/gateway.py:94-133` (`_select_backend`: `auto` falls back to `SubprocessBackend` when no container runtime and not strict).
+- `tribos/agentic/sandbox/runner.py:326` (`_guard_readers`), `:624` (`_install_io_guard`).
+- `tribos/agentic/sandbox/policy.py` (static allowlist).
+
+#### Problem
+The static policy blocks literal paths and dangerous names well (18 of 18 first-round payloads refused). The runtime guards only cover Python-level I/O and a list of wrapped readers. C-level file access, native library loading and library features that spawn processes are not covered when the path or name is computed at run time.
+
+#### Evidence
+`scratchpad/audit/sandbox_probe.py`, `sandbox_probe2.py` and `sandbox_probe3.py`; backend reported as `{"backend": "subprocess", "os_isolated": false}`:
+
+| Payload (computed names or paths) | Result |
+|---|---|
+| `numpy.ctypeslib.load_library('kern'+'el32', 'C:/Win'+'dows/System32').GetCurrentProcessId()` | **`ok`, returned 5152**: native Win32 call |
+| `h5py.File(<computed path outside the work dir>, 'w')` | **`ok`, file created outside the work directory** (`'w'` truncates an existing file) |
+| matplotlib `rcParams['animation.ffmpeg_path'] = 'C:/Windows/System32/' + 'where.exe'` with `FFMpegWriter` | **`Broken pipe`**: the external executable was launched |
+| `sympy.utilities.autowrap.autowrap(x**2)` | Spawned an unguarded `python.exe setup.py build_ext` |
+| `open`, `np.fromfile`, `pd.read_csv` and `pathlib` with computed paths | Refused at run time (guards work) |
+
+#### Failure mechanism
+The model writes code after reading web pages and uploads (indirect prompt injection). Through the primitives above, that code can call any Win32 API as the server user:
+- read the repository's `.env`;
+- open sockets below the Python-level network stub;
+- write or truncate files.
+
+#### Failure scenario
+A literature page fetched during a research project contains instructions. The model's analysis cell uses `ctypeslib` to read `.env` and post the keys elsewhere.
+
+#### Impact
+API-key theft and code execution on the operator's machine.
+
+**Exposure.** Every host that uses `TRIBOS_SANDBOX_BACKEND=auto` without a running container runtime and without strict mode, which is the default local configuration that this machine runs. The documented compose deployment sets `TRIBOS_SANDBOX_STRICT_LIMITS=1` (`docker/compose.yml:35`) and refuses execution instead (verified in config, not run).
+
+#### Root cause
+The default prefers availability (run unisolated, with a log warning) over safety. The runtime guards enumerate Python entry points, while the escape surface lies in native code.
+
+#### Recommended fix
+- Make strict mode the default, so that unisolated execution needs an explicit `TRIBOS_SANDBOX_ALLOW_UNISOLATED=1`.
+- Add runtime guards for `numpy.ctypeslib.load_library` and `ctypes` (refuse), `h5py.File` with any path outside the work directory, `matplotlib.animation` writers and `rcParams[*_path]`, and `sympy.utilities.autowrap` and `codegen`.
+- On POSIX, also drop privileges and use seccomp; on Windows, use AppContainer.
+
+#### Verification
+Turn the three payloads into regression tests that must report `policy_violation` or an error, on Windows and Linux.
+
+#### Related findings
+AUDIT-103, AUDIT-117; prior AUDIT-008.
+
+## 12a. Status of the Previous Audit's Findings (re-verified 2026-11-04)
+
+| Prior finding | Prior status claim | Current status | Evidence this audit |
+|---|---|---|---|
+| AUDIT-001 ASME clauses always compliant | Fixed | Fixed per regression tests | `tests/test_feat_audit_report_fixes.py` in the green suite (2546 passed). Not re-derived |
+| AUDIT-002 CAD fabricated mass properties | Fixed | Fixed per regression tests | Same |
+| AUDIT-003 CAE "14-gate" verdicts | Fixed | Fixed per regression tests | Same |
+| AUDIT-004 Harness authorisation | Fixed | **Verified fixed** | Probe: Bob cannot create threads on, or read revisions or spend of, Alice's project (404) |
+| AUDIT-005 False real-domain identities passed | Fixed | **Verified: no longer passed**, but labelled inconclusive (AUDIT-111) | Probe on √(x²) = x, \|x\| = x, ln(x²) = 2 ln x |
+| AUDIT-006 Derivation "Verified" pills | Fixed | Fixed per web tests | 227/227 web tests |
+| AUDIT-007 Curve-fit verified and SE | Fixed | **Verified fixed** | Fit matches closed-form OLS exactly (a = 1.981843, SE = 0.012108); `converged` and `verified` reported |
+| AUDIT-008 Sandbox isolation default | Fixed (deployment) | Compose fixed. **The local default remains unisolated, and escapes are confirmed** | AUDIT-102 |
+| AUDIT-009 Dependency advisories | Partly fixed | Partly fixed: **113 advisories in 18 of 245 packages** (was 385 in 41) | pip-audit 2.9.0 (AUDIT-109) |
+| AUDIT-010 Material properties at temperature | Fixed | Fixed per regression tests | Suite |
+| AUDIT-011 Red test suite | Fixed | **Verified**: 2546 passed, 0 failed, 28 skipped | Full run, 730.7 s |
+| AUDIT-012 mem0 adapter | Fixed | Fixed per regression tests | Suite |
+| AUDIT-013 Stale calibration | Fixed (refit needed) | **Refit still not done**: the file has no `code_sha256`, so calibrated confidence is never shown | AUDIT-114 |
+| AUDIT-014 NaN answers partially verified | Fixed | Fixed per regression tests | Suite |
+| AUDIT-015 Material substring lookup | Fixed | Fixed per regression tests | Suite |
+| AUDIT-016 `factorial` DoS | Fixed | Fixed per regression tests | Suite |
+| AUDIT-017 Harness placeholders | Honestly labelled | Unchanged (cost ledger still not fed) | Code reading |
+| AUDIT-018 UG-27 applicability | Fixed | Fixed per regression tests | Suite |
+| AUDIT-019 Actions tag-pinned | Fixed | **Verified**: 60 of 60 `uses:` pinned to 40-character SHAs | grep |
+| AUDIT-020 Biomedical leftovers | Deferred | **Still present, with functional impact** | AUDIT-108 |
+| AUDIT-021 Number formatter | Fixed | Fixed per web tests | 227/227 |
+| AUDIT-022 Duplicate CODATA | Fixed | Fixed per regression tests; Physis constants verified exact | §15 |
+| AUDIT-023 Inequality counterexample inconclusive | Fixed | Fixed per regression tests; the identity analogue remains (AUDIT-111) | Probe |
+| AUDIT-024 Repository hygiene | Not changed | Unchanged | AUDIT-116 |
+| AUDIT-025 Canned benchmark report | Fixed | Fixed per regression tests | Suite |
 
 ## 13. Medium-Severity Findings
 
-### AUDIT-011 – Python test suite is red (10 failures), contradicting the documented baseline
+### AUDIT-103 – The SageMath engine bypasses strict isolation
 
-**Severity:** MEDIUM · **Confidence:** CONFIRMED · **Category:** Testing
+**Severity:** MEDIUM. **Confidence:** HIGH (code), exploitation UNVERIFIED (SageMath not installed here). **Category:** Security
 
-**Evidence:** `pytest -q -p no:cacheprovider -rs` → **10 failed, 2142 passed, 28 skipped in 570.70 s**.
-`AGENTS.md:15` claims "baseline 1326 passed, 15 skipped, 0 failed".
+#### Location
+`tribos/agentic/sandbox/gateway.py:98-100`
 
-Application failures (5), consistent with the uncommitted edits to `tribos/agents/prompts.py` and the agentic
-modules:
-- `tests/test_agentic_loops.py::test_gap_loop_retrieves_resynthesizes_and_stops` — 2 prompts instead of 1;
-- `tests/test_foundation_hooks.py::test_synthesis_system_prompt_composition`;
-- `tests/test_prompts.py::test_composed_prompt_is_numbered_and_bounded` — rule numbering `[10,11,12]` instead
-  of `[8,9,10]`;
-- `tests/test_prompts.py::test_orchestrator_sends_structured_prompt`;
-- `tests/test_streaming.py::test_orchestrator_streams_reasoning_answer_and_real_steps` — an extra `---` block
-  appended.
+#### Problem
+`if engine == ENGINE_SAGE: return SageBackend(), None` returns before the strict-mode check. Model-written Sage code runs with the subprocess guards even when `TRIBOS_SANDBOX_STRICT_LIMITS=1`, and Sage widens the import surface (`sage.all`).
 
-Environment/test-design failures (5), in `tests/test_feat_mem0_integration.py`: Qdrant lock on
-`C:\Users\ghotc\.mem0\migrations_qdrant` (see AUDIT-012).
+#### Evidence
+The quoted code. `TRIBOS_SANDBOX_SAGE_ENABLED` defaults to true (`settings.py:376`).
 
-**Fix:** reconcile the prompt changes with the tests (or the reverse), and make the mem0 tests use a temporary
-`HOME` / `MEM0_DIR`.
+#### Impact
+On any host where SageMath is installed, strict mode does not protect Sage executions.
 
-### AUDIT-012 – Mem0 adapter: embedded single-process Qdrant, writes to `~/.mem0`, global env mutation at import
+#### Recommended fix
+Apply the same strict check, or refuse Sage when strict and no isolating backend can run it.
 
-**Severity:** MEDIUM · **Confidence:** CONFIRMED · **Category:** Concurrency / Reliability
+#### Verification
+A unit test: strict mode with engine=sage gives `refused_reason`.
 
-**Location:** `tribos/agentic/mem0_adapter.py`: line 24 (`os.environ["MEM0_TELEMETRY"] = "False"` at import),
-lines 111-120 (embedded Qdrant path).
+### AUDIT-104 – The thesis "number check" verifies presence, not binding to the right quantity
 
-**Evidence:** the test failures above (`portalocker.exceptions.AlreadyLocked`, "Storage folder … is already
-accessed by another instance of Qdrant client").
+**Severity:** MEDIUM. **Confidence:** CONFIRMED. **Category:** Scientific correctness, communication
 
-**Impact:**
-- Multiple uvicorn workers or processes sharing `TRIBOS_DATA_DIR` will fail on memory writes.
-- Tests leak state into the user's home directory.
+#### Location
+`tribos/agentic/research/ledger.py:145` (`evidence_numbers`), `:194` (`unsupported_numbers`). Claims about the check: `tribos/agentic/research/thesis.py:10` ("Every number … is checked against the evidence") and `:373`.
 
-**Fix:** use a Qdrant server or per-process paths, and document single-worker operation.
+#### Problem
+The check extracts the numbers in the text and asks whether each appears anywhere in the evidence set. It does not check what the number is attached to.
 
-### AUDIT-013 – Math-agent calibration is stale relative to the code it describes
+#### Evidence
+- Evidence: "maximum stopping time 329 at n = 837,799".
+- The sentence "The maximum stopping time is 837,799 and it occurs at n = 329." gives `unsupported_numbers` = **`[]`**; the swapped quantities pass.
 
-**Severity:** MEDIUM · **Confidence:** CONFIRMED · **Category:** Statistical validity / Reproducibility
+#### Impact
+A model-written chapter can attach correct numbers to the wrong quantities, and the thesis still presents it as number-checked.
 
-**Location:** `tribos/axiom/calibration.json` (`fitted_at 2026-10-24T10:20`, n = 48, verified 43/43, p 0.978);
-`tribos/axiom/agent.py:852-880`.
+#### Recommended fix
+- Bind numbers to quantity names: a pattern of quantity name plus number from the ledger's `quantities`, or the stated limitation in the thesis's own text.
+- Reword "checked against the evidence" to "each number appears in the evidence".
 
-**Problem:**
-- The file's own note says "refit after changing the parser, policy or verifier".
-- `git log` shows 10 commits since the fit touching `problem.py`, `agent.py` and `verifier.py`, plus uncommitted
-  changes (8 files, +349/−75 in `tribos/axiom/`).
-- `calibrated_confidence()` emits p_correct = 0.978 with no code-hash check.
+#### Verification
+The swapped-quantity sentence must be flagged.
 
-**Fix:** store the code hash of the axiom package in the calibration file and suppress the figure on mismatch.
+### AUDIT-105 – "Replicated" means the same model re-implemented the test; the docs and thesis call it independent
 
-### AUDIT-014 – NaN / divergent answers receive `partially_verified`
+**Severity:** MEDIUM. **Confidence:** CONFIRMED (code). **Category:** Scientific validity, labelling
 
-**Severity:** MEDIUM · **Confidence:** CONFIRMED · **Category:** Verification semantics
+#### Location
+`tribos/agentic/research/runner.py:115-138`; `docs/agentic/research-loop.md:38`; `tribos/export/thesis.py:364` ("two independent implementations agree").
 
-**Location:** `tribos/axiom/verifier.py` (status assignment around line 195).
+#### Problem
+The second implementation is produced by the same model, from the same test prompt, with a note not to look at the first one's code. `compare_results` (rtol 1e-6) then decides the tier. Errors that come from a shared misreading of the specification, or from the model's habits, are correlated.
 
-**Evidence:** `∫₋₁¹ 1/x dx` → `status partially_verified`, `answer "nan"`. The checks were only "tool executed",
-"expression matches the problem" and "correspondence" (all level 0-1); the level-2 check was `null`.
+#### Impact
+The `replicated` tier counts as strong progress (`judge.progress_snapshot`) and settles deliverables, yet measures repeatability, not independent replication. It is also the strongest tier the research loop can reach without Lean (AUDIT-107).
 
-**Impact:** the word "partially verified" attached to an undefined answer for a divergent integral (where the
-principal value is 0).
+#### Recommended fix
+- Rename it ("re-implemented, same model") or make it independent: a different model or provider, a different method required (for example exact against floating point), or a deterministic reference such as OEIS or an analytical limit.
+- Correct the docs and thesis text.
 
-**Fix:** treat non-finite answers as `failed` or `unverified`, and state "diverges".
+#### Verification
+Assert that the replication request uses a different model or method; update the label tests.
 
-### AUDIT-015 – Material lookup uses substring matching and silently returns the wrong alloy
+### AUDIT-106 – Judge rules check that evidence exists, not that it is relevant or points the right way
 
-**Severity:** MEDIUM · **Confidence:** CONFIRMED · **Category:** Data integrity
+**Severity:** MEDIUM. **Confidence:** HIGH (code reading). **Category:** Scientific correctness
 
-**Location:** `tribos/substrate/materials/__init__.py:6-13` (duplicated in `semantic.py:225-232`).
+#### Location
+`tribos/agentic/research/judge.py:63-107`, especially line 76 (deliverable `done`) and line 96 (hypothesis verdicts).
 
-**Evidence:** `get_material('a')` → "Aluminum 6061-T6"; `get_material('steel')` → "AISI 4140 …" (the first
-match in dict order; 316L is also steel).
+#### Problem
+1. A deliverable becomes `done` with any passed finding at the required tier. The charter's `serves` links between tests and deliverables are not consulted.
+2. A hypothesis verdict of `supported` or `refuted` is accepted if any cited finding has status `passed` **or `refuted`**. So "supported" may cite a refuted finding, and no tier minimum applies; a `reasoned` finding, which is model-written argument, is enough.
 
-**Fix:** use exact keys or aliases only; return candidates for ambiguous queries.
+#### Impact
+Verdict stamps in the thesis and UI ("supported", "refuted", "done") can rest on unrelated or contrary evidence, chosen by the LLM judge.
 
-### AUDIT-016 – Expression parser evaluates `factorial(10**7)` eagerly (CPU denial of service)
+#### Recommended fix
+- Require at least one cited finding whose test serves the deliverable or hypothesis.
+- Require that `supported` has no cited `refuted` findings.
+- Set a minimum tier for decided hypotheses.
 
-**Severity:** MEDIUM · **Confidence:** HIGH (the parse hang is CONFIRMED; the route impact is inferred from
-code) · **Category:** Security / Availability
+#### Verification
+Unit tests for each rule, with crafted judge proposals.
 
-**Location:** `tribos/axiom/safe_expr.py:95` (`"factorial": sp.factorial` allowed); the power guard at
-`safe_expr.py:238-276` covers only integer powers. `/api/simulate` uses `run_in_executor` + `wait_for`
-(`app/backend/routers/simulate.py:100-125`), so on timeout the thread keeps running.
+### AUDIT-107 – The `certified` tier is offered but never produced, so certified deliverables can never be completed
 
-**Evidence:** `safe_parse_expr('factorial(10**7)')` did not return within 20 s (killed). Power towers are
-rejected in about 2 s with "Expression is too large…".
+**Severity:** MEDIUM. **Confidence:** CONFIRMED (code). **Category:** Scientific workflow, documentation
 
-**Fix:** bound the arguments of `factorial`, `binomial`, `gamma` and similar functions, or parse with
-`evaluate=False`.
+#### Location
+- Offered at `tribos/agentic/research/charter.py:18`, `:31` and `:37`.
+- Ranked at `ledger.py:22-23`.
+- Documented at `docs/agentic/research-loop.md:37` ("interval or exact arithmetic, exhaustive finite checks").
+- Only `computed` and `replicated` are assigned (`runner.py:114`, `:138`).
 
-### AUDIT-017 – Harness durability, cost and sign-off features are placeholders
+#### Problem
+`meets("replicated", "certified")` is false, and `validate_charter` does not lower `certified` requirements. The interval tools exist (`axiom/accuracy.py`) but are not connected to tier assignment.
 
-**Severity:** MEDIUM · **Confidence:** CONFIRMED · **Category:** Dead code / Misleading feature
+#### Impact
+Rounds are spent on deliverables that cannot close. The project stops by stagnation or a ceiling. The thesis says "not yet at the required 'certified' level", which is honest but means the work cannot finish.
 
-**Evidence:**
-- `DurableExecutionHarness.save_checkpoint`: 0 call sites. `/runs/{id}/resume` returns `{"status": "resumed", ...}`
-  but executes nothing (`harness.py:226-235`, `durable.py:147-159`).
-- `CostLedger.record_usage`: 0 call sites. The pipeline's `budget.record_usage` is a different class, so spend
-  endpoints always report empty totals. The `MODEL_PRICING` table (`cost_ledger.py:20-27`) lists older model
-  names and charges unknown models at the "default" rate.
-- The HITL `signature_hash` is `sha256(f"{artifact_id}:{reviewer_id}:{action}:{now}")` (`hitl.py:91-92`). It is
-  unkeyed and does not include artifact content, so it neither authenticates the reviewer nor binds the approval
-  to what was approved.
-- No web code calls `/api/harness/*`.
+#### Recommended fix
+Produce `certified` from interval or exact certificates (`interval_verify` status `proved`, exhaustive integer search), or remove the tier from the charter options and docs.
 
-**Fix:** wire the features in, or remove or label them experimental. Use an HMAC over a content hash.
+#### Verification
+A charter with a certified deliverable can reach `done` through an interval proof.
 
-### AUDIT-018 – ASME UG-27(c)(1) check ignores the clause's applicability limits and the longitudinal check
+### AUDIT-108 – Dataset upload validates every table as a single-cell matrix and rejects common scientific tables
 
-**Severity:** MEDIUM · **Confidence:** CONFIRMED · **Category:** Scientific validity
+**Severity:** MEDIUM. **Confidence:** CONFIRMED (executed). **Category:** Data ingestion, UI/UX
 
-**Location:** `tribos/memory/semantic.py:144-170`.
+#### Location
+`tribos/datasets/validators.py:17-18` (`MIN_OBS = 5`, `MIN_VARS = 2`), `:54-63` (`_check_dims`); `tribos/datasets/models.py:52-66` (`geo_accession`, `organism`, `irb_protocol_id`, `cells_by_genes`).
 
-**Problem:**
-- The circumferential formula `t = PR/(SE − 0.6P)` is implemented correctly.
-- Not implemented: the UG-27(c)(1) applicability limits (t ≤ R/2, P ≤ 0.385·S·E) and the (c)(2)
-  longitudinal-stress requirement.
-- Inputs are unvalidated: zero or negative values, and `joint_efficiency` > 1, are accepted.
+#### Evidence
+Tenant probe 2:
+- a two-column table `x,y` with 6 rows gives `422 "The matrix has 1 genes; at least 2 are needed."`;
+- a 2-row table gives `422 "The matrix has 2 cells; at least 5 are needed."`;
+- a three-column table with 6 rows is accepted.
 
-**Evidence:** P = 60 MPa, S = 138 MPa, E = 1 (P > 0.385·SE = 53.1 MPa) → `compliant: True` with no warning.
+#### Impact
+The most basic measurement shape (one independent and one dependent variable) cannot be uploaded, and the user is told about "cells" and "genes". This is prior AUDIT-020 with a functional consequence.
 
-**Fix:** enforce or flag the limits, and validate inputs (P > 0, 0 < E ≤ 1, R > 0).
+#### Recommended fix
+A generic tabular validator (rows of at least 1, columns of at least 1). Keep the single-cell rules behind an explicit dataset kind.
 
-### AUDIT-019 – GitHub Actions are tag-pinned only (dependency-gate claim corrected)
+#### Verification
+An upload test for an `x,y` CSV with any number of rows of at least 1.
 
-**Severity:** MEDIUM · **Confidence:** CONFIRMED · **Category:** CI/CD supply chain
+### AUDIT-109 – Known advisories remain, including in parsers fed untrusted PDFs
 
-**Correction (2026-10-30):** the original claim that CI never blocks on vulnerable dependencies was **wrong**.
-`security_audit.yml` has a blocking "Fail on vulnerabilities" step that reads the pip-audit JSON report, after the
-`|| true` report steps quoted below. Only the action-pinning part of this finding stands.
+**Severity:** MEDIUM. **Confidence:** CONFIRMED (presence of advisories); exploitability UNVERIFIED. **Category:** Supply chain
 
-**Evidence (original, partly superseded):**
-- `.github/workflows/security_audit.yml:48-49` (`pip-audit … || true`) and `:63` (`safety`,
-  `continue-on-error: true`).
-- `tests_tribos.yml:58,62,69`: full ruff, pylint and all-severity bandit are report-only.
-- None of the ~60 `uses:` references is SHA-pinned. `release.yml` publishes to PyPI and container registries
-  using tag-pinned third-party actions.
+#### Evidence
+pip-audit 2.9.0 against the `.venv`: 245 packages audited, **18 with advisories, 113 advisories**:
+- nltk 3.9.2: 42;
+- virtualenv 20.34.0: 16;
+- transformers 4.55.2: 10;
+- torch 2.8.0: 8;
+- **pypdf 6.21.2: 7**;
+- langchain-core 0.3.40: 6;
+- filelock 3.19.1: 4;
+- mem0ai 0.1.116: 4;
+- langsmith 0.1.147: 3;
+- pymdown-extensions 10.16.1: 3;
+- langchain 0.3.7: 2;
+- langchain-text-splitters 0.3.6: 2;
+- langchain-openai 0.3.0, marshmallow 3.26.1, mkdocs-material 9.6.21, pylint 3.3.8, pytest 8.4.2 and sentence-transformers 3.3.1: 1 each.
 
-**Fix:** add a blocking runtime pip-audit and pin actions by commit SHA.
+pypdf parses untrusted input at three places: uploaded datasets (`tribos/datasets/validators.py:175`), downloaded papers (`tribos/papers/extract.py:93`) and fetched literature (`tribos/archivon/engine.py:379`).
+
+#### Impact
+Likely denial of service from crafted PDFs. Each advisory's applicability was not analysed.
+
+#### Recommended fix
+- Upgrade pypdf first, since it is on the untrusted-input path.
+- Then plan the LangChain 0.3 and transformers or torch majors, as the previous audit noted.
+
+#### Verification
+A pip-audit gate (already in CI per the prior audit) with an allowlist of accepted risks.
+
+### AUDIT-110 – Research results are only partially reproducible: no environment or version provenance
+
+**Severity:** MEDIUM. **Confidence:** CONFIRMED (code). **Category:** Reproducibility, provenance
+
+#### Location
+`tribos/agentic/research/thesis.py:320` (the run record states the model name and research ID only); `tribos/export/thesis.py:515` (`thesis_bundle` writes `thesis.md`, `code/*.py`, `proofs/*.lean`, `ledger.json` and `README.md`).
+
+#### Problem
+The bundle omits:
+- the software commit and version;
+- Python, NumPy, SciPy and SymPy versions;
+- Lean and Mathlib versions;
+- the exact model version or date;
+- sandbox allowlist and limits;
+- random seeds used by cells (not enforced);
+- retrieval dates and URLs of web sources.
+
+Model-written charters, judgements and prose are not deterministic.
+
+#### Impact
+The numbers in a finding can be recomputed from its code. The thesis as a whole (its plan, verdicts and text) cannot be reproduced, and an environment-sensitive result (floating point, library behaviour) cannot be traced. Classification: **partially reproducible**.
+
+#### Recommended fix
+Write a `manifest.json` into the bundle and the thesis appendix: commit, `pip freeze` subset, Lean toolchain and Mathlib revision, model id and provider date, seeds, source URLs with access dates.
+
+#### Verification
+The bundle contains the manifest, and a test checks its fields.
 
 ## 14. Low-Severity Findings
 
-### AUDIT-020 – Biomedical leftovers remain in production code despite the STEM-only policy
+### AUDIT-111 – A disproved real-domain identity is labelled "inconclusive"
+**Severity:** LOW. **Confidence:** CONFIRMED.
 
-**Confidence:** CONFIRMED.
+**Location:** `tribos/verify/math_claims.py:1404`.
 
-grep finds references to `lumicell|vivarix|primekg|biomodels|KRAS|leiden|n_cells` in at least 12 production
-modules, for example:
-- `tribos/tools/registry.py` (38 occurrences; `vivarix_*` aliases at 640-686);
-- `tribos/agents/authoritative_orchestrator.py` (30; "lumicell … Leiden clusters" at 784-787);
-- `tribos/provenance/run_manifest.py` (20; `biomodels`, `primekg_version` at 396-397);
-- `tribos/datasets/validators.py:455-485` (AnnData "cells by genes" path).
+**Evidence:** √(x²) = x, |x| = x and ln(x²) = 2 ln x "for all real x" all return `inconclusive: holds for positive values only; differs at …`.
 
-The test fixture in `test_agentic_loops.py` still asks about KRAS. Ten tests are skipped as "Legacy … retired"
-or "Clinical trial … pruned". This contradicts AGENTS.md "don't reintroduce any"; `test_no_biomedical_leftovers.py`
-evidently guards a narrower set.
+**Impact:** The claim is false where the checker found a differing point, but the label does not say so. Inequalities were already changed to FAILED (prior AUDIT-023).
 
-### AUDIT-021 – UI number formatter uses decimal places, not significant figures
+**Fix:** Report FAILED with the counterexample when the statement's domain includes it.
 
-**Confidence:** CONFIRMED.
+### AUDIT-112 – The number check flags correct numbers that are followed by a comma
+**Severity:** LOW. **Confidence:** CONFIRMED.
 
-`web/src/components/agentic/ui.tsx:32-37`: for 1e-3 ≤ |v| < 1e5 it renders `toFixed(3)`, so 0.0012345 → "0.001"
-(one significant figure). The constants card is not affected (`ReferenceDataArtifact.tsx:87` uses
-`toExponential(6)`).
+**Location:** `tribos/agentic/research/ledger.py:27` (`_NUMBER_RE`, lookahead `(?![\d,])`).
 
-### AUDIT-022 – Duplicate CODATA table diverges from Physis
+**Evidence:** "occurs at n = 837,799, as computed" gives unsupported `['837', '799']`, while the evidence contains 837,799.
 
-**Confidence:** CONFIRMED.
+**Impact:** False "unverified number" notes in the thesis appendix. This erodes trust in the real flags.
 
-`tribos/memory/semantic.py:210-219` hard-codes constants without uncertainties and truncates the gas constant
-(8.314462618 vs the exact 8.31446261815324 J/(mol·K)). Physis uses `scipy.constants` (CODATA 2022, verified:
-electron mass 9.1093837139e-31 kg).
+**Fix:** Allow a trailing comma followed by whitespace, or a non-digit, in the grouped-number branch.
 
-### AUDIT-023 – An inequality disproved by a counterexample returns INCONCLUSIVE, not FAILED
+### AUDIT-113 – (reserved; no finding retained)
+This placeholder is kept so that IDs stay stable. The candidate (that `concluded` ignores undecided hypotheses) matches the documented rule (`research-loop.md:51`), so it is not a defect.
 
-**Confidence:** CONFIRMED (code).
+### AUDIT-114 – Math-agent calibration is never shown (the refit from the prior audit is still pending)
+**Severity:** LOW. **Confidence:** CONFIRMED.
 
-`tribos/verify/math_claims.py:1334-1336`: a sampled counterexample to `≤`, `<` or `≠` yields "undecided" even
-though a single valid counterexample refutes a universal inequality.
+**Location:** `tribos/axiom/agent.py:845-885`; `tribos/axiom/calibration.json` (no `code_sha256`).
 
-### AUDIT-024 – Repository hygiene and maintainability
+**Evidence:** `calibrated_confidence()` returns `None` for a file without a matching hash.
 
-**Confidence:** CONFIRMED.
+**Impact:** The calibrated accuracy figure promised by the math agent is never shown. This is correct behaviour for stale data, but the feature is effectively dead.
 
-- In the root, all git-ignored and untracked: two 8.8 MB zips, a 6.9 MB screenshot PDF, ~20 `.log` files,
-  `.coverage`, and five large audit/prompt Markdown files.
-- `web/src/app/page.tsx` is a 3,381-line component.
-- Non-gating lint debt: ruff 145 issues, eslint 167 warnings (0 errors).
+**Fix:** Refit on a frozen-code held-out run with `math_eval --write-calibration`.
+
+### AUDIT-115 – Strict mypy has 617 errors in 133 files; it is non-blocking by design
+**Severity:** LOW (INFORMATIONAL for correctness). **Confidence:** CONFIRMED.
+
+**Location:** `pyproject.toml:209-222`; `.github/workflows/tests_scientific_validation.yml:111-128` ("Strict mypy has never been enforced…").
+
+**Impact:** Type errors on scientific paths are not caught statically.
+
+**Fix:** Enforce on new and changed files first.
+
+### AUDIT-116 – Repository root clutter and parallel audit documents
+**Severity:** LOW. **Confidence:** CONFIRMED.
+
+**Evidence:** The repository root holds:
+- about 20 `.t*-*.log` files;
+- two 8.8 MB codebase zips (git-ignored);
+- a page-capture PDF;
+- several overlapping report documents: `CODEBASE_AUDIT.md`, `ACCURACY_REPORT.md`, `RELIABILITY_ISSUE_REPORT.md`, `Tribos_Scientific_Repair_Report.md`, `TRIBOS_COMPLETE_AUDIT_AND_REPAIR_CHANGELOG.md (1).md`, and two prompt files.
+
+None of this contains secrets (the archive name scan found no `.env` or key files).
+
+**Impact:** Contradictory status claims across documents; confusion about which is authoritative. This report replaces only `AUDIT_REPORT.md`.
+
+**Fix:** Move historical reports to `docs/history/` and delete the logs.
+
+### AUDIT-117 – Long-running research compute has no per-user queue cap (UNVERIFIED) and a raised timeout ceiling
+**Severity:** LOW. **Confidence:** MEDIUM.
+
+**Location:** `tribos/agentic/sandbox/__init__.py:38-58` (the `research_ceiling` raises the per-cell timeout to `TRIBOS_RESEARCH_SANDBOX_TIMEOUT_S`, up to 1,800 s, above the 110 s maximum of `TRIBOS_SANDBOX_TIMEOUT_S`); `campaign.py` (`TRIBOS_CAMPAIGN_MAX_ACTIVE=1` per process). No per-user limit on queued projects was found by search.
+
+**Impact:** One user can occupy the research queue for everyone. Each project runs for hours of model and sandbox time.
+
+**Fix:** A per-user queued and active cap, and a 429 on `POST /api/campaigns`.
+
+### AUDIT-118 – The vision cross-check uses the same model for both readings and for the review (INFORMATIONAL)
+**Location:** `tribos/vision/reader.py` (`_settle`), `tribos/vision/vlm.py`.
+
+Agreement between two readings from one model is self-consistency, not independent confirmation. The real independence comes from the two OCR engines, which are used for the word-coverage gate. This is documented in `docs/agentic/image-reading.md`. The consensus labels ("two independent vision readings agreed") slightly overstate the independence.
+
+### AUDIT-119 – Model-written content in research outputs (INFORMATIONAL)
+Charters, analyses, judgements and thesis prose are written by an LLM. Code checks numbers (AUDIT-104) and evidence existence (AUDIT-106) only. Readers should treat the prose as unreviewed scientific writing. The thesis states its tiers, but not this limitation in general.
 
 ## 15. Scientific Correctness Findings
 
-- **CRITICAL/HIGH:** AUDIT-001, AUDIT-002, AUDIT-003, AUDIT-005, AUDIT-010.
-- **MEDIUM:** AUDIT-014, AUDIT-018.
+Known-answer tests executed in this audit (`scratchpad/audit/science_kat*.py`):
 
-Implementation verified correct against textbook forms (code read):
-
-- **Fatigue** (`tribos/engcalc/fatigue.py`):
-  - Gerber equivalent stress σa/(1 − (σm/Sut)²) (lines 22-29);
-  - the Gerber factor of safety (Shigley form, line 38);
-  - Soderberg and Goodman (lines 40-41);
-  - Se′ = 0.5·Sut ≤ 1400 MPa else 700 MPa, refused for non-steels (lines 48-58);
-  - Basquin constants a = (f·Sut)²/Se, b = −log₁₀(f·Sut/Se)/3 (lines 64-65).
-- **Thermofluid** (`tribos/engcalc/thermofluid.py`):
-  - Colebrook by Newton iteration on 1/√f, with Swamee–Jain seed and range check (lines 15-32, 55-56);
-  - laminar f = 64/Re below 2300, with a transitional warning;
-  - ε-NTU parallel and counterflow, including the Cr = 1 case (lines 121-125);
-  - LMTD with the equal-ΔT limit (line 175).
-
-Three separate questions, for the main engines:
-
-| Engine | Implementation correctness | Numerical correctness | Scientific validity |
+| Component | Test | Reference | Result |
 |---|---|---|---|
-| engcalc | Matches textbook forms (read) | Newton iteration converges to 1e-12 relative | Validity ranges checked and warned |
-| Dynamis ODE | `solve_ivp`, rejects failed or non-finite solves | Tight tolerances; invariant drift check | Problem-dependent; stiffness left to the method choice |
-| Dynamis fit | Correct `curve_fit` call | SE wrong when covariance undefined (AUDIT-007) | Unweighted; no dof check |
-| Monte Carlo | Correct | SE with ddof = 1; seeded PCG64 | Accuracy note disclaims exactness |
-| Substrate | Stubbed / fabricated | Zero-guard passes | Not valid (AUDIT-001..003, 010) |
+| CODATA constants | c, h, k_B, N_A, G, e, m_e | `scipy.constants` (CODATA 2022) | 7 of 7 exact (relative difference below 1e-9) |
+| Units | atm to Pa, °C to K, °F to K, mile to m, kWh to J, psi to kPa, rad to deg | Exact definitions | 7 of 7 |
+| GUM | x·y, x = 2 ± 0.1, y = 3 ± 0.2 | 6 ± 0.5 | Exact |
+| ODE | y′ = −0.5y, y(0) = 1, t in [0, 4] | e^(−t/2) | max error 2.31e-9 |
+| Fit | a·t + b on 21 noisy points | Closed-form OLS | a and SE(a) identical to 6 digits |
+| Beam | Simply supported, centre load | PL³/48EI = 2.000e-4 m | Exact; section I exact |
+| Interval | x²+1 > 0 on [−10, 10]; x²−1 > 0 on [−2, 2]; enclosure of sin on [0, π] | Analytic | proved; refuted at x = 0; [0, 1] |
+| Precision | (1 − cos x)/x² at x = 1e-8 | 0.5; float64 cancels | `status: cancellation` |
+| Counterexample | n²+n+41 prime for n ≤ 100 | Fails at n = 40 | n = 40 |
+| Distribution | N(5, 2) against Exp(1), n = 400 | Normality holds or is rejected | consistent (Shapiro p = 0.57) / rejected (p = 3e-21) |
+| Lean | 2+2 = 5 via axiom spellings | Must fail | **verified (AUDIT-101)** |
+| Number check | Swapped quantities | Must flag | **not flagged (AUDIT-104)** |
 
-## 16. Numerical Computing Findings
+**Implementation, numerical and scientific validity, separated:**
+- **The engines above** are correct in implementation and numerically sound on the tested cases. Validity depends on users choosing the models within their stated assumptions (linear elasticity, first-order GUM).
+- **The research tier system** has implementation defects (AUDIT-101, 107) and validity defects in its labels (AUDIT-104 to 106).
 
-- AUDIT-007 (undefined covariance → 0), AUDIT-014 (NaN accepted as partially verified), AUDIT-016 (unbounded
-  factorial), AUDIT-003 (division-by-zero guards turned into passes).
-- Working:
-  - ODE results are rejected when `success=False`, when the shape mismatches, or when output is non-finite
-    (`dynamis/engine.py:151`);
-  - Monte Carlo rejects non-finite samples and complex values (`monte_carlo.py:45-51`);
-  - the power-tower guard works.
-- Tolerances: ODE rtol 1e-8 / atol 1e-10 (fixed, documented in the output); invariant drift 1e-4 relative
-  (`engine.py:265`); math-claim tolerance derived from printed precision (`math_claims.py:1071-1099`). These are
-  documented in place. Their scale-appropriateness for very large or very small magnitudes is UNVERIFIED.
-
-## 17. Scientific Data Findings
-
-- Uploads: tables with NaN or infinite values are rejected outright (`datasets/validators.py:438`). There is no
-  silent fill, which is the conservative behaviour, but there is also no missing-value-aware analysis option.
-- Material catalogue: 5 alloys with single-point properties and no source citations (AUDIT-010, AUDIT-015).
-- External literature data (Crossref / OpenAlex retraction flags in `archivon/integrity.py:1-49`): implemented,
-  UNVERIFIED at runtime (offline audit).
-
-## 18. Units / Dimensions / Coordinates / Time Findings
-
-- Pint offset units are handled correctly (executed): 100 degC → 212 degF (shown as 211.99999999999991, float
-  noise); 0 degC → 273.15 K; 10 delta_degC → 10 K; degC/s → K/s.
-- Substrate APIs encode units in field names (`_mpa`, `_mm`, `_celsius`) with no validation; there is no Pint
-  use in `semantic.py`.
-- engcalc works in SI internally with declared `Param` units (`thermofluid.py:104`, `Result(..., "Pa", "kPa")`).
-- Coordinates and geospatial: **not applicable**; no CRS or geospatial code was found.
-- Time: run manifests use `utc_now()` (`run_manifest.py:996`); no scientific time series were found. No verified
-  finding identified in this category.
-
-## 19. Statistical / ML Findings
-
-- AUDIT-013 (stale calibration), AUDIT-007 (fit statistics).
-- `tribos/config/confidence_calibration.json` honestly declares `"status": "heuristic"`, hand-set weights,
-  `n_claims: 0`, and records that an earlier in-sample fit on 25 synthetic claims was withdrawn. This is good
-  practice. Whether the UI labels that score "heuristic" everywhere is UNVERIFIED.
-- Math calibration: Laplace-smoothed P(correct | status) with a Wilson lower bound, n = 48 on a held-out set. The
-  sample is small (43 verified), and the file reports it honestly.
-- NLI and embedding models (transformers, sentence-transformers): model version pinning is UNVERIFIED (not
-  audited).
-
-## 20. Reproducibility Findings
-
-| Question | Answer | Evidence |
-|---|---|---|
-| Can the result be reproduced? | Tool computations: yes. LLM text: no (no seed recorded; temperature recorded) | `run_manifest.py:981-993` |
-| Can the processing history be reconstructed? | Yes: ordered tool calls, steps, routing, verification | `run_manifest.py:999-1010` |
-| Can the dataset version be identified? | Yes: dataset hashes | `run_manifest.py:442+` |
-| Can the algorithm version be identified? | Yes: code-tree sha256, git commit, app version | `run_manifest.py:140-146` |
-| Can parameters be recovered? | Yes: validated tool inputs | manifest `tool_calls` |
-| Can the environment be reconstructed? | Partially: `uv.lock` sha256; web lockfile not hashed | `run_manifest.py:146` |
-| Can another researcher get the same result? | Numerics yes (seeded MC, fixed tolerances). The verdicts depend on the live LLM and live literature APIs | — |
-
-Calibration provenance is weaker than run provenance (AUDIT-013). The test suite is not hermetic (AUDIT-012).
-
-## 21. Provenance Findings
-
-Run provenance is strong:
-- requested **and actually served** models, and whether a fallback was used (`run_manifest.py:981-993`);
-- source-version probes;
-- `query_sha256` and `response_sha256`.
-
-Gaps:
-- Harness sign-offs are not bound to artifact content (AUDIT-017).
-- Substrate outputs carry no source for their material data or formulas (AUDIT-010).
-- The manifest schema still carries `biomodels` / `primekg` fields (AUDIT-020).
-
-## 22. Scientific Visualization Findings
-
-- AUDIT-006 (status pills), AUDIT-021 (formatting).
-- `SimulationArtifact` / `TrajectoryCharts` make no "verified" claim.
-- Chart axis, unit and log-scale correctness was not audited: UNVERIFIED.
-
-## 23. UI/UX Findings
-
-- AUDIT-006 is the material one. The `artifactAttention` mechanism (`MessageArtifacts.tsx:80-84`) flags cards
-  that need a look; whether it considers `partially_verified` axiom results is UNVERIFIED.
-- Every card starts collapsed so the written answer is read first (`MessageArtifacts.tsx:81-84`). This puts more
-  weight on the text verification (AUDIT-005).
-
-## 24. Security Findings
-
-AUDIT-004, AUDIT-008, AUDIT-009, AUDIT-016, AUDIT-019.
-
-Verified controls:
-- **SecurityMiddleware** (`security.py:153-214`): loopback-only when auth is disabled; Host allow-list
-  (DNS-rebinding defence); Origin check on state-changing methods; body-size limits for both declared and
-  chunked bodies.
-- **CORS** drops wildcards (`security.py:61-73`).
-- **XSS:** KaTeX runs with `trust:false` (`PaperArtifact.tsx:26-28`); markdown URLs go through a scheme
-  allow-list (`markdownSafety.ts:127,223`); the only other `dangerouslySetInnerHTML` is a static theme script
-  (`layout.tsx:58-66`).
-- **Bearer token** kept in sessionStorage unless the user opts in to "remember" (`page.tsx:322-326`).
-- **Caller LLM key:** placeholder keys are refused (`main.py:334-341`); the key is stripped before jobs are
-  persisted (`jobs.py:515`); manifests store only `api_key_supplied: bool`.
-
-## 25. Authentication and Authorization Findings
-
-- **Authentication** (`app/backend/auth.py`, read in full):
-  - static tokens compared with `hmac.compare_digest`;
-  - HS256 JWT with `exp` and `sub` required, plus optional `aud`/`iss`;
-  - 503 when nothing is configured (fail-closed);
-  - JWT error details are logged, not echoed to the client.
-- **Authorization:**
-  - correct for run control (`agent_runs.py:45-49`), jobs (`jobs.py:120-144`), research memory
-    (`main.py:738-792`), projects (RBAC), datasets (user-scoped resolve) and export runs (`_load_owned`);
-  - **missing for the harness router** (AUDIT-004).
-
-## 26. API Findings
-
-The unauthenticated routes are `/api/health*`, the A2A card, and `GET`/`DELETE /mcp` and `GET /a2a`, which
-return only 405. The harness API accepts unvalidated scientific inputs: negative pressures, `joint_efficiency`
-above 1, temperatures outside any range (AUDIT-018, AUDIT-010).
-
-## 27. Database Findings
-
-| Store | WAL | Locks | Foreign keys | Notes |
-|---|---|---|---|---|
-| `utils/memory/project_store.py` | yes | yes | none (app-level cascade, `:424-428`) | unique current-fact index (`:266`) |
-| `utils/memory/research_memory.py` | yes | — | none | user-scoped queries |
-| `agentic/jobs.py`, `agentic/router_store.py` | yes | yes | none | — |
-| `provenance/run_store.py`, `datasets/store.py` | no | yes | none | — |
-| `memory/session.py`, `memory/episodic.py`, `harness/*.py` | no | no | `session.py` only | unscoped by user (AUDIT-004) |
-
-bandit flags 10 B608 (string-built SQL) at medium severity. Two that were inspected (`project_store.py:310,428`)
-interpolate constant table and column names. The rest are UNVERIFIED individually.
-
-## 28. Concurrency and State Findings
-
-- AUDIT-012 (mem0 lock).
-- The harness stores open a new SQLite connection per call with `timeout=10.0` and no WAL. Concurrent writers
-  serialize, and under load this could produce "database is locked" (UNVERIFIED under load).
-- `/api/simulate` per-user slots prevent thread pile-up per user, but CPU-bound work continues after a 504
-  (AUDIT-016).
-- Run recorder: ContextVar per inquiry (`run_manifest.py:4-5`). Not stress-tested.
-
-## 29. Reliability and Error Handling
-
-- Default-to-pass patterns are the recurring scientific failure mode:
-  - `review.py` zero guards;
-  - `semantic.py` `else → compliant`;
-  - `inspector.py` fallback geometry;
-  - `DerivationArtifact.tsx` `?? true`.
-- Router import failures are logged and the router is disabled unless `TRIBOS_STRICT_ROUTERS=1`
-  (`main.py:150-169`). That is visible in `/api/health`.
-- The tool registry retries partial registration at most once per minute (`registry.py:794-813`).
-
-## 30. Performance Findings
-
-- The full test suite takes 9.5 minutes, versus the ~4 minutes claimed in AGENTS.md (this machine).
-- Unbounded `factorial` (AUDIT-016).
-- No benchmark numbers were measured; no other verified finding identified in this category.
-
-## 31. Testing Findings
-
-- **Gates:** pytest red (AUDIT-011); web tests 209/209; typecheck clean; ruff F/E9 clean; bandit high clean;
-  `gen_env_reference --check` clean.
-- **Skipped (28), meaning unvalidated in this environment:**
-  - Lean (2), container sandbox (5), SageMath (3), Windows/POSIX limit variants (3);
-  - ~15 legacy biomedical tests.
-- **Test quality on the defective code** (`tests/test_harness_and_memory.py`):
-  - ASME is tested only for one cylindrical pass/fail pair (`:252,265`);
-  - geometry asserts the fabricated 100/50/20 box and `mass_kg > 0` (`:478-481`);
-  - CAE asserts `cae_verified is True` for one input (`:521`).
-
-  These tests confirm the code returns *something*; none would catch AUDIT-001/002/003.
-- **Strong scientific tests do exist elsewhere:** the zero-false-accept gate for the math agent
-  (`tests/test_math_agent.py`, per the README), and "verify numerics against analytic results" is a stated
-  convention. They were not inspected individually in this audit.
-- **Missing tests:** UG-27(d) known answer, STL known-volume, CAE zero inputs, negative-domain identities,
-  zero-dof fit SE, harness two-user authorization, DerivationArtifact status rendering.
-
-## 32. Dependency / Supply-Chain Findings
-
-AUDIT-009, AUDIT-019. `npm audit --omit=dev`: 0. The `vision` extra pins opencv below 4.11 because of the numpy
-1.26 pin, which itself blocks many upgrades (`pyproject.toml:80-84`).
-
-## 33. Configuration / Infrastructure Findings
-
-- AUDIT-008.
-- The compose file hardens both services: `read_only`, `cap_drop: ALL`, `no-new-privileges`, pids/mem/cpu limits,
-  ports bound to 127.0.0.1 by default.
-- The backend image runs as non-root uid 10001 (`backend.Dockerfile:50-60`).
-- `.env` exists locally and is git-ignored (`.gitignore:134`); it is not tracked. Its contents were not read.
-
-## 34. Technical Debt
-
-- Duplicated scientific logic of divergent quality (engcalc vs substrate; Physis vs `semantic.py` constants).
-- A god component (`page.tsx`).
-- Biomedical residue (AUDIT-020).
-- Placeholder harness features (AUDIT-017).
-- Calibration not bound to code (AUDIT-013).
-- 167 eslint warnings (mostly `no-explicit-any`).
-
-## 35. Dead Code / Placeholder / Mock Findings
-
-- **MOCKED:** STL default geometry (AUDIT-002).
-- **PLACEHOLDER:** checkpoints/resume, cost ledger, HITL signature (AUDIT-017); unimplemented ASME clauses
-  (AUDIT-001).
-- **DEAD:** `vivarix_*` aliases, lumicell/AnnData paths, `primekg`/`biomodels` manifest fields (AUDIT-020).
-
-## 36. Documentation Inconsistencies
-
-| Claim | Where | Reality | Evidence |
-|---|---|---|---|
-| "baseline 1326 passed, 15 skipped, 0 failed", ~4 min | `AGENTS.md:15` | 2142 passed, **10 failed**, 28 skipped, 9.5 min | §47 |
-| "14 Published Verification Gates" / "fully verified against 14-gate criteria" | `cae/review.py:1,158` | 5 gates | AUDIT-003 |
-| Standards check covers "ASME … UG-27, API 650" | `registry.py:732` | Cylinder only; sphere stubbed; no API 650 | AUDIT-001 |
-| Geometry tool "calculating volume, surface area, mass, and center of gravity" | `registry.py:751` | Bounding-box heuristics or a fixed default | AUDIT-002 |
-| Material tool returns "fatigue properties" | `registry.py:714` | Output contains no fatigue fields | `registry.py:697-709` |
-| API image "must never run model-written code" | `backend.Dockerfile:43` | Auto mode runs it there when no runtime is present | AUDIT-008 |
-| "A contradicted statement fails verification" | README §Verified Mathematics Agent | False identities pass | AUDIT-005 |
-| Calibration "verified 43/43 … 0.98" | README | Fitted before 10+ later commits to the measured code | AUDIT-013 |
-| "Thread-scoped persistent memory vault (Mem0 SQLite store…)" | README | Mem0 uses embedded Qdrant (single process) | `mem0_adapter.py:111-120` |
-
-## 37. Root-Cause Analysis
-
-```text
-RC-1 Unreviewed bolt-on subsystem (substrate + harness on this branch)
-  ↓ written without engcalc's validity conventions, project RBAC, or pipeline wiring
-  ↓ defects: AUDIT-001/002/003/004/010/015/017/018
-  ↓ affected: harness REST API, three LLM tools
-  ↓ consequence: fabricated or unchecked engineering verdicts; cross-tenant data access
-
-RC-2 Conflating "executed" with "verified"
-  ↓ step status "ok", isfinite(rmse), level-1 checks all surface as "verified"
-  ↓ defects: AUDIT-006/007/014
-  ↓ consequence: users and the writer model over-trust results
-
-RC-3 Default-to-pass on missing or degenerate input
-  ↓ zero-denominator → 0% error; unknown clause → compliant; no vertices → default part; unknown step → Verified
-  ↓ defects: AUDIT-001/002/003/006
-
-RC-4 Happy-path tests on new code; red suite tolerated; non-blocking security gates
-  ↓ defects: AUDIT-009/011/019 allowed the above to merge unnoticed
-```
-
-## 38. Security Control Matrix
-
-| Control | Where implemented | Server-side enforced | Tested | Gaps |
-|---|---|---|---|---|
-| Bearer authentication | `auth.py:98-129` | Yes | Yes (suite) | — |
-| Fail-closed when unconfigured | `auth.py:105-112` | Yes | — | — |
-| Loopback-only when auth disabled | `security.py:165-171` | Yes | Yes | `ALLOW_INSECURE` overrides |
-| Host allow-list | `security.py:87-97,173-176` | Yes | Yes | — |
-| Origin check (CSRF) | `security.py:178-181` | Yes | Yes | — |
-| Body limits | `security.py:183-214` | Yes | Yes | — |
-| Per-resource ownership | runs, jobs, memory, projects, datasets, export | Yes | Partly | **harness: none** (AUDIT-004) |
-| Sandbox AST policy | `sandbox/policy.py` | Yes | Yes (+ probes here) | Native-code bypass (documented) |
-| OS isolation | `gateway.py:94-128` | Optional | Container tests skipped | Silent fallback (AUDIT-008) |
-| Expression-parser limits | `safe_expr.py` | Partial | Yes (powers) | factorial (AUDIT-016) |
-| XSS | `markdownSafety.ts`, KaTeX `trust:false` | Client | Yes (web tests) | — |
-| Dependency scanning | `security_audit.yml` | **Non-blocking** | — | AUDIT-009/019 |
-| Secrets | `.env` ignored; env allowlist for children; caller key stripped | Yes | — | — |
-
-## 39. Scientific Validation Matrix
-
-| Scientific component | Algorithm/model | Inputs | Units | Assumptions | Validation evidence | Tests | Risk | Confidence |
-|---|---|---|---|---|---|---|---|---|
-| Math agent | Rule ladder + LLM + independent verifier | Problem text | — | Parse fidelity | 10 probes, no false `verified`; calibration n = 48 (stale) | `test_math_agent.py` gate | Low-Med | HIGH |
-| Written-answer audit | Numeric compare + 6-point sampling | Answer Markdown | — | Positive sample domain | False passes confirmed | `test_math_claims.py` | **High** | CONFIRMED |
-| ODE | `solve_ivp`, RK4 | RHS, IC | User-declared | Smoothness | Failure/non-finite rejection; invariant drift | `test_dynamis.py` | Low | HIGH |
-| Curve fit | Least squares | x, y | — | Unweighted, iid | SE / verified defects | `test_dynamis.py` | **High** | CONFIRMED |
-| Monte Carlo | Crude MC | f, [a,b], N, seed | — | Finite variance | Correct SE, seeded | MC tests | Low | CONFIRMED |
-| Constants | `scipy.constants` | name | SI | CODATA 2022 | Electron mass value matches 2022 | `test_physis.py` | Low | CONFIRMED |
-| Units | Pint | value, units | any | — | Offset units correct | `test_physis.py` | Low | CONFIRMED |
-| Pipe flow | Colebrook / Swamee–Jain / 64/Re | D, L, ρ, μ, ε, Q | SI | Developed flow | Range checks, warnings | engcalc tests (not inspected) | Low | HIGH |
-| Fatigue | Goodman/Gerber/Soderberg, Basquin | Sut, Sy, σa, σm | Pa | Steels for Se′ | Steel-only enforced | engcalc tests (not inspected) | Low | HIGH |
-| Heat exchanger | ε-NTU, LMTD | NTU, Cr, temperatures | SI | — | Forms correct | engcalc tests (not inspected) | Low | HIGH |
-| ASME UG-27 | t = PR/(SE − 0.6P); sphere stub | P, R, S, E, t | MPa, mm | Thin shell | Sphere always passes; limits absent | 1 pass/fail pair | **Critical** | CONFIRMED |
-| Material at T | Linear derating | name, T | °C | Generic | Unsourced | none meaningful | **High** | HIGH |
-| STL mass properties | Bounding-box heuristics | STL text | mm | "bracket topology" | Fabricated | Asserts fabricated values | **Critical** | CONFIRMED |
-| CAE gates | 5 threshold gates | 6 numbers | N, MPa | — | Zero inputs pass | 1 happy path | **High** | CONFIRMED |
-| Lean / Sage / container | External tools | — | — | Installed | Not installed | Skipped | Unknown | UNVERIFIED |
-
-**Scientific invariant matrix:**
+**Scientific invariant matrix**
 
 | Invariant | Expected | Where enforced | Tested | Violation possible | Evidence |
 |---|---|---|---|---|---|
-| Unverified ≠ verified | Strict | Math agent statuses | Yes | **Yes, in UI and fit** | AUDIT-006/007 |
-| Non-negative SE / uncertainty is defined | SE > 0 or "not estimable" | — | No | Yes (SE = 0) | AUDIT-007 |
-| Finite answers only certified | Yes | ODE, MC | Partly | Yes (math NaN) | AUDIT-014 |
-| Static equilibrium ΣF ≈ 0 | Yes | CAE gate 1 | No | Yes (applied = 0) | AUDIT-003 |
-| Dimensional homogeneity | Yes | `physis/units.py:58` | Yes | Substrate bypasses Pint | §18 |
-| Physical bounds (t > 0, 0 < E ≤ 1) | Yes | — | No | Yes | AUDIT-018 |
+| Formal proof uses no new axioms | Always | `runner.uses_unproved` | Partly | **Yes** | AUDIT-101 |
+| A number in the thesis is the evidence's value for that quantity | Always | `unsupported_numbers` (presence only) | No | **Yes** | AUDIT-104 |
+| A deliverable is done only on relevant evidence at its tier | Always | `apply_judgement` (tier yes, relevance no) | Partly | **Yes** | AUDIT-106 |
+| Sandbox writes stay in the work directory | Always | Policy and runtime guards | Literal paths yes | **Yes (h5py)** | AUDIT-102 |
+| Dimensional homogeneity of stated equations | When checked | `physis/units.check_dimensional_homogeneity` | Tests in suite | Not probed | Unverified here |
+| p-values in [0, 1]; tests consistent | Always | SciPy | Probe | No | §15 |
+| Tier ranking is monotone | Always | `ledger.TIER_RANK` | Code | No | `ledger.py:22` |
 
-**Data lineage matrix:**
+## 16. Numerical Computing Findings
 
-| Data/Product | Source | Version | Units | Processing | Quality flags | Provenance | Confidence |
-|---|---|---|---|---|---|---|---|
-| Physical constants | scipy.constants | CODATA 2022 (scipy 1.16.2) | SI + uncertainty | none | uncertainty kept | Source label | CONFIRMED |
-| Material properties | hard-coded catalogue | none | MPa, GPa, °C | linear derating | none | **none** | CONFIRMED |
-| Literature records | Crossref, OpenAlex, arXiv, … | probed per run (`source_versions`) | — | normalisation, integrity | retraction flags | manifest | UNVERIFIED (runtime) |
-| User datasets | upload | sha256 | user-declared | validators (NaN reject) | rejection reasons | manifest hashes | HIGH |
-| Math calibration | `math_eval` holdout3 | `fitted_at` 2026-10-24 | probability | Laplace / Wilson | n per status | no code hash | CONFIRMED |
+No verified numerical defect in the tested engines:
+- the ODE solver uses rtol 1e-8 and atol 1e-10 (reported in the result);
+- the fit reports `std_error_basis`, degrees of freedom and maximum parameter correlation;
+- `precision_check` detects cancellation;
+- interval tools use mpmath.iv with a box cap and a time limit (`accuracy.py:73`).
+
+`compare_results` uses rtol 1e-6 and atol 1e-9 for replication. That is reasonable for double-precision recomputation, but no scale analysis is documented.
+
+## 17. Scientific Data Findings
+
+- AUDIT-108: generic tables are rejected by the single-cell validator.
+- Uploads keep a sha256 and require a provenance object (verified: a missing `provenance` gives 422).
+
+**Data lineage matrix**
+
+| Data/product | Source | Version | Units | Time standard | Processing | Quality flags | Provenance | Confidence |
+|---|---|---|---|---|---|---|---|---|
+| Physical constants | scipy.constants | CODATA bundled with the installed SciPy | SI, from the CODATA table | n/a | Lookup | Uncertainty from CODATA | Name and value returned | HIGH |
+| Uploaded datasets | User | sha256 per file | `units` dict in provenance (optional) | Not normalised | Validators, then store | PHI column warnings (single-cell era) | Provenance JSON required | HIGH (storage); data semantics UNVERIFIED |
+| Research findings | Sandbox runs of model code | None (AUDIT-110) | From quantity names only | Run timestamps (epoch) | `quantities_from_result` | Tier, status, replication | Code stored; no environment | MEDIUM |
+| Literature | arXiv and others via archivon | Mutable; no retrieval date in the thesis | n/a | n/a | Parsers (pypdf; AUDIT-109) | None | URL | LOW |
+| Image readings | User upload (not stored) | Content hash in memory | n/a | n/a | OCR, vision, consensus | consensus, unconfirmed_numbers, warnings | Engines named in the log | HIGH |
+
+## 18. Units / Dimensions / Coordinates / Time Findings
+
+- **Units:** pint conversions verified, including the affine temperature scales (§15).
+- **Coordinates and CRS:** not applicable. The repository has no geospatial processing (search found no CRS or projection code paths).
+- **Time:** campaign timing uses epoch seconds (`time.time()`), with active time tracked separately (`loop.active_s`). No timezone-sensitive computation was found on scientific paths.
+
+No verified finding identified in this category beyond those already listed.
+
+## 19. Statistical / ML Findings
+
+- `distribution_tests` behaves correctly on the probe samples.
+- The fit's SE uses residual-variance scaling unless `y_sigma` is given. That is standard, and documented in the docstring.
+- No ML training pipeline is present; the models are inference-only (OCR, embeddings).
+
+No verified finding identified in this category.
+
+## 20. Reproducibility Findings
+
+See AUDIT-110.
+
+| Question | Answer |
+|---|---|
+| Can a result be reproduced? | A finding's numbers: yes, from its code (`bundle/code`). The thesis as a whole: no (LLM) |
+| Can the processing history be reconstructed? | Partly: the round, test and finding records are kept in the campaign JSON |
+| Can the dataset version be identified? | Uploads: yes (sha256). Web sources: no |
+| Can the algorithm version be identified? | No commit is recorded |
+| Can parameters be recovered? | Code contains them; sandbox limits are not recorded |
+| Can the environment be reconstructed? | No |
+
+Classification: **partially reproducible**.
+
+## 21. Provenance Findings
+
+The chain from input to output is preserved up to the finding's code and its stdout, the plots and the replication code (`ledger.json`). Missing: the software version, library versions, model version, and source retrieval dates (AUDIT-110).
+
+## 22. Scientific Visualization Findings
+
+- Thesis charts (`tribos/export/svgchart.py`):
+  - a single y-axis;
+  - ×10ⁿ tick labels;
+  - escaped labels (`escape()` on every model-provided label; line 138 interpolates a constant);
+  - figures are captioned and numbered.
+- Plots from the sandbox are kept as PNGs, with duplicates removed by hash.
+- No verified finding identified (the charts were not audited against their data point by point).
+
+## 23. UI/UX Findings
+
+**Scientific trust matrix**
+
+| Workflow | User sees | Actual state | Meaning clear? | Uncertainty clear? | Provenance clear? | Risk |
+|---|---|---|---|---|---|---|
+| Research lab, Proofs | "Lean-verified" seal | Can rest on a model-declared axiom (AUDIT-101) | No | n/a | Lean code shown | **High** |
+| Research lab, Findings | "Replicated" seal | Same-model re-implementation (AUDIT-105) | Overstated | Rows of agreement shown | Code shown | Medium |
+| Thesis, numbers | "Numbers … the automatic check could not match" | Presence-only check (AUDIT-104) | Overstated | n/a | Ledger | Medium |
+| Hypothesis cards | supported / refuted stamps | Evidence relevance and direction not enforced (AUDIT-106) | Overstated | n/a | Evidence IDs shown | Medium |
+| Image viewer | "two independent vision readings agreed" | Same model twice, plus two OCR engines | Slightly overstated | Unconfirmed numbers shown | Engines summarised | Low |
+| Dataset upload | "matrix has 1 genes" | Generic table rejected (AUDIT-108) | Misleading | n/a | n/a | Medium |
+| Math agent | No calibrated confidence | Calibration stale (AUDIT-114) | Yes | Not shown | n/a | Low |
+
+## 24. Security Findings
+
+- AUDIT-102 (HIGH): sandbox escapes.
+- AUDIT-103 (MEDIUM): Sage engine bypasses strict mode.
+- AUDIT-109 (MEDIUM): dependency advisories.
+
+Bandit: 0 high. The 15 medium findings were triaged:
+- **B608 ×10:** SQL built from fixed column tuples with parameterised values (`project_store.py:413`, `jobs.py:263-318`, `research_memory.py:663`); false positives.
+- **B314 ×1:** `ET.fromstring` on arXiv Atom (`archivon/clients.py:157`). Python 3.12 expat limits entity amplification, and etree does not resolve external entities; low.
+- **B108 ×1:** the `--tmpfs` flag string in `container.py:164`; false positive.
+- **B615 ×3:** Hugging Face downloads without a pinned revision; locations not individually triaged (UNVERIFIED).
+
+**Verified controls:**
+- Markdown is rendered with `html: False` (`export/thesis.py:43`).
+- Figures in exports resolve only to local files.
+- The campaign file route uses a realpath containment check, and traversal names are refused (4 of 4 in the probe).
+- Unauthenticated routes are limited to health, metadata and 405 stubs (11 of 106).
+
+## 25. Authentication and Authorization Findings
+
+- **Authentication** (`app/backend/auth.py`):
+  - static tokens compared with `hmac.compare_digest`;
+  - HS256 JWT with `exp` and `sub` required and a fixed algorithm list;
+  - 503 when no credential source is configured;
+  - `TRIBOS_AUTH_MODE=disabled` is restricted to loopback clients by `SecurityMiddleware` (observed: non-loopback TestClient refused with 403).
+- **Authorization probe** (`scratchpad/audit/tenant_probe.py`, `tenant_probe2.py`; two bearer users; temp storage). Every attempt by user B on user A's resources was refused (404), and A kept access:
+  - projects: get, patch, delete;
+  - members: list, self-add as editor;
+  - memory: get, post;
+  - project files;
+  - harness: threads, revisions, spend;
+  - campaigns: get, report, thesis, file, delete;
+  - datasets: get, patch provenance, delete;
+  - attaching A's dataset to B's project or to A's project;
+  - unknown job, run and file IDs.
+
+No verified finding identified in this category.
+
+## 26. API Findings
+
+- 106 routes; request models have length limits; campaign IDs are regex-checked.
+- `/api/health` exposes the auth mode and provider availability as booleans only (by design, SEC-005).
+
+No verified finding identified beyond AUDIT-117 (no per-user research-queue cap, UNVERIFIED).
+
+## 27. Database Findings
+
+SQLite stores use parameterised queries; dynamic SQL is limited to fixed column names (bandit triage). Campaigns are JSON documents written atomically (temp file plus `os.replace` under a lock; `campaign.py:288-292`). Schema constraints and migrations were not reviewed in depth (§44).
+
+No verified finding identified.
+
+## 28. Concurrency and State Findings
+
+- Campaign ownership uses a process token, pid and start time, with heartbeats. A dead owner's project is resumed (`campaign.py:70-80`, `:361-370`).
+- The sandbox concurrency semaphore is `TRIBOS_SANDBOX_MAX_CONCURRENCY=2`.
+- Vision readings are cached by content hash plus provider, and only complete readings are cached.
+
+No verified race was found; concurrency was not stress-tested.
+
+## 29. Reliability and Error Handling
+
+- Provider outages pause a research project with a resumable error.
+- A disabled router is reported, not fatal.
+- A failed vision call falls back (other reading, local model, or OCR with a warning).
+- A repaired Lean import is recorded as `dropped_imports`.
+
+No verified finding identified.
+
+## 30. Performance Findings
+
+- Each research project runs for hours of model and sandbox time (AUDIT-117).
+- Image reading takes 3.5 to 8 s with the cross-check, measured earlier in this session.
+
+No benchmark was run in this audit.
+
+## 31. Testing Findings
+
+- **pytest:** 2546 passed, 28 skipped, 0 failed (730.7 s).
+- **Web:** 227/227. **tsc:** clean.
+- **Scientific known-answer coverage** exists for the engines. The missing tests, each of which matches a finding here:
+  - Lean axiom bypasses (AUDIT-101);
+  - native-code and C-level sandbox escapes (AUDIT-102);
+  - number-quantity binding (AUDIT-104);
+  - judge relevance and direction (AUDIT-106);
+  - generic two-column uploads (AUDIT-108).
+
+## 32. Dependency / Supply-Chain Findings
+
+See AUDIT-109. GitHub Actions are SHA-pinned (60 of 60). `uv.lock` pins the Python dependencies. npm audit was not run.
+
+## 33. Configuration / Infrastructure Findings
+
+- The compose file sets strict sandbox limits, binds to 127.0.0.1, and uses a read-only root filesystem and `cap_drop` (`docker/compose.yml`).
+- The backend image now installs `tesseract-ocr`.
+- The defaults that matter for safety are `TRIBOS_SANDBOX_BACKEND=auto` together with `TRIBOS_SANDBOX_STRICT_LIMITS=false` (AUDIT-102).
+- The environment reference is generated and checked (`scripts/gen_env_reference.py --check` clean).
+
+## 34. Technical Debt
+
+- Single-cell domain model in data ingestion (AUDIT-108).
+- Strict typing not enforced (AUDIT-115).
+- Two tier vocabularies, one of which has an unreachable level (AUDIT-107).
+- Overlapping report documents at the root (AUDIT-116).
+- `mkdocs` and docs dependencies carry advisories (AUDIT-109).
+
+## 35. Dead Code / Placeholder / Mock Findings
+
+- `calibration.json` is effectively dead (AUDIT-114).
+- The harness cost ledger is honestly labelled but not fed (prior AUDIT-017).
+- `tribos/verify/formal/correspondence.py` is **live**: it is used by `prove.py:22` and `:122-150`. An initial search suggested otherwise; that was corrected.
+
+No mocked scientific results were found on production paths (prior AUDIT-025 fixed per tests).
+
+## 36. Documentation Inconsistencies
+
+| Document | Claim | Code | Finding |
+|---|---|---|---|
+| `docs/agentic/research-loop.md:37` | `certified` from interval or exact arithmetic | Never assigned | AUDIT-107 |
+| `docs/agentic/research-loop.md:38`, `export/thesis.py:364` | Replicated means "two independent implementations" | Same model | AUDIT-105 |
+| `research/thesis.py:10` | "Every number … is checked against the evidence" | Presence only | AUDIT-104 |
+| `verify/formal/runner.py:7` | "verified": no sorry, admit or **new axiom** | Axioms with trusted names pass | AUDIT-101 |
+| `sandbox/policy.py:20-22` | "defence in depth, not a boundary" | Accurate; the default still runs it as the only boundary | AUDIT-102 |
+
+## 37. Root-Cause Analysis
+
+1. **Verification by text pattern instead of by the authority.**
+   - Lean axioms are found by regex rather than by `#print axioms` (AUDIT-101).
+   - Numbers are matched by presence rather than by quantity (AUDIT-104).
+   - Consequence: the strongest labels can be produced by inputs the patterns don't anticipate.
+2. **Availability defaults over safety defaults.** `auto` runs unisolated with only a log warning (AUDIT-102), and the Sage engine skips the strict check (AUDIT-103). Consequence: the local deployment executes untrusted code with the operator's privileges.
+3. **Labels that are stronger than the mechanism.** "Independent" means the same model (AUDIT-105); "certified" is unreachable (AUDIT-107); "supported" has no direction check (AUDIT-106). Consequence: readers overestimate the evidence.
+4. **A domain carry-over** (single-cell biology) in data ingestion (AUDIT-108).
+
+## 38. Security Control Matrix
+
+| Control | Present | Verified how | Gaps |
+|---|---|---|---|
+| Authentication | Yes | Code and probe | none found |
+| Per-resource authorization | Yes | 27-case probe | none found |
+| Path-traversal guard (files) | Yes | 4-case probe | none found |
+| Output escaping (thesis HTML, SVG) | Yes | Code | none found |
+| Sandbox static policy | Yes | 18-payload probe | Computed names and paths (AUDIT-102) |
+| Sandbox runtime guards | Partial | Probe | ctypes, h5py, spawning libraries (AUDIT-102) |
+| OS isolation of model code | Container backend only | Config | Not default; Sage bypass (AUDIT-102, 103) |
+| Rate and concurrency limits | Chat, re-run, simulate, vision | Code | Research queue per user (AUDIT-117) |
+| Dependency scanning | pip-audit | Executed | 113 advisories (AUDIT-109) |
+| CI supply chain | SHA-pinned actions | grep | none found |
+| Secrets in logs | None found by search | grep | Not exhaustive |
+
+## 39. Scientific Validation Matrix
+
+| Component | Algorithm/model | Inputs | Units | Assumptions | Validation evidence | Tests | Risk | Confidence |
+|---|---|---|---|---|---|---|---|---|
+| Constants | CODATA lookup | Name | SI | Bundled CODATA | Exact against scipy | Suite and probe | Low | HIGH |
+| Units | pint | Value, units | Any | pint definitions | 7 known answers | Suite and probe | Low | HIGH |
+| Uncertainty | GUM linear and Monte Carlo | Expression, σ | Propagated by pint | First order | x·y exact | Suite and probe | Low | HIGH |
+| ODE | RK45 | Right-hand side, initial state | User | Smooth | Analytic, 2e-9 | Suite and probe | Low | HIGH |
+| Fit | curve_fit | x, y, σ | User | Gaussian errors | OLS-identical | Suite and probe | Low | HIGH |
+| Beam | Euler–Bernoulli | L, E, I, P | SI | Linear elastic, small deflection | PL³/48EI | Suite and probe | Low | HIGH |
+| Interval verify | mpmath.iv bisection | Expression, box | n/a | mpmath.iv soundness | 3 cases | Suite and probe | Low | HIGH |
+| Counterexample | Exhaustive or sampled | Claim, domain | n/a | Search is not proof (stated) | n²+n+41 | Suite and probe | Low | HIGH |
+| Distribution tests | Shapiro–Wilk, D'Agostino, Anderson–Darling, KS, bootstrap | Sample | n/a | i.i.d. | Normal against exponential | Suite and probe | Low | HIGH |
+| Identity audit | Sampled equality | Text | n/a | Domain from the text | Not passed; labelled inconclusive | Suite and probe | Low | HIGH |
+| **Lean formal** | Lean 4 kernel plus text filter | Model code | n/a | No new axioms | **False theorem verified** | Partial | **Critical** | CONFIRMED |
+| **Replication tier** | Same-model re-implementation | Test prompt | n/a | Independence (not met) | Code | Suite | Medium | CONFIRMED |
+| **Number check** | Presence matching | Thesis text | n/a | Binding (not met) | Swapped-quantity probe | Partial | Medium | CONFIRMED |
+| Vision ensemble | Two OCR engines plus 2× VLM plus review | Image | n/a | Same model twice | 12 benchmark images exact | 30 tests | Low | HIGH |
 
 ## 40. Feature / Workflow Failure Matrix
 
-| Workflow | Invalid / missing input | Degenerate numbers | External failure | Concurrent use | Scientifically dangerous? |
+| Workflow | Invalid input | External API down | Computation fails | Repeat / concurrent | Dangerous scientific failure |
 |---|---|---|---|---|---|
-| Standards check | Unknown clause → compliant | Zero thickness passes for sphere | — | — | **Yes** |
-| Geometry | Path/empty → default part | Flat mesh → area wrong | — | — | **Yes** |
-| CAE review | — | Zeros → verified | — | — | **Yes** |
-| Curve fit | n = p → SE 0, verified | inf pcov → 0 | — | — | **Yes** |
-| Math agent | Misparse → `unverified` (honest) | NaN → `partially_verified` | LLM off → rules only | — | Moderate |
-| Simulate | 422 on bad spec | factorial blow-up → 504, thread continues | — | per-user slot | Availability |
-| Mem0 memory | — | — | — | **Lock failure** | No |
-| Harness threads | Any id accepted | — | — | Other users' data | Integrity |
+| Chat with tools | 422 or refusals | Provider error, retry | Tool error surfaced | Per-user slot, 429 | Model prose not fully checked |
+| Research loop | Charter validated | Pauses, resumable | Test retried, then blocked | One active per process | AUDIT-101, 104 to 107 |
+| Thesis export | n/a | n/a | Chromium missing: fpdf fallback | n/a | AUDIT-104 labels |
+| Dataset upload | 4xx with reason | n/a | n/a | n/a | AUDIT-108 rejects valid data |
+| Image reading | 4xx | Fallbacks, warning | OCR text with warning | 429 busy | Mis-transcription reduced by consensus |
+| Sandbox | Policy violation | n/a | Error or timeout | Semaphore | AUDIT-102 escapes |
 
 ## 41. Risk Summary
 
 | Category | Critical | High | Medium | Low |
 |---|---:|---:|---:|---:|
-| Scientific Correctness | 2 | 3 | 2 | 1 |
-| Numerical | 0 | 1 | 1 | 0 |
-| Data Integrity | 0 | 0 | 1 | 1 |
+| Scientific Correctness | 1 | 0 | 4 | 2 |
+| Numerical | 0 | 0 | 0 | 0 |
+| Data Integrity | 0 | 0 | 1 | 0 |
 | Reproducibility | 0 | 0 | 1 | 0 |
-| Security | 0 | 3 | 2 | 0 |
-| UI/UX | 0 | 1 | 0 | 1 |
-| Architecture | 0 | 0 | 1 | 0 |
-| Reliability | 0 | 0 | 1 | 0 |
-| Performance | 0 | 0 | 0 | 0 |
-| Testing | 0 | 0 | 1 | 0 |
+| Security | 0 | 1 | 2 | 0 |
+| UI/UX | 0 | 0 | 0 | 0 (overstatements counted under Scientific) |
+| Architecture | 0 | 0 | 0 | 0 |
+| Reliability | 0 | 0 | 0 | 0 |
+| Performance | 0 | 0 | 0 | 1 |
+| Testing | 0 | 0 | 0 | 1 |
 | Technical Debt | 0 | 0 | 0 | 2 |
 
-**Row mapping:**
-- Scientific Correctness: 001, 002; 003, 005, 010; 014, 018; 023.
-- Numerical: 007; 016.
-- Data Integrity: 015; 022.
-- Reproducibility: 013.
-- Security: 004, 008, 009; 019, and 016 also counted for availability.
-- UI/UX: 006; 021.
-- Architecture: 017.
-- Reliability: 012.
-- Testing: 011.
-- Technical Debt: 020, 024.
+The rows come from:
+- Scientific Correctness: 101 / 104, 105, 106, 107 / 111, 112.
+- Data Integrity: 108.
+- Reproducibility: 110.
+- Security: 102 / 103, 109.
+- Performance: 117.
+- Testing: 114.
+- Technical Debt: 115, 116.
+- Informational, not counted: 118, 119.
 
 ## 42. Remediation Priorities
 
-**P0 – Must fix before trusting results**
-
-- AUDIT-001, AUDIT-002, AUDIT-003: they fabricate or falsely certify engineering safety results. Alternatively,
-  unregister the three substrate tools and the harness substrate routes until fixed.
-- AUDIT-004: cross-tenant read/write.
-- AUDIT-005, AUDIT-006: the verification signals users rely on are wrong.
-
-**P1 – Must fix before production or research release**
-
-- AUDIT-007, AUDIT-010: wrong uncertainty and unsourced properties.
-- AUDIT-008, AUDIT-009: isolation and known CVEs on the input parsers and auth.
-- AUDIT-011: the suite is red.
-- AUDIT-013, AUDIT-014: calibration and status semantics.
-
-**P2 – Important improvements**
-
-AUDIT-012, 015, 016, 017, 018, 019: reliability, input validation, DoS, placeholder features, CI gating.
-
-**P3 – Cleanup**
-
-AUDIT-020 to 024.
+- **P0, before trusting results or running research locally:**
+  - AUDIT-101: the false "Lean-verified" label is a direct scientific-integrity failure.
+  - AUDIT-102: untrusted code with the operator's privileges on the default configuration.
+- **P1, before a research or production release:**
+  - AUDIT-103 (strict-mode bypass);
+  - AUDIT-104, 105, 106 (verification labels the thesis presents as facts);
+  - AUDIT-107 (unreachable tier);
+  - AUDIT-109 (pypdf on untrusted input first);
+  - AUDIT-110 (reproducibility manifest).
+- **P2, important improvements:**
+  - AUDIT-108 (generic uploads);
+  - AUDIT-111 and 112 (label and parse accuracy);
+  - AUDIT-114 (calibration refit);
+  - AUDIT-117 (per-user research quota).
+- **P3, cleanup:** AUDIT-115, 116, 118, 119.
 
 ## 43. Verification Plan
 
 | Finding | Method |
 |---|---|
-| 001, 018 | Known-answer tests for UG-27(c)(1), (c)(2) and (d), including limit violations; negative test for unimplemented clauses |
-| 002 | Known-answer tests: cube and tetrahedron volume, area and centroid; missing input → error |
-| 003 | Property test: zero, negative or non-finite inputs never yield `cae_verified: True` |
-| 004 | Security integration test with two bearer tokens across all 17 harness routes |
-| 005, 023 | Regression tests for negative-domain identities and inequality counterexamples |
-| 006 | Web rendering test on a recorded math-agent payload |
-| 007 | Analytic linear-regression SE comparison; zero-dof and poor-fit tests |
-| 008 | Deployment test of backend selection in compose; strict-mode default test |
-| 009, 019 | Blocking pip-audit in CI with a reviewed ignore list |
-| 010, 015 | Reference-table tests with cited sources; exact-key lookup tests |
-| 011, 012 | Green full suite with temporary `HOME` / `MEM0_DIR`; multi-process memory write test |
-| 013 | Calibration code-hash check test |
-| 014 | NaN and divergent-integral status tests |
-| 016 | Parser time-bound test for `factorial` / `gamma` / `binomial` with huge arguments |
-| 017 | Wiring tests (checkpoint saved per phase; cost recorded per LLM call) or removal |
-
-None of these verifications has been performed; they are proposals.
+| AUDIT-101 | Regression tests with the four Lean probe cases plus a `#print axioms` assertion (real Lean, skipped if absent) |
+| AUDIT-102 | Sandbox regression tests: ctypeslib, h5py computed path, matplotlib writer path, autowrap must fail; run on Windows and Linux CI |
+| AUDIT-103 | Unit test: strict mode with engine=sage refuses |
+| AUDIT-104 | Known-answer test: swapped-quantity sentence flagged |
+| AUDIT-105 | Test that the replication request differs in model or method; label test |
+| AUDIT-106 | Unit tests on `apply_judgement` with irrelevant, contrary and reasoned-only evidence |
+| AUDIT-107 | Integration test: a certified deliverable closes via an interval proof |
+| AUDIT-108 | Upload tests: x,y CSV with 1 to 6 rows |
+| AUDIT-109 | pip-audit gate; pypdf upgrade plus fuzz smoke test on malformed PDFs |
+| AUDIT-110 | Bundle manifest field test |
+| AUDIT-111, 112 | Unit tests on the quoted inputs |
+| AUDIT-114 | Calibration file carries the current code hash after a refit |
+| AUDIT-117 | API test: second queued project for the same user gets 429 |
 
 ## 44. Unverified Items
 
-- Not audited in depth:
-  - `tribos/agents/**` orchestration internals (prompt-injection resistance, coverage reconciliation);
-  - `tribos/agentic/**` topologies, NLI and counter-evidence;
-  - `tribos/scientific/**`, `tribos/export/**`, `tribos/evals/**`, `tribos/archivon/**`;
-  - `tribos/verify/verifier.py` citation grounding;
-  - most web components.
-- Lean, SageMath and the container sandbox: not installed, so their tests were skipped.
-- Exploitability of the individual pip-audit advisories; the 10 bandit B608 SQL sites beyond the two inspected.
-- Whether the "heuristic" confidence label is shown consistently in the UI; chart axis and units correctness.
-- Retraction and literature behaviour against live APIs.
-- The handbook magnitude comparison in AUDIT-010 requires domain review.
+- Container backend isolation; no runtime was available.
+- Exploitability of the 113 advisories, pypdf included.
+- B615 locations (Hugging Face downloads without a pinned revision).
+- A per-user research queue cap (none found by search).
+- Prior fixes for AUDIT-001, 002, 003, 010, 012, 014, 015, 016, 018, 021, 022, 023 and 025: verified by their regression tests only.
+- Engineering calculators other than the beam.
+- PDE, Monte Carlo and optimisation engines.
+- Database schemas and migrations.
+- Frontend behaviour beyond the code paths and earlier screenshots in this session.
+- npm audit.
+- End-to-end prompt-injection exploitation of AUDIT-102.
 
 ## 45. What Is Working
 
-- **Authentication and HTTP hardening** (§24-25). All routes outside the harness enforce ownership.
-- **Math agent honesty in probes.** For the questions "x²=4", "√x=−1", "sin x=2", "∫₋₁¹1/x", "lim sin(1/x)",
-  "n²+n+41 prime", "x⁵−x+1=0", "max x·e^(−x)", "Σ1/n" and "simplify √(x²)":
-  - correct `verified` answers where expected;
-  - `unverified` or `failed` otherwise;
-  - **no false `verified`** (only the NaN `partially_verified` case, AUDIT-014).
-- **Sandbox policy.** Of 11 escape attempts, 10 were rejected statically. The remaining one (string-based
-  SymPy evaluation, plus two variants) was rejected at runtime with "expressions containing '__' are not
-  allowed".
-- **engcalc** formulas and validity handling. **Monte Carlo** (seeded, correct SE). **Physis** CODATA 2022
-  values with uncertainties. **Pint** offset-unit handling.
-- **ODE** rejects failed or non-finite integrations.
-- **Run provenance:** code hash, git commit, lockfile hash, served models, tool input/output hashes.
-- **Uploads:** streamed limits, extension checks, NaN rejection.
-- **Frontend:** XSS controls; token in sessionStorage. Web gates pass (typecheck, 0 eslint errors, 209/209 tests).
-- **Honest heuristic-confidence declaration** in `config/confidence_calibration.json`.
+The following are supported by executed evidence in this audit:
+- authentication and per-resource authorization (27 probes);
+- path-traversal guards;
+- escaping of HTML and SVG exports;
+- the sandbox's static policy (18 of 18 literal-path, native and network payloads refused) and its Python-level runtime guards on computed `open`, `np.fromfile`, `pd.read_csv` and `pathlib` paths;
+- CODATA constants, units, GUM, ODE, curve fitting, the beam calculator, interval proofs, precision check, counterexample search and distribution tests (§15);
+- the identity audit no longer passing false identities;
+- the full Python suite green, and web tests and tsc green;
+- 60 of 60 CI actions SHA-pinned;
+- atomic campaign writes;
+- the vision ensemble reading the reported problem exactly.
 
 ## 46. Repository Coverage Matrix
 
-| Path/Directory | Inspected | Findings | Excluded | Reason |
+| Path/directory | Inspected | Findings | Excluded | Reason |
 |---|---|---|---|---|
-| `app/backend/auth.py`, `security.py`, `routers/harness.py` | Read in full | 004 | — | — |
-| `app/backend/main.py`, `routers/agent_runs.py`, `mcp.py`, `a2a.py`, `simulate.py`, `datasets.py` | Read in part (routes, auth, validators) | 016 | — | — |
-| `app/backend/routers/projects.py`, `jobs.py`, `export.py` | Grep plus excerpts | — | — | — |
-| `tribos/memory/semantic.py`, `tribos/substrate/**` | Read in full (inspector lines 70-158) | 001-003, 010, 015, 018, 022 | — | — |
-| `tribos/harness/**` | Excerpts plus caller grep | 017 | — | — |
-| `tribos/agentic/sandbox/**` | `__init__`, gateway, backends, process env, policy entry; executed | 008 | — | — |
-| `tribos/agentic/mem0_adapter.py` | Excerpts | 012 | — | — |
-| `tribos/agentic/**` (other) | Grep only | — | Partial | Depth was budgeted to higher-risk areas |
-| `tribos/axiom/**` | Agent calibration section; executed probes | 013, 014, 016 | Partial | — |
-| `tribos/verify/math_claims.py` | Lines 1247-1341; executed | 005, 023 | Partial | — |
-| `tribos/verify/verifier.py`, `latex_math.py`, `formal/**` | Not inspected | — | Yes | Budget |
-| `tribos/dynamis/engine.py`, `monte_carlo.py` | Fit/ODE sections; MC in full; executed | 007 | Partial | — |
-| `tribos/engcalc/fatigue.py`, `thermofluid.py` | Formula sections | — | Partial | — |
-| `tribos/physis/constants.py`, `units.py` | Excerpts; executed | — | Partial | — |
-| `tribos/tools/registry.py` | Lines 478-499, 640-814 | 001-003, 020 | Partial | — |
-| `tribos/agents/**`, `tribos/scientific/**`, `tribos/export/**`, `tribos/evals/**`, `tribos/archivon/**` | Grep only | 020 | Yes (depth) | Budget |
-| `tribos/provenance/run_manifest.py` | Lines 940-1010 plus grep | — | Partial | — |
-| `tribos/datasets/validators.py`, `utils/memory/project_store.py` | Excerpts plus grep | — | Partial | — |
-| `web/src/components/DerivationArtifact.tsx`, `MessageArtifacts.tsx`, `artifacts/PaperArtifact.tsx`, `agentic/ui.tsx`, `ReferenceDataArtifact.tsx` | Relevant sections | 006, 021 | Partial | — |
-| `web/src/app/page.tsx`, `layout.tsx`, `lib/markdownSafety.ts` | Grep plus excerpts | — | Partial | — |
-| `web/src/**` (other ~140 files) | Grep only (XSS, auth, verified) | — | Yes (depth) | Budget |
-| `tests/**` | Executed in full; `test_harness_and_memory.py` assertions read | 011 | — | — |
-| `.github/workflows/**`, `docker/**` | Grep plus compose read in full | 008, 019 | — | — |
-| `docs/**`, README, AGENTS.md | Targeted sections | §36 | Partial | — |
-| `.venv`, `web/node_modules`, `.next`, `__pycache__`, `.mypy_cache`, `.ruff_cache` | — | — | Yes | Third-party or generated |
-| `*.zip`, `*.pdf`, fonts, PNGs, `.coverage`, `*.log`, `.tribos_*` runtime data | Listed only | 024 | Yes | Binaries or runtime data |
-| `.env` | Existence and ignore status only | — | Yes | Secrets; never read |
+| `app/backend/auth.py` | Full read | none | | |
+| `app/backend/routers/campaigns.py` | Full read | none (probe verified) | | |
+| `app/backend/main.py` | Partial (routes, middleware, health) | none | | Size |
+| `app/backend/routers/*` (other 13) | AST route scan, signatures, probe | none | | Probed dynamically |
+| `tribos/agentic/sandbox/` | gateway (select and execute), policy header, runner function map, probes | 102, 103, 117 | | |
+| `tribos/verify/formal/` | runner (unproved detection), prove (attempt loop), correspondence (use) | 101 | | |
+| `tribos/agentic/research/` | judge (`apply_judgement`), runner (compute and prove tiering), charter (tiers), ledger (numbers), thesis (claims); authored earlier in this session | 104 to 107, 110, 112 | | |
+| `tribos/export/thesis.py`, `svgchart.py` | Escaping, Chromium use, bundle | none (110 for the bundle) | | |
+| `tribos/axiom/accuracy.py` | Signatures and probe | none | | |
+| `tribos/physis/`, `tribos/dynamis/engine.py`, `tribos/engcalc/structural.py` | Function maps, beam formula, probes | none | | |
+| `tribos/verify/math_claims.py` | `audit_answer` probe | 111 | | |
+| `tribos/datasets/` | validators header and dimensions, models, probe | 108 | | |
+| `tribos/vision/` | Full read (authored this session), probes | 118 | | |
+| `tribos/axiom/agent.py` (calibration) | Targeted | 114 | | |
+| `tribos/agents/`, `writer/`, `archivon/`, `extensions/`, `utils/`, `evals/`, `scientific/`, `provenance/`, `memory/`, `harness/`, `substrate/`, `papers/`, `sources/`, `files/`, `skills/`, `tools/` | Search only (bandit, pip-audit, targeted grep) | 109 (pypdf call sites) | | Not read line by line |
+| `web/src/` | Targeted (ComposerImages, visionService, ResearchLab wording); tsc and eslint | Trust matrix (§23) | | Not read in full |
+| `tests/`, `web/tests/` | Executed in full | §31 | | |
+| `.github/workflows/` | Pinning, mypy step | 115 | | |
+| `docker/` | compose (sandbox, bind), backend Dockerfile | 102 context | | |
+| `node_modules`, `.venv`, caches, `data/`, `logs/`, root archives | | | Yes | Vendored, generated or runtime |
 
-**Complete coverage is not claimed.**
+**Honest coverage estimate.** About 10% of the source lines were read line by line in this session. Full test execution, the AST route scan, bandit, pip-audit and targeted searches covered the remainder by survey. Dynamic probes were concentrated on the highest-risk surfaces.
 
 ## 47. Commands and Tools Executed
 
-| Command | Purpose | Result | Exit | Failure cause |
+| Command | Purpose | Result | Exit | Cause of any failure |
 |---|---|---|---|---|
-| `.venv/Scripts/python.exe -m pytest -q -p no:cacheprovider -rs` | Full test suite | 10 failed, 2142 passed, 28 skipped, 570.7 s | 1 | 5 application, 5 environment/test design |
-| `ruff check tribos app tests scripts --select F,E9` | Blocking lint gate | All checks passed | 0 | — |
-| `ruff check tribos app tests scripts` | Full lint (report) | 145 issues (W605 ×10, B905 ×6, …) | 1 | Application (non-gating) |
-| `bandit -c pyproject.toml -r tribos app --severity-level high` | Security gate | No high issues printed | 0 | — |
-| `bandit … --severity-level medium` | Report | 10× B608, 1× B108 | — | Not individually verified |
-| `python scripts/gen_env_reference.py --check` | Settings/docs drift | Clean | 0 | — |
-| `npm run typecheck` (web) | TypeScript | Clean | 0 | — |
-| `npx eslint src` | Web lint | 0 errors, 167 warnings | 0 | — |
-| `npm test` (web) | Web unit tests | 209 pass / 0 fail | 0 | — |
-| `python -m pip_audit -l` (text and JSON) | Python CVEs | 385 advisories, 41 packages | 1 | Dependency |
-| `npm audit --omit=dev` | JS CVEs | 0 vulnerabilities | 0 | — |
-| Scratch Python probes | Reproduce AUDIT-001/002/003/005/007/008/014/015/016; sandbox escapes; units; constants; math agent | Outputs quoted in findings | — | — |
-| `git log`, `git diff --stat`, `git check-ignore`, `git ls-files` | Calibration staleness, hygiene | See AUDIT-013, AUDIT-024 | 0 | — |
+| `pytest tests -q` | Python suite | 2546 passed, 28 skipped, 0 failed (730.7 s) | 0 | n/a |
+| `npm test` (web) | Web unit tests | 227 passed | 0 | n/a |
+| `npx tsc --noEmit` | Type check | Clean | 0 | n/a |
+| `npx eslint src` | Lint | 0 errors, 185 warnings | 0 | n/a |
+| `ruff check --select F,E9 tribos tests app scripts` | Lint gate | Clean | 0 | n/a |
+| `mypy tribos app` | Strict types | 617 errors in 133 files | 1 | Application (non-blocking by policy) |
+| `bandit -r tribos app -f json` | SAST | 0 high, 15 medium (triaged) | 0 | n/a |
+| `pip-audit -f json` | Advisories | 113 in 18 of 245 packages | 0 | Application dependencies |
+| `route_auth.py` | Route auth scan | 106 routes, 11 open (benign) | 0 | n/a |
+| `tenant_probe.py`, `tenant_probe2.py` | Authorization | All cross-user attempts 404 | 0 | First run 403: `.env` sets auth disabled (environment) |
+| `sandbox_probe.py`, `sandbox_probe2.py`, `sandbox_probe3.py` | Sandbox escapes | 3 escape primitives confirmed | 0 | Application |
+| `lean_axiom_probe.py` | Formal soundness | 3 bypasses confirmed | 0 | Application |
+| `science_kat.py`, `science_kat2.py`, `science_kat3.py` | Known answers | All engine checks pass; number-binding fails | 0 | Early errors were harness call-signature mistakes (fixed in rounds 2 and 3) |
+| grep: actions pinning; calibration hash | Prior findings 019 and 013 | 60/60 pinned; hash absent | 0 | n/a |
+
+All probe scripts are in the session scratchpad (`…/scratchpad/audit/`), outside the repository. Probes with side effects used temporary data directories; the one file created outside the sandbox work directory by the h5py probe was in the scratchpad and was deleted.
 
 ## 48. Audit Limitations
 
-- **Single-session audit.** Ten parallel sub-auditors were started, then stopped at the user's request to save
-  tokens; none of their partial work is used. The audit therefore prioritised depth on the highest-risk areas
-  and breadth by grep. Roughly 15-20% of the source was read directly; the rest was surveyed by targeted search
-  (§46).
-- No browser rendering was performed. UI findings are traced in code against real backend payloads.
-- Offline: live literature APIs and the LLM were not exercised; agent probes ran with the rule policy.
-- Lean, SageMath and container runtimes were unavailable.
-- The working tree contains uncommitted changes, so findings may differ from HEAD `16d0302`.
+- **Single session, no sub-agents** (the user's standing instruction). Depth was focused on security- and science-critical paths (§46).
+- **Independence.** The auditor wrote the research loop, thesis export, accuracy tools and vision ensemble earlier in this conversation. Claims about them rest on executed probes. Readers may want an independent review of `tribos/agentic/research/` and `tribos/vision/`.
+- No container runtime: container-backend isolation is not verified.
+- LLM-driven workflows were not run end to end during the audit. The stored Collatz project was inspected read-only.
+- No load or concurrency stress tests.
 
 ## 49. Final Engineering and Scientific Assessment
 
-- **What the software is:** a multi-agent STEM research assistant with real symbolic, numerical and engineering
-  engines, strong provenance, and an unusually explicit honesty policy.
-- **What works:** authentication, the main data APIs, the math agent's own status labels, ODE and Monte Carlo
-  numerics, constants and units, the engcalc calculators, the sandbox policy layer, and run manifests. Each is
-  supported by executed evidence above.
-- **What cannot be trusted:**
-  - everything produced by the engineering-substrate layer (ASME compliance, materials at temperature, STL mass
-    properties, CAE "14-gate" verdicts);
-  - harness data isolation;
-  - "Verified" pills on derivation steps;
-  - `verified` and standard errors on curve fits;
-  - "passed" on sampled identities over real domains.
-- **What must be fixed first:** AUDIT-001 to AUDIT-006 (P0), then the isolation default, the dependency
-  advisories and the red test suite.
+- **What the software is:** a STEM research assistant with real, well-tested deterministic engines, an LLM orchestration layer, a research loop that produces theses, and strong API security.
+- **What works:** authentication and tenant isolation; the scientific engines (all known-answer tests pass); the exports; the image reader; a green test suite.
+- **What cannot be trusted yet:**
+  - the "Lean-verified" label (AUDIT-101);
+  - running model-written code on a host without container isolation (AUDIT-102);
+  - the thesis's verification wording: number-checked, replicated, supported, certified (AUDIT-104 to 107);
+  - dataset upload for generic tables (AUDIT-108).
+- **What cannot be reproduced:** a thesis as a whole (AUDIT-110). A finding's numbers can be reproduced from its stored code.
+- **What must be fixed first:** AUDIT-101, then AUDIT-102.
 
-A technically competent engineer can trust Tribos's core computational engines on the evidence here. They
-should not yet trust its engineering-standards and CAE outputs, nor take its verification badges at face value
-outside the math agent's own run status.
+A technically competent engineer can trust Tribos's deterministic scientific engines on this evidence. A domain expert should not take its research-loop verification labels at face value until AUDIT-101 and AUDIT-104 to AUDIT-107 are fixed.
 
-## 50. Remediation Log (2026-10-30)
+## 50. Remediation Log (2026-11-04)
 
-Applied in the working tree after the audit. Nothing has been committed. Every fix has a regression test, mainly in
-`tests/test_feat_audit_report_fixes.py` (49 tests) and `web/tests/featAuditReportFixes.test.mts`.
+Applied after this audit, on the same branch. Each fix has a regression test built from the probe that exposed it.
 
-| Finding | Status | Change |
-|---|---|---|
-| AUDIT-001 | Fixed | `memory/semantic.py`: UG-27(d) sphere implemented; an unknown or unimplemented clause, or invalid input, returns `compliant: None` with a status, never `True` |
-| AUDIT-002 | Fixed | `substrate/cad/inspector.py`: exact facet area; divergence-theorem volume and centroid for closed meshes only; no default part; text without facets raises an error; the tool no longer accepts paths |
-| AUDIT-003 | Fixed | `substrate/cae/review.py`: gates are pass, fail or not evaluable; verified only when all 5 are evaluated and passed; the singularity ratio is required (no hidden 1.8); the "14-gate" wording is removed |
-| AUDIT-004 | Fixed | `routers/harness.py`: project membership (owner/editor to write) and run ownership on all routes; the revision author is the authenticated user |
-| AUDIT-005 | Fixed | `verify/math_claims.py`: identities are also sampled at negative values for unbounded real variables; positive-only agreement is inconclusive, not passed |
-| AUDIT-006 | Fixed | `web/src/lib/derivationStatus.ts` and `DerivationArtifact.tsx`: steps show "Ran" or "Not checked" unless explicitly verified; the run status appears in the header |
-| AUDIT-007 | Fixed | `dynamis/engine.py`: standard error is None when not estimable; identifiability check on parameter correlation; `converged` comes from the optimiser; `verified` needs convergence, estimable errors and R² > 0; optional `y_sigma` (absolute errors); fit issues reach the evidence block |
-| AUDIT-008 | Fixed (deployment) | compose sets `TRIBOS_SANDBOX_STRICT_LIMITS=1`; a one-time warning on unisolated fallback; `os_isolated` in reports; sandbox isolation in `/api/health/details`; setting text corrected |
-| AUDIT-009 | Partly fixed | Upgraded pypdf 6.21.2, PyJWT 2.15.0, requests 2.33.0, pyarrow 23.0.1, Pillow 13, aiohttp, urllib3 2.8, cryptography 50, tornado 6.6 and others via `[tool.uv] constraint-dependencies`. **Remaining:** langchain 0.3, transformers 4.55, sentence-transformers 3.3, torch 2.8, mem0ai 0.1, nltk, marshmallow 3, plus the dev-only filelock and virtualenv. These need major or API-breaking upgrades, or a NumPy 2 move |
-| AUDIT-010 | Fixed | Properties are reported only at room temperature (15-25 °C), with a data note; other temperatures return None with a limitation. No unsourced derating |
-| AUDIT-011 | Fixed | Root cause was AUDIT-025 plus non-hermetic mem0 tests; the rule-numbering tests were updated for grounding rules 8-9 |
-| AUDIT-012 | Fixed | mem0's directory is the adapter's storage (no `~/.mem0`, no cross-instance lock); telemetry is set with `setdefault` |
-| AUDIT-013 | Fixed | Calibration is bound to `calibrated_code_sha256()`; a stale file is not shown; `math_eval --write-calibration` records the hash. **Action needed:** refit `tribos/axiom/calibration.json` on a frozen-code held-out run to restore the figure |
-| AUDIT-014 | Fixed | `axiom/verifier.py`: NaN or complex-infinity answers are `unverified` with the reason |
-| AUDIT-015 | Fixed | Exact key, name or alias lookup only |
-| AUDIT-016 | Fixed | `safe_expr.py`: combinatorial functions refuse integer arguments over 4 digits |
-| AUDIT-017 | Fixed (honest labelling) | The resume endpoint returns `checkpoint_loaded`, `executed: false`; cost endpoints state what is counted; sign-off uses a keyed HMAC over all fields plus an optional `content_sha256`, verified on read. The cost ledger is still not fed by the pipeline |
-| AUDIT-018 | Fixed | UG-27(c)(1) and (c)(2) both computed; applicability limits enforced; inputs validated; optional corrosion allowance |
-| AUDIT-019 | Fixed | All 60 action references pinned to commit SHAs (tag kept as a comment). The blocking pip-audit gate already existed (see correction) |
-| AUDIT-020 | **Deferred** | Single-cell/biomedical code spans approval, plan graph, specialists, state and name sanitizing; removal is a cross-cutting refactor |
-| AUDIT-021 | Fixed | `web/src/lib/numberFormat.ts`: significant figures kept below 1 |
-| AUDIT-022 | Fixed | `semantic.py` constants read from `scipy.constants` |
-| AUDIT-023 | Fixed | An inequality counterexample inside declared domains is FAILED |
-| AUDIT-024 | **Not changed** | Local zips, PDFs and logs are the owner's ignored files; the `page.tsx` split and lint auto-fix are large diffs, left for a dedicated change |
-| AUDIT-025 | Fixed | Truncation repair applies only to an actual composite eight-part draft; hard-coded fallbacks removed (`MissingScientificResult`); correct result keys; the composite path reports missing results instead of inventing them |
+| Finding | Status | Change | Verification |
+|---|---|---|---|
+| AUDIT-101 | Fixed | `verify/formal/runner.py`:<br>- every `axiom` declaration is refused, whatever its name, attributes or namespace (no allowlist);<br>- after compiling, `#print axioms` runs for every theorem (top-level `example`s are named for this), and only Lean's three standard axioms are accepted;<br>- the reports are read after a random per-check marker, so model code can neither forge one nor hide one with `#exit` | The audit probe against the installed Lean: all three bypasses `failed`; true theorems, including `Classical.em`, `verified` with their axioms listed; a macro-generated axiom and a spoofed report plus `#exit` `failed`. `tests/test_fix_audit_101_lean_axioms.py` |
+| AUDIT-102 | Fixed (Python-level layers) | Policy:<br>- a `BANNED_MODULES` list (`numpy.ctypeslib`, `numpy.f2py`, `sympy.utilities.autowrap`, `sympy.printing.preview`, the pandas clipboard, …);<br>- native-loader, compiler, launcher and HDF5 low-level names banned.<br><br>Runtime:<br>- the same module check on import;<br>- no program can be started (`subprocess.Popen`, `os.system`/`spawn*`/`exec*`/`startfile`, `_winapi.CreateProcess`);<br>- h5py's C-level `h5f.create`/`open` check paths | All the audit's escape payloads now fail (sandbox probes 2 and 3 re-run). `tests/test_fix_audit_102_sandbox_escapes.py`. **Remaining:** the subprocess backend is still not an OS boundary. Shared deployments should use the container backend or strict mode, as the compose file does |
+| AUDIT-103 | Fixed | `gateway.py`: SageMath is refused under strict isolation unless `TRIBOS_SANDBOX_ALLOW_UNISOLATED=1` | Unit test |
+| AUDIT-104 | Fixed | `ledger.misattributed_numbers`: a number that is one ledger quantity's value, in a sentence naming another quantity, is flagged. It feeds the chapter repair call and the unverified list; the wording of the claims was corrected | The swapped-quantity sentence is flagged; correct and unnamed sentences pass |
+| AUDIT-105 | Fixed (labelling and an option) | "Replicated" now says what it is: a separately written re-implementation with a different algorithm. `TRIBOS_RESEARCH_REPLICATION_MODEL` runs it on a second model, and the finding records the model and `same_model`. Docs, thesis and UI wording corrected | Tests on the recorded fields |
+| AUDIT-106 | Fixed | `judge.apply_judgement`:<br>- evidence must come from a test planned for that deliverable or hypothesis;<br>- decided verdicts need `sourced` or stronger;<br>- "supported" may not cite a refuting finding;<br>- the reason is written to the note | Unit tests for each rule; research-loop fixtures updated to plan their evidence |
+| AUDIT-107 | Fixed | `certified` is assigned when every compared quantity is an exact integer that the re-implementation reproduces exactly. The charter prompt and docs say so | Integer results certified, floats replicated (test). The stored Collatz-style end-to-end test now reaches `certified` for its integer test |
+| AUDIT-108 | Fixed | CSV and TSV are ordinary tables (1 row and 1 column minimum; text columns allowed; empty cells reported, not refused) unless an expression-matrix orientation is declared, or 5 or more gene-like labels are recognised | `x,y` and short tables accepted; declared and recognisable matrices keep the matrix checks. `tests/test_fix_audit_108_tables.py` |
+| AUDIT-109 | Partly fixed | 113 → **41** advisories (installed environment, pip-audit):<br>- pypdf 6.21.4 (7 fixed);<br>- nltk 3.10.4 (42);<br>- langsmith, langchain 0.3.30, langchain-core 0.3.86, torch 2.10.0, filelock, mkdocs-material, pymdown-extensions, marshmallow, virtualenv | **Remaining 41** need major upgrades: transformers 5, langchain 1.x, mem0 1.x, sentence-transformers 5, pytest 9 (with pytest-asyncio 1.x), and virtualenv 21 (blocked by the langchain-core 0.3 `packaging<26` pin) |
+| AUDIT-110 | Fixed | `research/manifest.py`. The thesis records:<br>- Tribos version and commit;<br>- Python and library versions;<br>- Lean toolchain and Mathlib revision;<br>- models;<br>- sandbox backend and limits;<br>- sources with retrieval times;<br>- the limits of the checks.<br>It is summarised in the run record and written to the bundle as `manifest.json` (theses written earlier get one recorded at export) | Tests on the manifest and the bundle |
+| AUDIT-111 | Fixed | An identity stated over all reals ("for all real x", "x ∈ ℝ") that fails at a negative value is FAILED. With no stated domain it stays inconclusive | Tests on the audit's three identities |
+| AUDIT-112 | Fixed | A grouped number followed by a prose comma is one number | Test |
+| AUDIT-114 | Fixed | Calibration refitted on HOLDOUT3 with the axiom code frozen at `40537ca`: n = 44 verified, all correct; confidence 0.978; lower 95% bound 0.920; rule-based solver, no model calls. `fitted_on` states it is a re-measurement on a set the developers have seen | `calibrated_confidence("verified")` returns the figure again; the test reads n from the file |
+| AUDIT-115 | Fixed (gate on changed modules) | A blocking CI step runs strict mypy on the research, vision, accuracy, thesis export, SVG chart, Lean runner and sandbox policy/gateway modules (type-only changes) | `mypy --follow-imports=silent …`: no issues in 23 files. The rest of the codebase stays report-only |
+| AUDIT-116 | Fixed (tracked files) | Six historical reports and prompts moved to `docs/history/`, with an index; links updated | The owner's ignored local files (logs, zips, the page PDF) were left in place |
+| AUDIT-117 | Fixed | `TRIBOS_CAMPAIGN_MAX_PER_USER` (default 3): submit, resume or continue beyond it is refused with 429 before anything is written | `tests/test_fix_audit_117_campaign_quota.py` (6 tests, including the API) |
+| AUDIT-118 | Fixed | The vision wording says "separate" readings; the docs state that both readings and the review are one model, and that the independent evidence is the two OCR engines | Web test updated |
+| AUDIT-119 | Fixed | The thesis run record and the bundle state that the plan, judgements and prose are model-written, and exactly what the automatic checks cover | Manifest test |
+| AUDIT-113 | n/a | Reserved; no finding | |
 
 **Gates after remediation:**
-
-| Gate | Result |
-|---|---|
-| pytest | 2199 passed, 0 failed, 28 skipped (the full run reported 4 `cv2` errors because `uv sync` had dropped the vision extra; restored, and `tests/test_vision.py` reran 15/15) |
-| ruff F/E9 | Clean |
-| bandit (high) | Clean |
-| `gen_env_reference --check` | Clean |
-| web typecheck | Clean |
-| eslint | 0 errors |
-| web tests | 212/212 |
+- **Web:** 227/227 tests; tsc clean; eslint 0 errors.
+- **ruff F/E9:** clean, and the changed files are clean.
+- **Strict mypy gate:** clean.
+- **`gen_env_reference --check`:** clean.
+- **pip-audit:** 41 advisories.
+- **Full pytest:** 2,587 passed, 33 skipped, 3 failed in the full run; the 3 were old tests that encoded the axiom allowlist (AUDIT-101) or spawned a process in the test-only unsafe mode. They were updated or fixed, and the affected files reran with 101 passed. Net: **2,590 passed, 0 failed**.

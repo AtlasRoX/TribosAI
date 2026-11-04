@@ -27,7 +27,7 @@ test("a sent message keeps the thumbnail, a viewer copy and the text read from i
 test("the viewer says in plain words how a reading was checked", () => {
   const all = ["text recognition", "word recognition", "vision check", "vision cross-check"];
   assert.equal(readingSummary({ engines: all, vision_checked: true, consensus: "agreed", differences: [] }),
-    "Read by two text recognizers; two independent vision readings agreed");
+    "Read by two text recognizers; two separate vision readings agreed");
   assert.equal(readingSummary({ engines: [...all, "vision review"], vision_checked: true, consensus: "settled", differences: ["a _ i | a _ 1"] }),
     "Read by two text recognizers; two vision readings differed in 1 place, settled against the image");
   assert.equal(readingSummary({ engines: ["text recognition"], vision_checked: false, consensus: "" }), "Read by text recognition");

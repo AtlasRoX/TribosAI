@@ -21,6 +21,8 @@ Running unattended:
 - Retries (`TRIBOS_CAMPAIGN_STAGE_RETRIES`, default 1): a failed stage is run again before the campaign stops.
 - Queue (`TRIBOS_CAMPAIGN_MAX_ACTIVE`, default 1 per process): further campaigns wait as "queued" and start
   when a slot frees.
+- Per-user quota (`TRIBOS_CAMPAIGN_MAX_PER_USER`, default 3): a user with that many campaigns queued or running
+  cannot submit, resume or continue another (JobError 429), so one user cannot fill the queue for everyone.
 
 Location: `TRIBOS_CAMPAIGNS_DIR`, else `<jobs dir>/campaigns`.
 """
@@ -135,6 +137,12 @@ def _max_active() -> int:
     from ..config.settings import get_int
 
     return get_int("TRIBOS_CAMPAIGN_MAX_ACTIVE")
+
+
+def _max_per_user() -> int:
+    from ..config.settings import get_int
+
+    return int(get_int("TRIBOS_CAMPAIGN_MAX_PER_USER"))
 
 
 def _auto_resume() -> bool:
@@ -516,7 +524,32 @@ class CampaignManager:
             logger.info("Research projects resumed after restart: %s", ", ".join(resumed))
         return resumed
 
+    def active_count(self, user_id: str, exclude: str | None = None) -> int:
+        """The user's own projects that are queued or running. A record left "running" by a server process that is
+        gone is not counted: it holds no slot and becomes interrupted at the next start."""
+        n = 0
+        for cid in self.store.all_ids():
+            if cid == exclude:
+                continue
+            c = self.store.get(cid, user_id)
+            if c is None or c.get("status") not in RUNNING:
+                continue
+            local = cid in self._tasks and not self._tasks[cid].done()
+            if local or not c.get("owner") or owner_alive(c.get("owner")):
+                n += 1
+        return n
+
+    def _check_quota(self, user_id: str, exclude: str | None = None) -> None:
+        """Refuse (429) another queued project for a user who already has TRIBOS_CAMPAIGN_MAX_PER_USER queued or
+        running, so one user cannot fill the research queue for everyone. Call before anything is written."""
+        limit = _max_per_user()
+        if self.active_count(user_id, exclude) >= limit:
+            projects = "research project" if limit == 1 else "research projects"
+            raise JobError(f"You already have {limit} {projects} queued or running; wait for one to finish or "
+                           "cancel one before starting another.", 429)
+
     async def submit(self, user_id: str, goal: str, **kwargs: Any) -> dict[str, Any]:
+        self._check_quota(user_id)
         campaign = self.create(user_id, goal, **kwargs)
         self.start(campaign["campaign_id"])
         return campaign
@@ -774,6 +807,7 @@ class CampaignManager:
             return campaign
         if campaign["status"] == "succeeded":
             raise JobError("This project already finished", 409)
+        self._check_quota(user_id, exclude=campaign_id)
         self._reset_for_run(campaign)
         campaign["note"] = None
         self.store.save(campaign)
@@ -799,6 +833,7 @@ class CampaignManager:
             # writes the thesis again.
             if not campaign.get("charter"):
                 raise JobError("This project has no plan yet; resume it first", 409)
+            self._check_quota(user_id, exclude=campaign_id)
             loop = campaign.setdefault("loop", {})
             loop.setdefault("instructions", []).append(instruction)
             loop.update(replan=True, stop_reason=None, phase="testing")
@@ -815,6 +850,7 @@ class CampaignManager:
         rnd = max(int(s.get("round") or 1) for s in campaign["stages"]) + 1
         if rnd > MAX_ROUNDS:
             raise JobError(f"A project can have at most {MAX_ROUNDS} rounds; start a new project", 409)
+        self._check_quota(user_id, exclude=campaign_id)
         for k in kinds:
             campaign["stages"].append({
                 "key": f"{k}@{rnd}", "base": k, "round": rnd, "instruction": instruction,

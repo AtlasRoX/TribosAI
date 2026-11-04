@@ -42,6 +42,7 @@ from .policy import (
     ALLOWED_MODULE_ROOTS,
     BANNED_ATTRIBUTES,
     BANNED_CALLS,
+    BANNED_MODULES,
     BANNED_NAMES,
     READER_FUNCTIONS,
     READER_PATH_KWARGS,
@@ -228,6 +229,32 @@ def _block_network():
 _block_network()
 
 
+def _block_processes():
+    """No program may be started: library features that launch one (matplotlib's animation writers run a configurable
+    executable, sympy's autowrap runs a compiler) were a way out of the sandbox (audit AUDIT-102)."""
+    import subprocess as _subprocess
+
+    def _deny(*_a, **_k):
+        raise PermissionError("starting programs is disabled in the analysis sandbox")
+
+    class _BlockedPopen(_subprocess.Popen):
+        def __init__(self, *_a, **_k):
+            _deny()
+
+    _subprocess.Popen = _BlockedPopen  # run, call, check_output and getoutput are built on Popen
+    for _name in ("system", "popen", "startfile", "posix_spawn", "posix_spawnp", "fork", "forkpty", "execv", "execve",
+                  "execl", "execle", "execlp", "execlpe", "execvp", "execvpe", "spawnl", "spawnle", "spawnlp", "spawnlpe",
+                  "spawnv", "spawnve", "spawnvp", "spawnvpe"):
+        if hasattr(_os, _name):
+            setattr(_os, _name, _deny)
+    for _mod, _fn in (("_winapi", "CreateProcess"), ("_posixsubprocess", "fork_exec")):
+        try:
+            setattr(__import__(_mod), _fn, _deny)
+        except Exception:
+            pass
+
+
+
 class _Capped(_io.TextIOBase):
     def __init__(self, inner, limit):
         self._inner, self._left, self.truncated = inner, int(limit), False
@@ -269,6 +296,7 @@ _BANNED_ATTRS = frozenset(_CFG["banned_attributes"]) | frozenset(_CFG["banned_na
 _READ_MODES = frozenset({"r", "rb", "rt", "br", "tr"})
 
 
+_BANNED_MODULES = tuple(_CFG.get("banned_modules") or ())
 _READER_FUNCS = tuple(_CFG.get("reader_functions") or ())
 _READER_KWARGS = tuple(_CFG.get("reader_path_kwargs") or ())
 _READER_ROOTS = frozenset({"pandas", "numpy", "scipy", "matplotlib", "sklearn", "h5py"})
@@ -311,6 +339,41 @@ def _reader_target_ok(target):
     return _inside_input(text)
 
 
+def _h5_target(name):
+    if hasattr(name, "__fspath__"):
+        name = _os.fspath(name)
+    if isinstance(name, bytes):
+        name = name.decode("utf-8", "replace")
+    return name
+
+
+def _harden_h5py():
+    """HDF5 opens files in C, past the guarded open(): its file API (h5py.h5f.create/open, which h5py.File itself
+    calls) checks the path. Creating or writing a file stays inside the work dir; reading may also use the inputs.
+    `h5py.File(<computed path>, 'w')` once created a file outside the work directory (audit AUDIT-102)."""
+    h5f = _sys.modules.get("h5py.h5f")
+    if h5f is None or getattr(h5f, "_tribos_guarded", False):
+        return
+    real_create, real_open = h5f.create, h5f.open
+    read_only = getattr(h5f, "ACC_RDONLY", 0)
+
+    def create(name, *args, **kwargs):
+        target = _h5_target(name)
+        if isinstance(target, str) and not _inside_work(target):
+            raise PermissionError("h5py may only create files inside the work directory")
+        return real_create(name, *args, **kwargs)
+
+    def open(name, flags=None, *args, **kwargs):  # noqa: A001 - the h5f API name
+        target = _h5_target(name)
+        reading = flags == read_only
+        if isinstance(target, str) and not (_reader_target_ok(target) if reading else _inside_work(target)):
+            raise PermissionError("h5py may only open files inside the work directory")
+        return real_open(name, *args, **kwargs) if flags is None else real_open(name, flags, *args, **kwargs)
+
+    h5f.create, h5f.open = create, open
+    h5f._tribos_guarded = True
+
+
 def _wrap_reader(fn, name):
     def _guarded_reader(*args, **kwargs):
         target = args[0] if args else next((kwargs[k] for k in _READER_KWARGS if k in kwargs), None)
@@ -347,14 +410,20 @@ def _guard_readers():
                 pass
 
 
+def _banned_module(name):
+    return any(name == m or name.startswith(m + ".") for m in _BANNED_MODULES)
+
+
 def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
-    if level or str(name).split(".", 1)[0] not in _ALLOWED:
+    if level or str(name).split(".", 1)[0] not in _ALLOWED or _banned_module(str(name)):
         raise ImportError(f"import of '{name}' is not allowed in the analysis sandbox")
     for item in fromlist or ():
-        if str(item).startswith("__") or item in _BANNED_ATTRS:
+        if str(item).startswith("__") or item in _BANNED_ATTRS or _banned_module(f"{name}.{item}"):
             raise ImportError(f"importing '{item}' is not allowed in the analysis sandbox")
     module = _real_import(name, globals, locals, fromlist, level)
     root = str(name).split(".", 1)[0]
+    if root == "h5py":
+        _harden_h5py()
     if root in _READER_ROOTS:
         _guard_readers()
     if root == "numpy":
@@ -864,6 +933,9 @@ def _main():
         _install_io_guard()
         if "sympy" in _sys.modules:
             _harden_sympy()
+        if "h5py" in _sys.modules:
+            _harden_h5py()
+        _block_processes()  # with the other guards: off only in the test-only unsafe mode
     g = {
         "__builtins__": _restricted_builtins(),
         "__name__": "__analysis__",
@@ -1068,6 +1140,7 @@ def run_code(
             "max_table_rows": MAX_TABLE_ROWS,
             "allowed_modules": sorted(ALLOWED_MODULE_ROOTS),
             "banned_attributes": sorted(BANNED_ATTRIBUTES),
+            "banned_modules": list(BANNED_MODULES),
             "banned_names": sorted(BANNED_NAMES),
             "banned_calls": sorted(BANNED_CALLS),
             "reader_functions": sorted(READER_FUNCTIONS),

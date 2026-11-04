@@ -170,16 +170,18 @@ def test_f12_proof_holes_and_cheat_axioms_rejected():
     assert "axiom cheat" in unproved
 
 
-def test_f12_trusted_foundational_axioms_permitted():
-    """Normal trusted foundational axioms used by Lean/Mathlib are not blanket-banned."""
-    code_propext = "axiom propext {p q : Prop} : (p ↔ q) → p = q\ntheorem t : True := trivial"
-    assert "axiom propext" not in uses_unproved(code_propext)
+def test_f12_foundational_axioms_are_accepted_from_the_kernel_never_declared():
+    """Lean's standard axioms are allowed when the kernel reports them; declaring any axiom in the proof, even one named
+    like propext or Classical.choice, is refused (a name allowlist certified 2 + 2 = 5, AUDIT-101)."""
+    from tribos.verify.formal.runner import STANDARD_AXIOMS
 
-    code_choice = "axiom Classical.choice {α : Sort u} : Nonempty α → α"
-    assert "axiom Classical.choice" not in uses_unproved(code_choice)
-
-    code_quot = "axiom Quot.sound {α : Sort u} : Quot.sound"
-    assert "axiom Quot.sound" not in uses_unproved(code_quot)
+    assert STANDARD_AXIOMS == {"propext", "Classical.choice", "Quot.sound"}
+    for code in ("axiom propext {p q : Prop} : (p ↔ q) → p = q\ntheorem t : True := trivial",
+                 "axiom Classical.choice {α : Sort u} : Nonempty α → α",
+                 "axiom Quot.sound {α : Sort u} : Quot.sound"):
+        assert any(u.startswith("axiom ") for u in uses_unproved(code)), code
+    # Using a standard axiom (not declaring it) is not flagged by the source check.
+    assert uses_unproved("theorem em (p : Prop) : p ∨ ¬p := Classical.em p") == []
 
 
 def test_f12_no_formal_policy_controls(monkeypatch):

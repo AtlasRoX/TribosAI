@@ -77,7 +77,7 @@ def test_f10_calibrated_confidence_grounded_fields():
         cal["code_sha256"] = calibrated_code_sha256()
     conf = calibrated_confidence("verified", cal=cal)
     assert conf is not None
-    assert conf["n"] == 43
+    assert conf["n"] == cal["statuses"]["verified"]["n"] and conf["n"] >= 40  # from the file: refits change n
     assert conf["p_correct"] >= 0.95
     assert conf["lower_95"] >= 0.90
     assert conf["benchmark"] == "math-eval-v1"

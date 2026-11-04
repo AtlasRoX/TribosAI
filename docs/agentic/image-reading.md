@@ -12,7 +12,7 @@ misreads an index. So images are read by an ensemble, and every engine's output 
 | 1a | **Indra OCR** (`ocr.py`; local CPU, ONNX) | Layout and lines, with formulas as LaTeX drafts |
 | 1b | **Tesseract** (`tesseract.py`; local) | Plain words, each with a confidence (printed words 90+, garbled math near 0) |
 | 2a | **Vision reading, image only** (`vlm.transcribe_remote`) | Started at once, alongside OCR |
-| 2b | **Vision reading, with both OCR drafts** | Its errors are largely independent of 2a's |
+| 2b | **Vision reading, with both OCR drafts** | A second reading by the same model with different input: it catches many of 2a's slips, but the two are not independent |
 | 3 | **Agreement** (`consensus.compare`) | The two readings are compared in canonical form |
 | 4 | **Review** (`vlm.review_remote`) | Only when the readings differ: the model looks at the image again at each listed difference |
 | 5 | **Coverage gate and repair** (`consensus.coverage`, `vlm.repair_remote`) | The result must keep the words that are surely in the image |
@@ -31,8 +31,10 @@ second reading still misses them, the OCR text is shown with a warning, so no li
 gate existed, garbled OCR tokens counted as required words, and an exact transcription was rejected because it
 "kept 40%".
 
+**Independence.** Both vision readings and the review come from one model, so their agreement is self-consistency, not independent confirmation. The independent evidence is the two OCR engines, which the coverage gate uses.
+
 **Outcome.** Each reading reports `consensus`:
-- `agreed`: two independent readings matched;
+- `agreed`: the two readings (same model, different inputs) matched;
 - `settled`: they differed, and a look at the image decided each place;
 - `unsettled`: the review was unusable, so the reader is warned;
 - `single`: there was only one usable reading.
@@ -59,7 +61,7 @@ With the enlargement, the same images read exactly. The OCR engines upscale smal
 | --- | --- | --- |
 | `TRIBOS_VISION_PROVIDER` | `remote` | `remote` (the full ensemble), `ollama` (one local model reading), `ocr` (OCR only; the image stays on the machine) |
 | `TRIBOS_VISION_MODEL` | `muse-spark-1.3` | The cloud vision model |
-| `TRIBOS_VISION_CROSSCHECK` | `true` | The second, independent reading and the review |
+| `TRIBOS_VISION_CROSSCHECK` | `true` | The second reading and the review |
 | `TRIBOS_VISION_TESSERACT` | unset | The Tesseract executable. It is found on PATH, in Scoop or in Program Files when unset; `off` disables it |
 | `TRIBOS_VISION_TESSERACT_LANG` | `eng` | Tesseract language models, for example `eng+deu` |
 | `TRIBOS_VISION_OCR_MATH` | `true` | Indra's math models |

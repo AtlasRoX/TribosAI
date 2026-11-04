@@ -34,8 +34,8 @@ method" instruction up to `TRIBOS_RESEARCH_TEST_RETRIES` times, then marked bloc
 Strongest first:
 
 1. `formal` (Lean-verified)
-2. `certified` (interval or exact arithmetic, exhaustive finite checks)
-3. `replicated` (two independent implementations agree on every quantity)
+2. `certified` (every quantity an exact integer, reproduced exactly by the separate re-implementation)
+3. `replicated` (a separately written re-implementation, told to use a different algorithm and not shown the first code, agrees on every quantity; it is the same model unless `TRIBOS_RESEARCH_REPLICATION_MODEL` names a second one, and the finding records which)
 4. `computed` (ran once)
 5. `sourced` (cited)
 6. `reasoned` (argument only)
@@ -44,11 +44,32 @@ Every deliverable states the tier it needs. `formal` meets every requirement.
 
 ## The judge's evidence rules (deterministic)
 
-- **done:** a deliverable is "done" only when it cites a finding that exists, passed (not disputed), and meets the
-  deliverable's tier. Otherwise it falls back to "partial" (some evidence) or "open".
+The judge (a model) proposes; `judge.apply_judgement` keeps only what the ledger supports.
+
+- **done:** a deliverable is "done" only when it cites a finding that exists, passed (not disputed), meets the
+  deliverable's tier, **and comes from a test the charter planned for that deliverable** (`serves`). A strong finding
+  of another deliverable's test does not settle this one. Otherwise the deliverable falls back to "partial" or "open",
+  with the reason in its note.
 - **infeasible:** needs a stated reason, for example "open problem".
-- **hypothesis verdicts:** "supported" or "refuted" needs cited evidence, else it becomes "undecided".
+- **hypothesis verdicts:** "supported" or "refuted" needs a finding of a test planned for that hypothesis, at the
+  `sourced` level or stronger (a model-written argument alone decides nothing). "Supported" may not cite a finding
+  that refutes it. Otherwise the verdict becomes "undecided", with the reason in its note.
 - **concluded:** holds only when every deliverable is done or infeasible, whatever the model says.
+
+## Checks on the written thesis
+
+- **Numbers:** every number in a model-written chapter must appear in the evidence (ledger values, the review, the
+  goal). A number that is the value of one ledger quantity, in a sentence that names a different quantity, is flagged
+  as misattributed (`ledger.misattributed_numbers`): "the maximum stopping time is 837,799, at n = 329" is caught. A
+  chapter with either problem gets one repair call; what remains is listed in the run record.
+- **Formal proofs:** a proof is "Lean-verified" only when it compiles with no `sorry` or `admit`, declares no axiom,
+  and the kernel's own report (`#print axioms`, read after a per-check random marker) lists nothing beyond Lean's
+  standard three axioms (`propext`, `Classical.choice`, `Quot.sound`). See `tribos/verify/formal/runner.py`.
+- **Environment:** the thesis records a manifest (`research/manifest.py`): Tribos version and commit, Python and
+  library versions, Lean toolchain and Mathlib revision, the research and replication models, the sandbox backend and
+  limits, and the sources with their retrieval times. It is summarised in the run record and written to the bundle as
+  `manifest.json`, together with a statement of what the automatic checks do and do not cover (the prose's reasoning
+  is not checked).
 
 ## Stopping
 

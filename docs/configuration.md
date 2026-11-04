@@ -17,7 +17,7 @@ Precedence for state directories: a specific variable (`TRIBOS_MEMORY_DIR`, `TRI
 `TRIBOS_UPLOAD_ROOT`, `TRIBOS_JOBS_DIR`, `TRIBOS_TOOL_CACHE_DIR`) wins over `TRIBOS_DATA_DIR`; with
 neither set, every store keeps its historical location under the workspace.
 
-238 variables.
+240 variables.
 
 ## State directories
 
@@ -93,6 +93,7 @@ neither set, every store keeps its historical location under the workspace.
 | `TRIBOS_CAMPAIGN_AUTO_RESUME` | bool | `true` | `tribos/agentic/campaign.py` | Research projects interrupted by a server stop continue on their own when the server starts again (at most 3 times each). |
 | `TRIBOS_CAMPAIGN_CONTEXT_CHARS` | int (500 to 40000) | `3500` | `tribos/agentic/campaign.py` | Characters of each earlier stage a research-project stage is given (twice this for the report). |
 | `TRIBOS_CAMPAIGN_MAX_ACTIVE` | int (1 to 8) | `1` | `tribos/agentic/campaign.py` | Research projects run at once per server process; further ones wait in a queue. |
+| `TRIBOS_CAMPAIGN_MAX_PER_USER` | int (1 to 50) | `3` | `tribos/agentic/campaign.py` | Queued + running research projects per user; over it a new, resumed or continued project is refused (429). |
 | `TRIBOS_CAMPAIGN_STAGE_RETRIES` | int (0 to 5) | `1` | `tribos/agentic/campaign.py` | Times a failed research-project stage is run again before the project stops. |
 | `TRIBOS_JOB_CANCEL_GRACE_S` | float (0 to 600) | `20.0` | `tribos/agentic/jobs.py` | Seconds a cancelled job may take to stop before it is marked cancelled anyway. |
 | `TRIBOS_JOB_MAX_EVENTS` | int (100 to 1000000) | `20000` | `tribos/agentic/jobs.py` | Progress events kept per job; older ones are dropped. |
@@ -104,6 +105,7 @@ neither set, every store keeps its historical location under the workspace.
 | `TRIBOS_RESEARCH_MAX_ROUNDS` | int (1 to 40) | `12` | `tribos/agentic/research/loop.py` | Safety ceiling on research-loop rounds; a project normally stops earlier, when it reaches a conclusion or stops making progress. |
 | `TRIBOS_RESEARCH_MAX_TEST_RUNS` | int (5 to 1000) | `120` | `tribos/agentic/research/loop.py` | Safety ceiling on test runs (experiments, proofs, literature checks) in one research project. |
 | `TRIBOS_RESEARCH_PARALLEL_TESTS` | int (1 to 8) | `2` | `tribos/agentic/research/loop.py` | Research-project tests run at once. |
+| `TRIBOS_RESEARCH_REPLICATION_MODEL` | str | `` | `tribos/agentic/research/manifest.py`<br>`tribos/agentic/research/runner.py` | Model that re-implements numeric research results (must be in the allowed model list); empty means the research model, in a separate session. |
 | `TRIBOS_RESEARCH_SANDBOX_TIMEOUT_S` | int (30 to 1800) | `300` | `tribos/agentic/research/loop.py`<br>`tribos/agentic/sandbox/__init__.py` | Seconds one sandboxed cell of a research-project experiment may run (chat cells keep TRIBOS_SANDBOX_TIMEOUT_S). |
 | `TRIBOS_RESEARCH_STAGNATION_ROUNDS` | int (1 to 6) | `2` | `tribos/agentic/research/loop.py` | Consecutive research rounds without progress after which the project stops and writes its thesis. |
 | `TRIBOS_RESEARCH_TEST_RETRIES` | int (0 to 5) | `2` | `tribos/agentic/research/loop.py` | Times a failed research test is retried with a different method before it is marked blocked. |
@@ -323,7 +325,7 @@ neither set, every store keeps its historical location under the workspace.
 | `TRIBOS_LEAN_FULL_MATHLIB` | bool | `false` | `tribos/verify/formal/runner.py` | Allow a bare `import Mathlib` (several GB of memory); off replaces it with a default set of Mathlib modules. |
 | `TRIBOS_LEAN_PATH` | str | `` | `tribos/verify/formal/runner.py` | Path of the lean (or lake) executable; empty means lean on PATH. |
 | `TRIBOS_LEAN_PREMISE_SEARCH` | bool | `true` | `tribos/verify/formal/premises.py` | Lean repairs: look up Mathlib lemmas for the failing names with Loogle (loogle.lean-lang.org) and show them to the model. |
-| `TRIBOS_LEAN_PROJECT` | str | `` | `tribos/verify/formal/prove.py`<br>`tribos/verify/formal/runner.py` | A Lean project with Mathlib; proofs are checked with lake env lean there. |
+| `TRIBOS_LEAN_PROJECT` | str | `` | `tribos/agentic/research/manifest.py`<br>`tribos/verify/formal/prove.py`<br>`tribos/verify/formal/runner.py` | A Lean project with Mathlib; proofs are checked with lake env lean there. |
 | `TRIBOS_LEAN_PROVER_MODEL` | str | `` | `tribos/agentic/formal_proof.py` | Model for Lean proof attempts (e.g. a served Goedel-Prover); empty means the synthesis model. |
 | `TRIBOS_LEMMA_LIBRARY` | str | `` | `tribos/verify/formal/premises.py` | JSON file of kernel-checked lemmas reused as premises in later proofs; empty means data/lemma_library.json. |
 | `TRIBOS_MATH_AGENT` | bool | `true` | `tribos/agentic/math_agent.py` | Run the verified mathematics agent (bounded ReAct loop over the Axiom tools with an independent verifier) on mathematical questions. |

@@ -1,14 +1,15 @@
 {
   "benchmark": "math-eval-v1",
-  "fitted_on": "holdout3 set, first run with the code frozen",
-  "fitted_at": "2026-10-24T10:20:17.102139+00:00",
+  "fitted_on": "holdout3 set, re-run with the axiom code frozen at 40537ca",
+  "fitted_at": "2026-11-04T16:30:40.995103+00:00",
+  "code_sha256": "bbc0344314c7d5658279fc8696d7cdc693d4a5787bf2915c0dd4242b41112a41",
   "n": 48,
   "statuses": {
     "verified": {
-      "n": 43,
-      "correct": 43,
-      "confidence": 0.9778,
-      "lower_95": 0.918
+      "n": 44,
+      "correct": 44,
+      "confidence": 0.9783,
+      "lower_95": 0.9197
     },
     "partially_verified": {
       "n": 1,
@@ -23,19 +24,19 @@
       "lower_95": 0.0
     },
     "failed": {
-      "n": 2,
+      "n": 1,
       "correct": 0,
-      "confidence": 0.25,
+      "confidence": 0.3333,
       "lower_95": 0.0
     }
   },
   "cross_fitted": {
-    "ece": 0.0625,
-    "brier": 0.0219,
+    "ece": 0.0591,
+    "brier": 0.0224,
     "n": 48
   },
-  "accuracy": 0.9167,
+  "accuracy": 0.9375,
   "verified_precision": 1.0,
-  "verified_coverage": 0.8958,
+  "verified_coverage": 0.9167,
   "note": "P(answer correct | final status), Laplace-smoothed (k + 1) / (n + 2) with a Wilson 95% lower bound. Fit only on a held-out set run once with the code frozen; refit after changing the parser, policy or verifier."
 }

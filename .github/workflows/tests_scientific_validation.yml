@@ -108,9 +108,8 @@ jobs:
   type-check:
     name: Mypy (new modules)
     runs-on: ubuntu-latest
-    # Strict mypy has never been enforced on this codebase; this job reports without blocking until the
-    # listed modules are clean. Remove continue-on-error then, and widen the module list.
-    continue-on-error: true
+    # The first step is blocking; the report-only step below carries its own continue-on-error, so the job
+    # itself fails when the enforced modules regress (AUDIT-115).
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
@@ -123,7 +122,21 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen --extra dev
 
+      # Blocking (AUDIT-115): strict mypy, with the [tool.mypy] settings and the per-module stub overrides in
+      # pyproject.toml, on the modules that pass it today. --follow-imports=silent still reads the modules they
+      # import for their types but reports errors only in the listed paths. Add a module here once it is clean;
+      # never remove one to make a PR pass.
+      - name: Mypy strict (enforced modules, blocking)
+        run: >-
+          uv run mypy --follow-imports=silent
+          tribos/agentic/research tribos/vision tribos/axiom/accuracy.py
+          tribos/export/thesis.py tribos/export/svgchart.py tribos/verify/formal/runner.py
+          tribos/agentic/sandbox/policy.py tribos/agentic/sandbox/gateway.py
+
+      # Report only: strict mypy has never been enforced on the rest of the codebase (617 errors in 133 files on
+      # 2026-11-04). Move modules into the blocking step above as they become clean.
       - name: Run mypy
+        continue-on-error: true
         run: >-
           uv run mypy --ignore-missing-imports
           tribos/agents tribos/axiom tribos/dynamis tribos/physis tribos/archivon

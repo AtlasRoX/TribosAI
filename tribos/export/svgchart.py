@@ -26,6 +26,7 @@ def _ticks(lo: float, hi: float, n: int = 5) -> list[float]:
     mag = 10 ** math.floor(math.log10(raw))
     step = next(m * mag for m in (1, 2, 2.5, 5, 10) if m * mag >= raw)
     start = math.ceil(lo / step) * step
+    out: list[float]
     out, v = [], start
     while v <= hi + step * 1e-9 and len(out) < 12:
         out.append(round(v, 12))
@@ -136,7 +137,8 @@ def design_diagram(charter: dict[str, Any], ledger: list[dict[str, Any]], *, wid
            f"role='img' aria-label='Research design'>", f"<rect width='{width}' height='{height}' fill='{PAPER}'/>"]
     for label, x in (("Deliverables", cols["D"]), ("Tests", cols["T"]), ("Hypotheses", cols["H"])):
         out.append(f"<text x='{x}' y='30' {FONT} font-size='14' font-weight='600' fill='{INK}'>{label}</text>")
-    best = {}
+    best: dict[Any, dict[str, Any]] = {}
+    f: dict[str, Any] | None
     for f in ledger:
         best.setdefault(f.get("test_id"), f)
         if f.get("status") == "passed":

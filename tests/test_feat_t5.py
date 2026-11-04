@@ -24,6 +24,13 @@ FAKE_LEAN = textwrap.dedent('''
         sys.exit(1)
     if "sorry" in code:
         print(f"{path}:2:8: warning: declaration uses 'sorry'")
+    # Like real Lean: `#eval IO.println` prints its text, and each `#print axioms` prints a plain report line.
+    for line in code.splitlines():
+        if line.startswith('#eval IO.println "'):
+            print(line.split('"')[1])
+        elif line.startswith("#print axioms "):
+            name = line.split()[-1]
+            print(f"'{name}' depends on axioms: [sorryAx]" if "sorry" in code else f"'{name}' does not depend on any axioms")
     sys.exit(0)
 ''')
 

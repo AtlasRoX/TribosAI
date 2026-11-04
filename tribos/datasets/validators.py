@@ -347,6 +347,33 @@ def infer_table_orientation(row_names: list[str], col_names: list[str]) -> tuple
     return None, basis
 
 
+def _generic_table(df: object, ext: str, path: Path, out_path: Path | None) -> tuple[ValidationSummary, str | None]:
+    """An ordinary table: bounds checked, columns and types recorded, missing cells reported (not refused)."""
+    import pandas as pd
+
+    assert isinstance(df, pd.DataFrame)
+    if len(df) > MAX_TABLE_ROWS:
+        raise ValidationFailure("matrix_too_large", f"Tables are limited to {MAX_TABLE_ROWS:,} rows.")
+    if df.shape[1] > MAX_TABLE_COLUMNS:
+        raise ValidationFailure("matrix_too_large", f"Tables are limited to {MAX_TABLE_COLUMNS:,} columns.")
+    if df.shape[0] == 0 or df.shape[1] == 0:
+        raise ValidationFailure("table_unreadable", "The table has no data rows or columns.")
+    warnings: list[str] = []
+    missing = int(df.isna().sum().sum())
+    if missing:
+        warnings.append(f"{missing} empty cell(s); they are kept as missing values, not zeros")
+    derived_sha: str | None = None
+    if out_path is not None:
+        shutil.copyfile(path, out_path)
+        derived_sha = sha256_file(out_path)
+    return (
+        ValidationSummary(format=ext.lstrip("."), n_rows=int(df.shape[0]), n_columns=int(df.shape[1]),
+                          columns=[str(c) for c in df.columns][:200],
+                          dtypes={str(c): str(t) for c, t in list(df.dtypes.items())[:200]}, warnings=warnings),
+        derived_sha,
+    )
+
+
 def validate_table(
     path: Path,
     extension: str,
@@ -413,6 +440,20 @@ def validate_table(
         raise
     except Exception as exc:
         raise ValidationFailure("table_unreadable", "The measurement table could not be parsed.") from exc
+    # A table is an ordinary table (x, y measurements, results, a few rows): only a declared expression-matrix
+    # orientation, or gene and cell labels, make it a cells-by-genes matrix (audit AUDIT-108: a two-column `x,y`
+    # table was refused as "1 genes", a short one as "2 cells").
+    if orientation is None:
+        row_labels = [str(v) for v in timecourse.iloc[:500, 0].tolist()] if len(timecourse.columns) else []
+        col_labels = [str(c) for c in timecourse.columns[1:]]
+        inferred_matrix, _basis = infer_table_orientation(row_labels, col_labels)
+        # A matrix has many genes: one gene-like header ("y", "E_GPa") is not a reason to treat a table as one.
+        gene_axis = col_labels if inferred_matrix == "cells_by_genes" else row_labels
+        if inferred_matrix is None or len(gene_axis) < 5:
+            table = timecourse
+            if len(table.columns) > 1 and str(table.columns[0]).startswith("Unnamed: 0"):
+                table = table.set_index(table.columns[0])  # a written DataFrame index, not a data column
+            return _generic_table(table, ext, path, out_path)
     try:
         header = pd.read_csv(path, sep=sep, index_col=0, nrows=0, engine="c")
     except Exception as exc:

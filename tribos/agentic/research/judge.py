@@ -66,6 +66,13 @@ def apply_judgement(campaign: dict[str, Any], raw: Any) -> dict[str, Any]:
     charter = campaign["charter"]
     ledger = {f["id"]: f for f in campaign.get("ledger") or []}
     good = {fid for fid, f in ledger.items() if f.get("status") == "passed"}
+    tests = {t["id"]: t for t in charter.get("tests") or []}
+
+    def relevant(fid: str, key: str, item_id: str) -> bool:
+        """The finding comes from a test the charter planned for this deliverable (serves) or hypothesis."""
+        test = tests.get(ledger[fid].get("test_id"))
+        return test is not None and item_id in (test.get(key) or [])
+
     props = {str(d.get("id")): d for d in raw.get("deliverables") or [] if isinstance(d, dict)}
     accepted_d = []
     for d in charter["deliverables"]:
@@ -74,13 +81,18 @@ def apply_judgement(campaign: dict[str, Any], raw: Any) -> dict[str, Any]:
         evidence = [e for e in (p.get("evidence") or d.get("evidence") or []) if e in ledger]
         note = str(p.get("note") or (d.get("note") if not p else "") or "")[:400]
         if status == "done":
-            strong = [e for e in evidence if e in good and meets(ledger[e].get("tier"), d.get("tier"))]
+            # Done needs a passed finding at the required level from a test planned for this deliverable: a finding
+            # of another deliverable's test, however strong, does not settle this one (audit AUDIT-106).
+            strong = [e for e in evidence if e in good and meets(ledger[e].get("tier"), d.get("tier"))
+                      and relevant(e, "serves", d["id"])]
             if not strong:
-                weaker = [e for e in evidence if e in good]
+                weaker = [e for e in evidence if e in good and relevant(e, "serves", d["id"])]
                 status = "partial" if weaker else "open"
                 if weaker:
                     note = (note + " " if note else "") + (
                         f"(not yet at the required '{d.get('tier')}' verification level)")
+                elif any(e in good for e in evidence):
+                    note = (note + " " if note else "") + "(the cited findings come from tests for other deliverables)"
         elif status == "infeasible" and len(note) < 15:
             status = "partial" if evidence else "open"
         elif status not in ("partial", "open", "infeasible"):
@@ -93,13 +105,25 @@ def apply_judgement(campaign: dict[str, Any], raw: Any) -> dict[str, Any]:
         verdict = str(p.get("verdict") or h.get("verdict") or "untested").lower()
         # A judgement that says nothing about this hypothesis keeps its earlier verdict and evidence.
         evidence = [e for e in (p.get("evidence") or ([] if p else h.get("evidence")) or []) if e in ledger]
-        if verdict in ("supported", "refuted") and not any(e in good or ledger[e].get("status") == "refuted"
-                                                          for e in evidence):
+        note = str(p.get("note") or (h.get("note") if not p else "") or "")[:400]
+        # A decided verdict needs evidence from a test planned for this hypothesis, at least at the `sourced` level
+        # (a model-written argument alone decides nothing), and "supported" may not cite a finding that refutes it
+        # (audit AUDIT-106).
+        mine = [e for e in evidence if relevant(e, "hypotheses", h["id"])]
+        decisive = [e for e in mine if e in good and meets(ledger[e].get("tier"), "sourced")]
+        contrary = [e for e in mine if ledger[e].get("status") == "refuted"]
+        reason = ""
+        if verdict == "supported" and (contrary or not decisive):
+            reason = ("a cited finding refutes it" if contrary else
+                      "no finding of its own tests at the sourced level or stronger supports it")
+        elif verdict == "refuted" and not (contrary or decisive):
+            reason = "no finding of its own tests at the sourced level or stronger refutes it"
+        if reason:
             verdict = "undecided"
+            note = (note + " " if note else "") + f"(undecided: {reason})"
         if verdict not in ("supported", "refuted", "undecided", "untested"):
             verdict = "undecided"
-        h.update(verdict=verdict, evidence=evidence or h.get("evidence") or [],
-                 note=str(p.get("note") or (h.get("note") if not p else "") or "")[:400])
+        h.update(verdict=verdict, evidence=evidence or h.get("evidence") or [], note=note.strip())
     open_d = [d for d in charter["deliverables"] if d["status"] not in ("done", "infeasible")]
     return {"deliverables": accepted_d, "discrepancies": [str(x)[:400] for x in (raw.get("discrepancies") or [])][:10],
             "new_tests": [t for t in (raw.get("new_tests") or []) if isinstance(t, dict)][:6],

@@ -58,7 +58,7 @@ Materials Project requires a key and otherwise falls back to a curated **25-mate
 → **Build:** a material property service (temperature-dependent `E`, `ν`, `ρ`, `α`, yield/ultimate, fatigue S-N data) with a CODATA-backed units layer and a MatWeb-class source connector.
 
 **P0.5 — Experimental design & hypothesis generation**
-`discovery.py` ranks hypotheses but is framed as **biomedical** (`PrioritizedCandidate`, in-silico testing) — legacy framing for a STEM-only product, and flagged in `CODEBASE_AUDIT.md` §6. There is no DOE engine: no D-optimal, Latin hypercube, response-surface, or Taguchi design. An agentic R&D harness's core loop is *propose → design experiment → analyze → iterate*, and Tribos currently has none of the middle.
+`discovery.py` ranks hypotheses but is framed as **biomedical** (`PrioritizedCandidate`, in-silico testing) — legacy framing for a STEM-only product, and flagged in `docs/history/CODEBASE_AUDIT.md` §6. There is no DOE engine: no D-optimal, Latin hypercube, response-surface, or Taguchi design. An agentic R&D harness's core loop is *propose → design experiment → analyze → iterate*, and Tribos currently has none of the middle.
 → **Build:** a DOE engine (factorial, D-optimal, LHS, response-surface) + a STEM-native hypothesis generator seeded from literature gaps and measured residuals.
 
 **P0.6 — Multiphysics & unit-system integrity in the solve path**
@@ -123,15 +123,15 @@ These are cheap, high-leverage, and they directly affect the "be honest by desig
 
 | # | Issue | Evidence |
 |:--|:--|:--|
-| P3.1 | **README/docs state the wrong default framework.** "Plan-and-Execute (API Default)" — actual default is `auto`. | `README.md`, `docs/index.md`; flagged in `CODEBASE_AUDIT.md` §5 |
+| P3.1 | **README/docs state the wrong default framework.** "Plan-and-Execute (API Default)" — actual default is `auto`. | `README.md`, `docs/index.md`; flagged in `docs/history/CODEBASE_AUDIT.md` §5 |
 | P3.2 | **`physis_units` is not wired into the unit audit**, contradicting roadmap T4's "DONE". | `docs/TRIBOS_REMEDIATION.md` §4 |
-| P3.3 | **Biomedical leftovers in a STEM-only product**: `tribos/verify/verifier.py` is still a 3,049-line "Clinical Verifier"; `discovery.py` is biomedical-framed; `research_memory.py` keeps biomedical regexes; `SPECIALIST_SPECS` has domain-only specialists (simulation/omics/chemistry) that are never instantiated. | `CODEBASE_AUDIT.md` §6; `tribos/agents/discovery.py`; `tribos/agentic/specialists.py` |
+| P3.3 | **Biomedical leftovers in a STEM-only product**: `tribos/verify/verifier.py` is still a 3,049-line "Clinical Verifier"; `discovery.py` is biomedical-framed; `research_memory.py` keeps biomedical regexes; `SPECIALIST_SPECS` has domain-only specialists (simulation/omics/chemistry) that are never instantiated. | `docs/history/CODEBASE_AUDIT.md` §6; `tribos/agents/discovery.py`; `tribos/agentic/specialists.py` |
 | P3.4 | **Aspirational dead settings group**: "Milvus and the PrimeKG vector dump" — a settings group with no settings and no module. | `tribos/config/settings.py` |
-| P3.5 | **`web/src/app/page.tsx` is 3,311 lines** with ~130 `any`, ~33 React-hooks warnings, 7 `<img>` warnings. | `CODEBASE_AUDIT.md` "Still open" |
-| P3.6 | **Sandbox hardening is in-process only** (SUP-2) — no container isolation, no Windows memory-limit enforcement for Lean. | `CODEBASE_AUDIT.md`; `docs/TRIBOS_REMEDIATION.md` |
-| P3.7 | **mypy is not a CI gate** (~290 pre-existing errors). | `CODEBASE_AUDIT.md` |
+| P3.5 | **`web/src/app/page.tsx` is 3,311 lines** with ~130 `any`, ~33 React-hooks warnings, 7 `<img>` warnings. | `docs/history/CODEBASE_AUDIT.md` "Still open" |
+| P3.6 | **Sandbox hardening is in-process only** (SUP-2) — no container isolation, no Windows memory-limit enforcement for Lean. | `docs/history/CODEBASE_AUDIT.md`; `docs/TRIBOS_REMEDIATION.md` |
+| P3.7 | **mypy is not a CI gate** (~290 pre-existing errors). | `docs/history/CODEBASE_AUDIT.md` |
 | P3.8 | **Legacy alias sprawl** (`vivarix_*`, `lithoscribe_*`) risks double-counting tools and confusing the planner's tool description. | `tribos/extensions/`, `tribos/tools/registry.py` |
-| P3.9 | **CI runs the full test matrix twice**; Bandit B608 medium warnings still need `# nosec` with reasons. | `CODEBASE_AUDIT.md`; `docker/backend.Dockerfile` still says "Tribos Clinical R&D API" |
+| P3.9 | **CI runs the full test matrix twice**; Bandit B608 medium warnings still need `# nosec` with reasons. | `docs/history/CODEBASE_AUDIT.md`; `docker/backend.Dockerfile` still says "Tribos Clinical R&D API" |
 | P3.10 | **No documented confidence for a whole answer** — confidence is per-claim; a reader can mistake "98% on the expression" for "98% on the answer". | `docs/TRIBOS_REMEDIATION.md` §4 |
 
 ---

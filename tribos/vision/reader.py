@@ -121,7 +121,8 @@ def _png(image: Any, max_side: int = 1280) -> bytes:
     ok, buf = cv2.imencode(".png", image)
     if not ok:
         raise ImageReadError("The image could not be re-encoded.")
-    return buf.tobytes()
+    png: bytes = buf.tobytes()  # typed here: cv2 is untyped where the optional vision extra is not installed
+    return png
 
 
 def unconfirmed_numbers(transcription: str, ocr_text: str) -> list[str]:

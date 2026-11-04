@@ -6,7 +6,7 @@ Tribos is a multi-agent research assistant for engineering, physics and mathemat
 - **Agent pipeline:** `tribos/`, written in Python 3.12.
 - **Frontend:** Next.js 16 / React 19 in `web/`. Read [web/AGENTS.md](web/AGENTS.md) before any web work, because this Next.js version differs from older ones.
 
-Work to pick up next is in [docs/FEATURE_ROADMAP.md](docs/FEATURE_ROADMAP.md). Known open issues are listed in [CODEBASE_AUDIT.md](CODEBASE_AUDIT.md) under "Still open".
+Work to pick up next is in [docs/FEATURE_ROADMAP.md](docs/FEATURE_ROADMAP.md). The current audit and its remediation log are in [AUDIT_REPORT.md](AUDIT_REPORT.md); earlier audits and repair reports are in [docs/history/](docs/history/).
 
 ## Setup and commands
 

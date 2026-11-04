@@ -7,8 +7,10 @@ nothing). Everything that must be exact is assembled from the ledger, not writte
 tables and diagram, the results tables, the figures (sandbox plots and charts of the ledger series), the theorems and
 proofs with their verification level, the references, the code appendix and the run record.
 
-Every number in a model-written chapter is checked against the evidence (ledger values, the review, the goal);
-a chapter with unsupported numbers gets one repair call, and any number still unsupported is listed in the thesis.
+Every number in a model-written chapter must appear in the evidence (ledger values, the review, the goal), and a
+number that is the value of one ledger quantity in a sentence naming another quantity is flagged as misattributed.
+A chapter with either problem gets one repair call; what remains is listed in the thesis. The prose itself is
+model-written: these checks cover its numbers, not its reasoning (stated in the run record).
 """
 
 from __future__ import annotations
@@ -22,7 +24,14 @@ from typing import Any
 
 from .charter import charter_text
 from .judge import STOP_TEXT
-from .ledger import TIER_LABEL, evidence_numbers, ledger_text, unsupported_numbers
+from .ledger import (
+    TIER_LABEL,
+    evidence_numbers,
+    ledger_text,
+    misattributed_numbers,
+    unsupported_numbers,
+)
+from .manifest import environment_manifest, manifest_markdown
 from .model import ResearchModel
 
 logger = logging.getLogger(__name__)
@@ -44,7 +53,7 @@ CHAPTERS = [
                                                        "conjectured) and methods from the literature review, with "
                                                        "citations [n]."),
     ("methods", "Methods", 700, "How each test was carried out: algorithms, parameters, exact versus floating-point "
-                                "arithmetic, the independent re-implementation check, the formal proof attempts, and "
+                                "arithmetic, the separate re-implementation check, the formal proof attempts, and "
                                 "the verification levels used."),
     ("results", "Results", 900, "The results deliverable by deliverable, with exact numbers, references to the tables "
                                 "and figures listed, and for each hypothesis whether it is supported, refuted or "
@@ -162,7 +171,7 @@ def _context(campaign: dict[str, Any], refs: list[dict[str, Any]], figures: list
 
 
 async def _chapter(model: ResearchModel, key: str, title: str, words: int, brief: str, context: str,
-                   evidence: set[str], effort: str) -> dict[str, Any]:
+                   evidence: set[str], effort: str, ledger: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     user = f"{context}\n\nWrite the chapter \"{title}\" (about {words} words). {brief}"
     try:
         text = await model.text(WRITER_SYSTEM, user, effort=effort, max_tokens=32000)
@@ -170,14 +179,18 @@ async def _chapter(model: ResearchModel, key: str, title: str, words: int, brief
         logger.warning("thesis chapter %s failed: %s", key, exc)
         return {"key": key, "title": title, "markdown": f"*This chapter could not be written ({type(exc).__name__}).*",
                 "unverified": []}
-    bad = unsupported_numbers(text, evidence)
+    def problems(draft: str) -> list[str]:
+        return unsupported_numbers(draft, evidence) + misattributed_numbers(draft, ledger)
+
+    bad = problems(text)
     if bad:
-        fix = (f"{user}\n\nYour draft:\n{text}\n\nThese numbers are not in the evidence: {', '.join(bad)}. Rewrite the "
-               "chapter so that every number is one the evidence states (or remove it). Reply with the chapter only.")
+        fix = (f"{user}\n\nYour draft:\n{text}\n\nThese numbers are not in the evidence, or are attached to the wrong "
+               f"quantity: {', '.join(bad)}. Rewrite the chapter so that every number is the value the evidence gives "
+               "for the quantity it describes (or remove it). Reply with the chapter only.")
         try:
             text2 = await model.text(WRITER_SYSTEM, fix, effort=effort, max_tokens=32000)
             if text2.strip():
-                text, bad = text2, unsupported_numbers(text2, evidence)
+                text, bad = text2, problems(text2)
         except Exception as exc:  # noqa: BLE001
             logger.info("thesis repair of %s failed: %s", key, exc)
     return {"key": key, "title": title, "markdown": text.strip(), "unverified": bad}
@@ -283,7 +296,7 @@ def _listing(code: str, limit: int = LISTING_LINES) -> str:
 
 def _appendix_code(campaign: dict[str, Any]) -> str:
     out = ["The core of the code behind every computed value, as run in the Tribos sandbox. The complete code of every "
-           "finding and of its independent re-implementation, the Lean sources and the findings ledger are in the "
+           "finding and of its separate re-implementation, the Lean sources and the findings ledger are in the "
            "reproducibility bundle (export: Bundle)."]
     for f in campaign.get("ledger") or []:
         if f.get("status") not in ("passed", "disputed"):
@@ -346,9 +359,10 @@ async def write_thesis(model: ResearchModel, campaign: dict[str, Any], files_dir
             evidence |= evidence_numbers(*[str(c) for c in row])
     sem = asyncio.Semaphore(max(1, parallel))
 
-    async def one(spec: tuple) -> dict[str, Any]:
+    async def one(spec: tuple[str, str, int, str]) -> dict[str, Any]:
         async with sem:
-            return await _chapter(model, *spec, context=context, evidence=evidence, effort=effort)
+            return await _chapter(model, *spec, context=context, evidence=evidence, effort=effort,
+                                  ledger=campaign.get("ledger") or [])
 
     written = await asyncio.gather(*(one(c) for c in CHAPTERS))
     by = {c["key"]: c for c in written}
@@ -370,17 +384,20 @@ async def write_thesis(model: ResearchModel, campaign: dict[str, Any], files_dir
     ]
     unverified = sorted({n for c in written for n in c.get("unverified") or []})
     if unverified:
-        chapters[-1]["markdown"] += ("\n\nNumbers in the text that the automatic check could not match to the evidence: "
-                                     + ", ".join(unverified[:40]) + ".")
+        chapters[-1]["markdown"] += ("\n\nNumbers in the text that the automatic check could not match to the evidence, "
+                                     "or found attached to a different quantity: " + ", ".join(unverified[:40]) + ".")
     tl = next((f for f in figures if f["file"] == "timeline.svg"), None)
     if tl is not None:
         chapters[-1]["markdown"] += f"\n\n![Figure {tl['n']}. {tl['caption']}](files/timeline.svg)"
+    environment = environment_manifest(campaign, refs)
+    chapters[-1]["markdown"] += "\n\n**Environment and limits.**\n\n" + manifest_markdown(environment)
     md = [f"# {title}", "", f"*A research thesis produced by Tribos · {when} · Research ID `{campaign['campaign_id']}`*", ""]
     for c in chapters:
         md += [f"## {c['title']}", "", c["markdown"].strip(), ""]
     return {"status": "succeeded", "title": title, "markdown": "\n".join(md).strip() + "\n", "chapters": chapters,
             "figures": figures, "tables": [{"n": t["n"], "caption": t["caption"]} for t in tables],
-            "references": len(refs), "unverified": unverified, "written_at": _dt.datetime.now(_dt.UTC).timestamp()}
+            "references": len(refs), "unverified": unverified, "environment": environment,
+            "written_at": _dt.datetime.now(_dt.UTC).timestamp()}
 
 
 __all__ = ["CHAPTERS", "figures_and_tables", "write_thesis"]

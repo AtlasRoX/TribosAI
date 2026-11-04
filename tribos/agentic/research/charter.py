@@ -40,7 +40,7 @@ Given the research goal and the literature review, reply with ONE JSON object:
 Rules:
 - One deliverable per thing the goal asks for, in the goal's order; keep the goal's numbers and ranges exactly.
 - Tests must be executable now: a compute test is Python (numpy, scipy, sympy, mpmath, networkx, statsmodels, matplotlib) in a sandbox with no network, a few minutes per cell; a prove test is a precise mathematical statement to prove (formally in Lean 4 with Mathlib when possible); a literature test is a specific fact to find in published sources.
-- Prefer exact arithmetic for integers and rationals. Numeric deliverables should be "replicated" (an independent re-implementation must agree). Use "formal" only for statements small enough to prove in Lean.
+- Prefer exact arithmetic for integers and rationals. Numeric deliverables should be "replicated" (a separately written re-implementation with a different algorithm must agree). "certified" is reached only by exact integer results that the re-implementation reproduces exactly, so ask for it only when every quantity is an integer. Use "formal" only for statements small enough to prove in Lean.
 - The project ends in a thesis with a chapter of theorems and proofs. For a mathematical goal, plan 1 to 3 "prove" tests for the statements the conclusions rely on and that can actually be proved: lemmas about the objects defined (e.g. a recurrence such as s(2n) = s(n) + 1), derivations of the constants used (e.g. a heuristic constant from its model), identities or bounds the computation assumes. State each as a precise, self-contained mathematical statement. Never plan a proof of an open problem.
 - Split big work into tests that can run in parallel; use depends_on only when a test needs another test's numbers.
 - Never plan a test for something the goal does not ask for. Never claim an open problem will be solved: plan what can be established and state the rest as limits.
@@ -85,7 +85,7 @@ def _words(text: str) -> set[str]:
 def _break_cycles(tests: list[dict[str, Any]]) -> None:
     """Drop dependency edges that close a cycle (keeps the earliest edges)."""
     order = {t["id"]: i for i, t in enumerate(tests)}
-    graph = {t["id"]: [] for t in tests}
+    graph: dict[str, list[str]] = {t["id"]: [] for t in tests}
     for t in tests:
         kept = []
         for d in t["depends_on"]:
@@ -160,6 +160,8 @@ def validate_charter(raw: Any, goal: str) -> dict[str, Any]:
     h_map = _ids("H", hyps)
     tests_raw = [t for t in (raw.get("tests") or []) if isinstance(t, dict)][:MAX_TESTS]
     t_map = _ids("T", tests_raw)
+    out_d: list[dict[str, Any]]
+    out_h: list[dict[str, Any]]
     out_d = [{"id": d_map[str(d.get("id") or f"D{i}")], "title": _clean(d.get("title"), 200) or f"Deliverable {i}",
               "acceptance": _clean(d.get("acceptance") or d.get("title"), 800),
               "tier": (str(d.get("tier") or "").lower() if str(d.get("tier") or "").lower() in TIERS else "replicated"),

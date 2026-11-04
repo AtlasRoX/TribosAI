@@ -4,8 +4,9 @@ figures, and how strongly it is verified.
 
 Verification tiers, strongest first:
   formal      a Lean proof that compiled with no sorry/admit/axiom
-  certified   interval or exact arithmetic that encloses the true value, or an exhaustive finite check
-  replicated  two independent implementations agree on every reported quantity
+  certified   exact integer results, reproduced exactly by a separately written re-implementation
+  replicated  a separately written re-implementation (different algorithm; a second model when
+              TRIBOS_RESEARCH_REPLICATION_MODEL is set) agrees on every reported quantity
   computed    ran once in the sandbox
   sourced     a published source states it (with a citation)
   reasoned    an argument only
@@ -24,7 +25,8 @@ TIER_LABEL = {"formal": "Lean-verified", "certified": "Certified", "replicated":
               "sourced": "Sourced", "reasoned": "Argued", "none": "Unverified"}
 MAX_FIGURES_PER_FINDING = 4
 # A comma is a thousands separator only in groups of three digits ("1,000,000"); "27,97,871" is a list of three numbers.
-_NUMBER_RE = re.compile(r"(?:(?<![\w.,])-?\d{1,3}(?:,\d{3})+(?![\d,])|(?<![\w.])-?\d+)(?:\.\d+)?(?:[eE][-+]?\d+)?")
+# A grouped number may be followed by a comma of the prose ("n = 837,799, as computed"), not by another digit group.
+_NUMBER_RE = re.compile(r"(?:(?<![\w.,])-?\d{1,3}(?:,\d{3})+(?!\d|,\d)|(?<![\w.])-?\d+)(?:\.\d+)?(?:[eE][-+]?\d+)?")
 
 
 def rank(tier: str | None) -> int:
@@ -189,6 +191,67 @@ def _forms(v: float) -> set[str]:
     if v == int(v) and abs(v) < 1e18:
         out.add(str(int(v)))
     return out
+
+
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?;])\s+|\n+")
+_WORD_RE = re.compile(r"[A-Za-z]+")
+_NAME_STOP = frozenset({"the", "and", "for", "with", "from", "value", "values", "number", "numbers", "count", "result",
+                        "results", "total", "per", "all", "are", "was", "were", "this", "that", "which", "its"})
+
+
+def _name_words(name: Any) -> set[str]:
+    parts = re.sub(r"([a-z])([A-Z])", r"\1 \2", str(name or "")).replace("_", " ").replace("-", " ")
+    return {w.lower() for w in _WORD_RE.findall(parts) if len(w) >= 3} - _NAME_STOP
+
+
+def _named_in(words: set[str], sentence_words: set[str]) -> bool:
+    """A quantity's name words appear in the sentence ("max" in "maximum", "stopping" in "stopping")."""
+    return any(s == w or s.startswith(w) or (len(s) >= 4 and w.startswith(s)) for w in words for s in sentence_words)
+
+
+def misattributed_numbers(text: str, ledger: list[dict[str, Any]] | None) -> list[str]:
+    """Numbers attached to the wrong quantity (audit AUDIT-104).
+
+    The presence check (unsupported_numbers) accepts a number that appears anywhere in the evidence, so "the maximum
+    stopping time is 837,799, attained at n = 329" passed with the two values swapped. Here a number is flagged when
+    it is the value of a ledger quantity that its sentence does not name, while the sentence names another quantity
+    with a different value. Deliberately conservative: a sentence naming no quantity is not judged.
+    """
+    quantities: list[tuple[str, set[str], set[str]]] = []
+    for f in ledger or []:
+        for q in f.get("quantities") or []:
+            v = q.get("value")
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(float(v)):
+                continue
+            words = _name_words(q.get("name"))
+            if words:
+                quantities.append((str(q.get("name")), words, _forms(float(v))))
+    if len(quantities) < 2:
+        return []
+    body = re.sub(r"```.*?```", " ", text or "", flags=re.S)
+    out: list[str] = []
+    for sentence in _SENTENCE_SPLIT_RE.split(body):
+        words = {w.lower() for w in _WORD_RE.findall(sentence) if len(w) >= 3} - _NAME_STOP
+        named = [q for q in quantities if _named_in(q[1], words)]
+        if not named:
+            continue
+        for m in _NUMBER_RE.findall(sentence):
+            raw = m.replace(",", "")
+            try:
+                v = float(raw)
+            except ValueError:
+                continue
+            if v == int(v) and (abs(v) <= 20 or 1900 <= v <= 2100):
+                continue
+            digits = len(re.sub(r"[^0-9]", "", raw.split("e")[0].split("E")[0]).lstrip("0")) or 1
+            key = f"{v:.{min(12, max(2, digits))}g}"
+            owners = [q for q in quantities if key in q[2] or raw in q[2]]
+            if not owners or any(q in named for q in owners):
+                continue
+            others = [q for q in named if q not in owners]
+            if others:
+                out.append(f"{m} (the value of {owners[0][0]}, in a sentence about {others[0][0]})")
+    return list(dict.fromkeys(out))[:20]
 
 
 def unsupported_numbers(text: str, evidence: set[str]) -> list[str]:

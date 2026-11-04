@@ -86,6 +86,11 @@ long history of escapes. They are defence in depth *underneath* the container bo
    - file writers (`to_csv`, `savefig`, `np.save`, `write_h5ad`, ...) only to a literal relative path inside the
      work directory, never over an input file;
    - pickle-based I/O (`read_pickle`, `to_pickle`, `allow_pickle=True`), which runs code on load.
+   - submodules that load native code, compile or launch programs, whatever the import spelling
+     (`BANNED_MODULES`: `numpy.ctypeslib`, `numpy.f2py`, `sympy.utilities.autowrap`, `sympy.printing.preview`,
+     the pandas clipboard, ...), and the matching names and attributes (`load_library`, `CDLL`, `ctypes`,
+     `autowrap`, `preview`, `Popen`, `startfile`, the HDF5 low-level `h5f` API, ...). The 2026-11-04 audit
+     (AUDIT-102) loaded kernel32 through `import numpy.ctypeslib as c` with a computed library name.
 3. **A separate process.** `sys.executable -I` (isolated mode: PYTHON* variables ignored, no user site-packages,
    the script directory not on `sys.path`). `-S` is not used because the scientific stack lives in
    site-packages. The working directory is a fresh temporary `work/` folder that holds only read-only copies of
@@ -95,6 +100,12 @@ long history of escapes. They are defence in depth *underneath* the container bo
    restricted builtins dict. That dict has an `__import__` that re-checks the allowlist, a read-only `open()`
    confined to the work directory (this catches computed paths the AST cannot see), a `getattr` that refuses
    dunder and banned names, and no eval, exec, compile, vars or globals. stdout and stderr are capped.
+   Two further guards close the escapes the audit found: **no program can be started** (`subprocess.Popen`,
+   `os.system`/`popen`/`spawn*`/`exec*`/`startfile`, `_winapi.CreateProcess` and `_posixsubprocess.fork_exec`
+   raise; matplotlib's animation writers once launched a configurable executable), and **HDF5 opens files only
+   inside the work directory** (h5py's C-level `h5f.create`/`h5f.open`, which `h5py.File` calls, check the path;
+   `h5py.File(<computed path>, 'w')` once created a file outside it). `tests/test_fix_audit_102_sandbox_escapes.py`
+   replays the audit's payloads.
 5. **No secrets in the environment.** The child's environment is built from an allowlist: PATH,
    SYSTEMROOT/WINDIR, PATHEXT, TEMP/TMP (pointing into the run's own temp folder), PYTHONHASHSEED, and the
    thread and backend settings the runner sets itself (MPLBACKEND=Agg, MPLCONFIGDIR, NUMBA_CACHE_DIR, *_NUM_THREADS=1).
@@ -122,6 +133,8 @@ long history of escapes. They are defence in depth *underneath* the container bo
    off, that request cannot run Python or SageMath at all, whatever the planner asks for.
 
 ### The SageMath path
+
+Under strict isolation (`TRIBOS_SANDBOX_STRICT_LIMITS=1`) SageMath is refused unless `TRIBOS_SANDBOX_ALLOW_UNISOLATED=1`, like the subprocess backend: the container backend does not carry it (AUDIT-103).
 
 SageMath used to bypass the sandbox entirely: model-written Sage ran through a bare `subprocess.run` with no
 policy, no network block, no resource caps and a timeout that did not kill descendants. It is now contained:
