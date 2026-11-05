@@ -205,9 +205,9 @@ _THANKS_RE = re.compile(r"\b(?:thanks?|thx|ty|cheers|appreciate)\b", re.I)
 _FAREWELL_RE = re.compile(r"\b(?:bye|goodbye|see\s+(?:you|ya)|good\s*night)\b", re.I)
 
 
-# Kappa Gate's answer to a self-referential query (agents/context_gate.py): it has no grounding context (K = 0).
+# The Lumo Admission Gate's answer to a self-referential query (agents/context_gate.py): it has no grounding context (K = 0).
 PARADOX_REPLY = (
-    "This statement refers only to itself, so no fact can confirm or refute it: under the Kappa gate it has context "
+    "This statement refers only to itself, so no fact can confirm or refute it: under the Lumo Admission Gate it has context "
     "K = 0 (neither true nor false), and nothing was looked up or computed. Ask about the claim it is meant to "
     "test, or about the paradox itself (for example \"Why is the liar paradox neither true nor false?\")."
 )

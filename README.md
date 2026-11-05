@@ -228,7 +228,7 @@ flowchart LR
 | Mechanism | What it does | Where |
 | :--- | :--- | :--- |
 | **Context gate** | Extractive compression: literature sentences are ranked against the question and trimmed to a fixed budget, never paraphrased, so every quotation and citation stays exact. | `tribos/agents/context_gate.py` |
-| **Kappa admission gate** | Scores each sentence by source class (official to retracted), corroboration by independent sources and conflicts with reliable ones; admits, **quarantines** or **blocks** it. Forum and social results are dropped. | `tribos/agents/context_gate.py` |
+| **[Lumo Admission Gate](https://github.com/AtlasRoX/Lumo-GATE)** | Scores each sentence by source class (official to retracted), corroboration by independent sources and conflicts with reliable ones; admits, **quarantines** or **blocks** it. Forum and social results are dropped. | `tribos/agents/context_gate.py` |
 | **Evidence layout** | Evidence first in tagged blocks, then what failed or was skipped, then memory, with the question last; computed results are condensed (rows, significant figures) and escaped. | `tribos/agents/prompts.py`, `tribos/agents/stem_evidence.py` |
 | **Spotlighting** | Retrieved text, memory, research context and project instructions are wrapped as *data*, never instructions, as a defence against prompt injection. | `tribos/agentic/guardrails.py` |
 | **Run budget** | Caps tool calls, model calls, tokens and wall-clock time per run, with a reserve that guarantees the final draft and its revision. | `tribos/agentic/budget.py` |

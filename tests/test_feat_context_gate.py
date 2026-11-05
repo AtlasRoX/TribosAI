@@ -1,4 +1,4 @@
-"""Context gate (query-focused extractive compression + the Kappa admission gate), concise answers, the paradox
+"""Context gate (query-focused extractive compression + the Lumo Admission Gate), concise answers, the paradox
 guard, and the single-provider catalog (Meta muse only)."""
 
 from __future__ import annotations

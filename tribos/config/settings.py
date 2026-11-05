@@ -199,7 +199,7 @@ _SETTINGS: Sequence[Setting] = (
     Setting("TRIBOS_LLM_MODEL", "str", None, "Default model id when a request names none (the orchestrator default when unset).", _LLM),
     Setting("TRIBOS_ALLOWED_MODELS", "list", None, "Extra comma-separated model ids callers may select besides the built-in catalog.", _LLM),
     Setting("TRIBOS_ANSWER_STYLE", "str", "concise", "Answer length: `concise` answers only what was asked (direct answer first, no unrequested sections); `full` is the longer report format.", _PLAN, choices=("concise", "full")),
-    Setting("TRIBOS_CONTEXT_GATE", "bool", True, "Context gate: only query-relevant sentences with Kappa context K >= 1 (source-weighted, corroborated) reach the answer model.", _PLAN),
+    Setting("TRIBOS_CONTEXT_GATE", "bool", True, "Context gate: only query-relevant sentences with Lumo admission score K >= 1 (source-weighted, corroborated) reach the answer model.", _PLAN),
     Setting("TRIBOS_CONTEXT_GATE_CHARS", "int", 6000, "Characters of literature evidence the context gate admits (the most relevant sentences first).", _PLAN, min=1000, max=60000),
     Setting("TRIBOS_SYNTHESIS_MODEL", "str", None, "Model that writes the final answer (default: the turn's model).", _LLM),
     Setting("LLM_TIMEOUT", "float", 60.0, "Per-request LLM client timeout in seconds.", _LLM),

@@ -47,7 +47,7 @@ async def start(run: RunContext) -> Any | None:
         )
 
     # -------------------------------------------------------------
-    # STAGE 0.12: KAPPA GATE GUARD: A SELF-REFERENTIAL STATEMENT HAS NO GROUNDING CONTEXT (K = 0)
+    # STAGE 0.12: LUMO GATE GUARD: A SELF-REFERENTIAL STATEMENT HAS NO GROUNDING CONTEXT (K = 0)
     # -------------------------------------------------------------
     # "This statement is false" is answered here, before the planner, any source, tool or model call (context_gate.py).
     from ..context_gate import is_self_referential
@@ -64,9 +64,9 @@ async def start(run: RunContext) -> Any | None:
             selected_agents=[],
             duration_seconds=duration,
             model_used=run.model_name,
-            framework_used="kappa-gate",
+            framework_used="lumo-gate",
             verification_report={"passed": True, "verification_score": 1.0, "defects": []},
-            run_manifest=await run.finalize_manifest(resp, duration, framework="kappa-gate"),
+            run_manifest=await run.finalize_manifest(resp, duration, framework="lumo-gate"),
             task_status=TaskOutcome(
                 requested_operation="conversation", executed_operation="conversation",
                 reason="A self-referential statement: no grounding context (K = 0); nothing was looked up.",

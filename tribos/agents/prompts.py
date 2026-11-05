@@ -491,7 +491,7 @@ def build_evidence_block(
         excerpted = 0
         gated = _gate_literature(query, shown, gate_report)
         if gated is not None:
-            # The context gate (agents/context_gate.py): only the query-relevant sentences with Kappa K >= 1.
+            # The context gate (agents/context_gate.py): only the query-relevant sentences with Lumo K >= 1.
             for i, p in enumerate(shown, 1):
                 text = gated.texts.get(i - 1)
                 if not text:
@@ -536,7 +536,7 @@ def build_evidence_block(
     web = ok("websurfer")
     web_results = (web or {}).get("results") or []
     if web_results and _gate_on():
-        # Kappa source classes for web pages: forums and social media (unverified, K = 0) are withheld.
+        # Lumo source classes for web pages: forums and social media (unverified, K = 0) are withheld.
         from .context_gate import url_class
 
         web_results = [r for r in web_results if isinstance(r, dict) and url_class(record_url(r) or "") != "unverified"]

@@ -11,15 +11,14 @@ Two deterministic steps on the retrieved passages (no model call, standard libra
    facts in the middle of a long context are used less (Liu et al., "Lost in the Middle", TACL 2024), so a shorter,
    relevant context is not only cheaper.
 
-2. The Kappa admission gate (Kappa Gate, https://github.com/amirxon3513-ship-it/Kappa-gate, MIT; its "Contextual
-   Logic" axioms). Every kept sentence gets an integer context K: the weight of its source class (official +3,
-   internal +2, external +1, unverified 0, outdated -2, false -3), plus the weight of every other independent
-   source that states the same fact, minus the weight of every reliable source that states a conflicting number.
-   Only K >= 1 is admitted to the model; K = 0 is quarantined and K <= -1 blocked, and both are only counted. The
-   decision is deterministic, never made by a model. Kappa Gate is a hackathon project whose paper is not peer
-   reviewed; what it encodes is source-weighted corroboration with abstention, which grounding research supports
-   (answers restricted to attributable evidence, Gao et al., ALCE, EMNLP 2023; abstaining when evidence is weak,
-   selective prediction). As its own README says, K is only as good as the source classes behind it.
+2. The Lumo Admission Gate (standalone package: https://github.com/AtlasRoX/Lumo-GATE). Every kept sentence gets
+   an integer admission score K: the weight of its source class (official +3, internal +2, external +1, unverified 0,
+   outdated -2, false -3), plus the weight of every other independent source that states the same fact, minus the
+   weight of every reliable source that states a conflicting number. Only K >= 1 is admitted to the model; K = 0 is
+   quarantined and K <= -1 blocked, and both are only counted. The decision is deterministic, never made by a model.
+   What it encodes is source-weighted corroboration with abstention, which grounding research supports (answers
+   restricted to attributable evidence, Gao et al., ALCE, EMNLP 2023; abstaining when evidence is weak, selective
+   prediction); K is only as good as the source classes behind it.
 
 Source classes in Tribos: a technical report or standard, and a standards or regulatory host, are official; a
 peer-reviewed journal or conference paper, a textbook or reference work, and a repository, publisher or university
@@ -70,7 +69,7 @@ def split_sentences(text: str) -> list[str]:
 
 # ------------------------------------------------------------------------------------------------- source classes
 def passage_class(p: dict[str, Any]) -> str:
-    """Kappa source class of one literature passage."""
+    """Lumo source class of one literature passage."""
     if p.get("retracted") or str(p.get("integrity_status") or "").lower() in ("retracted", "withdrawn"):
         return "false"
     from .prompts import (
@@ -92,7 +91,7 @@ def passage_class(p: dict[str, Any]) -> str:
 
 
 def url_class(url: str) -> str:
-    """Kappa source class of a web page, from its host."""
+    """Lumo source class of a web page, from its host."""
     from ..utils.source_authority import host_of, source_authority
 
     host = host_of(url) or ""
@@ -106,9 +105,9 @@ def url_class(url: str) -> str:
     return "external"
 
 
-# ------------------------------------------------------------------------------------------------- Kappa relation
+# -------------------------------------------------------------------------------------------------- Lumo relation
 def _stems(text: str) -> set[str]:
-    """Kappa Gate's fact signature: 5-letter stems of the words of 4+ letters, numbers removed."""
+    """Fact signature: 5-letter stems of the words of 4+ letters, numbers removed."""
     text = re.sub(r"\d+(?:[.,]\d+)?", " ", text.lower())
     return {w[:5] for w in re.findall(r"[a-z]+", text) if len(w) >= 4}
 
@@ -118,7 +117,7 @@ def _numbers(text: str) -> list[str]:
 
 
 def relate(a: str, b: str) -> str:
-    """Kappa Gate's relate(): "same" (same words and numbers), "conflict" (same words, different numbers) or "new"."""
+    """The relation of two sentences: "same" (same words and numbers), "conflict" (same words, different numbers) or "new"."""
     sa, sb = _stems(a), _stems(b)
     if not sa or not sb:
         return "new"
@@ -126,9 +125,8 @@ def relate(a: str, b: str) -> str:
     na, nb = _numbers(a), _numbers(b)
     if j >= 0.7 and na == nb:
         return "same"
-    # Kappa Gate calls 50% shared words with different numbers a conflict. Scientific text often states different
-    # values under different conditions ("100 C at 1 atm", "120 C at 2 atm"), so a conflict here needs 80%: the
-    # same statement with another number.
+    # Scientific text often states different values under different conditions ("100 C at 1 atm", "120 C at 2 atm"),
+    # so a conflict needs 80% shared words: the same statement with another number.
     if j >= CONFLICT_OVERLAP and na and nb and na != nb and _same_conditions(na, nb):
         return "conflict"
     return "new"
@@ -240,7 +238,7 @@ def gate(query: str, passages: list[dict[str, Any]], budget_chars: int, text_key
         used += len(f.text) + 1
     irrelevant = sentences_in - len(chosen)
 
-    # Kappa K: own weight, plus corroboration from other independent sources, minus reliable conflicts.
+    # Lumo K: own weight, plus corroboration from other independent sources, minus reliable conflicts.
     for f in chosen:
         f.K = SOURCE_WEIGHTS[f.cls]
     for a_i, a in enumerate(chosen):
@@ -272,7 +270,7 @@ def gate(query: str, passages: list[dict[str, Any]], budget_chars: int, text_key
 
 
 # ------------------------------------------------------------------------------------------------- query guard
-# Kappa Gate's liar-paradox guard (its RuleBasedLLM.LIAR, English part): a self-referential query has no grounding
+# Liar-paradox guard: a self-referential query has no grounding
 # context (K = 0), so it is answered without retrieval or a model call.
 _LIAR = re.compile(r"\b(?:this (?:statement|sentence) is (?:false|a lie|not true)|will you answer [\"']?no[\"']? to this "
                    r"question|i am lying right now|the next statement is true\W+the previous statement is false)\b",

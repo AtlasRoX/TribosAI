@@ -208,7 +208,7 @@ neither set, every store keeps its historical location under the workspace.
 | Variable | Type | Default | Read at | Description |
 | --- | --- | --- | --- | --- |
 | `TRIBOS_ANSWER_STYLE` | concise \| full | `concise` | `tribos/agents/prompts.py` | Answer length: `concise` answers only what was asked (direct answer first, no unrequested sections); `full` is the longer report format. |
-| `TRIBOS_CONTEXT_GATE` | bool | `true` | `tribos/agents/prompts.py` | Context gate: only query-relevant sentences with Kappa context K >= 1 (source-weighted, corroborated) reach the answer model. |
+| `TRIBOS_CONTEXT_GATE` | bool | `true` | `tribos/agents/prompts.py` | Context gate: only query-relevant sentences with Lumo admission score K >= 1 (source-weighted, corroborated) reach the answer model. |
 | `TRIBOS_CONTEXT_GATE_CHARS` | int (1000 to 60000) | `6000` | `tribos/agents/prompts.py` | Characters of literature evidence the context gate admits (the most relevant sentences first). |
 | `TRIBOS_NORMALIZER_BUDGET_S` | float (>= 0.1) | unset | `tribos/agents/query_planner.py` | Seconds for query normalization when the caller keeps the 3.5 s default. |
 | `TRIBOS_PLANNER` | off \| auto \| always | `auto` | `tribos/agents/query_planner.py` | LLM query planner: off, auto (when heuristics are unsure) or always. |

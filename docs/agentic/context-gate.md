@@ -1,4 +1,4 @@
-# Context gate, concise answers and the Kappa guard
+# Context gate, the Lumo Admission Gate and concise answers
 
 What reaches the answer model, how long the answer is, and what is never sent at all. Code:
 [context_gate.py](../../tribos/agents/context_gate.py), wired in [prompts.py](../../tribos/agents/prompts.py)
@@ -16,10 +16,10 @@ model); long contexts also degrade use of what is in them ("Lost in the Middle",
 
 When no sentence matches the question, the passages are excerpted as before, so an answer never loses its evidence.
 
-## 2. The Kappa admission gate
+## 2. The Lumo Admission Gate
 
-From [Kappa Gate](https://github.com/amirxon3513-ship-it/Kappa-gate) (MIT). Every kept sentence gets an integer
-context K:
+Standalone package: [Lumo-GATE](https://github.com/AtlasRoX/Lumo-GATE). Every kept sentence gets an integer
+admission score K:
 
 | Source class | Weight | Tribos sources |
 |---|---|---|
@@ -33,14 +33,13 @@ K = the sentence's own weight + the weight of every other independent source sta
 every reliable source stating a conflicting value. Only **K ≥ 1** is admitted; K = 0 is quarantined and K ≤ −1 blocked
 (counted in the run trace, never shown to the model). Two pages of one source count once.
 
-Changes from Kappa Gate's word-overlap relation, for scientific text: a conflict needs 80% shared words (not 50%), and
+For scientific text, the word-overlap relation needs 80% shared words for a conflict, and
 when sentences carry several numbers, some must be shared (the conditions) while others differ. "100 °C at 1 atm"
 and "120 °C at 2 atm" are different conditions, not a conflict; "100 °C at 1 atm" and "105 °C at 1 atm" are.
 
-Honest limits, as Kappa Gate's own README states: K is only as good as the source classes behind it, and the word
-overlap relation is crude. Kappa Gate's "Contextual Logic" paper is not peer reviewed; what the gate implements is
-source-weighted corroboration with abstention, in line with grounding research (attributable answers, ALCE, Gao et
-al., EMNLP 2023). Claim-level checking of the written answer stays with the existing verifier.
+Honest limits: K is only as good as the source classes behind it, and the word-overlap relation is crude. What the
+gate implements is source-weighted corroboration with abstention, in line with grounding research (attributable
+answers, ALCE, Gao et al., EMNLP 2023). Claim-level checking of the written answer stays with the existing verifier.
 
 ## 3. The paradox guard
 

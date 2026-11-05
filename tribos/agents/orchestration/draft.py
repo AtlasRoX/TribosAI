@@ -428,7 +428,7 @@ async def write_first_draft(run: RunContext) -> None:
         await emit(
             "context_gate",
             title=f"Context gate: kept {gate.get('admitted', 0)} relevant statements, {gate.get('saved_pct', 0):.0f}% less text",
-            text=(f"{gate.get('admitted', 0)} of {gate.get('sentences_in', 0)} sentences admitted (Kappa K >= 1); "
+            text=(f"{gate.get('admitted', 0)} of {gate.get('sentences_in', 0)} sentences admitted (Lumo K >= 1); "
                   f"{withheld} withheld as unverified or contradicted"),
             status="done",
             extra={"context_gate": gate},
