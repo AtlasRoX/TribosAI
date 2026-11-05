@@ -34,9 +34,9 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "Tribos | Engineering R&D Assistant",
+  title: "Tribos | Research partner for engineering and science",
   description:
-    "Tribos — Engineering and Scientific R&D Multi-Agent Intelligence System. Made by ChronoStrider Engineering.",
+    "Tribos: Your research partner for engineering and science. Made by ChronoStrider Engineering.",
   icons: {
     icon: [
       { url: "/tribos/favicon.ico", sizes: "any" },

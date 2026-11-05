@@ -136,6 +136,9 @@ changelog_file = "CHANGELOG.md"
 version_toml = [
   "pyproject.toml:project.version",
 ]
+version_variables = [
+  "web/package.json:version",
+]
 commit_parser = "conventional"
 commit_author = "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
 commit_message = "chore(release): {version}"

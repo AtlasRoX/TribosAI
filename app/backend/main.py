@@ -140,8 +140,8 @@ async def _lifespan(_app: FastAPI):
 
 
 app = FastAPI(
-    title="Tribos Engineering R&D API",
-    description="Engineering, Mathematics & Scientific R&D Multi-Agent Assistant",
+    title="Tribos API",
+    description="Tribos: Your research partner for engineering and science. Multi-agent research for engineering, physics and mathematics.",
     version=_package_version(),
     lifespan=_lifespan,
 )

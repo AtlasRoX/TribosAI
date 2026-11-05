@@ -338,7 +338,10 @@ commented template.
 - **2,000+ automated tests**, run offline with fakes (no network, no model calls): `uv run pytest -q`.
 - Blocking CI gates: `ruff`, `bandit`, `mypy` on the typed core, generated-config drift check, and for the web app
   `typecheck`, `eslint`, unit tests and a production build.
-- A hardened sandbox: banned modules, no subprocesses, filesystem guards and resource limits. Untrusted maths is only
+- A hardened sandbox: model-written code runs in a container when Docker or Podman is available
+  (`TRIBOS_SANDBOX_BACKEND=auto`), otherwise in a guarded subprocess (banned modules, no subprocesses, filesystem guards,
+  resource limits), which is defence in depth rather than an OS isolation boundary: for multi-user deployments set
+  `TRIBOS_SANDBOX_BACKEND=container`. Untrusted maths is only
   ever parsed with a safe expression parser, never `eval`.
 
 ## Documentation
