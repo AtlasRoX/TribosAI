@@ -1,8 +1,8 @@
 # Context gate, the Lumo Admission Gate and concise answers
 
 What reaches the answer model, how long the answer is, and what is never sent at all. Code:
-[context_gate.py](../../tribos/agents/context_gate.py), wired in [prompts.py](../../tribos/agents/prompts.py)
-(`build_evidence_block`, `CONCISE_ANSWER_RULE`) and [plan.py](../../tribos/agents/orchestration/plan.py) (stage 0.12).
+[context_gate.py](https://github.com/AtlasRoX/TribosAI/blob/main/tribos/agents/context_gate.py), wired in [prompts.py](https://github.com/AtlasRoX/TribosAI/blob/main/tribos/agents/prompts.py)
+(`build_evidence_block`, `CONCISE_ANSWER_RULE`) and [plan.py](https://github.com/AtlasRoX/TribosAI/blob/main/tribos/agents/orchestration/plan.py) (stage 0.12).
 
 ## 1. Query-focused extractive compression
 

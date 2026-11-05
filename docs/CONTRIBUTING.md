@@ -15,7 +15,7 @@ expected; the conversation ID shown at the top of the chat helps us find the run
 ## Pull requests
 
 1. Work against the latest `main`, and open an issue first for any larger change.
-2. Read [AGENTS.md](../AGENTS.md) for the architecture map and the conventions (tools, settings, verification, the
+2. Read [AGENTS.md](https://github.com/AtlasRoX/TribosAI/blob/main/AGENTS.md) for the architecture map and the conventions (tools, settings, verification, the
    sandbox). Every new `TRIBOS_*` variable is a `Setting(...)` in `tribos/config/settings.py`, and the configuration
    reference is regenerated with `scripts/gen_env_reference.py`.
 3. Keep the checks green:

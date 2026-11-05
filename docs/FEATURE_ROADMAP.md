@@ -1,6 +1,6 @@
 # Feature roadmap: tasks for AI coding agents
 
-Read [../AGENTS.md](../AGENTS.md) first. It has setup, commands, architecture and conventions.
+Read [AGENTS.md](https://github.com/AtlasRoX/TribosAI/blob/main/AGENTS.md) first. It has setup, commands, architecture and conventions.
 
 Each task below is self-contained: a goal, where it plugs in, the files to create or own, and acceptance criteria. The tasks can be done in any order and by different agents at the same time, as long as each agent edits only its task's files. The shared files are:
 
