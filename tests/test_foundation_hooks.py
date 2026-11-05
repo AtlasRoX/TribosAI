@@ -338,7 +338,7 @@ def test_synthesis_system_prompt_composition(isolated):
     hooks.register_prompt_rule("r2", "Second test rule.")
     prompt = get_synthesis_system_prompt()
     assert "- Discovery: an evidence-weighted hypothesis ranking and experimental validation protocols\n- Lithoscribe also searches a test registry\n" in prompt
-    assert "</grounding_rules>\n\n<additional_rules>\n10. First test rule.\n11. Second test rule.\n</additional_rules>\n" in prompt
+    assert "</grounding_rules>\n\n<additional_rules>\n12. First test rule.\n13. Second test rule.\n</additional_rules>\n" in prompt
     for word in ("openai", "nvidia", "langgraph"):
         assert word not in prompt.lower()
 

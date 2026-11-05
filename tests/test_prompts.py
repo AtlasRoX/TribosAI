@@ -96,7 +96,7 @@ def test_composed_prompt_is_numbered_and_bounded():
     prompt = _composed_prompt_with_all_extensions()
     block = prompt.split("<additional_rules>\n", 1)[1].split("\n</additional_rules>", 1)[0]
     numbers = [int(line.split(".", 1)[0]) for line in block.splitlines()]
-    assert numbers == list(range(10, 10 + len(numbers))) and len(numbers) >= 3  # grounding rules 1-9 come first
+    assert numbers == list(range(12, 12 + len(numbers))) and len(numbers) >= 3  # grounding rules 1-11 come first
     components = prompt.split("<grounding_rules>", 1)[0].splitlines()
     bullets = [line for line in components if line.startswith("- ")]
     assert len(bullets) == len(set(bullets))
