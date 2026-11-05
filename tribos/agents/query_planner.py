@@ -77,13 +77,8 @@ INTENTS = (
     "explain",
     "literature",
     "data_analysis",
-    "target_assessment",
-    "clinical_trials",
     "simulation",
     "steady_state",
-    "single_cell",
-    "drug_mechanism",
-    "variant_interpretation",
     "comparison",
     "safety",
 )
@@ -1098,12 +1093,8 @@ _INTENT_PATTERNS: dict[str, re.Pattern] = {
     "explain": re.compile(r"\b(explain|what\s+is|intuition|physical\s+meaning|why\s+does|compare)\b", re.I),
     "literature": re.compile(r"\b(papers?|literature|articles?|publications?|reviews?|studies|study|evidence|pmids?|arxiv|doi|cite|citations?|survey|references?)\b", re.I),
     "data_analysis": re.compile(r"\b(fit|regression|spectrum|fft|psd|dataset|csv|hdf5|parquet|uncertainty)\b", re.I),
-    "clinical_trials": re.compile(r"\b(trials?|phase\s*(?:[1-4]|i{1,3}v?|iv)\b|nct\d{8}|enrol\w*|cohorts?|registry)", re.I),
-    "drug_mechanism": re.compile(r"\b(mechanism\s+of\s+action|moa|inhibitors?|agonists?|antagonists?|drugs?|compounds?|binding|ic50|selectivity)\b", re.I),
-    "variant_interpretation": re.compile(r"\b(variants?|mutations?|mutant|pathogenic\w*|vus|clinvar|germline|somatic|allele\s+frequency)\b", re.I),
     "comparison": re.compile(r"\b(compare[ds]?|comparison|versus|vs\.?|difference\s+between|better\s+than|head[\s\-]to[\s\-]head)\b", re.I),
-    "safety": re.compile(r"\b(adverse\s+events?|toxicit\w*|safety|side[\s\-]effects?|faers|black\s+box|contraindicat\w*|warnings?)\b", re.I),
-    "target_assessment": re.compile(r"\b(druggab\w*|target\s+(?:assessment|validation)|tractab\w*|essentiality|associations?)\b", re.I),
+    "safety": re.compile(r"\b(safety|hazards?|failure\s+modes?|toxicit\w*|exposure\s+limits?|code\s+compliance|warnings?)\b", re.I),
 }
 
 
@@ -1113,14 +1104,6 @@ def _deterministic_intents(ctx: QueryContext, query: str) -> set:
         intents.add("simulation")
     if ctx.wants_steady_state:
         intents.add("steady_state")
-    if ctx.has_single_cell_intent:
-        intents.add("single_cell")
-    if ctx.variants:
-        intents.add("variant_interpretation")
-    if ctx.drugs and re.search(r"\b(mechanism|how\s+does|works?|acts?)\b", query, re.I):
-        intents.add("drug_mechanism")
-    if ctx.primary_gene is not None:
-        intents.add("target_assessment")
     return intents
 
 

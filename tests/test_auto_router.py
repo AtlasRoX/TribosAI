@@ -24,26 +24,28 @@ from tribos.agents import query_planner as qp
 AGENTIC, SUPERVISOR, SWARM, DEBATE = agent_config.AGENTIC, agent_config.SUPERVISOR, agent_config.SWARM, agent_config.DEBATE
 ROOT = Path(__file__).resolve().parents[1]
 
-# One question per clinical question type, with the route and the explanation rule the router should give.
+# One question per routing rule, with the route and the explanation rule the router should give.
 ROUTES = [
     (
-        "For KRAS G12C-mutant non-small cell lung cancer, compare sotorasib and adagrasib: summarize their pivotal "
-        "Phase 3 trial endpoints with hazard ratios (CodeBreaK 200 and KRYSTAL-12), their FDA approval dates and NDA "
-        "numbers, their binding affinities (IC50/Kd) against KRAS G12C, their safety signals in FAERS, and how "
-        "druggable KRAS is.",
+        "Compare carbon-fibre and glass-fibre reinforced polymers for wind-turbine blades: summarize their tensile "
+        "strength and stiffness from the literature, their fatigue data, their recycling routes and the certification "
+        "standards they meet, and how their cost per kilogram has changed since 2015.",
         AGENTIC, "default_backbone",
     ),
-    ("Is sotorasib better than adagrasib for KRAS G12C NSCLC?", DEBATE, "contested_claim"),
-    # Focused questions take the direct workflow (the plan-and-execute runtime without its planner); a safety-critical
-    # one still gets critics through the after-draft escalation.
-    ("What is the recommended dose of osimertinib for a 72-year-old patient with renal impairment?", AGENTIC, "focused"),
-    ("What are the adverse events of pembrolizumab?", AGENTIC, "focused"),
-    ("Interpret the variant BRAF V600E in melanoma.", AGENTIC, "focused"),
-    ("Evaluate PCSK9 as a drug target for cardiovascular disease.", SUPERVISOR, "open_multi_domain"),
-    ("Propose novel drug repurposing candidates for glioblastoma.", DEBATE, "hypothesis_generation"),
-    ("Simulate the MAPK cascade model BIOMD0000000010 for 100 seconds.", AGENTIC, "computational"),
-    ("Which cell clusters express CD19 in my single-cell dataset?", AGENTIC, "focused"),  # one computation: no plan
-    ("Explore the connections between TP53 and ferroptosis and drugs that target that link.", SWARM, "exploratory_chain"),
+    ("Is RANS better than LES for predicting separated flow over a stalled airfoil?", DEBATE, "contested_claim"),
+    # Focused questions take the direct workflow (the plan-and-execute runtime without its planner).
+    ("What is the yield strength of S355 structural steel?", AGENTIC, "focused"),
+    ("What is the thermal conductivity of copper at 300 K?", AGENTIC, "focused"),
+    ("Fit a power law to the creep data in my dataset.", AGENTIC, "focused"),  # one computation: no plan
+    ("Evaluate perovskite-silicon tandem cells as a candidate technology for utility-scale solar.", SUPERVISOR,
+     "open_multi_domain"),
+    ("Propose novel mechanisms that could explain the anomalous thermal conductivity of twisted bilayer graphene.",
+     DEBATE, "hypothesis_generation"),
+    ("For a steel shaft and an aluminium shaft of the same 40 mm diameter, compute the torsional stiffness, the first "
+     "natural frequency, the mass per metre and the allowable torque at a safety factor of 2, and tabulate them.",
+     AGENTIC, "computational"),
+    ("Explore the connections between topological insulators and Majorana zero modes and the materials that host that "
+     "link.", SWARM, "exploratory_chain"),
 ]
 
 
@@ -90,7 +92,9 @@ def _eval_module():
     return eval_router
 
 
-@pytest.mark.parametrize("name, strict, acceptable", [("benchmark", 0.9, 0.95), ("holdout", 0.8, 0.9)])
+# Floors just under the accuracy measured on the STEM sets (benchmark 86.7% strict / 98.3% acceptable, holdout
+# 87.5% / 100%), so a regression fails while the numbers stay honest (docs/agentic/auto-routing.md).
+@pytest.mark.parametrize("name, strict, acceptable", [("benchmark", 0.85, 0.95), ("holdout", 0.85, 0.95)])
 def test_deterministic_accuracy_on_the_routing_benchmarks(monkeypatch, name, strict, acceptable):
     """Regression guard: the offline router keeps its measured accuracy (scripts/eval_router.py prints the misses)."""
     monkeypatch.setenv("TRIBOS_ROUTER_LLM", "off")

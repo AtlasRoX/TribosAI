@@ -13,13 +13,13 @@ automatically better:
   dependence, tool density) picked the best architecture for 87% of held-out cases. Centralized coordination
   contained error amplification far better than independent peers
   ([Towards a Science of Scaling Agent Systems, 2025](https://arxiv.org/abs/2512.08296)).
-- **Medicine benefits from adaptive collaboration.** MDAgents rates question complexity and routes to a solo agent, a
-  multidisciplinary team or an integrated care team; it was best on 7 of 10 medical benchmarks
+- **Adaptive collaboration beats a fixed team.** MDAgents rates question complexity and routes to a solo agent or to
+  progressively larger teams; it was best on 7 of 10 (medical) benchmarks
   ([NeurIPS 2024](https://arxiv.org/abs/2404.15155)). Tiered oversight escalates only on explicit triggers
   ([TAO, 2025](https://arxiv.org/abs/2506.12482)).
 - **Debate is not a free upgrade.** Multi-agent debate does not reliably beat a single agent with self-consistency
   ([ICML 2024](https://arxiv.org/abs/2311.17371), [2025](https://arxiv.org/abs/2502.08788),
-  [NeurIPS 2025](https://arxiv.org/abs/2508.17536)), and medical agent teams show authority bias and agents restating their opening positions
+  [NeurIPS 2025](https://arxiv.org/abs/2508.17536)), and agent teams show authority bias and agents restating their opening positions
   ([MedAgentAudit, 2025](https://arxiv.org/abs/2510.10185)). Debate pays off for ranking hypotheses
   ([AI co-scientist](https://arxiv.org/abs/2502.18864)) and for specific contested claims.
 - **Decide architecture first, then specialists, then depth** ([MasRouter, ACL 2025](https://arxiv.org/abs/2502.11133));
@@ -51,8 +51,9 @@ question ─► read_question (entities, intents, scope)
    explicit parts, independent (decomposable) parts, sequential steps, several facets, several domains.
    - *Deterministic signals* come from the planner's query context and keyword patterns.
    - *Semantic features* come from one structured model call (`[phase:router]`) that reads the question's shape:
-     question kind (therapy comparison, dosing, diagnosis, prognosis, variant interpretation, target assessment, trial
-     landscape, repurposing, hypothesis generation, simulation, data analysis, exploration, ...), number of parts,
+     question kind (proof, derivation, symbolic solve, numerical computation, simulation, parameter estimation, design
+     and sizing, method comparison, safety and compliance, materials or reference lookup, hypothesis generation,
+     conjecture, data analysis, literature review, exploration), number of parts,
      decomposable versus sequential, domains, and the flags above. `TRIBOS_ROUTER_SAMPLES` (1–5) averages several
      samples (self-consistency).
    - The blend is 65% semantic, 35% deterministic. Safety flags (safety-critical, computational) are OR-ed: the model can
@@ -87,8 +88,21 @@ Settings: `TRIBOS_ROUTER_LLM` (off = deterministic only), `TRIBOS_ROUTER_SAMPLES
 `scripts/eval_router.py` routes the labelled question sets in `tests/fixtures/routing/` and prints strict accuracy (the
 gold architecture), acceptable accuracy (gold or a listed alternative), accuracy per question kind and every miss:
 
-- `benchmark.json`: 60 questions across 20 clinical question kinds; the weights were set on it.
-- `holdout.json`: 24 questions written afterwards and never used for tuning, so its score is the honest one.
+- `benchmark.json`: 60 engineering, physics and mathematics questions across 20 question kinds.
+- `holdout.json`: 24 questions written independently and never used for tuning, so its score is the honest one.
+
+Both sets replaced the earlier clinical questions (2026-11-06) when Tribos became STEM-only; the router's weights were
+not re-tuned on them. Deterministic signals only, measured 2026-11-06:
+
+| Set | Strict | Acceptable |
+| --- | --- | --- |
+| Benchmark (60) | 86.7% | 98.3% |
+| Held-out (24) | 87.5% | 100% |
+
+The one wrong route: "Is it true that every bounded sequence of real numbers converges?" goes to debate (read as a
+contested claim) instead of plan & execute. The rest of the strict misses are acceptable alternatives: broad
+"overview / landscape / assess" questions go to plan & execute where the supervisor is preferred, because the keyword
+signals do not see their facets; the semantic features (below) are meant to supply that.
 
 ```
 python scripts/eval_router.py                         # deterministic signals, benchmark
@@ -96,7 +110,8 @@ python scripts/eval_router.py --set holdout           # deterministic signals, h
 python scripts/eval_router.py --semantic --samples 3  # with the model's semantic features (needs a model key)
 ```
 
-Measured on 2026-10-18 (semantic features from `nvidia/nemotron-3-super-120b-a12b`, one sample):
+History: on the retired clinical sets, measured 2026-10-18 (semantic features from `nvidia/nemotron-3-super-120b-a12b`,
+one sample):
 
 | Router | Benchmark strict / acceptable | Held-out strict / acceptable |
 | --- | --- | --- |
