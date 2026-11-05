@@ -66,7 +66,7 @@ pip install uv
 
 ```bash
 # Clone repository
-git clone https://github.com/AtlasRoX/trib
+git clone https://github.com/AtlasRoX/TribosAI
 cd tribos-CS
 
 # Sync dependencies (creates .venv; pytest, coverage, ruff and pylint are in the dev extra)
@@ -776,6 +776,6 @@ uv run pytest tribos/lithoscribe/tests/
 
 - **UV Documentation**: https://docs.astral.sh/uv/
 - **pytest Documentation**: https://docs.pytest.org/
-- **Repository Issues**: https://github.com/AtlasRoX/trib/issues
+- **Repository Issues**: https://github.com/AtlasRoX/TribosAI/issues
 
 This guide provides a comprehensive overview of testing, linting, and code coverage using UV. The modern toolchain ensures fast, reliable, and secure development practices.

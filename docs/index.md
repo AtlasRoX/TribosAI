@@ -52,7 +52,6 @@ Scientific responses emitted by Tribos adhere strictly to a derivation-first str
 
 ## Quick Links
 
-- [Scientific Validation & Architecture](SCIENTIFIC_VALIDATION_AND_ARCHITECTURE.md)
 - [Agentic System Architecture](agentic/README.md)
 - [Evaluation Harness (`python -m tribos.evals`)](evals.md)
 - [Configuration Reference](configuration.md)

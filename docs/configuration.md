@@ -6,7 +6,7 @@ Every environment variable read by `tribos/` and `app/` (tests excluded). Types,
 come from the settings registry (`tribos/config/settings.py`); the "Read at" column comes from scanning the
 code. Regenerate with `python scripts/gen_env_reference.py`; CI can run it with `--check`, which also fails when a
 variable read in the code is not registered. A commented template is in
-[`.env.example`](https://github.com/AtlasRoX/trib/blob/main/.env.example).
+[`.env.example`](https://github.com/AtlasRoX/TribosAI/blob/main/.env.example).
 
 At startup the API validates the environment (`tribos.config.validate_environment`): unparsable or
 out-of-range numbers, unknown choices, non-boolean flags and `TRIBOS_*` names that no code reads (likely
@@ -126,7 +126,7 @@ neither set, every store keeps its historical location under the workspace.
 | `OPENAI_API_KEY` | str | (secret, unset) | `tribos/utils/llm/llm_factory.py`<br>`app/backend/main.py` | OpenAI models; also the fallback when no NVIDIA key is set. |
 | `TRIBOS_ALLOWED_MODELS` | list | unset | `tribos/utils/llm/llm_factory.py` | Extra comma-separated model ids callers may select besides the built-in catalog. |
 | `TRIBOS_LLM_FALLBACK` | bool | `false` | `tribos/utils/llm/llm_factory.py` | Allow fallback to an available provider when the requested model key is unset (off: only Meta models are offered). |
-| `TRIBOS_LLM_MODEL` | str | unset | `tribos/evals/cassette.py`<br>`tribos/evals/runner.py`<br>`tribos/utils/llm/llm_factory.py` | Default model id when a request names none (the orchestrator default when unset; gpt-4o-mini for the Lumicell SCP agent). |
+| `TRIBOS_LLM_MODEL` | str | unset | `tribos/evals/cassette.py`<br>`tribos/evals/runner.py`<br>`tribos/utils/llm/llm_factory.py` | Default model id when a request names none (the orchestrator default when unset). |
 | `TRIBOS_LLM_RETRY_ATTEMPTS` | int (1 to 5) | `3` | `tribos/utils/llm/provider_retry.py` | Attempts per NVIDIA NIM model request on a transient provider failure (408/409/429/5xx or no connection); replaces the SDK's own retry, so attempts are not multiplied. |
 | `TRIBOS_LLM_RETRY_DEADLINE_S` | float (0 to 120) | `20.0` | `tribos/utils/llm/provider_retry.py` | Seconds from a model request's first attempt after which no further transient-failure retry starts. |
 | `TRIBOS_SYNTHESIS_MODEL` | str | unset | `tribos/agentic/campaign.py`<br>`tribos/agentic/research/model.py`<br>`tribos/agents/orchestration/draft.py` (+2) | Model that writes the final answer (default: the turn's model). |

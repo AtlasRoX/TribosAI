@@ -310,7 +310,7 @@ def render_markdown(found: Dict[str, Var]) -> str:
         "come from the settings registry (`tribos/config/settings.py`); the \"Read at\" column comes from scanning the",
         "code. Regenerate with `python scripts/gen_env_reference.py`; CI can run it with `--check`, which also fails when a",
         "variable read in the code is not registered. A commented template is in",
-        "[`.env.example`](https://github.com/AtlasRoX/trib/blob/main/.env.example).",
+        "[`.env.example`](https://github.com/AtlasRoX/TribosAI/blob/main/.env.example).",
         "",
         "At startup the API validates the environment (`tribos.config.validate_environment`): unparsable or",
         "out-of-range numbers, unknown choices, non-boolean flags and `TRIBOS_*` names that no code reads (likely",

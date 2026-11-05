@@ -196,7 +196,7 @@ _SETTINGS: Sequence[Setting] = (
     Setting("META_API_KEY", "str", None, "Meta Model API models (such as Muse Spark).", _LLM, secret=True),
     Setting("META_API_BASE", "str", "https://api.meta.ai/v1", "Base URL for the Meta Model API.", _LLM),
     Setting("OPENAI_API_KEY", "str", None, "OpenAI models; also the fallback when no NVIDIA key is set.", _LLM, secret=True),
-    Setting("TRIBOS_LLM_MODEL", "str", None, "Default model id when a request names none (the orchestrator default when unset; gpt-4o-mini for the Lumicell SCP agent).", _LLM),
+    Setting("TRIBOS_LLM_MODEL", "str", None, "Default model id when a request names none (the orchestrator default when unset).", _LLM),
     Setting("TRIBOS_ALLOWED_MODELS", "list", None, "Extra comma-separated model ids callers may select besides the built-in catalog.", _LLM),
     Setting("TRIBOS_ANSWER_STYLE", "str", "concise", "Answer length: `concise` answers only what was asked (direct answer first, no unrequested sections); `full` is the longer report format.", _PLAN, choices=("concise", "full")),
     Setting("TRIBOS_CONTEXT_GATE", "bool", True, "Context gate: only query-relevant sentences with Kappa context K >= 1 (source-weighted, corroborated) reach the answer model.", _PLAN),

@@ -178,5 +178,5 @@ For Azure-specific issues:
 - [Azure Support](https://azure.microsoft.com/en-us/support/)
 
 For Tribos issues:
-- [GitHub Issues](https://github.com/AtlasRoX/trib/issues)
+- [GitHub Issues](https://github.com/AtlasRoX/TribosAI/issues)
 - [Documentation](https://atlasrox.github.io/Tribos/)

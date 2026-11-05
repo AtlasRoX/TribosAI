@@ -1,45 +1,45 @@
-# Contributing Guidelines — Tribos
+# Contributing to Tribos
 
-> **Tribos** — Biomedical Research Assistant  
+> **Tribos**: a research partner for engineering, physics and mathematics
 > **Made by ChronoStrider Engineering**
 
-Thank you for your interest in contributing to **Tribos**. Whether it's a bug report, new feature, correction, or additional
-documentation, we greatly value feedback and contributions from our community.
+Thank you for your interest in contributing to Tribos. Bug reports, feature ideas, corrections and documentation
+improvements are all welcome. Please read this page before opening an issue or a pull request.
 
-Please read through this document before submitting any issues or pull requests to ensure we have all the necessary
-information to effectively respond to your bug report or contribution.
+## Reporting bugs and requesting features
 
-In addition, please review our [CodeOps](./ops/CodeOps.md) to understand our approach to coding.
+Use the [GitHub issue tracker](https://github.com/AtlasRoX/TribosAI/issues). Check open and recently closed issues
+first, and follow the bug or feature template. For a wrong answer, include the question, the answer and what you
+expected; the conversation ID shown at the top of the chat helps us find the run and the checks it made.
 
-## Code contributions
+## Pull requests
 
-### Reporting Bugs/Feature Requests
+1. Work against the latest `main`, and open an issue first for any larger change.
+2. Read [AGENTS.md](../AGENTS.md) for the architecture map and the conventions (tools, settings, verification, the
+   sandbox). Every new `TRIBOS_*` variable is a `Setting(...)` in `tribos/config/settings.py`, and the configuration
+   reference is regenerated with `scripts/gen_env_reference.py`.
+3. Keep the checks green:
 
-Please use the [GitHub issue tracker](https://github.com/AtlasRoX/trib/issues) to report bugs or suggest features.
+   ```sh
+   uv run pytest -q                                              # offline: no network, no model calls
+   uv run ruff check tribos app tests scripts --select F,E9
+   uv run bandit -c pyproject.toml -r tribos app --severity-level high
+   uv run python scripts/gen_env_reference.py --check
+   cd web && npm run typecheck && npx eslint src && npm test && npx next build
+   ```
 
-When filing an issue, please check existing open, or recently closed, issues to make sure somebody else hasn't already
-reported the issue. Please try to include as much information as you can following the bug and feature templates that we provide.
+4. Tests must not need the network: use the fakes in `tests/fakes.py` and `tests/agentic_fakes.py`.
+5. Never commit `.env` or any key.
 
-### Contributing via Pull Requests
+Good first contributions are issues labelled *help wanted*, new deterministic tools for a domain engine (each with a
+precise description, a JSON schema and a test against known answers), and documentation fixes.
 
-Contributions via pull requests are much appreciated. Before sending us a pull request, please review our [DevOps](./ops/DevOps.md) guide, and please ensure that:
-
-1. You are working against the latest source on the _main_ branch.
-2. You check existing open, and recently merged, pull requests to make sure someone else hasn't addressed the problem already.
-3. You open an issue to discuss any significant work - we would hate for your time to be wasted.
-
-### Finding contributions to work on
-
-Looking at the existing issues is a great way to find something to contribute on. As our projects, by default, use the default GitHub issue labels (enhancement/bug/duplicate/help wanted/invalid/question/wontfix), looking at any 'help wanted' issues is a great place to start.
-
-## Code of Conduct
+## Code of conduct
 
 This project follows the [Apache Code of Conduct](https://www.apache.org/foundation/policies/conduct).
 
-## Security issue notifications
+## Security issues
 
-If you discover a potential security issue in this project we ask that you notify Team VPE directly: mccloskey at bio dot mx. Please do **not** create a public github issue.
-
-## Attributions
-
-Portions adopted from https://github.com/pytorch, https://github.com/rapidsai, and https://github.com/aws-samples/
+Please report a potential vulnerability privately through GitHub's
+[security advisories](https://github.com/AtlasRoX/TribosAI/security/advisories/new) for this repository, not in a
+public issue.

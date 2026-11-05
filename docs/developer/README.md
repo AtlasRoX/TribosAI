@@ -38,7 +38,7 @@ This guide covers the complete development setup, tooling, and workflow for the 
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/AtlasRoX/trib
+git clone https://github.com/AtlasRoX/TribosAI
 cd Tribos
 
 # 2. Install dependencies (creates virtual environment automatically)

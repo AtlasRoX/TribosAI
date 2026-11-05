@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# Tribos Clinical R&D API (FastAPI + uvicorn).
+# Tribos API (FastAPI + uvicorn).
 #
 #   docker build -f docker/backend.Dockerfile -t tribos-backend .     (context = repo root)
 #

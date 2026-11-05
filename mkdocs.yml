@@ -1,8 +1,8 @@
 site_name: Tribos
 site_description: Engineering, Physics & Mathematical Sciences Discovery Platform
-site_url: https://github.com/AtlasRoX/trib
-repo_name: AtlasRoX/trib
-repo_url: https://github.com/AtlasRoX/trib
+site_url: https://github.com/AtlasRoX/TribosAI
+repo_name: AtlasRoX/TribosAI
+repo_url: https://github.com/AtlasRoX/TribosAI
 
 theme:
   name: material
@@ -70,7 +70,6 @@ extra_javascript:
 nav:
   - Overview: index.md
   - Architecture & Reasoning:
-      - Scientific Architecture: SCIENTIFIC_VALIDATION_AND_ARCHITECTURE.md
       - Agentic System Architecture: agentic/README.md
       - Auto-Routing: agentic/auto-routing.md
       - Reasoning Loop & References: agentic/references-agent-loop.md
@@ -92,7 +91,4 @@ nav:
       - Cloud Deployment: cloud/CLOUD_DEPLOYMENT.md
       - Azure Deployment: developer/AZURE_DEPLOYMENT.md
       - SonarCloud Setup: developer/SONARCLOUD_SETUP.md
-      - DevOps Manual: ops/DevOps.md
-      - CodeOps Manual: ops/CodeOps.md
-      - Documentation Guide: ops/Documentation_intro.md
   - Contributing: CONTRIBUTING.md

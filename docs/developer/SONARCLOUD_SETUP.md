@@ -12,7 +12,7 @@ SonarCloud provides advanced code quality analysis, security scanning, and techn
 ### 1. SonarCloud Account Setup
 
 1. **Create SonarCloud Account**: Go to [sonarcloud.io](https://sonarcloud.io) and sign in with GitHub
-2. **Import Repository**: Import the `AtlasRoX/trib` repository
+2. **Import Repository**: Import the `AtlasRoX/TribosAI` repository
 3. **Generate Token**: Go to Account → Security → Generate new token
 
 ### 2. GitHub Repository Configuration

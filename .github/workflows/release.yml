@@ -134,5 +134,5 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: |
-            ${{ vars.DOCKERHUB_NAMESPACE || 'vpatientengine' }}/${{ matrix.image }}:${{ needs.release.outputs.tag }}
-            ${{ vars.DOCKERHUB_NAMESPACE || 'vpatientengine' }}/${{ matrix.image }}:latest
+            ${{ vars.DOCKERHUB_NAMESPACE || 'atlasrox' }}/${{ matrix.image }}:${{ needs.release.outputs.tag }}
+            ${{ vars.DOCKERHUB_NAMESPACE || 'atlasrox' }}/${{ matrix.image }}:latest

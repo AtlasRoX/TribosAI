@@ -167,7 +167,7 @@ NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
 **Purpose:** Build and push the two images on a `v*` tag or a manual dispatch: `tribos-backend`
 (`docker/backend.Dockerfile`, context: the repository root) and `tribos-web` (`docker/web.Dockerfile`, context:
 `web/`). Images are pushed to the Docker Hub namespace in the `DOCKERHUB_NAMESPACE` repository variable (default
-`vpatientengine`) as `<version>` and `latest`.
+`atlasrox`) as `<version>` and `latest`.
 
 ### Package Build
 
@@ -328,8 +328,8 @@ GITHUB_TOKEN            # GitHub API access (auto-provided)
 Add these badges to your README for real-time status monitoring:
 
 ```markdown
-[![Security Audit](https://github.com/AtlasRoX/trib/actions/workflows/security_audit.yml/badge.svg)](https://github.com/AtlasRoX/trib/actions/workflows/security_audit.yml)
-[![SonarCloud](https://github.com/AtlasRoX/trib/actions/workflows/sonarcloud.yml/badge.svg)](https://github.com/AtlasRoX/trib/actions/workflows/sonarcloud.yml)
+[![Security Audit](https://github.com/AtlasRoX/TribosAI/actions/workflows/security_audit.yml/badge.svg)](https://github.com/AtlasRoX/TribosAI/actions/workflows/security_audit.yml)
+[![SonarCloud](https://github.com/AtlasRoX/TribosAI/actions/workflows/sonarcloud.yml/badge.svg)](https://github.com/AtlasRoX/TribosAI/actions/workflows/sonarcloud.yml)
 ```
 
 ### Common Issues & Solutions
