@@ -628,23 +628,28 @@ def test_mcp_handshake_and_tool_listing(mcp):
     disc = _rpc(c, "server/discover", headers={"MCP-Protocol-Version": "2026-07-28"}).json()["result"]
     assert "2026-07-28" in disc["supportedVersions"] and disc["capabilities"]["tools"]
     tools = {t["name"]: t for t in _rpc(c, "tools/list").json()["result"]["tools"]}
-    assert "tribos_research" in tools and "synapta_kegg_pathways" in tools and "lithoscribe_literature_synthesis" in tools
+    assert "tribos_research" in tools and "physis_constants" in tools and "lithoscribe_literature_synthesis" in tools
     assert "vivarix_simulate_time_course" not in tools and "lumicell_analyze_single_cell" not in tools
-    assert tools["synapta_kegg_pathways"]["inputSchema"]["properties"]["target_symbol"]
+    # A retired tool is not offered, even when a registry still carries it.
+    assert "synapta_kegg_pathways" not in tools
+    assert tools["physis_constants"]["inputSchema"]["properties"]["query"]
     assert tools["tribos_research"]["inputSchema"]["required"] == ["question"]
-    assert tools["synapta_kegg_pathways"]["description"] == "KEGG pathways that contain a gene symbol."
+    assert tools["physis_constants"]["description"].startswith("Look up fundamental physical constants")
+    assert tools["lithoscribe_literature_synthesis"]["description"].startswith("Legacy name of archivon_literature_search")
 
 
 def test_mcp_tool_calls(mcp, monkeypatch):
     c = mcp.client
-    out = _rpc(c, "tools/call", {"name": "synapta_kegg_pathways", "arguments": {"target_symbol": "BRAF"}}).json()["result"]
-    assert out["isError"] is False and out["structuredContent"]["results"][0]["id"] == "hsa04010"
+    out = _rpc(c, "tools/call", {"name": "physis_constants", "arguments": {"query": "speed of light"}}).json()["result"]
+    assert out["isError"] is False and out["structuredContent"]["constants"][0]["symbol"] == "c"
     assert json.loads(out["content"][0]["text"]) == out["structuredContent"]
-    assert called(mcp.calls, "synapta_kegg_pathways") == [{"target_symbol": "BRAF"}]
-    bad = _rpc(c, "tools/call", {"name": "synapta_kegg_pathways", "arguments": {}}).json()["result"]
+    assert [kw["query"] for kw in called(mcp.calls, "physis_constants")] == ["speed of light"]
+    bad = _rpc(c, "tools/call", {"name": "physis_constants", "arguments": {}}).json()["result"]
     assert bad["isError"] is True
     unknown = _rpc(c, "tools/call", {"name": "vivarix_simulate_time_course", "arguments": {}}).json()
     assert unknown["error"]["code"] == -32602
+    retired = _rpc(c, "tools/call", {"name": "synapta_kegg_pathways", "arguments": {"target_symbol": "BRAF"}}).json()
+    assert retired["error"]["code"] == -32602 and not called(mcp.calls, "synapta_kegg_pathways")
     res = _rpc(c, "tools/call", {"name": "tribos_research", "arguments": {"question": "KRAS?", "framework": agent_config.DEBATE}}).json()["result"]
     assert res["content"][0]["text"] == "Research answer for KRAS?" and res["isError"] is False
     assert res["structuredContent"]["citations"] == {"pmids": ["123456"]} and res["structuredContent"]["verification"]["passed"] is True
@@ -652,9 +657,9 @@ def test_mcp_tool_calls(mcp, monkeypatch):
     invalid = _rpc(c, "tools/call", {"name": "tribos_research", "arguments": {"question": "x", "framework": "bogus"}}).json()["result"]
     assert invalid["isError"] is True
     # Denied names stay hidden even when an operator lists them.
-    monkeypatch.setenv("TRIBOS_MCP_TOOLS", "synapta_kegg_pathways,analysis_run_python,dataset_upload")
+    monkeypatch.setenv("TRIBOS_MCP_TOOLS", "physis_constants,analysis_run_python,dataset_upload")
     names = [t["name"] for t in _rpc(c, "tools/list").json()["result"]["tools"]]
-    assert names == ["tribos_research", "synapta_kegg_pathways"]
+    assert names == ["tribos_research", "physis_constants"]
 
 
 def test_mcp_errors_and_auth(mcp):

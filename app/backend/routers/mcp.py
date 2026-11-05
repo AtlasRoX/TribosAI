@@ -98,9 +98,9 @@ DEFAULT_TOOLS: tuple[str, ...] = (
     "physis_wolfram",
     "physis_encyclopedia",
     "websurfer_search",
-    # Legacy aliases
+    # Legacy alias kept for MCP clients configured before the rename: tribos/tools/registry.py registers it as
+    # archivon_literature_search under its old name. Retired tools with no current equivalent are not listed.
     "lithoscribe_literature_synthesis",
-    "synapta_kegg_pathways",
 )
 
 # Refused whatever TRIBOS_MCP_TOOLS says: writes, uploads, code execution and generative/docking calls. The same
@@ -148,8 +148,9 @@ _STATIC_DESCRIPTIONS: dict[str, str] = {
     "physis_wolfram": "Evaluate natural-language or symbolic queries via Wolfram|Alpha.",
     "physis_encyclopedia": "Search scientific and mathematical reference definitions and encyclopedias.",
     "websurfer_search": "Search the web for recent engineering and scientific documentation.",
-    "lithoscribe_literature_synthesis": "Search the scientific literature and return ranked passages with citations.",
-    "synapta_kegg_pathways": "KEGG pathways that contain a gene symbol.",
+    "lithoscribe_literature_synthesis": (
+        "Legacy name of archivon_literature_search: search the literature and return ranked passages with citations."
+    ),
 }
 
 _INSTRUCTIONS = (
