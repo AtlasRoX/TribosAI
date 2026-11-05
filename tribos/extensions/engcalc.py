@@ -33,8 +33,10 @@ class PhysisEngineeringCalcInput(BaseModel):
         default_factory=dict,
         description=(
             "Input values by name. A bare number is in the input's SI unit; any unit may be written as a string "
-            "('250 MPa', '12 mm', '5 kN/m') or as {value, unit, uncertainty} to propagate an uncertainty. Input names "
-            "per calculator: " + _inputs_by_calculator()
+            "('250 MPa', '12 mm', '5 kN/m') or as {value, unit, uncertainty} to propagate an uncertainty. Example "
+            "(beam): {\"support\": \"simply_supported\", \"load\": \"point\", \"length\": \"4 m\", \"point_load\": "
+            "\"12 kN\", \"elastic_modulus\": \"200 GPa\", \"section\": \"rectangle\", \"width\": \"60 mm\", "
+            "\"height\": \"120 mm\"}. Input names per calculator: " + _inputs_by_calculator()
         ),
     )
     material: str | None = Field(

@@ -10,6 +10,7 @@ like the uncertainty tool (T3): value +/- U with k = 2.
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -193,7 +194,50 @@ INPUT_ALIASES: dict[str, str] = {
     "epsilon": "roughness", "eps": "roughness", "U": "overall_coefficient", "configuration": "support",
     "support_type": "support", "boundary": "support", "load_type": "load", "loading": "load",
     "safety_factor": "required_safety_factor", "n": "required_safety_factor",
+    # Names model planners send (seen in live runs): the beam's support and load case, a lower-case modulus, and the
+    # plain-English names of common inputs.
+    "beam_type": "support", "support_condition": "support", "supports": "support", "end_condition": "support",
+    "boundary_condition": "support", "boundary_conditions": "support", "load_case": "load", "load_kind": "load",
+    "loading_type": "load", "load_configuration": "load", "e": "elastic_modulus", "young_modulus": "elastic_modulus",
+    "elastic_modulus_e": "elastic_modulus", "span_length": "length", "beam_length": "length", "F": "point_load",
+    "force": "point_load", "point_force": "point_load", "concentrated_load": "point_load", "load_magnitude": "point_load",
+    "breadth": "width", "section_width": "width", "section_height": "height", "section_depth": "height",
+    "dia": "diameter", "outside_diameter": "diameter", "inside_diameter": "inner_diameter", "id": "inner_diameter",
+    "od": "diameter", "yield_stress": "yield_strength", "yield": "yield_strength", "factor_of_safety": "required_safety_factor",
+    "fos": "required_safety_factor", "sf": "required_safety_factor", "deflection_limit": "deflection_limit_ratio",
 }
+# An alias that names a close relative when the calculator lacks the input itself (a vessel's "diameter" is its
+# inner diameter in the thin-wall formula).
+_FALLBACK_TARGETS: dict[str, str] = {"diameter": "inner_diameter"}
+
+
+def _alias_target(key: str, known: set[str]) -> str:
+    target = INPUT_ALIASES.get(key) or INPUT_ALIASES.get(key.lower(), key)
+    if target not in known and key.lower() in known:
+        target = key.lower()
+    if target not in known and _FALLBACK_TARGETS.get(target) in known:
+        target = _FALLBACK_TARGETS[target]
+    return target
+
+
+def _split_unit_suffix(key: str, known: set[str], choice_params: set[str]) -> tuple[str, str] | None:
+    """An input name with its unit written in (span_m, P_kN, E_GPa, flow_rate_m3_per_s) as (input, unit), trying every
+    split from the right; None when no suffix is a unit or the rest names no numeric input of this calculator."""
+    parts = key.split("_")
+    for i in range(len(parts) - 1, 0, -1):
+        base, unit = "_".join(parts[:i]), "_".join(parts[i:])
+        unit = re.sub(r"^in_", "", unit)
+        unit = re.sub(r"_?per_?", "/", unit)
+        unit = re.sub(r"(?<=[A-Za-z])([23])(?![0-9])", r"^\1", unit)  # m3 -> m^3, s2 -> s^2
+        target = base if base in known else _alias_target(base, known)
+        if target not in known or target in choice_params:
+            continue
+        try:
+            get_unit_registry().parse_units(_normalise_unit_text(unit))
+        except Exception:  # noqa: BLE001 - not a unit: try the next split
+            continue
+        return target, unit
+    return None
 # Words for a choice that mean one of its values.
 CHOICE_ALIASES: dict[str, dict[str, str]] = {
     "support": {"cantilevered": "cantilever", "fixed_free": "cantilever", "simply": "simply_supported",
@@ -209,13 +253,49 @@ def _canonical_inputs(calc: Calculator, inputs: dict[str, Any]) -> dict[str, Any
     """The inputs keyed by the calculator's own names: an alias maps to its input when the calculator has it and the
     input was not also given under its own name."""
     known = {p.name for p in calc.params}
+    choice_params = {p.name for p in calc.params if p.is_choice}
+    inputs = dict(inputs)
+    # A magnitude sent as the load case ({"load": "12 kN", "load_type": "point"}): the number is the point load (or the
+    # distributed load for a force per length), and the case comes from the other key.
+    if "load" in choice_params and _is_quantity(inputs.get("load")):
+        magnitude = inputs.pop("load")
+        per_length = isinstance(magnitude, str) and "/" in magnitude
+        dest = "distributed_load" if per_length and "distributed_load" in known else "point_load"
+        if dest in known and dest not in inputs:
+            inputs[dest] = magnitude
+        else:
+            inputs["load"] = magnitude  # nowhere to move it: left for the normal validation error
     out: dict[str, Any] = {}
     for key, value in inputs.items():
-        target = key if key in known else INPUT_ALIASES.get(key) or INPUT_ALIASES.get(key.lower(), key)
+        target = key if key in known else _alias_target(key, known)
+        if target not in known:
+            split = _split_unit_suffix(key, known, choice_params)
+            if split is not None:
+                target, unit = split
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    value = f"{value} {unit}"  # the unit in the name applies to a bare number
         if target in known and target != key and target in inputs:
             target = key  # the input is also given under its own name; the alias is left as an unknown input
         out[target] = value
     return out
+
+
+def _is_quantity(value: Any) -> bool:
+    """A number, or a string that starts with one ("12 kN", "5e3"): a magnitude rather than a choice word."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return True
+    return isinstance(value, str) and bool(re.match(r"^\s*[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?\b", value))
+
+
+def _example_inputs(calc: Calculator) -> str:
+    """A short example call in the calculator's own names: {"length": "<value> m", "support": "simply_supported"}."""
+    parts = []
+    for p in calc.params[:4]:
+        value = p.choices[0] if p.is_choice else f"<value> {p.unit}".strip()
+        parts.append(f'"{p.name}": "{value}"')
+    return "{" + ", ".join(parts) + ", ...}"
 
 
 def _resolve_inputs(calc: Calculator, inputs: dict[str, Any], material: str | None) -> tuple[dict[str, Any], dict[str, float], list[dict[str, Any]], dict[str, Any] | None]:
@@ -225,7 +305,9 @@ def _resolve_inputs(calc: Calculator, inputs: dict[str, Any], material: str | No
     if unknown:
         raise ValueError(
             f"Unknown input(s) {unknown} for the {calc.id} calculator; its inputs are "
-            + ", ".join(f"{p.name} [{p.unit or '/'.join(p.choices)}]" for p in calc.params) + "."
+            + ", ".join(f"{p.name} [{p.unit or '/'.join(p.choices)}]" for p in calc.params) + ". "
+            + "Retry with these exact names; a value may carry its unit as a string, for example "
+            + _example_inputs(calc) + "."
         )
     mat_props: dict[str, Any] | None = None
     mat_id = None
