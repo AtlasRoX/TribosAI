@@ -69,12 +69,11 @@
   --code-inline-bg: rgba(255, 255, 255, 0.08);
   --table-head-bg: rgba(255, 255, 255, 0.035);
 
-  /* Agent provenance hues */
-  --domain-t2kg: #7dd3fc; /* Synapta: knowledge graphs & targets */
-  --domain-t2b: #6ee7b7;  /* Vivarix: kinetic models */
-  --domain-scp: #c4b5fd;  /* Lumicell: single-cell */
-  --domain-s2: #fcd34d;   /* Lithoscribe: literature & trials */
-  --biocontext-accent: #f9a8d4;
+  /* Accent hues. The token names are historical; each is now a general-purpose accent. */
+  --domain-t2kg: #7dd3fc; /* sky: the main accent (links, badges, info) */
+  --domain-t2b: #6ee7b7;  /* green: simulation results */
+  --domain-scp: #c4b5fd;  /* violet: secondary accent */
+  --domain-s2: #fcd34d;   /* amber: highlights */
 
   /* The heatmap ramp of a solved field: six steps of one hue, darkest (lowest) to brightest (highest). */
   --heatmap-0: #14213d;
@@ -180,7 +179,6 @@ html.light, :root[data-theme="light"], .light, [data-theme="light"] {
   --domain-t2b: #047857;
   --domain-scp: #6d28d9;
   --domain-s2: #b45309;
-  --biocontext-accent: #be185d;
 
   /* The heatmap ramp on porcelain: the same hue, palest (lowest) to deepest (highest), readable on white. */
   --heatmap-0: #eef4fd;

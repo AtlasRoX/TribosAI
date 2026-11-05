@@ -24,3 +24,24 @@ export function normalizeLegacyAgentName(label: string | null | undefined): stri
 export function normalizeThoughtAgents<T extends { agent?: string | null }>(thoughts: T[]): T[] {
   return thoughts.map((th) => (th.agent ? { ...th, agent: normalizeLegacyAgentName(th.agent) } : th));
 }
+
+// Tool names that runs recorded before the STEM release carry (the re-run diff shows them). The keys stay so stored
+// runs still render: an alias the server still runs is shown under the engine that serves it now
+// (tribos/tools/registry.py registers the vivarix_* and lithoscribe_* aliases), and a tool that no longer exists
+// reads as retired.
+const LEGACY_TOOL_LABELS: Record<string, string> = {
+  vivarix_simulate_time_course: "Dynamis time course",
+  vivarix_compute_steady_state: "Dynamis steady state",
+  vivarix_parameter_scan: "Dynamis parameter scan",
+  lithoscribe_literature_synthesis: "Archivon literature search",
+  synapta_opentargets_search: "Retired tool (Open Targets search)",
+  synapta_opentargets_associations: "Retired tool (Open Targets associations)",
+  synapta_kegg_pathways: "Retired tool (KEGG pathways)",
+  lumicell_analyze_single_cell: "Retired tool (single-cell analysis)",
+  websurfer_search: "WebSurfer search",
+};
+
+/** The display label of a recorded tool name; current tool names are shown as recorded. */
+export function legacyToolLabel(toolName: string): string {
+  return Object.prototype.hasOwnProperty.call(LEGACY_TOOL_LABELS, toolName) ? LEGACY_TOOL_LABELS[toolName] : toolName;
+}

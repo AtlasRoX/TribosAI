@@ -4,6 +4,7 @@ import React, { useId, useState } from "react";
 import { ChevronRight, Loader2, Play } from "lucide-react";
 
 import styles from "@/components/Export.module.css";
+import { legacyToolLabel } from "@/lib/legacyNames";
 import { rerun } from "@/services/exportService";
 import type { FieldChange, RerunMode, RerunReport, ToolDiff } from "@/types/runs";
 
@@ -32,18 +33,8 @@ const OVERALL: Record<RerunReport["overall"], { label: string; className: string
   changed: { label: "Changed", className: styles.chipChanged },
 };
 
+// ensembl_ids and kegg_ids only occur in runs recorded before the STEM release; they still diff as id sets.
 const ID_SET_PATHS = new Set(["pmids", "dois", "urls", "ensembl_ids", "kegg_ids"]);
-
-const TOOL_LABELS: Record<string, string> = {
-  vivarix_simulate_time_course: "Vivarix time course",
-  vivarix_compute_steady_state: "Vivarix steady state",
-  lithoscribe_literature_synthesis: "Lithoscribe literature",
-  synapta_opentargets_search: "Synapta target search",
-  synapta_opentargets_associations: "Synapta associations",
-  synapta_kegg_pathways: "Synapta KEGG pathways",
-  websurfer_search: "WebSurfer search",
-  lumicell_analyze_single_cell: "Lumicell single-cell",
-};
 
 function show(value: unknown): string {
   if (value === null || value === undefined) return "—";
@@ -181,7 +172,7 @@ function ReportView({ report }: { report: RerunReport }) {
                   const fieldChanges = changes.filter((c) => !ID_SET_PATHS.has(c.path));
                   return (
                     <tr key={`${d.key}-${rowIdx}`}>
-                      <td>{TOOL_LABELS[d.tool_name] ?? d.tool_name}</td>
+                      <td>{legacyToolLabel(d.tool_name)}</td>
                       <td className={d.status_before !== d.status_after ? styles.bad : undefined}>
                         {d.status_before === d.status_after ? d.status_after : `${d.status_before} → ${d.status_after}`}
                       </td>

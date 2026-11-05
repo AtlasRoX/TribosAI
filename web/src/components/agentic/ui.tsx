@@ -417,12 +417,12 @@ export interface ChipItem {
   label: React.ReactNode;
   href?: string | null;
   title?: string;
-  /** Emphasised (e.g. matches the question's disease); explain it with `highlightHint` on the list. */
+  /** Emphasised (e.g. matches a term of the question); explain it with `highlightHint` on the list. */
   highlight?: boolean;
 }
 
 /**
- * Names (drugs, genes, diseases, pathways) as tinted chips. Shows `limit` and a "+N more" toggle; `extra` counts
+ * Names (entities, sources, terms) as tinted chips. Shows `limit` and a "+N more" toggle; `extra` counts
  * items the backend reported but did not send (shown as plain text, nothing to expand).
  */
 export function ChipList({

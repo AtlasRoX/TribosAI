@@ -1,13 +1,13 @@
 // Pure helpers behind the simulation card (SCI-013, SCI-015). Framework-free and erasable-TypeScript-only so
 // `node --test` can import it.
 
-/** Below this magnitude a start value counts as zero (same threshold as tribos/vivarix engine.py). */
+/** Below this magnitude a start value counts as zero. */
 export const ZERO_ABS = 1e-12;
 
 /**
  * Steady-state agreement tolerance: |end − ss| ≤ RTOL·|ss| + ATOL_REL·scale, where `scale` is the largest
  * magnitude of any species in the run (start, end or steady state). The relative part (5 %) is a display
- * heuristic, not a convergence criterion of COPASI; the absolute part (one millionth of the model's largest
+ * heuristic, not the solver's convergence criterion; the absolute part (one millionth of the model's largest
  * value) stops a species whose steady state is ~0 from being reported "not reached" because it ends at 1e-7.
  */
 export const STEADY_RTOL = 0.05;
@@ -38,7 +38,7 @@ export function modelScale(...maps: Values[]): number {
 export interface SteadyStateCheck {
   /** reached: every species agrees; not_reached: at least one disagrees; unknown: none disagree but some could not be compared. */
   status: "reached" | "not_reached" | "unknown";
-  /** Species that ended away from COPASI's steady state. */
+  /** Species that ended away from the reported steady state. */
   notReached: string[];
   /** Species with no comparable end or steady-state value (missing from one of the two maps). */
   unmatched: string[];
@@ -46,7 +46,7 @@ export interface SteadyStateCheck {
   compared: number;
 }
 
-/** Did the time course end at COPASI's steady state? Missing species are "unknown", never a silent pass (SCI-013). */
+/** Did the time course end at the reported steady state? Missing species are "unknown", never a silent pass (SCI-013). */
 export function checkSteadyState(
   species: string[],
   finals: Values,

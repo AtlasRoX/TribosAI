@@ -28,7 +28,8 @@ const SOURCE_NAMES: Record<string, string> = {
   wikipedia: "Wikipedia",
 };
 
-// Decisions that only say a plugin is not installed or not relevant are routing noise, not a choice.
+// Decisions that only say a plugin is not installed or not relevant are routing noise, not a choice. The last two
+// occur only in runs recorded before the STEM release.
 const HIDDEN_REASONS = new Set([
   "tool not available",
   "not applicable",
@@ -39,6 +40,7 @@ const HIDDEN_REASONS = new Set([
   "gene family is ambiguous",
 ]);
 
+// Routing keys of retired agents, and of the vivarix/lithoscribe aliases that duplicate Dynamis/Archivon: not listed.
 const LEGACY_IGNORED_KEYS = new Set(["vivarix", "lumicell", "synapta", "lithoscribe"]);
 
 const ID_ORDER = ["wikidata_id", "arxiv_id", "doi", "oeis_id", "mp_id", "codata_key", "msc_code", "zbl_id", "mr_id"];
@@ -78,6 +80,7 @@ const KIND_LABELS: Record<string, string> = {
   equation: "Equation",
   concept: "Concept",
   quantity: "Quantity",
+  // Entity kinds of runs recorded before the STEM release.
   gene: "Gene",
   drug: "Compound",
   disease: "Disease",

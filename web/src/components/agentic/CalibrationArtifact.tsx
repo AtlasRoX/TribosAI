@@ -185,7 +185,8 @@ function identifiabilityVerdict(params: CalibrationParameter[]): string {
   return [`${ok} of ${assessed} identifiable`, ...rest].join(" · ");
 }
 
-/** SBML parameter estimation: fitted values, profile-likelihood CIs and identifiability, fit and profile plots. */
+/** Parameter estimation (the calibrate phase, tribos/agentic/fit.py): fitted values, profile-likelihood CIs and
+ * identifiability, fit and profile plots. */
 export function CalibrationArtifact({ data }: { data: ModelCalibrationArtifact }) {
   if (!data || typeof data !== "object") return null;
   const params = arr<CalibrationParameter>(data.parameters).filter((p) => p && typeof p === "object");

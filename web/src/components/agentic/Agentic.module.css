@@ -1358,7 +1358,7 @@ a.chipItem:focus-visible,
   padding: 1px 2px;
 }
 
-/* Agentic result cards (plan, dialogue, memory, hypotheses, counter-evidence, code, structure, omics, calibration) */
+/* Agentic result cards (plan, dialogue, memory, hypotheses, counter-evidence, code, calibration) */
 
 /* Bar() tracks are 8px by default; cards wrap their bars in this for the thin 5px style. */
 .thinBars .barTrack {
