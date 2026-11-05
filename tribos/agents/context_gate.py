@@ -40,7 +40,7 @@ SOURCE_WEIGHTS = {"official": 3, "internal": 2, "external": 1, "unverified": 0, 
 
 # Sentence boundary: ., ! or ? followed by space and an upper-case letter, digit or opening bracket. Abbreviations
 # ("et al.", "Fig.", "e.g.") and decimals are not boundaries.
-_ABBREV = r"(?<!\bet al)(?<!\bFig)(?<!\bEq)(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\bapprox)(?<!\bRef)(?<!\bNo)"
+_ABBREV = r"(?<!\bet al\.)(?<!\bFig\.)(?<!\bEq\.)(?<!\be\.g\.)(?<!\bi\.e\.)(?<!\bvs\.)(?<!\bapprox\.)(?<!\bRef\.)(?<!\bNo\.)"
 _SENT_SPLIT = re.compile(_ABBREV + r"(?<=[.!?])\s+(?=[A-Z0-9(\[$\\])")
 _WORD = re.compile(r"[a-z][a-z0-9]+|\d+(?:\.\d+)?")
 _STOP = frozenset(
