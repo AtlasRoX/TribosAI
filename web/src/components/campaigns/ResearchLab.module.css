@@ -23,6 +23,11 @@
   --t-computed: #5b6474;
   --t-sourced: #c0632b;
   --t-reasoned: #8a90a0;
+  /* Chart series hues for the GenUI blocks a finding renders (GenUI defines them only on its own panel wrappers). */
+  --s1: #3987e5;
+  --s2: #d95926;
+  --s3: #199e70;
+  --s4: #c98500;
   color: var(--lab-ink);
   display: flex;
   flex-direction: column;
@@ -31,7 +36,16 @@
   min-width: 0;
 }
 
-.lab svg { width: 1em; height: 1em; flex: none; }
+:global(.light) .lab,
+:global([data-theme="light"]) .lab {
+  --s1: #2a78d6;
+  --s2: #eb6834;
+  --s3: #1baf7a;
+  --s4: #b37400;
+}
+
+/* Icon sizing only: zero specificity, so charts (svg[role="img"]) and GenUI's own svg rules keep their sizes. */
+:where(.lab) :where(svg:not([role="img"])) { width: 1em; height: 1em; flex: none; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .rot { transform: rotate(180deg); }
