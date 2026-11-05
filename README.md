@@ -35,7 +35,7 @@ simulations and proofs until it reaches a conclusion, then writes the result up 
 ## See it work
 
 <p align="center">
-  <a href="https://github.com/AtlasRoX/TribosAI/releases/tag/v1.1.0">
+  <a href="https://github.com/AtlasRoX/TribosAI/releases/tag/demo-video">
     <img src="docs/assets/readme/demo-poster.jpg" alt="Watch the 3-minute Tribos demo" width="88%">
   </a>
   <br>
