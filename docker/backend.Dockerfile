@@ -35,7 +35,7 @@ WORKDIR /app
 # copied source tree on PYTHONPATH, so the wheel build (and its sdist/wheel include lists) is not needed.
 COPY pyproject.toml uv.lock README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project
+    uv sync --frozen --no-dev --no-install-project --extra vision
 
 # ---------------------------------------------------------------------------------------------------------
 # Runtime: slim image, non-root user, source + venv only.

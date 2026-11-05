@@ -287,7 +287,7 @@ flowchart LR
 ```sh
 # 1. Get the code and the Python dependencies
 git clone https://github.com/AtlasRoX/TribosAI.git && cd TribosAI
-uv sync --extra dev --frozen
+uv sync --extra dev --extra vision --frozen   # vision: reading problems from photos (OpenCV, Indra OCR)
 
 # 2. Configure: set META_API_KEY in .env (TRIBOS_AUTH_MODE=disabled for local development)
 cp .env.example .env
