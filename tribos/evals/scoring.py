@@ -664,6 +664,11 @@ def symbolic_answer_check(expected_expr: str, text: str) -> tuple[Check, dict[st
             candidates.append(cand)
     if text and text.strip() not in candidates:
         candidates.append(text.strip())
+    # "\sqrt{51} \approx 7.141": the exact expression stated before the approximation is the answer.
+    for cand in list(candidates):
+        exact = re.split(r"\\approx|≈", cand)[0].strip()
+        if exact and exact != cand and exact not in candidates:
+            candidates.insert(candidates.index(cand) + 1, exact)
 
     matched: str | None = None
     for cand in candidates:
