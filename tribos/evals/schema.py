@@ -121,6 +121,8 @@ class AnswerExpect(BaseModel):
     # The question asks for the value in a power-of-ten unit ("in 10^6"); the same quantity written out in base units
     # (expected x numeric_scale, e.g. 4.8e6 for 4.76 in 10^6) is equally right.
     numeric_scale: float | None = None
+    # The answer is a list of numbers, in order ("all n with ...", or several sub-answers): each within the tolerances.
+    numeric_list: list[float] | None = None
     symbolic_answer: str | None = None  # expected symbolic/LaTeX expression (checked via SymPy simplify(a-b)==0 + spot checks)
     # Benchmark labels: graded from the free-text answer.
     label: str | None = None  # yes|no|maybe, or the correct option text

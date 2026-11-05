@@ -37,6 +37,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..agentic.config import product_default_framework
 from . import grading, scoring
 from .schema import CaseResult, Check, EvalCase, RetrievalExpect
 
@@ -298,7 +299,9 @@ class Evaluator:
     def _run_options(self, case: EvalCase) -> dict[str, Any]:
         """framework / agent_options / dataset_ids / project_id for execute_inquiry, only those that are set."""
         opts: dict[str, Any] = {}
-        framework = self.cfg.framework or case.framework
+        # With nothing set, run what the app runs: the API's default (TRIBOS_DEFAULT_FRAMEWORK, else Auto routing),
+        # not execute_inquiry's own fallback (the classic pipeline), so a benchmark measures the product users get.
+        framework = self.cfg.framework or case.framework or product_default_framework()
         if framework:
             opts["framework"] = framework
         if case.agent_options:

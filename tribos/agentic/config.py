@@ -162,6 +162,11 @@ def resolve_framework(requested: str | None, default: str | None = None) -> str:
     return fallback if fallback in ALL_FRAMEWORKS else CLASSIC
 
 
+def product_default_framework() -> str:
+    """The framework a chat request runs when it names none, as the API resolves it: TRIBOS_DEFAULT_FRAMEWORK, else Auto."""
+    return resolve_framework(None, os.getenv("TRIBOS_DEFAULT_FRAMEWORK") or AUTO)
+
+
 def env_int(name: str, default: int, lo: int, hi: int) -> int:
     """Integer setting clamped to [lo, hi]; unset, blank or invalid values give the default (tribos.config)."""
     return get_int(name, default, min=lo, max=hi)

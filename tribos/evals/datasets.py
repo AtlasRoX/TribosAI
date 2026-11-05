@@ -132,6 +132,13 @@ def _parse_float(value: Any) -> float | None:
         return None
 
 
+def _number_list(value: Any) -> list[float] | None:
+    """[4, 16, 65536] (a list or its string) as floats; None unless every item is a number and there are two or more."""
+    items = value if isinstance(value, (list, tuple)) else _as_list(value) if str(value or "").strip().startswith("[") else []
+    nums = [_parse_float(v) for v in items]
+    return [n for n in nums if n is not None] if len(nums) >= 2 and all(n is not None for n in nums) else None
+
+
 # ---------------------------------------------------------------------------------------------------------------
 # MATH-500 (HuggingFaceH4/MATH-500, MIT): competition math with symbolic / numeric answers
 # ---------------------------------------------------------------------------------------------------------------
@@ -210,6 +217,10 @@ def load_theoremqa(refresh: bool = False) -> list[EvalCase]:
             if label and label not in opts:
                 opts = [label, *opts]
             expect = AnswerExpect(answer_type="choice", label=label, options=opts, verified=None)
+        elif "list" in atype and (values := _number_list(raw_ans)):
+            # "list of integer" / "list of float": every item, in order (not just the first number).
+            expect = AnswerExpect(answer_type="list", numeric_list=values, numeric_rel_tol=0.01, numeric_tolerance=1e-3,
+                                  verified=None)
         else:
             num = _parse_float(raw_ans)
             if num is not None:

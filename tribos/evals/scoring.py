@@ -325,7 +325,7 @@ def latex_to_sympy_str(raw: str) -> str:
     if "=" in s and not any(op in s for op in ("==", "<=", ">=", "!=")):
         s = s.split("=")[-1].strip()
     s = re.sub(r"\\text\s*\{[^}]*\}", "", s)
-    s = re.sub(r"\\mathrm\s*\{([^}]*)\}", r"\1", s)
+    s = re.sub(r"\\(?:mathrm|operatorname)\s*\{([^}]*)\}", r"\1", s)  # \operatorname{erf}(1) -> erf(1)
     s = _replace_latex_fracs(s)
     s = _replace_latex_sqrts(s)
     # Subscripts: x_{0} -> x_0
@@ -379,6 +379,20 @@ def parse_sympy_expr(raw: str) -> Any:
             "ln": sympy.log,
             "Abs": sympy.Abs,
             "factorial": sympy.factorial,
+            # Special functions a closed-form answer may use (named here so they are not split into symbols).
+            "erf": sympy.erf,
+            "erfc": sympy.erfc,
+            "gamma": sympy.gamma,
+            "cot": sympy.cot,
+            "sec": sympy.sec,
+            "csc": sympy.csc,
+            "asinh": sympy.asinh,
+            "acosh": sympy.acosh,
+            "atanh": sympy.atanh,
+            "arcsin": sympy.asin,
+            "arccos": sympy.acos,
+            "arctan": sympy.atan,
+            "binomial": sympy.binomial,
         }
         # If 'E' is not used as a variable (like Young's modulus E*I), allow exp(1) when written as 'e'
         transformations = standard_transformations + (implicit_multiplication_application, convert_xor)
@@ -535,6 +549,8 @@ def extract_numeric_answer(text: str) -> float | None:
             base = float(m.group(1).replace(",", ""))
             exp = int(m.group(2)) if m.group(2) else 0
             return base * (10.0 ** exp)
+        # The stated answer holds no number (\boxed{Yes}): any other number in the text is not the answer.
+        return None
     # GSM8K style: #### 42
     m_hash = re.search(r"####\s*([+-]?[\d,]+(?:\.\d+)?(?:[eE][+-]?\d+)?)", norm)
     if m_hash:
@@ -589,6 +605,47 @@ def numeric_answer_check(
     detail = f"expected {expected:g} (±max({abs_tol:g}, {rel_tol:.1%})), got {pred:g}" if pred is not None else f"expected {expected:g}, no number found"
     metrics = {"numeric_expected": expected, "numeric_predicted": pred, "numeric_correct": ok}
     return Check(name="answer.numeric", passed=ok, detail=detail), metrics
+
+
+_YES_NO_RE = re.compile(r"^\W*(yes|true|no|false)\b", re.I)
+
+
+def yes_no_value(answer: str) -> int | None:
+    """1 for a stated yes/true, 0 for no/false (\\text{Yes}, **No**, "True."), else None."""
+    s = re.sub(r"\\(?:text|textbf|mathrm|mathbf)\s*\{([^{}]*)\}", r"\1", normalize(answer or "")).strip().strip("$*")
+    m = _YES_NO_RE.match(s)
+    if not m:
+        return None
+    return 1 if m.group(1).lower() in ("yes", "true") else 0
+
+
+def _list_items(answer: str) -> list[str] | None:
+    """The items of a stated list answer ("[4, 16, 65536]", "4,\\;16,\\;65536", "(0, 4)"), or None."""
+    s = normalize(answer or "")
+    boxed = extract_boxed(s)
+    if boxed is not None:
+        s = boxed
+    else:
+        lists = re.findall(r"\[([^\[\]]+)\]", s)
+        if lists:
+            s = lists[-1]
+    s = re.sub(r"\\[,;:! ]|\\quad|\\qquad", " ", s).strip().strip("$").strip()
+    s = re.sub(r"^\\?[\[\(\{]\s*|\s*\\?[\]\)\}]$", "", s)
+    parts = [p.strip() for p in re.split(r",|;|\band\b", s) if p.strip()]
+    return parts if len(parts) >= 2 else None
+
+
+def numeric_list_check(
+    expected: Sequence[float], answer: str, *, abs_tol: float = 1e-3, rel_tol: float = 1e-2
+) -> tuple[Check, dict[str, Any]]:
+    """The stated list matches the expected numbers in order, each within the tolerances."""
+    items = _list_items(answer)
+    got = [_parse_numeric_str(p) for p in items] if items else []
+    ok = (len(got) == len(expected)
+          and all(numeric_within_tolerance(g, e, abs_tol=abs_tol, rel_tol=rel_tol) for g, e in zip(got, expected)))
+    shown = ", ".join("?" if g is None else f"{g:g}" for g in got) if got else "no list found"
+    detail = f"expected [{', '.join(f'{e:g}' for e in expected)}], got [{shown}]"
+    return Check(name="answer.numeric_list", passed=ok, detail=detail), {"numeric_list_correct": ok}
 
 
 def symbolic_answer_check(expected_expr: str, text: str) -> tuple[Check, dict[str, Any]]:
@@ -678,7 +735,18 @@ def answer_checks(expect: AnswerExpect, observed: dict[str, Any], gold_pmids: Se
     # when there is one, else the grader's reading of the stated final answer. Checked strictly: no number elsewhere
     # in the working can rescue it.
     final = observed.get("final_answer")
-    graded_text = f"\\boxed{{{final}}}" if isinstance(final, str) and final.strip() else text
+    stated = final if isinstance(final, str) and final.strip() else None
+    graded_text = f"\\boxed{{{stated}}}" if stated else text
+    if expect.numeric_answer in (0.0, 1.0):
+        # A yes/no question whose gold is coded 1/0 (TheoremQA): "Yes" and "True" are 1, "No" and "False" are 0.
+        yn = yes_no_value(stated if stated else (extract_boxed(text) or ""))
+        if yn is not None:
+            graded_text = f"\\boxed{{{yn}}}"
+    if expect.numeric_list is not None:
+        l_check, l_metrics = numeric_list_check(expect.numeric_list, stated if stated else text,
+                                                abs_tol=expect.numeric_tolerance, rel_tol=expect.numeric_rel_tol)
+        checks.append(l_check)
+        extra_metrics.update(l_metrics)
     if expect.numeric_answer is not None:
         n_check, n_metrics = numeric_answer_check(
             expect.numeric_answer, graded_text, abs_tol=expect.numeric_tolerance, rel_tol=expect.numeric_rel_tol

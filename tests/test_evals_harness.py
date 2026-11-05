@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 import pytest
 
+from tribos.agentic.config import product_default_framework
 from tribos.evals import baseline, datasets, report, scoring
 from tribos.evals.cli import main as cli_main
 from tribos.evals.runner import Evaluator, RunConfig, aggregate_repeats, load_results, observe
@@ -124,10 +125,12 @@ def test_case_run_options_reach_execute_inquiry_and_cli_framework_overrides():
     orch2 = FakeOrchestrator()
     run(Evaluator(RunConfig(levels=["answer"], framework="multi-agent-debate"), orchestrator=orch2), [kras_case()])
     assert orch2.calls[0][1]["framework"] == "multi-agent-debate"
-    # A case without options passes none (the orchestrator's defaults apply).
+    # A case without options runs what the app runs (the API's default framework, Auto unless configured), not
+    # execute_inquiry's own classic fallback; nothing else is passed.
     orch3 = FakeOrchestrator()
     run(Evaluator(RunConfig(levels=["answer"]), orchestrator=orch3), [EvalCase(id="p", suite="s", query="q", answer={"verified": None})])
-    assert not {"framework", "agent_options", "dataset_ids", "project_id"} & set(orch3.calls[0][1])
+    assert orch3.calls[0][1]["framework"] == product_default_framework()
+    assert not {"agent_options", "dataset_ids", "project_id"} & set(orch3.calls[0][1])
 
 
 def test_cli_framework_flag_reaches_run_config(monkeypatch, tmp_path: Path):
