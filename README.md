@@ -6,6 +6,7 @@
   <a href="#see-it-work"><b>Demo</b></a> &nbsp;·&nbsp;
   <a href="#what-tribos-does"><b>Features</b></a> &nbsp;·&nbsp;
   <a href="#built-on-meta-muse-spark"><b>Meta models</b></a> &nbsp;·&nbsp;
+  <a href="#how-tribos-keeps-answers-honest"><b>Anti-hallucination</b></a> &nbsp;·&nbsp;
   <a href="#how-it-works"><b>How it works</b></a> &nbsp;·&nbsp;
   <a href="#quick-start"><b>Quick start</b></a> &nbsp;·&nbsp;
   <a href="docs/index.md"><b>Docs</b></a>
@@ -36,7 +37,11 @@ simulations and proofs until it reaches a conclusion, then writes the result up 
 
 <p align="center">
   <a href="https://youtu.be/yac5XH8Yyl8">
-    <img src="docs/assets/readme/demo-poster.jpg" alt="Watch the 3-minute Tribos demo" width="88%">
+    <img src="docs/assets/readme/demo-thumbnail.jpg" alt="Watch the 3-minute Tribos demo on YouTube" width="88%">
+  </a>
+  <br>
+  <a href="https://youtu.be/yac5XH8Yyl8">
+    <img alt="Watch on YouTube" src="https://img.shields.io/badge/Watch%20on-YouTube-FF0000?logo=youtube&logoColor=white&style=for-the-badge">
   </a>
   <br>
   <sub>Three minutes, recorded from the running app: an engineering question, a problem read from a photo, a research
@@ -182,6 +187,63 @@ reasoning; deterministic tools do the arithmetic, and independent checkers decid
 Tribos maps its effort levels (from *minimal* to *ultra*) onto Muse Spark's `reasoning_effort`, so quick lookups stay
 fast and research work gets deep reasoning.
 
+## How Tribos keeps answers honest
+
+Tribos treats the model's draft as a set of claims to check, not as the answer. Verification is **deterministic first**:
+every identifier, figure and equation in the draft is checked against what *this run* actually retrieved or computed.
+Model judges may only downgrade a verdict, never upgrade one, and a check that evaluated nothing never counts as a pass.
+
+```mermaid
+flowchart LR
+    D["Draft"] --> CA["Claim audit<br/>citations · figures · units"]
+    D --> MA["Math audit<br/>equations re-evaluated with SymPy"]
+    CA --> P{"Passes?"}
+    MA --> P
+    P -- "yes" --> E["Guarded copy edit<br/>may not add a number"]
+    P -- "no" --> R["One bounded revision<br/>from the defect list, no new facts"]
+    R --> RV["Re-verified; kept only if better"]
+    RV --> X["Contradicted sentences removed<br/>a failing answer carries a notice"]
+    X --> E
+    E --> A["Answer with its status:<br/>verified · checked · failed · not evaluated"]
+```
+
+### Anti-hallucination, layer by layer
+
+| Layer | What it does | Where |
+| :--- | :--- | :--- |
+| **Grounding rules** | The writer may cite only identifiers that appear in this run's evidence, may describe a check only if it passed, and states plainly what could not be found ("negative knowledge") instead of filling the gap. | `tribos/agents/prompts.py` |
+| **Claim audit** | Every cited DOI, arXiv, zbMATH or MR id must come from this run's tool output or retrieved passages, or it is a critical defect; retracted papers are vetoed. Each sentence that cites a source or reports a figure must be grounded in one passage: same numbers, same units, no opposite polarity. Simulated values must lie on the computed trajectory. | `tribos/verify/verifier.py` |
+| **Math audit** | Parses the answer's LaTeX and tables, binds the question's own values, and re-checks every equation and derivative with SymPy; numbers in a table must round from the computed values; units are checked for consistency. | `tribos/verify/math_claims.py` |
+| **Bounded revision** | A failing draft gets one revision, fed the structured defect list and forbidden to add facts, citations or numbers. It is re-verified and kept only if it scores at least as well; contradicted sentences are then removed, and an answer that still fails shows a verification notice. | `tribos/agents/orchestration/verify.py` |
+| **Honest status** | *Verified* only when every material claim was checked and supported; *checked*, *failed* and *not evaluated* are kept apart. The mathematics agent reports `verified`, `partially_verified`, `unverified` or `failed`, re-deriving each check from the original question, never from its own arguments. | `tribos/verify/`, `tribos/axiom/verifier.py` |
+| **Counter-evidence** | Before drafting, searches for limitations and counterexamples and makes the writer address any conflict; afterwards, rechecks the answer's claims against them. | `tribos/agentic/counter_evidence.py` |
+| **Gap-driven re-retrieval** | Hedged or unsupported sentences become new searches; the answer is rewritten only if new, on-topic evidence arrives. | `tribos/agentic/gaps.py` |
+| **NLI judge** | A semantic entailment check (local cross-encoder or model judge) that can only downgrade a deterministic verdict. | `tribos/agentic/nli.py` |
+| **Guarded rewrites** | The copy edit, the generated UI blocks and every thesis chapter are rejected or repaired if they introduce a number that is not in the evidence. | `tribos/writer/editor.py`, `tribos/writer/genui.py`, `tribos/agentic/research/` |
+| **Citation links** | An identifier becomes a clickable link only if it is in this turn's evidence or verified memory; rejected ones render as plain text. | `tribos/agents/citations.py` |
+| **Lean correspondence** | Rejects formal theorems that do not state the question (a goal of `False`, a hypothesis equal to the conclusion, the wrong domain) before any "Lean-verified" label. | `tribos/verify/formal/correspondence.py` |
+
+### Context: what the model is allowed to see
+
+| Mechanism | What it does | Where |
+| :--- | :--- | :--- |
+| **Context gate** | Extractive compression: literature sentences are ranked against the question and trimmed to a fixed budget, never paraphrased, so every quotation and citation stays exact. | `tribos/agents/context_gate.py` |
+| **Kappa admission gate** | Scores each sentence by source class (official to retracted), corroboration by independent sources and conflicts with reliable ones; admits, **quarantines** or **blocks** it. Forum and social results are dropped. | `tribos/agents/context_gate.py` |
+| **Evidence layout** | Evidence first in tagged blocks, then what failed or was skipped, then memory, with the question last; computed results are condensed (rows, significant figures) and escaped. | `tribos/agents/prompts.py`, `tribos/agents/stem_evidence.py` |
+| **Spotlighting** | Retrieved text, memory, research context and project instructions are wrapped as *data*, never instructions, as a defence against prompt injection. | `tribos/agentic/guardrails.py` |
+| **Run budget** | Caps tool calls, model calls, tokens and wall-clock time per run, with a reserve that guarantees the final draft and its revision. | `tribos/agentic/budget.py` |
+
+### Memory that cannot launder a mistake
+
+- **Research memory vault** (per user and thread): tool evidence is stored as *verified* only when the whole turn
+  verified; the model's own prose is never promoted to evidence; contradicted statements are kept as **refuted, do not
+  reuse**; and a new claim with the opposite polarity demotes the older one. Recall is bounded per turn.
+- **Project memory**: a bi-temporal fact graph. Contradictions invalidate old facts instead of deleting them, an
+  unverified run cannot invalidate a verified fact, owners and editors review extracted facts, and every recalled fact
+  is labelled verified or unverified ("a lead, never evidence").
+- **Research isolation**: each research stage runs in its own thread without recalling your other chats; earlier stages
+  reach it only as clearly labelled context. Evaluations and reruns switch memory off entirely.
+
 ## How it works
 
 ```mermaid
@@ -216,11 +278,6 @@ flowchart LR
     J -- "more to do" --> S
     J -- "concluded, stalled or ceiling" --> TH["Thesis<br/>PDF · Word · Markdown · bundle"]
 ```
-
-**Honest by design.** The mathematics agent reports `verified`, `partially_verified`, `unverified` or `failed`, with
-the checks that passed and the gaps that remain. Its verifier re-derives every check from the *original* question,
-never from the agent's own arguments. Citations are grounded against the retrieved sources, and an answer with nothing
-checkable says so instead of claiming confidence.
 
 ## Quick start
 
@@ -290,7 +347,8 @@ commented template.
 | :--- | :--- |
 | The research loop: charter, tiers, judge, stopping rules, thesis | [docs/agentic/research-loop.md](docs/agentic/research-loop.md) |
 | Image reading: OCR, vision readings and consensus | [docs/agentic/image-reading.md](docs/agentic/image-reading.md) |
-| Scientific validation and architecture | [docs/SCIENTIFIC_VALIDATION_AND_ARCHITECTURE.md](docs/SCIENTIFIC_VALIDATION_AND_ARCHITECTURE.md) |
+| Context gate and admission scoring | [docs/agentic/context-gate.md](docs/agentic/context-gate.md) |
+| Auto routing | [docs/agentic/auto-routing.md](docs/agentic/auto-routing.md) |
 | Developer guide | [docs/developer/README.md](docs/developer/README.md) · [AGENTS.md](AGENTS.md) |
 | Configuration reference | [docs/configuration.md](docs/configuration.md) |
 | Roadmap | [docs/FEATURE_ROADMAP.md](docs/FEATURE_ROADMAP.md) |
