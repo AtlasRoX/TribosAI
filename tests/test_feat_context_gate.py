@@ -25,6 +25,11 @@ def test_only_query_relevant_sentences_are_kept():
     assert r.chars_out < r.chars_in
 
 
+def test_sentences_keep_abbreviations_and_decimals_together():
+    s = cg.split_sentences("Results agree with Fig. 3 of Smith et al. within 0.5 percent. A second claim follows.")
+    assert s == ["Results agree with Fig. 3 of Smith et al. within 0.5 percent.", "A second claim follows."]
+
+
 def test_the_budget_limits_how_much_text_is_admitted():
     long = " ".join(f"Off-target cleavage by Cas9 was measured at site number {i} in this assay." for i in range(60))
     r = cg.gate("off-target cleavage Cas9", [_p(long, "10.1/a", **JOURNAL)], budget_chars=1000)
