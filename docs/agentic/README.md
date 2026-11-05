@@ -14,7 +14,6 @@ Tribos can run each question through one of five orchestration frameworks. Choos
 | `multi-agent-swarm` | Specialist agents hand control to each other until the task is done. |
 | `multi-agent-debate` | Gathers evidence with plan-and-execute, then critic agents debate the draft before the final answer (Du et al. 2023). |
 
-- Design, contracts and work packages: [`docs/plans/tribos-transformation.md`](../plans/tribos-transformation.md)
 - Verified references, agent loop and reasoning: [`references-agent-loop.md`](references-agent-loop.md)
 - Verified references, verification, memory, tools and data sources: [`references-verification-tools-data.md`](references-verification-tools-data.md)
 - Platform API (run control, jobs, projects, MCP, A2A): [`platform-api.md`](platform-api.md)

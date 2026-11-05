@@ -71,7 +71,6 @@ nav:
   - Overview: index.md
   - Architecture & Reasoning:
       - Scientific Architecture: SCIENTIFIC_VALIDATION_AND_ARCHITECTURE.md
-      - Engineering Harness Gap Analysis: AGENTIC_ENGINEERING_HARNESS_GAP_ANALYSIS.md
       - Agentic System Architecture: agentic/README.md
       - Auto-Routing: agentic/auto-routing.md
       - Reasoning Loop & References: agentic/references-agent-loop.md
@@ -96,8 +95,4 @@ nav:
       - DevOps Manual: ops/DevOps.md
       - CodeOps Manual: ops/CodeOps.md
       - Documentation Guide: ops/Documentation_intro.md
-  - Architecture Plans:
-      - Transformation Plan: plans/tribos-transformation.md
-      - Migration Brief: plans/tribos-migration-brief.md
-  - Audit Repair Report: AUDIT_REPAIR_REPORT.md
   - Contributing: CONTRIBUTING.md
