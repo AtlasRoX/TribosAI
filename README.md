@@ -1,234 +1,304 @@
-# Tribos
+<p align="center">
+  <img src="docs/assets/readme/banner.jpg" alt="Tribos: your research partner for engineering and science" width="100%">
+</p>
 
-> **Tribos** — Engineering, Physics & Mathematical Sciences Discovery Platform  
-> **Made by ChronoStrider Engineering**
+<p align="center">
+  <a href="#see-it-work"><b>Demo</b></a> &nbsp;·&nbsp;
+  <a href="#what-tribos-does"><b>Features</b></a> &nbsp;·&nbsp;
+  <a href="#built-on-meta-muse-spark"><b>Meta models</b></a> &nbsp;·&nbsp;
+  <a href="#how-it-works"><b>How it works</b></a> &nbsp;·&nbsp;
+  <a href="#quick-start"><b>Quick start</b></a> &nbsp;·&nbsp;
+  <a href="docs/index.md"><b>Docs</b></a>
+</p>
 
-[![Tests](https://github.com/AtlasRoX/trib/actions/workflows/tests_tribos.yml/badge.svg)](https://github.com/AtlasRoX/trib/actions/workflows/tests_tribos.yml)
-[![Web](https://github.com/AtlasRoX/trib/actions/workflows/tests_web.yml/badge.svg)](https://github.com/AtlasRoX/trib/actions/workflows/tests_web.yml)
-[![Evals](https://github.com/AtlasRoX/trib/actions/workflows/evals.yml/badge.svg)](https://github.com/AtlasRoX/trib/actions/workflows/evals.yml)
-[![Docs](https://github.com/AtlasRoX/trib/actions/workflows/mkdocs_deploy.yml/badge.svg)](https://github.com/AtlasRoX/trib/actions/workflows/mkdocs_deploy.yml)
-
-**Tribos** (*τρίβος* — "a worn path, practice, diligent inquiry") is an authoritative multi-agent scientific discovery platform for **Engineering, Physics, and the Mathematical Sciences**, engineered by **ChronoStrider Engineering**.
-
-Tribos answers advanced engineering and physical inquiries by decomposing questions into structured tool DAGs, coordinating five domain-specialist agents, and returning derivation-first answers with exact LaTeX equations, numerical simulations, sandboxed code execution, and peer-reviewed literature citations (arXiv, DOI, zbMATH, CODATA).
-
----
-
-## Architecture & Technology Stack
-
-- **Backend Platform:** FastAPI (`app/backend/main.py`), with the multi-agent orchestrator, specialist engines, and verification pipeline in `tribos/`.
-- **Frontend Application:** Next.js (`web/`) with full mathematical typesetting powered by KaTeX (`rehype-katex`), streaming SSE reasoning tokens, and responsive run inspectors.
-- **Five Specialist Agents** (`tribos/`):
-  - **Archivon** (`tribos/archivon/`): Literature synthesis and citation grounding across arXiv, zbMATH Open, Crossref, OpenAlex, Semantic Scholar, and NASA ADS with retraction verification.
-  - **Axiom** (`tribos/axiom/`): Exact symbolic computer algebra via SymPy: closed-form equation solving, calculus (differentiation, integration, limits, series), ODE `dsolve`, exact linear algebra, and dual symbolic/mpmath identity verification.
-  - **Dynamis** (`tribos/dynamis/`): Numerical simulation of dynamical systems with SciPy: ODE/IVP solvers (`RK45`, `DOP853`, `Radau`, `BDF`), fixed-point equilibrium and Jacobian eigenvalue stability analysis, parameter continuation scans, nonlinear curve fitting, and optimization.
-  - **Calcula** (`tribos/extensions/sandbox.py`): Isolated subprocess Python sandbox running NumPy, SciPy, SymPy, Pandas, Pint, Matplotlib, NetworkX, mpmath, and statsmodels; automatic schema and statistical profiling of experimental datasets (`CSV`, `TSV`, `HDF5`, `MAT`, `Parquet`, `XLSX`).
-  - **Physis** (`tribos/physis/`): Physical reference metrology: NIST CODATA 2022 fundamental physical constants, Pint unit conversions and equation dimensional homogeneity verification ($[M^a L^b T^c I^d \Theta^e N^f J^g]$), OEIS integer sequences, Materials Project crystal data, and Wikipedia scientific concepts.
+<p align="center">
+  <img alt="Meta Muse Spark 1.3" src="https://img.shields.io/badge/Meta-Muse%20Spark%201.3-0467DF?logo=meta&logoColor=white">
+  <img alt="Python 3.12" src="https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white">
+  <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-backend-009688?logo=fastapi&logoColor=white">
+  <img alt="Next.js 16" src="https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white">
+  <img alt="Lean 4" src="https://img.shields.io/badge/Lean-4-3949AB">
+  <img alt="SymPy and SciPy" src="https://img.shields.io/badge/SymPy%20%C2%B7%20SciPy-exact%20%2B%20numeric-8CAAE6?logo=scipy&logoColor=white">
+</p>
 
 ---
 
-## Agent Orchestration Frameworks
+**Tribos** (*τρίβος*, "a worn path, diligent inquiry") is a research partner for engineering, physics and
+mathematics. Ask a question in plain language, or show it a photo of a problem. Tribos plans the work, runs real
+tools (computer algebra, numerical solvers, a Python sandbox, physical constants, the literature and a Lean 4 proof
+checker), writes the answer with every formula on the page, and tells you **which claims were checked, and how**.
 
-Choose an orchestration backend per request with `framework`, or configure a global default with `TRIBOS_DEFAULT_FRAMEWORK`. A request that names no framework (and no default is configured) uses **Auto** routing. `GET /api/frameworks` lists available modes and reports the active default:
+For questions that need more than one answer, Tribos runs a **research project**: round after round of computations,
+simulations and proofs until it reaches a conclusion, then writes the result up as a **thesis** you can export.
 
-| Mode | `framework` | Architectural Description |
-| :--- | :--- | :--- |
-| **Auto** *(API Default)* | `auto` | Reads each question and routes it to the architecture that fits (`tribos/agentic/router.py`): closed computations and fully specified problems run the direct workflow with the mathematics agent, open questions go to one of the agentic frameworks below, and critics debate the draft when the evidence conflicts. |
-| **Plan-and-Execute** | `agentic-plan-execute` | Decomposes the inquiry into an LLM-planned tool DAG executed concurrently (LLMCompiler). Performs Self-RAG gap-driven re-retrieval, ContraCrow counter-evidence search, NLI claim audits, and calibrated confidence scoring. |
-| **Authoritative ReAct Compiler** | `authoritative-react-compiler` | Structured deterministic pipeline executing parallel Stage 1 evidence gathering followed by Stage 2 numerical/symbolic computation and Reflexion auditing. |
-| **Centralized Supervisor** | `multi-agent-supervisor` | Magentic-One-style progress ledger delegating subtasks dynamically to Archivon, Axiom, Dynamis, Calcula, and Physis. |
-| **Specialist Swarm** | `multi-agent-swarm` | Peer-to-peer delegation where specialist agents directly hand off context and intermediate findings to each other until synthesis is complete. |
-| **Multi-Agent Debate** | `multi-agent-debate` | Multi-agent peer debate where mathematical, physical, and computational claims undergo rigorous cross-agent critique before finalizing the derivation. |
+> Built on **Meta Muse Spark** through the Meta Model API, for the **Meta AI Global Hackathon 2026**.
 
-All frameworks share:
-- Strict tool reliability policies: retries, persistent result caching, and circuit breakers.
-- Human-in-the-loop controls: clarifying questions, plan approval, steering, and cancellation.
-- Background jobs with reconnectable SSE streams.
-- Thread-scoped persistent memory vault (Mem0 SQLite store with Okapi BM25 scoring).
-- Subprocess code execution sandbox (on by default; `TRIBOS_SANDBOX=off` disables it).
-- Model Context Protocol server (`POST /mcp`) and Agent-to-Agent card (`/.well-known/agent-card.json`).
+## See it work
 
----
+<p align="center">
+  <a href="https://github.com/AtlasRoX/TribosAI/releases/tag/v1.1.0">
+    <img src="docs/assets/readme/demo-poster.jpg" alt="Watch the 3-minute Tribos demo" width="88%">
+  </a>
+  <br>
+  <sub>Three minutes, recorded from the running app: an engineering question, a problem read from a photo, a research
+  project with a Lean-verified theorem and its thesis, and a simulation you can explore.</sub>
+</p>
 
-## Verified Mathematics Agent
+## What Tribos does
 
-Concrete mathematical tasks are solved by a bounded ReAct controller over the Axiom tools (`tribos/axiom/agent.py`), following the patterns in `math_agent_research_recommendations.md` (ReAct, ToRA, THOR, Toolformer, RAP). It covers 20 task kinds, each with its own independent check:
+<table>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/assets/readme/s1-formulas.jpg" alt="An engineering answer with every formula worked out">
+</td>
+<td width="50%" valign="top">
 
-| Area | Tools | Independent check |
-| :--- | :--- | :--- |
-| Algebra | `axiom_solve`, `axiom_nsolve`, `axiom_inequality`, `axiom_simplify` | back-substitution, root counting (Sturm / square-free degree), sampled interval membership |
-| Calculus | `axiom_calculus`, `axiom_tangent`, `axiom_optimize`, `axiom_nintegrate` | numeric derivatives, quadrature, one-sided limits, O(hⁿ) truncation, dense sampling for global extrema, two quadrature rules |
-| Differential equations and transforms | `axiom_dsolve`, `axiom_transform`, `axiom_recurrence` | `checkodesol` + initial conditions, the defining Laplace/Fourier integral, direct iteration |
-| Linear algebra and vector calculus | `axiom_linalg`, `axiom_vector_calculus` | second algorithms, Cayley–Hamilton, finite-difference partial derivatives |
-| Discrete mathematics | `axiom_number_theory`, `axiom_verify_identity` | independent integer arithmetic (Miller–Rabin, square-and-multiply), exact counterexamples |
-| Probability and statistics | `axiom_probability`, `calcula_statistics` | exact SymPy against SciPy, textbook formulas against SciPy |
+### Ask anything
 
-- **Parse, never rewrite.** `tribos/axiom/problem.py` turns prose, LaTeX or Unicode math into a typed `ProblemSpec` (kind, expression, variable, bounds, domain, assumptions) and keeps the verbatim question; anything it had to guess is listed as an ambiguity.
-- **Rules first, model on escalation.** A deterministic strategy ladder per task kind runs at zero model cost (e.g. exact solve → numeric interval scan); the planning model chooses steps only when the rules reach no checked answer.
-- **Independent verifier.** `tribos/axiom/verifier.py` re-derives every check from the *original* problem, never from the agent's arguments: level 1 confirms the tool call encodes the question asked (same equation up to a nonzero factor, same integrand and bounds, same matrix); level 2 checks the answer by a second method (back-substitution, differentiation, quadrature, numeric limits, Cayley–Hamilton, `checkodesol`, exact counterexamples).
-- **Typed failures and local repair.** Schema, argument, semantic-mismatch, cannot-solve, no-progress and infrastructure failures are classified separately; repairs are local (at most `TRIBOS_MATH_AGENT_MAX_REPAIRS`, default 4), identical failed calls are never re-run, and infrastructure faults are never charged to the policy.
-- **Honest status.** Every answer is `verified`, `partially_verified` (e.g. a periodic root family, or numeric roots whose completeness cannot be proven), `unverified` or `failed`, with the passing checks and the open gaps. The synthesis is told to report exactly that.
-- **Trajectories as data.** Set `TRIBOS_MATH_TRAJECTORY_DIR` to append each run as a JSONL record with interleaved decision / tool_call / observation / verification events and per-step labels (`tool_schema_valid`, `execution_success`, `semantic_alignment`, `local_result_valid`, `progress_made`), ready for evaluation and SFT.
+Type an engineering, physics or mathematics question. Tribos routes it, plans the steps and calls the tools that do
+the arithmetic, so the answer is **derived, not guessed**:
 
-- **Parse fidelity.** Every number, differential and meaning-changing word in the question ("twice", "area", "maximum", ...) must be used by the parsed problem; otherwise the answer can never be `verified`, because it may answer a different question.
-- **Measured and calibrated.** `python -m tribos.axiom.math_eval` runs a stratified benchmark (development set and three held-out sets, 268 problems; prose, LaTeX and Unicode phrasing) graded against gold answers, independently of the verifier, plus an adversarial suite of known-wrong candidates. It reports accuracy, verified precision and coverage, false accepts and rejects, cross-fitted ECE/Brier and latency. `tribos/axiom/calibration.json` holds P(correct | status), fitted on the third held-out set with the code frozen (verified: 43/43, Laplace estimate 0.98, Wilson 95% lower bound 0.92). That figure describes the agent's final answer expression only and is shown with its scope and n; the written answer around it is checked statement by statement (see below), never covered by it.
-- **The written answer is checked too.** `tribos/verify/math_claims.py` re-evaluates every equation, derivation step and result-table row of the final answer with the question's values and the tools' structured outputs (arithmetic, identities by sampling, derivatives of the stated functions, deferred equations, amplitude-phase reconstruction, tool-value cross-checks, grounding of table numbers). A contradicted statement fails verification and goes back to the writer with the computed value; coverage (how many statements were evaluated) is reported apart from the result, and an answer with nothing checkable is "not evaluated". `python -m tribos.evals.math_claims_matrix` measures false alarms and detection across nine kinds of mathematics. See docs/TRIBOS_REMEDIATION.md.
+- every formula and every intermediate number on the page, rendered with KaTeX;
+- engineering calculators for beams, columns, pressure vessels (ASME VIII-1), shafts, bolts, fatigue, pipe flow and
+  heat exchangers, each with its reference and validity limits;
+- unit and dimension checks on the written answer, and every equation in it re-evaluated before you see it;
+- a plan panel that shows each step and how it was checked.
 
-It runs as the `math_agent` phase of every agentic framework and is available to planners as the `axiom_solve_problem` tool. `tests/test_math_agent.py` holds the Phase 1 gate: zero false accepts on every benchmark set and on the adversarial suite.
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
 
----
+### Read a problem from a photo
 
-## Research Features
+Attach a picture of a problem. Before anything is solved, Tribos reads it **four ways**: two text recognizers
+(Tesseract and Indra OCR) and two separate Muse Spark vision readings. The readings are compared as canonical
+LaTeX; when they disagree, a review pass settles the differences and repairs the transcription.
 
-- **Fit ODE models to your data** (`dynamis_fit_parameters`, agentic fit phase): attach CSV/XLSX/HDF5/MAT measurements; least squares with bounds, multi-start, robust loss and optional initial-state fitting; CIs from the covariance, correlation and identifiability warnings, AIC/BIC, fit-vs-data and residual plots.
-- **PDE solver** (`dynamis_solve_pde`): heat, wave and Poisson in 1D/2D; advection-diffusion, Fisher-KPP and Burgers in 1D; Dirichlet, Neumann and periodic edges. Every solve reports a nested-grid convergence study (observed order, Richardson error), the analytic error when an exact solution is given, exact mass/energy conservation checks, and the CFL/diffusion number (unstable explicit steps are refused or adapted).
-- **Uncertainty propagation** (`physis_propagate_uncertainty`): first-order GUM with a contribution budget, Monte Carlo with a coverage interval, Pint units and CODATA autofill; value ± U (k = 2).
-- **Engineering calculators** (`physis_engineering_calc`): beams, column buckling, pressure vessels (ASME VIII-1 UG-27), shafts, bolts, fatigue (Goodman/Gerber/Soderberg, Miner), pipe pressure drop (Colebrook), heat exchangers (LMTD, ε-NTU) and layered walls, each with its reference section, unit-checked inputs, a typical-material table, utilisation per limit state and validity limits.
-- **Unit checking on every answer**: the written answer's quantities and equations are checked for dimensional consistency and numeric agreement; contradictions go back to the writer.
-- **Formal proofs with Lean 4 (optional)**: "prove ..." questions are formalised, checked and repaired; "formally verified (Lean)" only on a clean compile without `sorry`. Without Lean installed the status is "formal checker unavailable".
-- **Interactive simulation**: simulation cards have an Explore panel (parameter sliders, initial conditions, phase portrait with a vector field, bifurcation sweeps) backed by `/api/simulate`.
-- **Uploaded papers** (`archivon_read_paper`, `archivon_reproduce_paper`): attach a PDF; its equations, ODEs, parameters and stated results are extracted with page references, and each claim is reproduced, differs, or is reported not reproducible with the missing inputs.
-- **Exports**: Markdown, Word (with native equations), PDF and a runnable Jupyter notebook that re-executes the recorded computations and asserts their values.
-- **Shared projects**: projects with owner/editor/viewer members, shared files attached to every chat, project instructions, reviewed memory (approve/reject, history) and an activity log, in a ChatGPT-style sidebar.
+You see the result rendered as math, side by side with the image, with a status line such as *"read by two text
+recognizers; two separate vision readings agreed"*, and you can edit it before sending.
 
----
+</td>
+<td width="50%" valign="top">
+<img src="docs/assets/readme/s2-read.jpg" alt="A photographed olympiad problem transcribed to LaTeX">
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/assets/readme/s3-overview.jpg" alt="A research project: the loop orbit, status and where the research stands">
+</td>
+<td width="50%" valign="top">
 
-## Data & Computation Sources
+### Run a research project
 
-| Domain | Integrated Sources & Solvers |
+Give Tribos an open question and it works like a lab:
+
+1. **Charter**: deliverables, hypotheses with falsification criteria, and a graph of tests.
+2. **Rounds**: tests run in parallel (compute, simulate, prove, literature); failures retry with a different method.
+3. **Findings ledger**: every result keeps its numbers, code, plots and a **verification seal**.
+4. **Judge**: decides what is done, refuted or still open, under deterministic evidence rules: nothing is marked
+   done without a passing finding behind it.
+5. **Adaptive stopping**: it stops on a conclusion, on stagnation or at a safety ceiling, and says which.
+
+A live time estimate shows how long the work has left.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### Proofs you can trust
+
+Theorems are formalised in **Lean 4** and repaired until they compile. A result is labelled *Lean-verified* only on a
+clean compile with no `sorry`, after an axiom audit (`#print axioms`) that rejects anything beyond Lean's standard
+axioms. Everything else is labelled with what it really is: certified by interval or exact arithmetic, replicated by two
+independent implementations, computed once, sourced from the literature, or reasoned.
+
+</td>
+<td width="50%" valign="top">
+<img src="docs/assets/readme/s3-proof.jpg" alt="A Lean-verified theorem with its proof">
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/assets/readme/s3-thesis.jpg" alt="The thesis reader with contents, figures and export buttons">
+</td>
+<td width="50%" valign="top">
+
+### From findings to a thesis
+
+When the work is done, Tribos writes it up chapter by chapter: abstract, background with citations, research design,
+methods, results with numbered figures and tables, theorems and proofs, discussion, conclusion with a verdict per
+hypothesis, and appendices with the code of every finding.
+
+Every number in the thesis is checked against the findings ledger. Export it as **PDF, Word, Markdown, HTML** or a
+**reproducibility bundle** with the code and data.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### Compute and simulate
+
+Describe a simulation and Tribos writes the Python, runs it in a **sandbox** (NumPy, SciPy, SymPy, Pandas, Pint,
+Matplotlib) and brings back the plot. The code behind every chart is one click away.
+
+- ODE and PDE solvers with convergence studies and conservation checks;
+- an **Explore** panel: trajectories, phase portraits, bifurcation sweeps and parameter changes, live;
+- fit models to your own CSV, Excel, HDF5 or MAT data;
+- uncertainty propagation (GUM and Monte Carlo) with CODATA constants and units.
+
+</td>
+<td width="50%" valign="top">
+<img src="docs/assets/readme/s4-plot.jpg" alt="A damped oscillator simulated in the sandbox and plotted">
+<br><br>
+<img src="docs/assets/readme/s4-phase.jpg" alt="The phase portrait of the oscillator in the Explore panel">
+</td>
+</tr>
+</table>
+
+<p align="center">
+  <img src="docs/assets/readme/s3-findings.jpg" alt="The findings wall with replicated results, checked numbers and charts" width="88%">
+  <br>
+  <sub>The findings wall: each result with its checked numbers, charts and verification seal.</sub>
+</p>
+
+## Built on Meta Muse Spark
+
+Tribos runs on **`muse-spark-1.3`** through the **Meta Model API** (`https://api.meta.ai/v1`). It is the default
+model for every role, and with the default settings only Meta models are offered. The model does the
+reasoning; deterministic tools do the arithmetic, and independent checkers decide what counts as verified.
+
+| Role | What Muse Spark does |
 | :--- | :--- |
-| **Scholarly Literature** | arXiv (`math.*`, `physics.*`, `cs.*`, `eess.*`), zbMATH Open, Crossref, OpenAlex, Semantic Scholar, NASA ADS |
-| **Symbolic Mathematics** | SymPy (algebra, calculus, ODEs, linear algebra), mpmath (arbitrary-precision numerical verification) |
-| **Numerical Dynamics** | SciPy `integrate.solve_ivp`, `optimize.minimize`, `optimize.root`, `optimize.curve_fit` |
-| **Data Computation** | Isolated Python Subprocess (NumPy, SciPy, Pandas, Pint, Matplotlib, NetworkX, statsmodels, h5py) |
-| **Physical Metrology** | NIST CODATA 2022 fundamental physical constants, Pint dimensional unit system |
-| **Integer Sequences** | OEIS (On-Line Encyclopedia of Integer Sequences REST API) |
-| **Materials Science** | Materials Project API v2 and curated 25-material solid-state engineering reference table |
-| **Web & Encyclopedia** | Wikipedia scientific concept API, DuckDuckGo / Tavily web search (`TAVILY_API_KEY`) |
+| **Routing and planning** | Reads the question, picks the architecture, and plans a graph of tool calls that run concurrently. |
+| **Specialist agents** | Drives the five domain agents and the supervisor, swarm and debate frameworks through tool calls. |
+| **Mathematics agent** | Takes over when the deterministic strategy ladder finds no checked answer, and repairs failed steps. |
+| **Vision** | Two separate readings of a photographed problem, then review and repair when they disagree. |
+| **Formal proofs** | Formalises statements in Lean 4 and repairs them from the compiler's errors. |
+| **Research loop** | Writes the charter, analyses each round, judges the evidence and writes the thesis chapter by chapter. |
+| **Writing** | Turns checked results into a derivation-first answer, then a copy edit that may not add numbers. |
 
----
+Tribos maps its effort levels (from *minimal* to *ultra*) onto Muse Spark's `reasoning_effort`, so quick lookups stay
+fast and research work gets deep reasoning.
 
-## Derivation-First Answer Structure
+## How it works
 
-Scientific responses emitted by Tribos adhere strictly to a derivation-first structure:
-1. **Result**: Immediate, unambiguous answer to the inquiry with dimensional units.
-2. **Derivation**: Step-by-step mathematical derivation formatted in LaTeX notation, rendered on the frontend via KaTeX and documented via MathJax.
-3. **Verification**: Exact symbolic back-substitution, dimensional homogeneity verification ($LHS \equiv RHS$), or numerical simulation checks.
-4. **Assumptions & Limits**: Physical regimes of validity (e.g., non-relativistic, laminar, low Reynolds number, ideal gas).
-5. **References**: Inline grounded citations to preprints (`arXiv:`), journals (`doi:`), theorem databases (`zbl:`), or constants (`nist:`).
-
----
-
-## Quick Start
-
-### Prerequisites
-
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/) (fast Python package manager)
-- Node.js 22+
-
-### Setup
-
-```sh
-# 1. Clone the repository
-git clone https://github.com/AtlasRoX/trib && cd trib
-
-# 2. Install Python dependencies
-uv sync --extra dev --frozen
-
-# 3. Configure environment
-cp .env.example .env        # uncomment and configure your API keys (e.g. OPENAI_API_KEY)
+```mermaid
+flowchart LR
+    Q["Question, photo or dataset"] --> R{"Router"}
+    R -- "fully specified problem" --> M["Mathematics agent<br/>rules first, Muse Spark on escalation"]
+    R -- "open question" --> F["Agentic frameworks<br/>plan-execute · supervisor · swarm · debate"]
+    M --> T[("Tools<br/>Axiom · Dynamis · Calcula · Physis · Archivon · Lean 4")]
+    F --> T
+    T --> V["Independent checks<br/>equations · units · claims · citations"]
+    V --> W["Writer"]
+    W --> A["Answer with its evidence<br/>and what was checked"]
 ```
 
-### Running the Services
+| Engine | What it does | Built on |
+| :--- | :--- | :--- |
+| **Axiom** | Exact symbolic mathematics: solving, calculus, ODEs, linear algebra, number theory, identities | SymPy, mpmath |
+| **Dynamis** | Simulation and analysis: ODE/IVP, PDEs, stability, continuation, fitting, optimisation | SciPy |
+| **Calcula** | Sandboxed Python and dataset profiling (CSV, TSV, HDF5, MAT, Parquet, XLSX) | NumPy, Pandas, Matplotlib |
+| **Physis** | CODATA 2022 constants, units and dimensional checks, materials data, engineering calculators | Pint, NIST CODATA |
+| **Archivon** | Literature search and citation grounding, papers read and reproduced | arXiv, zbMATH, Crossref, OpenAlex, Semantic Scholar, NASA ADS |
+| **Formal** | Proof formalisation and checking with an axiom audit | Lean 4 |
+
+The research loop on top of these engines:
+
+```mermaid
+flowchart LR
+    G["Goal"] --> C["Charter<br/>deliverables · hypotheses · tests"]
+    C --> S["Run ready tests<br/>in parallel"]
+    S --> L["Findings ledger<br/>numbers · code · plots · seals"]
+    L --> J{"Judge<br/>evidence rules"}
+    J -- "more to do" --> S
+    J -- "concluded, stalled or ceiling" --> TH["Thesis<br/>PDF · Word · Markdown · bundle"]
+```
+
+**Honest by design.** The mathematics agent reports `verified`, `partially_verified`, `unverified` or `failed`, with
+the checks that passed and the gaps that remain. Its verifier re-derives every check from the *original* question,
+never from the agent's own arguments. Citations are grounded against the retrieved sources, and an answer with nothing
+checkable says so instead of claiming confidence.
+
+## Quick start
+
+**You need:** Python 3.12+, [uv](https://docs.astral.sh/uv/), Node.js 22+, and a Meta Model API key. Optional: Lean 4
+(formal proofs), Tesseract (image reading), Docker.
 
 ```sh
-# Terminal 1: Backend API on http://127.0.0.1:8000
+# 1. Get the code and the Python dependencies
+git clone https://github.com/AtlasRoX/TribosAI.git && cd TribosAI
+uv sync --extra dev --frozen
+
+# 2. Configure: set META_API_KEY in .env (TRIBOS_AUTH_MODE=disabled for local development)
+cp .env.example .env
+
+# 3. Start the API on http://127.0.0.1:8000
 uv run uvicorn app.backend.main:app --host 127.0.0.1 --port 8000
 
-# Terminal 2: Next.js Web App with KaTeX frontend on http://localhost:3000
+# 4. In a second terminal, start the web app on http://localhost:3000
 cd web && npm ci && npm run dev
 ```
 
-The web application connects to `NEXT_PUBLIC_API_URL` (default `http://127.0.0.1:8000`). Validate frontend integrity with:
-```sh
-cd web && npm run typecheck && npm test && npm run build
-```
-
-### Docker
+Or run both with Docker:
 
 ```sh
 docker compose -f docker/compose.yml up --build
 ```
 
-This builds `docker/backend.Dockerfile` (context: the repository root) and `docker/web.Dockerfile` (context: `web/`), reads secrets from `.env`, keeps all backend state on the `tribos-data` volume, and publishes both ports on `127.0.0.1` only (see the header of `docker/compose.yml` to expose them behind a TLS proxy).
+Every setting is documented in [docs/configuration.md](docs/configuration.md), and [`.env.example`](.env.example) is a
+commented template.
 
----
+## More to explore
 
-## Configuration Reference
+- **Six orchestration modes**: Auto routing, Plan-and-Execute, ReAct compiler, supervisor, specialist swarm and
+  multi-agent debate, selectable per request.
+- **Uploaded papers**: equations, parameters and stated results are extracted with page references, then reproduced.
+- **Projects**: shared chats and files, project instructions and reviewed memory, with owner, editor and viewer roles.
+- **Exports for every answer**: Markdown, Word with native equations, PDF, and a Jupyter notebook that re-runs the
+  computations and asserts their values.
+- **Open interfaces**: a Model Context Protocol server (`POST /mcp`) and an Agent-to-Agent card
+  (`/.well-known/agent-card.json`).
+- **Background jobs** with reconnectable streams, steering while a run is in progress, and plan approval.
 
-Every environment variable is documented in [docs/configuration.md](docs/configuration.md), detailing its type, default value, and where it is read in the codebase. [`.env.example`](.env.example) provides a commented configuration template.
+## Repository layout
 
-Both files are maintained by `scripts/gen_env_reference.py`. Run `--check` to verify zero drift:
-```sh
-uv run python scripts/gen_env_reference.py --check
-```
+| Path | Contents |
+| :--- | :--- |
+| [`app/backend/`](app/backend) | FastAPI app, routers, auth and per-user limits |
+| [`tribos/agentic/`](tribos/agentic) | Router, frameworks, sandbox, formal proofs and the research loop (`research/`) |
+| [`tribos/axiom/`](tribos/axiom) · [`dynamis/`](tribos/dynamis) · [`physis/`](tribos/physis) · [`archivon/`](tribos/archivon) | The specialist engines |
+| [`tribos/vision/`](tribos/vision) | Image reading: OCR, vision readings, consensus and repair |
+| [`tribos/verify/`](tribos/verify) | Claim, equation, unit and citation checks; the Lean runner |
+| [`tribos/writer/`](tribos/writer) · [`tribos/export/`](tribos/export) | Answer writing; PDF, Word, notebook and thesis exports |
+| [`web/`](web) | Next.js 16 and React 19 app with KaTeX |
+| [`tests/`](tests) · [`docs/`](docs) | Test suite and documentation |
 
-### Data Storage & Retention
+## Quality
 
-When `TRIBOS_DATA_DIR` is set, state is consolidated under a single directory containing:
-- `memory/` (SQLite research vault)
-- `runs/` (persisted agent execution manifests)
-- `uploads/` (attached user datasets)
-- `jobs/` (background execution queues)
-- `tool_cache/` (cached tool responses)
+- **2,000+ automated tests**, run offline with fakes (no network, no model calls): `uv run pytest -q`.
+- Blocking CI gates: `ruff`, `bandit`, `mypy` on the typed core, generated-config drift check, and for the web app
+  `typecheck`, `eslint`, unit tests and a production build.
+- A hardened sandbox: banned modules, no subprocesses, filesystem guards and resource limits. Untrusted maths is only
+  ever parsed with a safe expression parser, never `eval`.
 
-Retention policies:
-- Expired tool-cache rows are automatically purged.
-- Completed background jobs are pruned after `TRIBOS_JOB_TTL_DAYS` (default: 30 days).
-- Up to `TRIBOS_MAX_RUNS` run manifests are retained (default: 500).
+## Documentation
 
----
+| Topic | Where |
+| :--- | :--- |
+| The research loop: charter, tiers, judge, stopping rules, thesis | [docs/agentic/research-loop.md](docs/agentic/research-loop.md) |
+| Image reading: OCR, vision readings and consensus | [docs/agentic/image-reading.md](docs/agentic/image-reading.md) |
+| Scientific validation and architecture | [docs/SCIENTIFIC_VALIDATION_AND_ARCHITECTURE.md](docs/SCIENTIFIC_VALIDATION_AND_ARCHITECTURE.md) |
+| Developer guide | [docs/developer/README.md](docs/developer/README.md) · [AGENTS.md](AGENTS.md) |
+| Configuration reference | [docs/configuration.md](docs/configuration.md) |
+| Roadmap | [docs/FEATURE_ROADMAP.md](docs/FEATURE_ROADMAP.md) |
+| Contributing | [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) |
 
-## Evaluation Harness
+## Credits
 
-Tribos includes an offline and online evaluation framework (`python -m tribos.evals`) to benchmark intent routing, tool retrieval, and derivation accuracy:
+Made by **ChronoStrider Engineering**. Built on Meta Muse Spark for the Meta AI Global Hackathon 2026.
 
-```sh
-# Fast offline routing and tool planning check
-uv run python -m tribos.evals run --level plan
-
-# Full derivation and synthesis evaluation with rubric judge
-uv run python -m tribos.evals run --level answer --judge
-
-# Compare two evaluation runs
-uv run python -m tribos.evals compare eval_runs/<run_a> eval_runs/<run_b>
-```
-
-See [docs/evals.md](docs/evals.md) for benchmark suites and CI integration details.
-
----
-
-## Development & Testing
-
-```sh
-# Run backend test suite
-uv run pytest -q tests/
-
-# Run code linters (the CI gate: pyflakes and syntax errors; the full rule set still reports legacy findings)
-uv run ruff check --select F,E9 tribos app tests
-uv run bandit -c pyproject.toml -r tribos app --severity-level high
-
-# Build and verify documentation site
-uv run mkdocs build --strict
-```
-
-- [Developer Setup & Architecture](docs/developer/README.md)
-- [Scientific Validation & Architecture](docs/SCIENTIFIC_VALIDATION_AND_ARCHITECTURE.md)
-- [Contributing Guide](docs/CONTRIBUTING.md)
-
----
-
-## Acknowledgements & Credits
-
-- **Engineering & Architecture:** **ChronoStrider Engineering**.
+Tribos stands on SymPy, SciPy, mpmath, Pint, Lean 4, Tesseract, KaTeX, FastAPI and Next.js. Demo video: music by
+Sascha Ende ([ende.app](https://ende.app), CC BY 4.0); voiceover by [ElevenLabs](https://elevenlabs.io).
