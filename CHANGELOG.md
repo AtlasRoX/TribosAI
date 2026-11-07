@@ -2,6 +2,87 @@
 
 <!-- version list -->
 
+## v1.3.0 (2026-11-07)
+
+### Bug Fixes
+
+- **website**: The changelog page names no outside product
+
+- **website**: The footer links to the hosted documentation
+
+- **evals**: Fairer grading and eight more flawed benchmark items set aside
+
+- **verify**: No false contradictions for congruence chains, unit prefixes or case lists
+
+- **routing**: Words that narrate an exercise no longer require literature search
+
+- **planner**: Answer options are never requests, and stem letters are not options
+
+- **install**: Install the vision extra in the Docker image and the README quick start
+
+- **mcp**: Drop the retired gene-pathway tool from the MCP allowlist
+
+- **engcalc**: Accept the input names model planners send, and say how to retry
+
+- **router**: STEM routing examples and no biomedical intents in the query planner
+
+- **evals**: An exact answer followed by its approximation is graded on the exact part
+
+- **web**: Label legacy tool names by their current engine or as retired
+
+- **deps**: Pin pyarrow to 23.0.1 and relock with the project version
+
+- **evals**: Benchmark the app's default pipeline and grade both systems fairly
+
+- **writer**: Answer the intended reading, keep computed precision, prefer given data
+
+
+### Build System
+
+- **deps**: Add RDKit for organic structure checks
+
+- **deps**: Minor and patch upgrades from the Dependabot group
+
+
+### Chores
+
+- One name, tagline and version across the API, web app, docs and release
+
+
+### Continuous Integration
+
+- Stop Dependabot version updates
+
+
+### Documentation
+
+- Link source files by GitHub URL so mkdocs --strict builds
+
+
+### Features
+
+- **website**: GPQA with the chemistry agent, changelog and Physis card
+
+- **agents**: Chemeia, a chemistry agent for organic questions
+
+- **physis**: Organic structure facts and stereodescriptors as geometry
+
+- **website**: Homepage and changelog
+
+- **physis**: Real-fluid properties from reference equations of state
+
+- **agents**: Field conventions for exercises, and an opt-in independent cross-check
+
+- **evals**: Paired benchmark against the base model, fair grading, report
+
+
+### Testing
+
+- Regression tests for the failure-analysis fixes
+
+- **router**: STEM routing benchmark and held-out set replace the biomedical questions
+
+
 ## v1.2.1 (2026-11-05)
 
 ### Bug Fixes
