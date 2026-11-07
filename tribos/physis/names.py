@@ -5,12 +5,16 @@ that carries a methyl) and left out the locant numbers, so the stereodescriptor 
 never ran. The names of answer options are usually simple substitutive names, so code builds them instead:
 
     (1S,4R,5S,6S)-4,5,6-trimethylcyclohex-2-en-1-ol, 2,2,4,5-tetramethylcyclohexan-1-ol,
-    1,2-dibromo-4,4-dimethylcyclopentanol, 5-isopropyl-3,4-dimethylocta-1,6-diene, but-2-ene
+    1,2-dibromo-4,4-dimethylcyclopentanol, 5-isopropyl-3,4-dimethylocta-1,6-diene, but-2-ene,
+    (1R,3R,4R,6S)-1,3,4-trimethyl-7-oxabicyclo[4.1.0]heptane, bicyclo[2.2.1]hept-5-ene-2,3-diol, spiro[4.5]decan-6-one
 
-A parent chain or carbocycle (C1-C12, with -ene/-yne locants), principal suffixes -ol, -one, -amine, -thiol and
--al, and prefix substituents (alkyl, halo, hydroxy, alkoxy, nitro, amino, oxo, ...). Anything else (fused or bridged
-ring systems, heterocycles, parenthesised substituents, esters) returns None: the caller falls back to a
-model-written SMILES rather than to a guess.
+Parents: a chain or carbocycle (C1-C12), a von Baeyer bicycle (bicyclo[a.b.c], numbered from a main bridgehead along
+the largest bridge, back along the next, then the smallest bridge from the end nearer atom 1) and a monospiro system
+(spiro[a.b], numbered from the atom next to the spiro atom in the smaller ring). With -ene/-yne locants, the principal
+suffixes -ol, -one, -amine, -thiol and -al, prefix substituents (alkyl, halo, hydroxy, alkoxy, nitro, amino, oxo, ...)
+and skeletal replacement ("7-oxa", "2-aza", "3-thia"). Anything else (fused ring names such as "methanoisobenzofuran",
+aromatic parents, parenthesised substituents, esters) returns None: the caller falls back to a model-written SMILES
+rather than to a guess.
 """
 
 from __future__ import annotations
@@ -22,7 +26,7 @@ from typing import Any
 _STEMS = {"meth": 1, "eth": 2, "prop": 3, "but": 4, "pent": 5, "hex": 6, "hept": 7, "oct": 8, "non": 9, "dec": 10,
           "undec": 11, "dodec": 12}
 _MULTIPLIERS = {"": 1, "di": 2, "tri": 3, "tetra": 4, "penta": 5, "hexa": 6}
-# Prefix substituent -> (fragment SMILES, bond order to the parent atom).
+# Prefix substituent -> (fragment SMILES, bond order to the parent atom). "@X" replaces the parent atom by element X.
 _SUBSTITUENTS: dict[str, tuple[str, int]] = {
     "methyl": ("C", 1), "ethyl": ("CC", 1), "propyl": ("CCC", 1), "isopropyl": ("C(C)C", 1),
     "butyl": ("CCCC", 1), "isobutyl": ("CC(C)C", 1), "sec-butyl": ("C(C)CC", 1), "tert-butyl": ("C(C)(C)C", 1),
@@ -32,13 +36,15 @@ _SUBSTITUENTS: dict[str, tuple[str, int]] = {
     "methoxy": ("OC", 1), "ethoxy": ("OCC", 1), "nitro": ("[N+](=O)[O-]", 1), "amino": ("N", 1),
     "cyano": ("C#N", 1), "oxo": ("O", 2), "methylidene": ("C", 2), "methylene": ("C", 2), "acetyl": ("C(C)=O", 1),
     "mercapto": ("S", 1), "sulfanyl": ("S", 1),
+    "oxa": ("@O", 0), "aza": ("@N", 0), "thia": ("@S", 0),
 }
 _SUFFIXES: dict[str, tuple[str, int]] = {"ol": ("O", 1), "one": ("O", 2), "amine": ("N", 1), "thiol": ("S", 1),
                                          "al": ("O", 2)}
 
 _DESCRIPTOR_PREFIX_RE = re.compile(r"^\s*(?:\((?:rel-)?[0-9a-zA-Z',*\s]+\)|rel|\(\s*[±+-]\s*\))\s*-\s*")
 _PARENT_RE = re.compile(
-    r"(?P<cyclo>cyclo)?(?P<stem>dodec|undec|meth|eth|prop|but|pent|hex|hept|oct|non|dec)(?P<a>a)?"
+    r"(?P<system>cyclo|bicyclo\[(?P<ba>\d+)\.(?P<bb>\d+)\.(?P<bc>\d+)\]|spiro\[(?P<sa>\d+)\.(?P<sb>\d+)\])?"
+    r"(?P<stem>dodec|undec|meth|eth|prop|but|pent|hex|hept|oct|non|dec)(?P<a>a)?"
     r"(?:-(?P<unloc>\d+(?:,\d+)*)-(?P<unmult>di|tri)?(?P<un>en|yn)|(?P<ane>an))e?"
     r"(?:-?(?:(?P<sloc>\d+(?:,\d+)*)-)?(?P<smult>di|tri)?(?P<suffix>ol|one|amine|thiol|al))?$"
 )
@@ -65,6 +71,37 @@ def _split_descriptors(name: str) -> tuple[str, str]:
     return (head if head.startswith("(") and any(c.isdigit() or c in "RSEZrs" for c in head) else ""), text[m.end():]
 
 
+def _topology(parent: re.Match[str]) -> tuple[int, list[tuple[int, int]]] | None:
+    """(number of skeletal atoms, bonds between locants) of the parent hydride, or None when its brackets do not add
+    up to the stem."""
+    size = _STEMS[parent.group("stem")]
+    system = parent.group("system") or ""
+    if not system:
+        return size, [(i, i + 1) for i in range(1, size)]
+    if system == "cyclo":
+        return (size, [(i, i + 1) for i in range(1, size)] + [(size, 1)]) if size >= 3 else None
+    if system.startswith("bicyclo"):
+        a, b, c = (int(parent.group(k)) for k in ("ba", "bb", "bc"))
+        if not (a >= b >= c >= 0 and a >= 1 and b >= 1) or a + b + c + 2 != size:
+            return None
+        head2 = a + 2
+        bonds = [(i, i + 1) for i in range(1, head2)]  # 1 .. the second bridgehead along the largest bridge
+        back = list(range(head2 + 1, head2 + b + 1))  # the next bridge, numbered on from the second bridgehead
+        path = [head2, *back, 1]
+        bonds += list(zip(path, path[1:]))
+        small = list(range(head2 + b + 1, head2 + b + c + 1))  # the smallest bridge, from the end nearer atom 1
+        path = [1, *small, head2]
+        bonds += list(zip(path, path[1:]))
+        return size, bonds
+    a, b = int(parent.group("sa")), int(parent.group("sb"))
+    if not (1 <= a <= b) or a + b + 1 != size:
+        return None
+    spiro = a + 1
+    ring1 = [spiro, *range(1, a + 1), spiro]
+    ring2 = [spiro, *range(spiro + 1, size + 1), spiro]
+    return size, list(zip(ring1, ring1[1:])) + list(zip(ring2, ring2[1:]))
+
+
 def parse_name(name: str) -> ParsedName | None:
     """The locant-numbered structure of a simple substitutive name, or None when the name is outside the grammar."""
     try:
@@ -87,10 +124,11 @@ def parse_name(name: str) -> ParsedName | None:
                 break
     if parent is None:
         return None
-    size = _STEMS[parent.group("stem")]
-    ring = bool(parent.group("cyclo"))
-    if ring and size < 3:
+    topology = _topology(parent)
+    if topology is None:
         return None
+    size, bonds = topology
+    ring = bool(parent.group("system"))
     if parent.group("suffix"):
         mult = _MULTIPLIERS[parent.group("smult") or ""]
         locs = [int(x) for x in parent.group("sloc").split(",")] if parent.group("sloc") else (
@@ -106,14 +144,15 @@ def parse_name(name: str) -> ParsedName | None:
     if any(not 1 <= loc <= size for loc, _, _ in attachments) or any(not 1 <= loc <= size for loc in multiple):
         return None
     try:
-        smiles = _assemble(Chem, size, ring, multiple, bond_order, attachments)
+        smiles = _assemble(Chem, size, bonds, multiple, bond_order, attachments)
     except Exception:  # noqa: BLE001 - an impossible valence means the name is outside the grammar or wrong
         return None
     return ParsedName(smiles=smiles, descriptors=descriptors, parent_size=size, ring=ring) if smiles else None
 
 
 def _prefixes(prefix: str) -> list[tuple[int, str, int]] | None:
-    """(locant, fragment, bond order) for "4,5,6-trimethyl", "2-bromo-4,4-dimethyl"; None unless all of it reads."""
+    """(locant, fragment, bond order) for "4,5,6-trimethyl", "2-bromo-4,4-dimethyl", "7-oxa"; None unless all of it
+    reads."""
     out: list[tuple[int, str, int]] = []
     pos = 0
     while pos < len(prefix):
@@ -129,18 +168,27 @@ def _prefixes(prefix: str) -> list[tuple[int, str, int]] | None:
     return out
 
 
-def _assemble(Chem: Any, size: int, ring: bool, multiple: list[int], order: int,
+def _assemble(Chem: Any, size: int, bonds: list[tuple[int, int]], multiple: list[int], order: int,
               attachments: list[tuple[int, str, int]]) -> str | None:
+    elements = {loc: frag[1:] for loc, frag, _ in attachments if frag.startswith("@")}
     rw = Chem.RWMol()
     for loc in range(1, size + 1):
-        atom = Chem.Atom(6)
+        atom = Chem.Atom(Chem.GetPeriodicTable().GetAtomicNumber(elements.get(loc, "C")))
         atom.SetAtomMapNum(loc)
         rw.AddAtom(atom)
     bond = {1: Chem.BondType.SINGLE, 2: Chem.BondType.DOUBLE, 3: Chem.BondType.TRIPLE}
-    pairs = [(i, i + 1) for i in range(1, size)] + ([(size, 1)] if ring else [])
-    for a, b in pairs:
-        rw.AddBond(a - 1, b - 1, bond[order] if a in multiple else Chem.BondType.SINGLE)
+    edges = {tuple(sorted(p)) for p in bonds}
+    for loc in multiple:
+        # "-2-ene" is the bond from atom 2 to atom 3 (in a ring, from the last atom back to atom 1).
+        if tuple(sorted((loc, loc + 1))) not in edges and not (loc == size and (1, size) in edges):
+            return None
+    for a, b in bonds:
+        unsaturated = (a in multiple and b == a + 1) or (b in multiple and a == b + 1) or \
+            (size in multiple and {a, b} == {size, 1})
+        rw.AddBond(a - 1, b - 1, bond[order] if unsaturated else Chem.BondType.SINGLE)
     for loc, frag, frag_order in attachments:
+        if frag.startswith("@"):
+            continue
         piece = Chem.MolFromSmiles(frag)
         if piece is None:
             return None

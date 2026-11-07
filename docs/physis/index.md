@@ -258,6 +258,16 @@ For each structure it returns:
 For each pair of structures it says whether they are identical, enantiomers, diastereomers or constitutional isomers.
 Environments are graph-symmetry classes, so diastereotopic CH2 protons count as one class.
 
+It also gives the molecular point group (`tribos/physis/symmetry.py`):
+
+1. Up to 12 conformers are embedded and relaxed with MMFF (UFF when MMFF has no parameters); the lowest is kept.
+2. Candidate rotation axes and mirror planes are tested against the atoms within 0.3 Å.
+3. The Schoenflies group follows the standard decision chart.
+
+Three groups are reported: that of the relaxed conformer, that of its heavy-atom framework, and the most symmetric one
+within 1.5 kcal/mol. A flexible molecule such as stilbene twists in its minimum (Ci) but is planar (C2h) close by.
+Structures without force-field parameters, such as hypervalent centres, get no group rather than a wrong one.
+
 ### `physis_stereo`
 
 Translates stereodescriptor sets into 3D geometry. A model that has a product's geometry right can still write the
@@ -294,13 +304,18 @@ itself before drafting:
 2. `compute_option_stereo` translates each option's descriptors into ring faces.
 3. The result is stored under the `chemistry` result key. The planner is then not offered `physis_stereo`.
 
-The name grammar covers substituted chains and carbocycles:
+Options given as SMILES are numbered by the canonical order of their shared constitution, so `#k` is the same atom in
+every option, and the centres whose labels differ are listed.
 
-- C1 to C12 parents, with -ene/-yne locants;
+The name grammar covers substituted chains, carbocycles, von Baeyer bicycles and monospiro systems:
+
+- C1 to C12 parents, `bicyclo[a.b.c]` and `spiro[a.b]`, with -ene/-yne locants;
+- skeletal replacement: `oxa`, `aza`, `thia`;
 - the suffixes -ol, -one, -amine, -thiol and -al;
 - alkyl, halo, hydroxy, alkoxy, nitro, amino, oxo and similar prefixes.
 
-Fused, bridged and hetero ring names return nothing. Those are left to a planned tool call.
+Fused ring names (such as "methanoisobenzofuran") and aromatic parents return nothing. Those are left to a planned
+tool call.
 
 ---
 

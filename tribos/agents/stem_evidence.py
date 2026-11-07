@@ -911,7 +911,8 @@ def render_chemistry(res: Any) -> list[str]:
         facts = {k: m.get(k) for k in ("smiles", "formula", "molecular_weight", "monoisotopic_mass",
                                        "degree_of_unsaturation", "formal_charge", "rings", "aromatic_rings", "stereo",
                                        "chiral", "meso", "h_environments", "h_environments_on_carbon",
-                                       "h_environment_sizes", "c_environments", "c_environment_sizes", "note")
+                                       "h_environment_sizes", "c_environments", "c_environment_sizes", "point_group",
+                                       "point_group_heavy_atoms", "point_group_most_symmetric_low_energy", "note")
                  if m.get(k) not in (None, "", [], {})}
         facts["stereoisomers_of_constitution"] = iso
         out.append(f'<molecule name="{_attr(m.get("name"))}">{_json(facts)}</molecule>')

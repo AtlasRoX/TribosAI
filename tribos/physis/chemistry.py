@@ -43,7 +43,8 @@ STRUCTURE_QUESTION_RE = re.compile(
     r"chemically\s+(?:distinct|equivalent|different)|distinct\s+(?:hydrogen|carbon|proton)\w*|"
     r"molecular\s+formula|degrees?\s+of\s+unsaturation|(?:index|degrees?)\s+of\s+hydrogen\s+deficiency|"
     r"double[\s-]+bond\s+equivalents?|IUPAC\s+name|(?:cis|trans)[\s-]+isomers?|geometric(?:al)?\s+isomers?|"
-    r"endo|exo)\b",
+    r"endo|exo|molecular\s+(?:symmetry|point\s+group)\w*|"
+    r"(?:point|symmetry)\s+group\s+of\s+(?:the\s+)?(?:molecule|compound|product|ion|anion|cation)\w*)\b",
     re.IGNORECASE,
 )
 # A stereodescriptor set opening a chemical name, "(1S,2R)-", "(3aR,4S,7aS)-", "(R)-", "(2E,4Z)-", or an
@@ -739,6 +740,7 @@ def molecule_facts(smiles: list[str], names: list[str] | None = None, locants: d
             "stereo": stereo,
             "stereoisomers_of_constitution": _stereoisomer_count(mol),
             **_environments(mol),
+            **_symmetry(s),
         }
         if len(specified) == len(stereo) and stereo:
             item["chiral"] = not mirror_same
@@ -763,6 +765,18 @@ def molecule_facts(smiles: list[str], names: list[str] | None = None, locants: d
         "molecules": molecules,
         "comparisons": comparisons[:28],
     }
+
+
+def _symmetry(smiles: str) -> dict[str, Any]:
+    """The point group of the structure's relaxed conformer (tribos.physis.symmetry), or why there is none."""
+    from .symmetry import point_group
+
+    try:
+        pg = point_group(smiles)
+    except (ValueError, RuntimeError) as exc:
+        return {"point_group": f"unavailable: {str(exc)[:120]}"}
+    return {"point_group": pg["point_group"], "point_group_heavy_atoms": pg["heavy_atom_framework"],
+            "point_group_most_symmetric_low_energy": pg["most_symmetric_low_energy"]}
 
 
 def _relation(a: Any, b: Any) -> str:
@@ -791,6 +805,84 @@ _OPTION_NAME_RE = re.compile(
     r"(?:\((?:rel-)?\d{1,3}[a-z]?'*[RSEZ]\*?(?:\s*,\s*\d{1,3}[a-z]?'*[RSEZrs]\*?)*\)|\([RSEZ]\))-[A-Za-z0-9,()\[\]'\-]+")
 
 
+_OPTION_SMILES_RE = re.compile(r"SMILES\s*:\s*(\S+)", re.I)
+
+
+def _number_by_constitution(smiles: str) -> str:
+    """The SMILES with every heavy atom numbered by its canonical rank in the stereo-free constitution: options that are
+    stereoisomers of one another number the same atom alike, whatever order their SMILES were written in."""
+    Chem = _rdkit()
+    mol = _parse(smiles)
+    for atom in mol.GetAtoms():
+        atom.SetAtomMapNum(0)
+    flat = Chem.Mol(mol)
+    Chem.RemoveStereochemistry(flat)
+    ranks = list(Chem.CanonicalRankAtoms(flat, breakTies=True))
+    for atom in mol.GetAtoms():
+        atom.SetAtomMapNum(ranks[atom.GetIdx()] + 1)
+    return Chem.MolToSmiles(mol)
+
+
+def _smiles_option_stereo(options: list[tuple[str, str]]) -> dict[str, Any] | None:
+    """Answer options given as SMILES: each configuration described with one atom numbering per constitution (#k), so
+    the faces of different options can be compared atom by atom."""
+    Chem = _rdkit()
+    groups: dict[str, list[tuple[str, str]]] = {}
+    for letter, smiles in options:
+        try:
+            flat = _parse(smiles)
+        except ValueError:
+            continue
+        Chem.RemoveStereochemistry(flat)
+        groups.setdefault(Chem.MolToSmiles(flat), []).append((letter, smiles))
+    configurations: list[dict[str, Any]] = []
+    constitutions: list[dict[str, Any]] = []
+    for flat_smiles, members in groups.items():
+        numbered = [_number_by_constitution(s) for _, s in members]
+        locants = {str(n): f"#{n}" for n in range(1, 400)}
+        result = stereo_configurations(numbered, None, locants)
+        constitutions.append({**result["constitution"], "options": [letter for letter, _ in members],
+                              "numbering": "#k is the k-th atom in the canonical order of this constitution: the same "
+                                           "number is the same atom in every option"})
+        for (letter, smiles), config in zip(members, result["configurations"]):
+            for key in ("same_compound_as", "enantiomer_of", "achiral"):
+                config.pop(key, None)
+            config["requested"] = f"({letter}) {smiles}"
+            config["option"] = letter
+            configurations.append(config)
+    if len(configurations) < 2:
+        return None
+    _relate_configurations(configurations)
+    for config in configurations:
+        for key in ("same_compound_as", "enantiomer_of"):
+            if config.get(key):
+                config[key] = [f"option {configurations[j - 1]['option']}" for j in config[key]]
+        labels = config.get("labels") or {}
+        config["descriptors"] = ", ".join(f"{k}{v}" for k, v in labels.items() if v != "unspecified")
+    differing = _differing_centres(configurations)
+    return {
+        "method": f"RDKit {rdkit_version()}: the options' SMILES, numbered by their shared constitution; CIP labels by "
+                  "the new CIP labeler; geometry embedded in 3D (ETKDG, MMFF)",
+        "source": "answer options (SMILES)",
+        "constitutions": constitutions,
+        "configurations": configurations,
+        "notes": ([f"stereocentres whose label differs between options: {', '.join(differing)}"] if differing else []),
+        "how_to_read": ("Atoms are numbered #k alike in every option. Faces are the two sides of each ring's mean plane; "
+                        "substituents on the same face are cis (syn) with respect to that ring. Compare the options "
+                        "at the centres whose labels differ."),
+    }
+
+
+def _differing_centres(configurations: list[dict[str, Any]]) -> list[str]:
+    keys = sorted({k for c in configurations for k in (c.get("labels") or {})}, key=_locant_key)
+    out = []
+    for k in keys:
+        values = {(c.get("labels") or {}).get(k) for c in configurations if c.get("labels")}
+        if len(values) > 1:
+            out.append(k)
+    return out
+
+
 def compute_option_stereo(question: str) -> dict[str, Any] | None:
     """For a choose-one question whose options are named with stereodescriptor sets: each option's structure built
     from its name (tribos.physis.names), its descriptors assigned, and its geometry as ring faces. Options with the same
@@ -802,11 +894,15 @@ def compute_option_stereo(question: str) -> dict[str, Any] | None:
     if not is_choice_question(question or ""):
         return None
     entries: list[tuple[str, str, Any]] = []
+    smiles_entries: list[tuple[str, str]] = []
     for text in option_texts(question):
         mark = _OPTION_MARK_RE.match(text)
         letter = mark.group(1).upper() if mark else "?"
         body = text[mark.end():] if mark else text
-        if "=" in body:  # "A = ..., B = ...": an option naming several compounds
+        given = _OPTION_SMILES_RE.search(body)
+        if given:
+            smiles_entries.append((letter, given.group(1).rstrip(".,;")))
+        if "=" in body.split("\n")[0]:  # "A = ..., B = ...": an option naming several compounds
             continue
         names = _OPTION_NAME_RE.findall(body)
         if len(names) != 1:
@@ -816,7 +912,7 @@ def compute_option_stereo(question: str) -> dict[str, Any] | None:
         if parsed is not None and parsed.descriptors:
             entries.append((letter, name, parsed))
     if len(entries) < 2:
-        return None
+        return _smiles_option_stereo(smiles_entries) if len(smiles_entries) >= 2 else None
     groups: dict[str, list[tuple[str, str, Any]]] = {}
     for entry in entries:
         groups.setdefault(entry[2].smiles, []).append(entry)

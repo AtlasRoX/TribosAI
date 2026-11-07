@@ -486,7 +486,7 @@ Open follow-ups:
 
 ## T13: Cheminformatics for structure questions
 
-**Status (2026-11-07): DONE.** After T12, every remaining GPQA failure in the
+**Status (2026-11-07): DONE, measured on the failing items only.** After T12, every remaining GPQA failure in the
 paired run was an organic-chemistry item, and Tribos had no chemistry tooling. The clearest failure was
 stereodescriptors: the model had a product's geometry right and still wrote the wrong R/S labels.
 
@@ -509,6 +509,7 @@ stereodescriptors: the model had a product's geometry right and still wrote the 
 - **Evidence gate:** in a choose-one question, narrating words ("preliminary studies", "typically", "measured") no
   longer trigger literature search. Explicit requests ("cite papers", "according to") still do.
 
+
 Open follow-ups:
 
 - Fused and bridged names: either an OPSIN-class parser or a validated model transcription. The planned tool now
@@ -521,7 +522,7 @@ Open follow-ups:
 
 ## T14: Chemeia, a chemistry agent
 
-**Status (2026-11-07): DONE.** `tribos/agentic/chem_agent.py`
+**Status (2026-11-07): DONE, measured on GPQA's organic-chemistry items.** `tribos/agentic/chem_agent.py`
 (`TRIBOS_CHEM_AGENT`, on by default) is an augment-stage phase for organic-chemistry questions
 (`is_organic_question`).
 
@@ -537,3 +538,47 @@ How a run goes:
 
 The `<chem_agent>` evidence states that code checked the structures, not the chemistry. With the agent on, structure
 questions no longer force a tool plan.
+
+
+## T15: Second round of fixes and enhancements
+
+**Status (2026-11-07): DONE.**
+
+Fixes:
+
+- **System facts within their time limit.** A named non-stiff system was checked against Radau, an implicit stiff
+  solver. On the Lorenz system over 100 s that took 32-42 s, so the facts missed their 45 s limit under load. The
+  second method is now LSODA, still another method family: the Lorenz facts take about 4 s, and
+  `test_explicit_simulation_request_still_runs` passes again.
+- **Values at named points.** "At r = 0, z = 1; at r = 1, z = 0" no longer reads as a contradiction when the answer
+  introduces the point's symbol (`_AT_POINT_RE` in `tribos/verify/math_claims.py`). A restated value that changes
+  still fails.
+- **Dependencies.**
+  - langchain, langchain-core and langchain-openai moved to 1.x, with the openai SDK 2.x.
+  - filelock moved to 4.x.
+  - safety was dropped: it capped filelock below 4, and pip-audit is the CI gate.
+- **Workflows.** Tribos-Alpha uses the same workflows as the public repository: newer action pins, and a Pages
+  workflow that publishes the homepage with the documentation under `/docs/`.
+
+Enhancements:
+
+- **Molecular point groups** (`tribos/physis/symmetry.py`):
+  - the Schoenflies group of the relaxed conformer, of its heavy-atom framework, and of the most symmetric
+    conformer within 1.5 kcal/mol;
+  - reported by `physis_molecule` and the chemistry agent;
+  - a structure without force-field parameters (hypervalent centres) gets no group rather than a wrong one.
+- **Names** (`tribos/physis/names.py`): von Baeyer bicycles (`bicyclo[2.2.1]hept-2-ene`), monospiro systems
+  (`spiro[4.5]decan-6-one`) and skeletal replacement (`7-oxa`, `2-aza`). Fused names remain out of scope.
+- **Options given as SMILES** are numbered by the canonical order of their shared constitution, so the same `#k` is
+  the same atom in every option, and the centres whose labels differ are listed.
+- **Majority voting** for choose-one questions (`TRIBOS_MC_VOTES`, `tribos/agents/orchestration/mc_vote.py`):
+  opt-in, off by default.
+- **Public mirror sync** (`scripts/sync_public.py`):
+  - builds the public tree from `main`, leaving out internal material and private blocks
+    (`
+`), and removing private changelog links;
+  - checks for excluded paths, leftover private blocks and secret-looking strings;
+  - commits or pushes only when asked.
+
+Tests: `tests/test_feat_round2.py`.
+

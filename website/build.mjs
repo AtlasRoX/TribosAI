@@ -112,6 +112,9 @@ const REDACT = [
   [/\bMeta Muse Spark\b/gi, "the model"],
   [/\bMuse Spark\b/gi, "the model"],
   [/\bRDKit\b/g, "a cheminformatics toolkit"],
+  [/\bLangchain 1\.x with the openai SDK 2\.x, filelock 4\.x\b/gi,
+    "The language-model client libraries and file locking move to releases without known advisories"],
+  [/\bEslint 10, as in the public repository\b/gi, "The web app's linter moves to its current major version"],
   [/\bCoolProp\b/g, "reference equations of state"],
 ];
 const redact = (s) => REDACT.reduce((acc, [re, to]) => acc.replace(re, to), s);

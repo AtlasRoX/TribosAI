@@ -169,8 +169,6 @@ uv run bandit -r tribos/ -f json -o security-report.json
 # Scan dependencies for known vulnerabilities
 uv run pip-audit
 
-# Alternative scanner
-uv run safety check
 
 # Scan with detailed output
 uv run pip-audit --desc --format=json
@@ -315,7 +313,6 @@ jobs:
 uv run pytest                    # Tests
 uv run pylint tribos/   # Static analysis (config in pyproject.toml)
 uv run pip-audit                 # Security scan
-uv run safety check              # Alternative security scan
 uv run bandit -r tribos/ # Security scan
 uv run mypy tribos/     # Type checking
 ```
@@ -333,7 +330,6 @@ The project includes comprehensive automated security scanning:
 
 # Manual security audit
 uv run pip-audit --desc
-uv run safety check --json
 uv run bandit -c pyproject.toml -r tribos/
 ```
 
@@ -379,7 +375,6 @@ pip install dist/tribos-*.whl
 ```bash
 # Weekly security scan (runs automatically in CI)
 uv run pip-audit --desc
-uv run safety check --json
 uv run bandit -c pyproject.toml -r tribos/
 
 # Check for outdated packages with vulnerabilities

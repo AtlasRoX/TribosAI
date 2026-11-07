@@ -17,7 +17,7 @@ Precedence for state directories: a specific variable (`TRIBOS_MEMORY_DIR`, `TRI
 `TRIBOS_UPLOAD_ROOT`, `TRIBOS_JOBS_DIR`, `TRIBOS_TOOL_CACHE_DIR`) wins over `TRIBOS_DATA_DIR`; with
 neither set, every store keeps its historical location under the workspace.
 
-242 variables.
+243 variables.
 
 ## State directories
 
@@ -334,6 +334,7 @@ neither set, every store keeps its historical location under the workspace.
 | `TRIBOS_MATH_AGENT_MAX_REPAIRS` | int (0 to 10) | `4` | `tribos/axiom/agent.py` | Local repairs of one failed step before the agent switches strategy. |
 | `TRIBOS_MATH_AGENT_MAX_STEPS` | int (2 to 40) | `12` | `tribos/axiom/agent.py` | Tool calls one mathematics-agent run may make. |
 | `TRIBOS_MATH_TRAJECTORY_DIR` | path | unset | `tribos/axiom/agent.py` | Append every mathematics-agent trajectory here as JSONL (tool calls, observations, verification labels) for evaluation and fine-tuning data. |
+| `TRIBOS_MC_VOTES` | int (1 to 9) | `1` | `tribos/agents/orchestration/mc_vote.py` | Drafts that vote on a choose-one question's option (self-consistency); 1 is off, 3 or 5 multiply the drafting cost and keep the majority option. |
 | `TRIBOS_SAGEMATH_PATH` | str | unset | `tribos/axiom/sagemath.py` | SageMath executable, or `wsl:<wsl.exe arguments>` to run it inside WSL; discovered on PATH and in WSL when unset. |
 
 ## TRIBOS_VISION_*: Image input (OCR and vision)

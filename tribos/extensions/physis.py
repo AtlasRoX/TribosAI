@@ -484,7 +484,7 @@ def register_tools(registry: Any) -> None:
                 "weight and monoisotopic mass, degree of unsaturation, stereocentres and double bonds with CIP "
                 "R/S/E/Z labels, whether the molecule is chiral or meso, the number of stereoisomers of the "
                 "constitution (enantiomer pairs and achiral forms, e.g. peaks on chiral and achiral HPLC), the number "
-                "of chemically distinct hydrogen and carbon environments (1H and 13C NMR signal counts), and whether "
+                "of chemically distinct hydrogen and carbon environments (1H and 13C NMR signal counts), the molecular point group (Schoenflies, of the relaxed 3D conformer and of the most symmetric low-energy one), and whether "
                 "two structures are identical, enantiomers, diastereomers or constitutional isomers."
             ),
             domain="physis",

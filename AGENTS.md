@@ -75,6 +75,15 @@ Never commit `.env`. Tests must not need the network: use the fakes in `tests/fa
     - a mismatch gets one repair round.
 
     Its evidence says that code checked the structures, not the chemistry.
+  - Majority voting over several drafts for choose-one questions is opt-in (`TRIBOS_MC_VOTES`,
+    `tribos/agents/orchestration/mc_vote.py`). The independent cross-check (`TRIBOS_CROSS_CHECK`) stays off: measured,
+    it did harm.
+- **Public mirror.** github.com/AtlasRoX/TribosAI is built from `main` by `scripts/sync_public.py`.
+  - The script leaves out internal material: audit reports, history, plans, the benchmark records, CLAUDE.md and the
+    agent rules.
+  - Mark any private passage inside a public file with `
+`.
+  - Never push `main` to the public remote directly.
 - **Sandbox.** `tribos/agentic/sandbox/runner.py` and `policy.py` provide a runtime IO guard, SymPy parser hardening and resource limits. Any tool that executes code must be:
   - classified `executes_code` in `tribos/agentic/plan_graph.tool_capabilities`;
   - refused for replay in `tribos/provenance/rerun.py` (`UNSAFE_TOOL_RE`).

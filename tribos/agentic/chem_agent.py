@@ -238,7 +238,9 @@ def check_solution(question: str, solution: ChemSolution, options: list[dict[str
             "role": product.role, "name": product.name, "smiles": canon[0], "formula": canon[1], "geometry": product.geometry,
             "stereo_specified": _fully_specified(canon[0]),
             **{k: facts.get(k) for k in ("degree_of_unsaturation", "stereo", "chiral", "meso", "h_environments",
-                                         "h_environments_on_carbon", "c_environments", "stereoisomers_of_constitution")
+                                         "h_environments_on_carbon", "c_environments", "stereoisomers_of_constitution",
+                                         "point_group", "point_group_heavy_atoms",
+                                         "point_group_most_symmetric_low_energy")
                if facts.get(k) is not None},
         }
     options = option_structures(question) if options is None else options
@@ -319,7 +321,8 @@ def evidence_xml(solution: ChemSolution, report: dict[str, Any], repaired: bool)
                      f'smiles="{_esc(step.get("smiles"), 300)}" formula="{_esc(step.get("formula", "invalid"), 40)}"/>')
     if product:
         facts = {k: product[k] for k in ("degree_of_unsaturation", "chiral", "meso", "h_environments",
-                                         "h_environments_on_carbon", "c_environments") if k in product}
+                                         "h_environments_on_carbon", "c_environments", "point_group",
+                                         "point_group_most_symmetric_low_energy") if k in product}
         iso = product.get("stereoisomers_of_constitution") or {}
         lines.append(
             f'<target role="{_esc(product.get("role"), 40)}" name="{_esc(product.get("name"), 160)}" '

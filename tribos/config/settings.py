@@ -383,6 +383,7 @@ _SETTINGS: Sequence[Setting] = (
     # Off by default: on the 2026-11-06 benchmark it changed 4 answers, all from right to wrong, and fixed none.
     Setting("TRIBOS_CROSS_CHECK", "bool", False, "Check a self-contained, multiple-choice or yes/no answer no code computed against an independent solution; adjudicate and rewrite on disagreement (1 model call, 2 more if they disagree).", _MATH),
     Setting("TRIBOS_CHEM_AGENT", "bool", True, "Run the chemistry agent on organic-chemistry questions: the model works the reaction as SMILES, code checks each structure and matches the target to the options, one repair on a mismatch.", _MATH),
+    Setting("TRIBOS_MC_VOTES", "int", 1, "Drafts that vote on a choose-one question's option (self-consistency); 1 is off, 3 or 5 multiply the drafting cost and keep the majority option.", _MATH, min=1, max=9),
     Setting("TRIBOS_MATH_AGENT_MAX_STEPS", "int", 12, "Tool calls one mathematics-agent run may make.", _MATH, min=2, max=40),
     Setting("TRIBOS_MATH_AGENT_MAX_REPAIRS", "int", 4, "Local repairs of one failed step before the agent switches strategy.", _MATH, min=0, max=10),
     Setting("TRIBOS_MATH_TRAJECTORY_DIR", "path", None, "Append every mathematics-agent trajectory here as JSONL (tool calls, observations, verification labels) for evaluation and fine-tuning data.", _MATH),

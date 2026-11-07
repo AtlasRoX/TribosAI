@@ -221,7 +221,10 @@ def compute_system_facts(question: str) -> dict[str, Any] | None:
     if stiff:
         primary, tight, second = ("Radau", 1e-6, 1e-10), ("Radau", 1e-9, 1e-14), ("BDF", 1e-8, 1e-12)
     else:
-        primary, tight, second = ("DOP853", 1e-9, 1e-12), ("DOP853", 1e-12, 1e-14), ("Radau", 1e-10, 1e-12)
+        # The second method is from another family (Adams/BDF, not Runge-Kutta). Radau, an implicit stiff solver, took
+        # 32 s on the Lorenz system over 100 s at these tolerances and pushed the facts past their time limit; LSODA
+        # takes under a second.
+        primary, tight, second = ("DOP853", 1e-9, 1e-12), ("DOP853", 1e-12, 1e-14), ("LSODA", 1e-10, 1e-12)
     ya, yt, yb = run(*primary), run(*tight), run(*second)
     scale = np.maximum(np.abs(yt).max(axis=0), 1e-12)
     tol_change = float(np.max(np.abs(ya[-1] - yt[-1]) / scale))

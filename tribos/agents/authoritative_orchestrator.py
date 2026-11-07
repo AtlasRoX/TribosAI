@@ -1427,6 +1427,10 @@ class AuthoritativeOrchestrator:
         from .orchestration.best_of_n import best_of_n
 
         await run.timed("best_of_n", best_of_n(run))
+        # A choose-one question: the majority option of several independent drafts (opt-in, TRIBOS_MC_VOTES).
+        from .orchestration.mc_vote import mc_vote
+
+        await run.timed("mc_vote", mc_vote(run))
         # A problem with its own data that no code computed: its answer against an independent solution.
         from .orchestration.cross_check import cross_check
 

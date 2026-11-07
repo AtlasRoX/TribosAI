@@ -285,7 +285,7 @@ def test_simple_names_are_built_with_locants(name: str, formula: str, descriptor
 
 
 @pytest.mark.parametrize("name", [
-    "7-oxabicyclo[4.1.0]heptane", "benzene", "dimethyl cyclohexane-1,2-dicarboxylate", "1-(prop-1-en-1-yl)cyclopentane",
+    "3a,4,7,7a-tetrahydro-4,7-methanoisobenzofuran-1,3-dione", "benzene", "dimethyl cyclohexane-1,2-dicarboxylate", "1-(prop-1-en-1-yl)cyclopentane",
     "2,2-dimethylcyclohexan-7-ol",  # locant outside the ring
     "2,3-methylbutane",  # multiplier missing
 ])

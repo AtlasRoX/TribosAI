@@ -184,8 +184,8 @@
     <dl class="reveal mt-12 grid gap-3 sm:grid-cols-2 lg:grid-cols-4" data-spots>
       <div class="spot p-6">
         <dt class="text-sm text-sand">Tribos</dt>
-        <dd class="display mt-2 text-6xl text-iris">98.3%</dd>
-        <dd class="mt-1 text-sm text-sand">234 of 238</dd>
+        <dd class="display mt-2 text-6xl text-iris">96.6%</dd>
+        <dd class="mt-1 text-sm text-sand">230 of 238</dd>
       </div>
       <div class="spot p-6">
         <dt class="text-sm text-sand">Same model, alone</dt>
@@ -194,12 +194,12 @@
       </div>
       <div class="spot p-6">
         <dt class="text-sm text-sand">Solved by only one</dt>
-        <dd class="display mt-2 text-6xl">10<span class="text-3xl text-dust"> to </span>1</dd>
+        <dd class="display mt-2 text-6xl">9<span class="text-3xl text-dust"> to </span>4</dd>
         <dd class="mt-1 text-sm text-sand">in Tribos's favour</dd>
       </div>
       <div class="spot p-6">
         <dt class="text-sm text-sand">Paired test</dt>
-        <dd class="display mt-2 text-5xl">p = 0.012</dd>
+        <dd class="display mt-2 text-5xl">p = 0.27</dd>
         <dd class="mt-2 text-sm text-sand">exact McNemar, two-sided</dd>
       </div>
     </dl>
@@ -237,10 +237,9 @@
       Paired run, November 2026: 50 problems sampled from each benchmark (seed 1), each answered by the same language
       model directly and through Tribos. Twelve items whose reference answer is demonstrably wrong, or that cannot be
       answered from their text, are set aside for both. One grader for both: stated or boxed final answer, numeric
-      tolerance, symbolic equivalence. Four Tribos answers were re-run after an experimental check was switched off.
-      GPQA Diamond was run again on 7 November with the chemistry agent; the other four benchmarks are from the
-      run of 6 November, and the model alone is the same run throughout.
-      Per-benchmark differences are not significant on their own at 50 problems; the overall paired difference is.
+      tolerance, symbolic equivalence. Tribos is one complete run of the current version, on 7 November; the model
+      alone is one run of 4-5 November. Neither the per-benchmark differences nor the overall one are significant in
+      this run (exact McNemar, p = 0.27), and repeated runs of the same system differ by a few problems.
     </p>
   </div>
 </section>

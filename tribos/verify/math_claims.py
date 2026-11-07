@@ -92,6 +92,8 @@ _CONDITIONAL_RE = re.compile(
 )
 # A value given for a reference condition right before the math ("below resonance ($r = 1$)", "critical damping
 # ($\zeta = 1$)", "when $t = 0$"): not a claim about the solved system. Only the few words just before count.
+# A sentence that opens at a named point: "at $r = 1$, ...", "for $\theta=0$: ...", "when $s = 2$, ..." (the lead text).
+_AT_POINT_RE = re.compile(r"\b(?:at|for|when)\s*\$\s*\\?([A-Za-z]+)\s*=\s*-?\d+(?:\.\d+)?\s*\$\s*[,:]?\s*$", re.I)
 _REFERENCE_CUE_RE = re.compile(r"\b(?:resonan\w*|critical\w*|threshold|when|whenever|near|limit\w*)\b[^$]{0,6}$", re.I)
 _NUM_CELL_RE = re.compile(
     r"^\s*\$?\s*(?P<sign>[-−–+]?)\s*(?P<mant>\d+(?:\.\d+)?)\s*(?:(?:\\times|×|x|\\cdot|·)\s*10\s*\^?\s*\{?\s*(?P<exp1>[-−–+]?\d+)\s*\}?"
@@ -1833,6 +1835,13 @@ class _Auditor:
                     return True  # set to a value other than the given one
             except (TypeError, ValueError):
                 continue
+        # "at $r=0$, $z=1$ ... at $r=1$, $z=0$": the value at an explicitly named point of a symbol the answer introduced
+        # (r is not in the question). The two are values at two points, not a statement and its contradiction.
+        at = _AT_POINT_RE.search(text[-48:])
+        if at:
+            name = canonical_name(at.group(1))
+            if name not in (own, canonical_name(self.env.var.name)):
+                return True
         return False
 
     def _open_case_scope(self, name: str) -> None:

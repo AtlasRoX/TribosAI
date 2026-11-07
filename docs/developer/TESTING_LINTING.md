@@ -522,19 +522,6 @@ uv run pip-audit --desc --format=markdown --output=audit-report.md
 uv run pip-audit --desc --format=table
 ```
 
-#### safety (Alternative Vulnerability Scanner)
-
-```bash
-# Basic safety check
-uv run safety check
-
-# JSON output
-uv run safety check --json --output safety-report.json
-
-# Check specific files
-uv run safety check --file=uv.lock
-```
-
 ---
 
 ## Type Checking (MyPy)

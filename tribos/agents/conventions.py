@@ -88,6 +88,16 @@ CONVENTIONS: tuple[Convention, ...] = (
               "Latency = 2 RTT + O/R + the sum of the idle times. Build the window-by-window timeline and show it."),
     ),
     Convention(
+        key="difference_is_positive",
+        # "What is the difference between their two scores?": an amount, not a signed A - B.
+        requires=(_rx(r"\b(?:what\s+is|find|how\s+(?:big|large|much)\s+is|calculate|compute)\s+(?:the\s+)?"
+                      r"(?:absolute\s+)?difference\s+between\b"),),
+        excludes=_rx(r"\bsigned\s+difference\b|\bdifference\s+[A-Za-z]\s*-\s*[A-Za-z]\b|\bminus\b|\bsubtract\b"),
+        note=("DIFFERENCE: \"the difference between\" two quantities, with no direction given, is the positive amount by "
+              "which one exceeds the other. State it as a positive number and say which is larger (\"Emma scores 25 "
+              "more\"); do not give a signed value such as -25."),
+    ),
+    Convention(
         key="stereodescriptor_options",
         # Two or more candidate structures named with stereodescriptor sets, "(1R,2S,3R)-...", "(3aR,...,7aS)-...".
         # Case-sensitive: "(3s)" is a time.

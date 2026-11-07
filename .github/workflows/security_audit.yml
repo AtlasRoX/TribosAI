@@ -57,18 +57,6 @@ jobs:
             audit-report.json
             audit-report.md
 
-      - name: Run safety check
-        run: |
-          uv run safety check --output json > safety-report.json
-        continue-on-error: true
-
-      - name: Upload safety report
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: safety-report
-          path: safety-report.json
-
       # Fails on any known vulnerability in the lock. A finding that is reviewed and accepted (no fix exists, or the
       # code path is unused) goes into PIP_AUDIT_IGNORE with a comment, e.g. "GHSA-xxxx-xxxx-xxxx PYSEC-2024-1".
       - name: Fail on vulnerabilities
@@ -134,7 +122,6 @@ jobs:
           name: consolidated-security-report
           path: |
             audit-report.*
-            safety-report.json
 
   # Generate security summary
   security-summary:
@@ -165,10 +152,6 @@ jobs:
             echo "**pip-audit:** $VULN_COUNT vulnerabilities found" >> security-summary.md
           else
             echo "**pip-audit:** report missing (the scan did not run)" >> security-summary.md
-          fi
-
-          if [ -f safety-report.json ]; then
-            echo "**safety:** Additional dependency scan completed" >> security-summary.md
           fi
 
           echo "" >> security-summary.md

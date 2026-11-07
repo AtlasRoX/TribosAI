@@ -2,6 +2,54 @@
 
 <!-- version list -->
 
+## v1.4.0 (2026-11-07)
+
+### Bug Fixes
+
+- **website**: The changelog page names no outside library
+
+- **website**: The benchmark table shows one complete run of the current version
+
+- **agents**: "the difference between" two quantities is a positive amount
+
+- **verify**: Values at two named points are not a contradiction
+
+- **writer**: A named system is integrated within the facts time limit
+
+
+### Build System
+
+- **web**: Eslint 10, as in the public repository
+
+- **deps**: Langchain 1.x with the openai SDK 2.x, filelock 4.x
+
+
+### Continuous Integration
+
+- Align the workflows with the public repository
+
+
+### Documentation
+
+- Roadmap T15, point groups and names, the public mirror sync
+
+
+### Features
+
+- **scripts**: Build the public mirror from main
+
+- **agents**: Opt-in majority voting for choose-one questions
+
+- **physis**: Point groups, bridged and spiro names, option SMILES numbered alike
+
+
+### Testing
+
+- Build the sync test's fake key at run time
+
+- Second round of fixes and enhancements
+
+
 ## v1.3.0 (2026-11-07)
 
 ### Bug Fixes
