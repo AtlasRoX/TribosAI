@@ -1,0 +1,2020 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Your research partner for engineering and science.">
+      
+      
+      
+        <link rel="canonical" href="https://github.com/AtlasRoX/TribosAI/evals/">
+      
+      
+        <link rel="prev" href="../configuration/">
+      
+      
+        <link rel="next" href="../developer/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/logo.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>Evaluation Harness - Tribos</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#evaluating-tribos" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Tribos" class="md-header__button md-logo" aria-label="Tribos" data-md-component="logo">
+      
+  <img src="../assets/logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Tribos
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Evaluation Harness
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="cyan"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/AtlasRoX/TribosAI" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    AtlasRoX/TribosAI
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Overview
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../agentic/" class="md-tabs__link">
+          
+  
+  
+  Architecture & Reasoning
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../archivon/" class="md-tabs__link">
+          
+  
+  
+  Specialist Agents
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../configuration/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Configuration Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation Harness
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../developer/" class="md-tabs__link">
+          
+  
+  
+  Developer & Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../CONTRIBUTING/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Tribos" class="md-nav__button md-logo" aria-label="Tribos" data-md-component="logo">
+      
+  <img src="../assets/logo.png" alt="logo">
+
+    </a>
+    Tribos
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/AtlasRoX/TribosAI" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    AtlasRoX/TribosAI
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture & Reasoning
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture & Reasoning
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agentic/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agentic System Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agentic/auto-routing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Auto-Routing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agentic/references-agent-loop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reasoning Loop & References
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agentic/references-verification-tools-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Verification & Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agentic/platform-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Platform API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agentic/sandbox-security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sandbox Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Specialist Agents
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Specialist Agents
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../archivon/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Archivon (Literature & Theorems)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../axiom/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Axiom (Symbolic Mathematics)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dynamis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dynamis (Dynamics & Simulation)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../calcula/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Calcula (Computation & Data)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../physis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Physis (Physical & Materials Reference)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation Harness
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation Harness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#suites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Suites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#benchmarking-against-the-base-model-system-direct" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmarking against the base model (--system direct)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#options-worth-knowing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Options worth knowing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#metrics-and-hard-gates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Metrics and hard gates
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#through-the-api-via" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Through the API (--via)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#regression-control-baselines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Regression control: baselines
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#re-scoring-without-re-running" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Re-scoring without re-running
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#comparing-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Comparing runs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#writing-a-case" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Writing a case
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Writing a case">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#golden-facts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Golden facts
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recorded-cassettes-offline-deterministic-answers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recorded cassettes: offline, deterministic answers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#continuous-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Continuous integration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-results-honestly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading results honestly
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer & Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer & Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../developer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../developer/TESTING_LINTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing & Linting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../developer/WORKFLOWS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflows & CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cloud/CLOUD_DEPLOYMENT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cloud Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../developer/AZURE_DEPLOYMENT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../developer/SONARCLOUD_SETUP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SonarCloud Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#suites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Suites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#benchmarking-against-the-base-model-system-direct" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmarking against the base model (--system direct)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#options-worth-knowing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Options worth knowing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#metrics-and-hard-gates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Metrics and hard gates
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#through-the-api-via" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Through the API (--via)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#regression-control-baselines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Regression control: baselines
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#re-scoring-without-re-running" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Re-scoring without re-running
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#comparing-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Comparing runs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#writing-a-case" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Writing a case
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Writing a case">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#golden-facts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Golden facts
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recorded-cassettes-offline-deterministic-answers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recorded cassettes: offline, deterministic answers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#continuous-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Continuous integration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-results-honestly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading results honestly
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="evaluating-tribos">Evaluating Tribos</h1>
+<blockquote>
+<p><strong>Tribos</strong> — Evaluation Suites &amp; Benchmarks<br />
+<strong>Made by ChronoStrider Engineering</strong></p>
+</blockquote>
+<p><code>tribos.evals</code> measures how well Tribos handles clinical and research questions, at three levels:</p>
+<table>
+<thead>
+<tr>
+<th>Level</th>
+<th>What runs</th>
+<th>What it checks</th>
+<th>Cost</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>plan</strong></td>
+<td>Question parsing and routing (<code>build_query_context</code>), as the orchestrator calls it</td>
+<td>Scope (research / conversational / unclear), question type, recognised entities, primary target, which sources run or are skipped</td>
+<td>Seconds. Offline needs no keys or network; <code>--live</code> adds the entity resolver and planner model</td>
+</tr>
+<tr>
+<td><strong>retrieval</strong></td>
+<td>The plan, the search plan, and the same Lithoscribe call production makes</td>
+<td>Whether the papers an expert would expect are retrieved: hit@k, recall@k, MRR</td>
+<td>About 15 s per question; EuropePMC + planner model</td>
+</tr>
+<tr>
+<td><strong>answer</strong></td>
+<td>The full orchestrator (or the running API with <code>--via</code>), in an isolated thread that is deleted afterwards</td>
+<td>Golden facts (fact recall), forbidden claims, abstention, agents run, verifier result and faithfulness, hard gates, budgets; benchmark labels; optional rubric judge</td>
+<td>30–70 s per question on the classic pipeline, 4–20 min on agentic frameworks; full model usage</td>
+</tr>
+</tbody>
+</table>
+<h2 id="quick-start">Quick start</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>tribos.evals<span class="w"> </span>list<span class="w">                                         </span><span class="c1"># suites and what they cover</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>tribos.evals<span class="w"> </span>run<span class="w"> </span>--level<span class="w"> </span>plan<span class="w">                             </span><span class="c1"># offline routing check, ~5 s</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>tribos.evals<span class="w"> </span>run<span class="w"> </span>--suite<span class="w"> </span>clinical<span class="w"> </span>--level<span class="w"> </span>retrieval<span class="w">       </span><span class="c1"># literature retrieval, ~2 min</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>tribos.evals<span class="w"> </span>run<span class="w"> </span>--level<span class="w"> </span>answer<span class="w"> </span>--judge<span class="w">                   </span><span class="c1"># full answers, ~20 min</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>tribos.evals<span class="w"> </span>run<span class="w"> </span>--suite<span class="w"> </span>clinical<span class="w"> </span>--level<span class="w"> </span>answer<span class="w"> </span>--ids<span class="w"> </span>clin-sepsis<span class="w">   </span><span class="c1"># one case</span>
+</code></pre></div>
+<p><code>tribos-eval</code> is the same command once the package is installed. Keys come from <code>.env</code>, as for the app.</p>
+<p>Each run writes <code>eval_runs/&lt;time&gt;_&lt;suites&gt;_&lt;levels&gt;/</code>:</p>
+<ul>
+<li><code>report.html</code>: the summary, then every case with its checks, full answer, and what the run observed. It has a filter box (try <code>fail</code>).</li>
+<li><code>report.md</code>: the same summary, for pull requests and chat.</li>
+<li><code>summary.json</code>: machine-readable metrics.</li>
+<li><code>results.jsonl</code>: one line per case and level.</li>
+<li><code>meta.json</code>: model, settings, environment, and a fingerprint of the routing/retrieval code and case data.</li>
+</ul>
+<h2 id="suites">Suites</h2>
+<p><code>python -m tribos.evals list</code> prints the current set.</p>
+<table>
+<thead>
+<tr>
+<th>Suite</th>
+<th>Cases</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>math</code>, <code>physics</code>, <code>engineering</code></td>
+<td>12 each</td>
+<td>Curated STEM questions across analysis, ODEs, number theory, mechanics, electromagnetism, thermodynamics, structures, control and more, with plan, retrieval and answer expectations</td>
+</tr>
+<tr>
+<td><code>behavior</code></td>
+<td>17</td>
+<td>Routing, abstention, scope, safety, memory and simulation behaviour</td>
+</tr>
+<tr>
+<td><code>golden</code></td>
+<td>5</td>
+<td>Live only. Long questions with structured golden facts, one or more per orchestration framework</td>
+</tr>
+<tr>
+<td><code>stem</code></td>
+<td>11</td>
+<td>Algebra, number theory, ODEs, PDEs, proofs, simulation and an open problem</td>
+</tr>
+<tr>
+<td><code>math500</code></td>
+<td>500</td>
+<td>MATH-500 competition mathematics (HuggingFaceH4/MATH-500, MIT); symbolic answers</td>
+</tr>
+<tr>
+<td><code>gsm8k</code></td>
+<td>1,319</td>
+<td>GSM8K grade-school word problems (openai/gsm8k, MIT); numeric answers</td>
+</tr>
+<tr>
+<td><code>theoremqa</code></td>
+<td>350+</td>
+<td>TheoremQA across math, physics, EE and CS (MIT); numeric, boolean, choice or symbolic</td>
+</tr>
+<tr>
+<td><code>scibench</code></td>
+<td>—</td>
+<td>SciBench collegiate physics, chemistry and math numerics (MIT); numeric within 2%</td>
+</tr>
+<tr>
+<td><code>phybench</code></td>
+<td>—</td>
+<td>PHYBench symbolic physics (MIT)</td>
+</tr>
+<tr>
+<td><code>engdesign</code></td>
+<td>—</td>
+<td>Engineering analysis and design (MIT / Apache-2.0); numeric within 5% or required terms</td>
+</tr>
+<tr>
+<td><code>ugphysics</code></td>
+<td>—</td>
+<td>Undergraduate physics (CC BY-NC 4.0; needs <code>--allow-noncommercial</code>)</td>
+</tr>
+<tr>
+<td><code>gpqa</code></td>
+<td>198</td>
+<td>GPQA Diamond PhD-level science multiple choice (gated: accept the terms on Hugging Face and set <code>HF_TOKEN</code>)</td>
+</tr>
+<tr>
+<td><code>path/to/file.jsonl</code></td>
+<td>—</td>
+<td>Your own cases</td>
+</tr>
+</tbody>
+</table>
+<p>External benchmarks are downloaded on first use and cached. Sample them with <code>--limit 50 --seed 1</code>; the same seed
+gives the same cases on every run, so two systems can be compared on an identical sample.</p>
+<h2 id="benchmarking-against-the-base-model-system-direct">Benchmarking against the base model (<code>--system direct</code>)</h2>
+<p><code>--system direct</code> answers each case with the same model alone: one call with a standard benchmark prompt (reason
+step by step, final answer in <code>oxed{}</code> or as <code>Answer: &lt;option&gt;</code>), no tools, retrieval or verification. It is graded
+exactly as the full pipeline is, so the difference between the two runs is what the Tribos harness adds.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>python<span class="w"> </span>-m<span class="w"> </span>tribos.evals<span class="w"> </span>run<span class="w"> </span>--suite<span class="w"> </span>math500<span class="w"> </span>--level<span class="w"> </span>answer<span class="w"> </span>--limit<span class="w"> </span><span class="m">50</span><span class="w"> </span>--seed<span class="w"> </span><span class="m">1</span><span class="w"> </span>--system<span class="w"> </span>direct<span class="w"> </span>--out<span class="w"> </span>runs/direct
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>python<span class="w"> </span>-m<span class="w"> </span>tribos.evals<span class="w"> </span>run<span class="w"> </span>--suite<span class="w"> </span>math500<span class="w"> </span>--level<span class="w"> </span>answer<span class="w"> </span>--limit<span class="w"> </span><span class="m">50</span><span class="w"> </span>--seed<span class="w"> </span><span class="m">1</span><span class="w"> </span>--system<span class="w"> </span>tribos<span class="w"> </span>--out<span class="w"> </span>runs/tribos
+</code></pre></div>
+<p><code>meta.json</code> records the system. <code>python -m tribos.evals.benchmark_report &lt;root&gt;</code> pairs the two runs by case and
+reports accuracy with Wilson intervals, the paired difference with an exact McNemar test, Tribos's verified
+precision, abstention and latency, as HTML, Markdown and PDF.</p>
+<h2 id="options-worth-knowing">Options worth knowing</h2>
+<ul>
+<li><code>--ids</code>, <code>--category</code>, <code>--tags</code>, <code>--limit</code>, <code>--seed</code>: choose cases. <code>--ids</code> takes id prefixes, so <code>clin-</code> means every clinical case.</li>
+<li><code>--concurrency N</code>: answer-level cases at once (default 2). Plan and retrieval run up to 4×N.</li>
+<li><code>--judge</code>: score answers 1–5 on correctness, grounding, completeness, calibration and clarity against the reference answer.</li>
+<li>The judge sees the verified citations, so recent papers are not mistaken for fabrications.</li>
+<li><code>--judge-min 3.5</code> turns the score into a pass/fail check.</li>
+<li><code>--judge-model</code> uses a different model from the system under test (recommended when you can).</li>
+<li><code>--retries N</code> (default 1): re-runs a failed live plan or retrieval case. A pass on retry is reported as <strong>flaky</strong>, meaning an upstream service hiccup, not a regression. <code>--answer-retries</code> does the same for answers.</li>
+<li><code>--resume &lt;run dir&gt;</code>: continues an interrupted run, retrying only cases that errored.</li>
+<li><code>--no-web</code>: disables web search everywhere, to isolate the peer-reviewed path.</li>
+<li><code>--fail-under "answer.pass_rate=0.8,retrieval.hit_rate=0.7"</code>: the run exits with code 1 below any threshold.</li>
+<li>Thresholds can name any level metric: <code>retrieval.mrr</code>, <code>answer.verified_rate</code>, <code>answer.label_accuracy</code>, <code>answer.judge.overall</code>, <code>answer.fact_recall_mean</code>, <code>answer.faithfulness_mean</code>, <code>answer.gate_pass_rate</code>, and so on.</li>
+<li><code>--framework &lt;id&gt;</code>: runs every case with this orchestration framework (<code>authoritative-react-compiler</code>, <code>agentic-plan-execute</code>, <code>multi-agent-supervisor</code>, <code>multi-agent-swarm</code>, <code>multi-agent-debate</code>), overriding each case's <code>framework</code>.</li>
+<li><code>--via http://127.0.0.1:8000</code>: see <a href="#through-the-api-via">Through the API</a>.</li>
+<li><code>--record</code> / <code>--replay</code> (<code>--replay-lenient</code>, <code>--cassette-dir</code>): record answer cases to cassettes against the live system, or replay them offline. See <a href="#recorded-cassettes-offline-deterministic-answers">Recorded cassettes</a>.</li>
+<li><code>--repeat N</code>: runs each case N times, in sequence. The result keeps the first successful run's observations and replaces <code>fact_recall</code>, <code>faithfulness</code>, latency, calls and tokens with their means. <code>metrics.repeat</code> holds each run's values and the mean and SD per metric. The case passes when at least half the runs pass. It is marked <strong>flaky</strong> when runs disagree on pass/fail, or when the SD of <code>fact_recall</code> or <code>faithfulness</code> exceeds <code>--flaky-sd</code> (default 0.15).</li>
+</ul>
+<h2 id="metrics-and-hard-gates">Metrics and hard gates</h2>
+<p>Every answer-level result reports these metrics. They are computed from stored observations, so <code>rescore</code> recomputes them.</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fact_recall</code></td>
+<td>Required golden facts found ÷ required facts. <code>facts_missing</code> lists the ids of the missing ones; optional misses are listed in <code>facts_optional_missing</code></td>
+</tr>
+<tr>
+<td><code>faithfulness</code></td>
+<td>The verifier's claim audit: supported ÷ (supported + unsupported + contradicted). Claims that were not checked are excluded. RAGAS/FActScore-style</td>
+</tr>
+<tr>
+<td><code>steps_failed</code></td>
+<td>Activity steps (thoughts) with status <code>error</code></td>
+</tr>
+<tr>
+<td><code>llm_calls</code>, <code>tokens_est</code></td>
+<td>From the agent budget (<code>execution_artifacts.agent_run.budget.used</code>). Agentic frameworks only; <code>null</code> on the classic pipeline</td>
+</tr>
+<tr>
+<td><code>tool_calls</code></td>
+<td>Tool calls in the run manifest</td>
+</tr>
+<tr>
+<td><code>latency_s</code></td>
+<td>Wall time of the question, setup turns excluded</td>
+</tr>
+</tbody>
+</table>
+<p><code>summary.json</code> adds, per level, <code>by_framework</code> (pass rate, fact recall, faithfulness, latency p50/p95 and gate failures for each requested framework) and <code>latency_p95_s</code>. The answer section adds <code>fact_recall_mean</code>, <code>faithfulness_mean</code>, <code>steps_failed_mean</code>, <code>llm_calls_mean</code>, <code>tool_calls_mean</code>, <code>tokens_est_mean</code>, <code>gate_pass_rate</code> and <code>gate_failures</code>.</p>
+<p><strong>Hard gates</strong> are deterministic required checks that run on every answer. They need no model:</p>
+<ul>
+<li><code>answer.no_crash</code>: the run returned a non-empty answer. An exception or an HTTP error from <code>--via</code> fails it.</li>
+<li><code>answer.citations_in_evidence</code>: every PMID, NCT, CHEMBL, NDA, BLA or ANDA id written in the answer appears in the run's own evidence or in the question. An id that is in neither is treated as hallucinated. The evidence comprises:</li>
+<li>the canonical ids and output digests of successful tool calls;</li>
+<li>the synthesis scope notes;</li>
+<li>the citation entries and aliases;</li>
+<li>the verifier's verified identifiers;</li>
+<li>the evidence artifacts.</li>
+</ul>
+<p>Model-written artifacts never count as evidence: claim confidence, the agent plan, run trace and dialogue, hypotheses and project memory.
+- <code>answer.no_internal_leak</code>: a research answer must not contain:
+  - internal component names (Lithoscribe, Synapta, Vivarix, Lumicell, Discovery, in any case);
+  - evidence-field keys (<code>clinical_trials</code>, <code>structure_intel</code>, <code>total_reports</code>, <code>tool_status</code>, …);
+  - internal step ids (<code>agent.gaps.9-12</code>);
+  - prompt tags (<code>[CLINICAL_CLAIM]</code>).</p>
+<p>Code spans and URLs are ignored. The conversational introduction names the components on purpose, so it is not checked.</p>
+<p>A case can switch a gate off with <code>"skip_gates": ["answer.no_internal_leak"]</code>.</p>
+<p><strong>Budgets</strong> are optional per-case limits, each a required check: <code>max_latency_s</code>, <code>max_tokens</code>, <code>max_llm_calls</code>, <code>max_tool_calls</code> (<code>0</code> means no tool may run, as for greetings) and <code>min_faithfulness</code>. A budget whose metric the run did not record, such as model calls on the classic pipeline, is reported but not failed.</p>
+<h2 id="through-the-api-via">Through the API (<code>--via</code>)</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>tribos.evals<span class="w"> </span>run<span class="w"> </span>--suite<span class="w"> </span>golden<span class="w"> </span>--level<span class="w"> </span>answer<span class="w"> </span>--via<span class="w"> </span>http://127.0.0.1:8000<span class="w"> </span>--ids<span class="w"> </span>golden-kras
+</code></pre></div>
+<p>Each answer case, and each of its setup turns, is sent to <code>POST /api/chat</code> with the body the web client sends: <code>message</code>, <code>thread_id</code>, <code>enable_web_search</code>, the case's <code>framework</code>, <code>agent_options</code>, <code>dataset_ids</code> and <code>project_id</code>, and <code>model</code> when <code>--model</code> is given. The returned JSON (the orchestrator result's <code>to_dict()</code>) is scored exactly like an in-process result, so the API layer is tested as well. Afterwards the thread's memory is deleted with <code>DELETE /api/memory/thread/{id}</code>.</p>
+<p>Details:</p>
+<ul>
+<li><strong>Authentication.</strong> A bearer token is read from <code>TRIBOS_EVAL_TOKEN</code>. It is never written to <code>meta.json</code>.</li>
+<li><strong>Errors.</strong> A non-200 status, or a reply without a <code>response</code> string, becomes an errored result with a failed <code>answer.no_crash</code>.</li>
+<li><strong>Other levels.</strong> Plan and retrieval still run in-process.</li>
+<li><strong>Timeouts.</strong> Golden cases set <code>timeout_s</code> (1,800 s), because agentic frameworks take minutes.</li>
+</ul>
+<h2 id="regression-control-baselines">Regression control: baselines</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>tribos.evals<span class="w"> </span>run<span class="w"> </span>--suite<span class="w"> </span>golden<span class="w"> </span>--level<span class="w"> </span>answer<span class="w"> </span>--via<span class="w"> </span>http://127.0.0.1:8000
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>tribos.evals<span class="w"> </span>baseline<span class="w"> </span>save<span class="w"> </span>eval_runs/&lt;run&gt;<span class="w"> </span>--name<span class="w"> </span>golden<span class="w">          </span><span class="c1"># eval_runs/baselines/golden.json</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="c1"># ... change the system, run again ...</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>tribos.evals<span class="w"> </span>baseline<span class="w"> </span>check<span class="w"> </span>eval_runs/&lt;new<span class="w"> </span>run&gt;<span class="w"> </span>--name<span class="w"> </span>golden<span class="w"> </span>--delta<span class="w"> </span><span class="m">0</span>.03
+</code></pre></div>
+<ul>
+<li><strong>Saving.</strong> <code>baseline save</code> stores a per-case snapshot of the run. For each scored case it records pass, <code>fact_recall</code>, <code>faithfulness</code>, latency and each hard gate's outcome. Use <code>--baseline &lt;file&gt;</code> to write or read an explicit path, such as a committed baseline.</li>
+<li><strong>Checking.</strong> <code>baseline check</code> pairs the cases that both runs scored. For each metric (<code>--metrics</code>, default <code>fact_recall,faithfulness,pass</code>) it bootstraps a 95% CI of the mean per-case delta, new minus baseline. The bootstrap uses 2,000 resamples, a fixed seed (<code>--seed</code>) and pure Python.</li>
+<li><strong>When it fails.</strong> The check exits with code 1 when either holds:</li>
+<li>a metric's CI upper bound is below <code>-delta</code>: the drop is both real and larger than the tolerance;</li>
+<li>a hard gate that held in the baseline (or was not recorded there) now fails on any case.</li>
+</ul>
+<p>It exits with code 2 when the baseline file does not exist.
+- <strong>Output.</strong> The comparison is written to <code>&lt;run&gt;/baseline_check.md</code> and <code>baseline_check.json</code>. It also lists cases that newly fail and cases present in only one of the two runs.</p>
+<p>With few live cases a single bad run is noisy. Use <code>--repeat 3</code> before saving a baseline or reading a drop.</p>
+<h2 id="re-scoring-without-re-running">Re-scoring without re-running</h2>
+<p>Edited a case's expectations, or improved a scorer? Re-apply them to a finished run's stored answers, without calling the system again:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>tribos.evals<span class="w"> </span>rescore<span class="w"> </span>eval_runs/&lt;run&gt;<span class="w">               </span><span class="c1"># seconds; previous results kept in results.prev.jsonl</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>tribos.evals<span class="w"> </span>rescore<span class="w"> </span>eval_runs/&lt;run&gt;<span class="w"> </span>--rejudge<span class="w">     </span><span class="c1"># also re-ask the judge and label grader</span>
+</code></pre></div>
+<p>Retrieval results store every retrieved PMID, DOI and title in rank order, and answers store the full response and citations. Gold papers, title patterns, required facts and thresholds can therefore all change after the fact. Re-run the system only when the system itself changed.</p>
+<h2 id="comparing-runs">Comparing runs</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>tribos.evals<span class="w"> </span>compare<span class="w"> </span>eval_runs/&lt;before&gt;<span class="w"> </span>eval_runs/&lt;after&gt;
+</code></pre></div>
+<p>This prints metric deltas per level, every case that went from pass to fail (with the failing checks), and every case that was fixed. Run the same suites and levels before and after a change. <code>meta.json</code> records the code fingerprint, so you can confirm which code each run used.</p>
+<h2 id="writing-a-case">Writing a case</h2>
+<p>One JSON object per line. Every block is optional; a case is scored at each level it has a block for.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"clin-sepsis-criteria"</span><span class="p">,</span><span class="w"> </span><span class="nt">"suite"</span><span class="p">:</span><span class="w"> </span><span class="s2">"clinical"</span><span class="p">,</span><span class="w"> </span><span class="nt">"category"</span><span class="p">:</span><span class="w"> </span><span class="s2">"diagnosis"</span><span class="p">,</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w"> </span><span class="nt">"query"</span><span class="p">:</span><span class="w"> </span><span class="s2">"What are the diagnostic criteria for sepsis?"</span><span class="p">,</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w"> </span><span class="nt">"plan"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"scope"</span><span class="p">:</span><span class="w"> </span><span class="s2">"research"</span><span class="p">,</span><span class="w"> </span><span class="nt">"question_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"diagnosis"</span><span class="p">,</span><span class="w"> </span><span class="nt">"entities"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"Sepsis"</span><span class="p">],</span><span class="w"> </span><span class="nt">"skip"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"vivarix"</span><span class="p">]},</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w"> </span><span class="nt">"retrieval"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"gold_pmids"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"26903338"</span><span class="p">,</span><span class="w"> </span><span class="s2">"26903335"</span><span class="p">,</span><span class="w"> </span><span class="s2">"26903336"</span><span class="p">],</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">               </span><span class="nt">"gold_title_patterns"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"Sepsis-3|consensus definitions? for sepsis"</span><span class="p">],</span><span class="w"> </span><span class="nt">"k"</span><span class="p">:</span><span class="w"> </span><span class="mi">8</span><span class="p">},</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w"> </span><span class="nt">"answer"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"must_mention"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"SOFA"</span><span class="p">,</span><span class="w"> </span><span class="s2">"lactate"</span><span class="p">],</span><span class="w"> </span><span class="nt">"cite_gold"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="nt">"abstain"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">},</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="w"> </span><span class="nt">"reference"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Sepsis-3 defines sepsis as ... SOFA increase of 2 or more points ..."</span><span class="p">}</span>
+</code></pre></div>
+<p>Guidance:</p>
+<ul>
+<li><strong>Gold papers.</strong> List several acceptable PMIDs (the landmark trial, its main follow-up, the guideline), each confirmed on EuropePMC. Add <code>gold_title_patterns</code> when any paper of the right kind is a correct result; open retrieval has many right answers. Keep patterns specific enough that an off-topic paper cannot match. Use <code>"required": false</code> for papers older than the 12-year citation-ranked window, or when gold is uncertain: the miss is then reported without failing the case.</li>
+<li><strong>Required facts</strong> (<code>must_mention</code>) are regexes; all must match, case-insensitively. Test the facts an expert would insist on, with alternatives (<code>"IVIG|immunoglobulin"</code>), not wording.</li>
+<li><strong>Forbidden claims</strong> (<code>must_not_mention</code>): fabricated figures or confirming an injected claim.</li>
+<li><strong>Abstention.</strong> <code>"abstain": true</code> means the answer must say the evidence or entity does not exist (hallucination traps). <code>false</code> adds an informational check that the answer does not open with a refusal.</li>
+<li><strong>Routing.</strong> <code>plan.run</code> and <code>plan.skip</code> name sources: <code>synapta</code>, <code>lithoscribe</code>, <code>websurfer</code>, <code>vivarix</code>, <code>lumicell</code>, <code>clinical_trials</code>, <code>chembl</code>, <code>openfda</code>, <code>variant_intel</code>. Set <code>"offline": true</code> only when the entities and routing hold without the live resolver (the offline lexicon knows common genes and drugs, not every disease).</li>
+<li><strong>Memory.</strong> <code>setup</code> lists earlier turns in the same thread.</li>
+<li><strong>How the case runs.</strong> <code>framework</code> requests an orchestration framework, and <code>--framework</code> overrides it. <code>answer.framework</code> is a different thing: the framework that must have been <em>used</em>, for example <code>conversational-direct</code> for a greeting. The case can also set <code>agent_options</code> (for example <code>{"budget": {"max_llm_calls": 30}}</code>), <code>dataset_ids</code>, <code>project_id</code> and <code>timeout_s</code>. Tag a case <code>live</code> when nothing in it can be scored offline; <code>list</code> shows a suite as live only when all its cases are.</li>
+<li><strong>Validation.</strong> Cases are checked on load: every regex must compile and must not contain control characters (a lost backslash turns <code>\b</code> into a backspace).</li>
+</ul>
+<h3 id="golden-facts">Golden facts</h3>
+<p>Structured facts make answer correctness measurable without a judge, in the style of SAFE/FActScore. Each fact has an <code>id</code> and exactly one matcher:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">"facts"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sotorasib-nda"</span><span class="p">,</span><span class="w"> </span><span class="nt">"pattern"</span><span class="p">:</span><span class="w"> </span><span class="s2">"NDA\\s*#?\\s*214665"</span><span class="p">},</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sotorasib-approval-date"</span><span class="p">,</span><span class="w"> </span><span class="nt">"date"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2021-05-28"</span><span class="p">},</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">  </span><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"codebreak200-pfs-hr"</span><span class="p">,</span><span class="w"> </span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.66</span><span class="p">,</span><span class="w"> </span><span class="nt">"tolerance"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.01</span><span class="p">,</span><span class="w"> </span><span class="nt">"ci"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mf">0.51</span><span class="p">,</span><span class="w"> </span><span class="mf">0.86</span><span class="p">],</span><span class="w"> </span><span class="nt">"context"</span><span class="p">:</span><span class="w"> </span><span class="s2">"CodeBreaK|sotorasib"</span><span class="p">},</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">  </span><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"keynote716"</span><span class="p">,</span><span class="w"> </span><span class="nt">"any_of"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"a"</span><span class="p">,</span><span class="w"> </span><span class="nt">"pattern"</span><span class="p">:</span><span class="w"> </span><span class="s2">"KEYNOTE-?716"</span><span class="p">},</span><span class="w"> </span><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"b"</span><span class="p">,</span><span class="w"> </span><span class="nt">"pattern"</span><span class="p">:</span><span class="w"> </span><span class="s2">"NCT03553836"</span><span class="p">}]},</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">  </span><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"profound-rpfs-hr"</span><span class="p">,</span><span class="w"> </span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.34</span><span class="p">,</span><span class="w"> </span><span class="nt">"tolerance"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.01</span><span class="p">,</span><span class="w"> </span><span class="nt">"ci"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mf">0.25</span><span class="p">,</span><span class="w"> </span><span class="mf">0.47</span><span class="p">],</span><span class="w"> </span><span class="nt">"context"</span><span class="p">:</span><span class="w"> </span><span class="s2">"PROfound"</span><span class="p">,</span><span class="w"> </span><span class="nt">"required"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">}</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="p">]</span>
+</code></pre></div>
+<ul>
+<li><strong><code>pattern</code></strong> is a case-insensitive regex.</li>
+<li><strong><code>date</code></strong> (ISO) also matches <code>December 19, 2014</code>, <code>Dec. 19, 2014</code>, <code>19 December 2014</code> and <code>12/19/2014</code>.</li>
+<li><strong><code>value</code></strong> matches a number however it is written: <code>0.30</code>, <code>0.3</code>, <code>0·30</code>, <code>1,063</code>, a Unicode minus. A number glued to a word, as in <code>G12C</code> or <code>rs121434569</code>, never matches.</li>
+<li>Use <code>tolerance</code> for rounding: 0.663 matches 0.66 ± 0.01.</li>
+<li>With <code>ci</code>, an interval within <code>window</code> characters after the number (default 200) must also match. Any of <code>95% CI 0.23–0.41</code>, <code>(0.23 to 0.41)</code> or <code>0.23, 0.41</code> works, with <code>ci_tolerance</code> defaulting to <code>tolerance</code>.</li>
+<li><strong><code>context</code></strong> is a regex that must occur within <code>window</code> characters of the match. It ties a hazard ratio to its trial.</li>
+<li><strong><code>any_of</code></strong> accepts alternative facts; any one of them counts.</li>
+</ul>
+<p>Each fact is a check. An optional fact (<code>"required": false</code>) is informational and is left out of <code>fact_recall</code>. With <code>"min_fact_recall": 0.8</code> in the answer block, a single <code>answer.fact_recall</code> check decides instead, and every fact becomes informational.</p>
+<p>To add facts:</p>
+<ol>
+<li><strong>Confirm against primary sources.</strong> Use the label or Drugs@FDA for application numbers and dates, and the trial publication or registry for hazard ratios.</li>
+<li><strong>Check against stored runs.</strong> Run <code>rescore</code> on stored runs to see the facts hold on real answers before relying on them.</li>
+<li><strong>Mark the rest optional.</strong> A fact the question does not strictly require, such as a secondary trial's HR, should be optional.</li>
+</ol>
+<h2 id="recorded-cassettes-offline-deterministic-answers">Recorded cassettes: offline, deterministic answers</h2>
+<p>Live answer cases are slow and vary between runs. A <strong>cassette</strong> records every tool and model call of one answer case, so the case can be replayed offline: no keys, no network, the same result on every run. CI replays the committed cassettes on every commit.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># 1. Record locally, against the live APIs and model (in-process only; not with --via):</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>tribos.evals<span class="w"> </span>run<span class="w"> </span>--suite<span class="w"> </span>golden<span class="w"> </span>--level<span class="w"> </span>answer<span class="w"> </span>--ids<span class="w"> </span>golden-kras-g12c-nsclc<span class="w"> </span>--record
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="c1"># 2. Commit the cassette: tribos/evals/cassettes/golden/golden-kras-g12c-nsclc.json</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1"># 3. Replay (what CI does), in seconds:</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>tribos.evals<span class="w"> </span>run<span class="w"> </span>--suite<span class="w"> </span>golden<span class="w"> </span>--level<span class="w"> </span>answer<span class="w"> </span>--replay
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>tribos.evals<span class="w"> </span>run<span class="w"> </span>--suite<span class="w"> </span>golden<span class="w"> </span>--level<span class="w"> </span>answer<span class="w"> </span>--replay<span class="w"> </span>--repeat<span class="w"> </span><span class="m">2</span><span class="w">   </span><span class="c1"># determinism check: never flaky</span>
+</code></pre></div>
+<p>What a cassette holds (<code>tribos/evals/cassette.py</code>):</p>
+<ul>
+<li><strong>Tool calls.</strong> Each registry call is recorded with its <code>ToolResult</code>, keyed by the tool name and the canonical JSON of its arguments. The hook sits below the registry's argument validation and run-manifest recording, and above its cache, circuit breakers, retries and executor. A replayed run therefore still writes its own manifest, canonical ids and evidence, and the citation gate checks them as usual.</li>
+<li><strong>Model calls.</strong> Each call is keyed by the model and the prompt messages, and records the reply text and the model's reasoning. This covers models obtained through <code>get_llm</code>, whether called with <code>ainvoke</code>, <code>astream</code> or <code>astream_with_reasoning</code>: the planner, the agent phases, NLI, the synthesis, rewrites and the Reflexion correction. Replay builds no real client.</li>
+<li><strong>Side lookups.</strong> Calls made outside the registry: the BioModels search and the run manifest's upstream version probes.</li>
+<li><strong>Run settings.</strong> The case's query, setup turns and run options, the model, the web-search setting, the latency, and the registered tools.</li>
+</ul>
+<p>How replay matches calls:</p>
+<ul>
+<li><strong>Normalised keys.</strong> Before hashing, volatile parts of prompts and arguments are replaced by placeholders: ISO timestamps, today's date (and the recording's date) in any common format, uuids, <code>run_…</code>/<code>job_…</code> ids, eval thread ids and Unix timestamps. The <code>&lt;retrieval_date&gt;</code> in a prompt does not break a replay.</li>
+<li><strong>Order.</strong> A call made several times replays its recordings in order.</li>
+<li><strong>Pinned settings.</strong> <code>TRIBOS_NLI=llm</code> and no tool embeddings, for recording and replay alike. Without the pin, a cross-encoder in one machine's HF cache would send that machine down a different path from CI.</li>
+<li><strong>Recorded latency.</strong> A replayed result reports the recorded run's latency (<code>replay_latency_s</code> holds the replay's own wall time), so its metrics match the recording.</li>
+</ul>
+<p>What is stored:</p>
+<ul>
+<li><strong>Secrets are redacted.</strong> API keys, <code>Authorization</code> headers, bearer tokens, <code>nvapi-</code>/<code>sk-</code> keys, <code>?api_key=</code> URL parameters and the values of <code>*_KEY</code>/<code>*_TOKEN</code>/<code>*_SECRET</code> environment variables never reach the file.</li>
+<li><strong>Prompts are not stored in full.</strong> Each prompt keeps a per-message hash, its length and a short preview. Set <code>TRIBOS_CASSETTE_PROMPTS=1</code> while recording to keep the full normalised prompts; a miss then shows the first differing characters.</li>
+<li><strong>Size.</strong> Files larger than 2 MB are written gzipped (<code>.json.gz</code>).</li>
+</ul>
+<p>Failures:</p>
+<ul>
+<li><strong>Strict by default.</strong> A call the cassette does not hold is a <em>miss</em>: it raises <code>CassetteMiss</code>, and the case fails <code>answer.cassette</code> even when the orchestrator recovers from the exception. The check names the call and, for a model call, which message differs from the nearest recording. <code>run --replay</code> exits with code 1 when any case missed.</li>
+<li><strong>Network.</strong> During replay, outbound network connections are refused and reported, so an unhooked network path shows up as a failure instead of a silent live call.</li>
+<li><strong>Stale cassettes.</strong> A case whose query, setup or run options changed since recording fails <code>answer.cassette</code> without running.</li>
+<li><strong>No cassette.</strong> Cases without a cassette are skipped.</li>
+<li><strong>Lenient replay.</strong> <code>--replay-lenient</code> answers a missed model call with the nearest recording of the same model and a missed tool call with a failed <code>ToolResult</code>. It reports the misses (<code>cassette_misses</code>) without failing, which is useful to see how far a change reaches.</li>
+</ul>
+<p>When to refresh:</p>
+<ul>
+<li><strong>Re-record a case</strong> with <code>--record</code>, which overwrites its cassette, whenever its replay misses because of an intended change: a prompt, a tool argument, the search plan or the routing. Commit the new file with the change.</li>
+<li><strong>Re-record yearly.</strong> The literature search window is computed from the current year, so recordings go stale at the turn of the year.</li>
+<li><strong>Recordings capture the live services as they were.</strong> Use the live weekly golden job and <code>baseline check</code> to follow upstream changes; replay answers a different question: did <em>our code</em> change what it asks and does?</li>
+</ul>
+<p>Limits:</p>
+<ul>
+<li><strong>Calls inside a tool are not recorded.</strong> Replay never runs the tool, so an extension tool's own model call, or a registry fallback between tools, is not stored.</li>
+<li><strong>One recording per case.</strong> <code>--record</code> cannot be combined with <code>--repeat</code>, <code>--resume</code> or <code>--via</code>.</li>
+</ul>
+<h2 id="continuous-integration">Continuous integration</h2>
+<p><code>.github/workflows/evals.yml</code> has three jobs:</p>
+<ul>
+<li><strong>On every commit to main/master and on pull requests</strong> that touch the system or the harness, it runs the harness tests, the offline plan level and the cassette replay. None of them needs keys.</li>
+<li>The plan level gates on <code>plan.pass_rate=1</code>.</li>
+<li>The replay runs every committed cassette (<code>run --suite &lt;suites with cassettes&gt; --level answer --replay</code>) and fails on any miss. With no cassettes committed, the step is skipped with a notice.</li>
+<li><strong>Weekly and on demand</strong>, it runs retrieval and answers live, using the <code>NVIDIA_API_KEY</code> secret, and gates on <code>retrieval.hit_rate</code> and <code>answer.pass_rate</code>. It uploads <code>eval_runs/</code> as an artifact, so the HTML report can be downloaded from the run page.</li>
+<li><strong>Weekly and on demand, golden.</strong> A third job runs the <code>golden</code> suite at the answer level and then checks it with <code>baseline check --baseline tribos/evals/baselines/golden.json</code>. When no baseline is committed, the check step is skipped with a notice. To commit one, save it from a trusted run with <code>baseline save &lt;run&gt; --baseline tribos/evals/baselines/golden.json</code>.</li>
+</ul>
+<p>The push and pull-request path filters cover:</p>
+<ul>
+<li>the agents and the agentic runtime;</li>
+<li>tools, sources (including <code>sources_extra</code>), drug intelligence, Lithoscribe and <code>tribos/utils/</code> (the model factory, HTTP helpers, biocontext);</li>
+<li>the API (<code>app/</code>) and the harness.</li>
+</ul>
+<h2 id="reading-results-honestly">Reading results honestly</h2>
+<ul>
+<li><strong>A failing case is information.</strong> First check whether the expectation is right; then fix the system. The <code>clin-crispr-screen-design</code> case fails retrieval on purpose: literature search returns applications of CRISPR screens, not design protocols, and that weakness should stay visible.</li>
+<li><strong>Judge scores are relative.</strong> Compare them between runs with the same judge model; do not read them as absolute quality. The judge model may share blind spots with the system under test.</li>
+<li><strong>Expect variance.</strong> Live services and model sampling vary. Compare runs on the same suite, and look at flaky counts before reading a one-case change as a regression.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+        <script src="../javascripts/mathjax.js"></script>
+      
+        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>

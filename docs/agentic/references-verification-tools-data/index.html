@@ -1,0 +1,1831 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Your research partner for engineering and science.">
+      
+      
+      
+        <link rel="canonical" href="https://github.com/AtlasRoX/TribosAI/agentic/references-verification-tools-data/">
+      
+      
+        <link rel="prev" href="../references-agent-loop/">
+      
+      
+        <link rel="next" href="../platform-api/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/logo.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>Verification & Tools - Tribos</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#tribos-agentic-features-verified-literature-and-api-references-verification-memory-tools-data-sources" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Tribos" class="md-header__button md-logo" aria-label="Tribos" data-md-component="logo">
+      
+  <img src="../../assets/logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Tribos
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Verification & Tools
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="cyan"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/AtlasRoX/TribosAI" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    AtlasRoX/TribosAI
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Overview
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+  Architecture & Reasoning
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../archivon/" class="md-tabs__link">
+          
+  
+  
+  Specialist Agents
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../configuration/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Configuration Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../evals/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation Harness
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../developer/" class="md-tabs__link">
+          
+  
+  
+  Developer & Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../CONTRIBUTING/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Tribos" class="md-nav__button md-logo" aria-label="Tribos" data-md-component="logo">
+      
+  <img src="../../assets/logo.png" alt="logo">
+
+    </a>
+    Tribos
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/AtlasRoX/TribosAI" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    AtlasRoX/TribosAI
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture & Reasoning
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture & Reasoning
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agentic System Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../auto-routing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Auto-Routing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../references-agent-loop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reasoning Loop & References
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Verification & Tools
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Verification & Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#8-semantic-claim-verification-with-nli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Semantic claim verification with NLI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-calibrated-per-claim-confidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Calibrated per-claim confidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-sbml-model-calibration-parameter-estimation-and-identifiability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. SBML model calibration, parameter estimation and identifiability
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-structure-and-chemistry-agents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Structure and chemistry agents
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-durable-long-running-agent-jobs-and-living-literature-monitoring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Durable long-running agent jobs and living literature monitoring
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#16-project-level-and-agent-memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        16. Project-level and agent memory
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#17-mcp-server-and-agent-interoperability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17. MCP server and agent interoperability
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#18-tool-retrieval-and-selection-from-a-large-tool-catalogue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        18. Tool retrieval and selection from a large tool catalogue
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#19-tool-reliability-retries-caching-circuit-breakers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        19. Tool reliability (retries, caching, circuit breakers)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#20-new-data-sources-paper-and-live-rest-base-url" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        20. New data sources (paper and live REST base URL)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#guardrails-prompt-injection-from-retrieved-content-and-the-code-sandbox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Guardrails: prompt injection from retrieved content and the code sandbox
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Guardrails: prompt injection from retrieved content and the code sandbox">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#items-left-out-or-flagged" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Items left out or flagged
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../platform-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Platform API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sandbox-security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sandbox Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Specialist Agents
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Specialist Agents
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../archivon/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Archivon (Literature & Theorems)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../axiom/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Axiom (Symbolic Mathematics)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../dynamis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dynamis (Dynamics & Simulation)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../calcula/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Calcula (Computation & Data)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../physis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Physis (Physical & Materials Reference)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../evals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation Harness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer & Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer & Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/TESTING_LINTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing & Linting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/WORKFLOWS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflows & CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cloud/CLOUD_DEPLOYMENT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cloud Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/AZURE_DEPLOYMENT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/SONARCLOUD_SETUP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SonarCloud Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#8-semantic-claim-verification-with-nli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Semantic claim verification with NLI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-calibrated-per-claim-confidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Calibrated per-claim confidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-sbml-model-calibration-parameter-estimation-and-identifiability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. SBML model calibration, parameter estimation and identifiability
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-structure-and-chemistry-agents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Structure and chemistry agents
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-durable-long-running-agent-jobs-and-living-literature-monitoring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Durable long-running agent jobs and living literature monitoring
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#16-project-level-and-agent-memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        16. Project-level and agent memory
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#17-mcp-server-and-agent-interoperability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17. MCP server and agent interoperability
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#18-tool-retrieval-and-selection-from-a-large-tool-catalogue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        18. Tool retrieval and selection from a large tool catalogue
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#19-tool-reliability-retries-caching-circuit-breakers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        19. Tool reliability (retries, caching, circuit breakers)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#20-new-data-sources-paper-and-live-rest-base-url" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        20. New data sources (paper and live REST base URL)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#guardrails-prompt-injection-from-retrieved-content-and-the-code-sandbox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Guardrails: prompt injection from retrieved content and the code sandbox
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Guardrails: prompt injection from retrieved content and the code sandbox">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#items-left-out-or-flagged" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Items left out or flagged
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="tribos-agentic-features-verified-literature-and-api-references-verification-memory-tools-data-sources">Tribos agentic features: verified literature and API references (Verification, Memory, Tools, Data sources)</h1>
+<p>How I checked: titles, first authors, years and venues come from arXiv abstract pages, Crossref DOI metadata (api.crossref.org) or the venue's proceedings pages. I called the REST endpoints with curl on 2026-10-16 and the result of each call is noted. Anything I could not confirm is labelled UNVERIFIED or left out. The "technique we borrow" lines are design notes based on the papers and docs.</p>
+<hr />
+<h2 id="8-semantic-claim-verification-with-nli">8. Semantic claim verification with NLI</h2>
+<ul>
+<li><strong>Fact or Fiction: Verifying Scientific Claims.</strong> Wadden, D. et al., 2020, EMNLP 2020. arXiv:2004.14974; DOI 10.18653/v1/2020.emnlp-main.609. https://arxiv.org/abs/2004.14974</li>
+<li>Borrow: the SciFact task setup. For each (claim, abstract) pair, first pick rationale sentences, then predict a label in {SUPPORTS, REFUTES, NOINFO}. We use the same three labels for each claim and keep the rationale sentence IDs as evidence pointers. The dataset is at github.com/allenai/scifact.</li>
+<li>Verified via: https://arxiv.org/abs/2004.14974</li>
+<li><strong>MultiVerS: Improving scientific claim verification with weak supervision and full-document context.</strong> Wadden, D. et al., submitted 2021, published 2022, Findings of NAACL 2022. arXiv:2112.01640. https://arxiv.org/abs/2112.01640</li>
+<li>Borrow: one Longformer model sees the whole abstract and predicts the label and the rationale together (multitask). We pass full EuropePMC abstracts and do not split them into sentences first. It can be weakly supervised on abstracts that have no rationale annotations.</li>
+<li>Verified via: https://arxiv.org/abs/2112.01640</li>
+<li><strong>FActScore: Fine-grained Atomic Evaluation of Factual Precision in Long Form Text Generation.</strong> Min, S. et al., 2023, EMNLP 2023 (main). arXiv:2305.14251. https://arxiv.org/abs/2305.14251</li>
+<li>Borrow: split each answer into atomic facts with an LLM. Check each fact against retrieved passages. Score = the fraction of atomic facts that are supported. We use this as the per-answer "verified fraction" metric.</li>
+<li>Verified via: https://arxiv.org/abs/2305.14251</li>
+<li><strong>AlignScore: Evaluating Factual Consistency with a Unified Alignment Function.</strong> Zha, Y. et al., 2023, ACL 2023. arXiv:2305.16739. https://arxiv.org/abs/2305.16739</li>
+<li>Borrow: a RoBERTa "alignment" function trained on many tasks. Split the context into chunks and the claim into sentences. For each claim sentence take the best-matching chunk, then average across sentences.</li>
+<li>CPU checkpoints: HF <code>yzha/AlignScore</code>, files <code>AlignScore-base.ckpt</code> (RoBERTa-base, about 125M) and <code>AlignScore-large.ckpt</code> (RoBERTa-large, about 355M). MIT licence.</li>
+<li>Verified via: https://arxiv.org/abs/2305.16739 and https://huggingface.co/yzha/AlignScore</li>
+<li><strong>MiniCheck: Efficient Fact-Checking of LLMs on Grounding Documents.</strong> Tang, L. et al., 2024, EMNLP 2024. arXiv:2404.10774. https://arxiv.org/abs/2404.10774</li>
+<li>Borrow: a small checker that labels each (document, sentence) pair as supported (1) or unsupported (0) and also returns a probability. Long documents are split into chunks and the maximum chunk score is taken. The model card gives no recommended threshold, so we must calibrate one ourselves (see feature 9).</li>
+<li>CPU checkpoints (HF): <code>lytang/MiniCheck-RoBERTa-Large</code> (0.4B), <code>lytang/MiniCheck-DeBERTa-v3-Large</code> (0.4B), <code>lytang/MiniCheck-Flan-T5-Large</code> (base google/flan-t5-large, under 1B, MIT). The larger option is <code>bespokelabs/Bespoke-MiniCheck-7B</code> (7B, GPU).</li>
+<li>Verified via: https://arxiv.org/abs/2404.10774 and https://huggingface.co/lytang/MiniCheck-Flan-T5-Large</li>
+<li><strong>SummaC: Re-Visiting NLI-based Models for Inconsistency Detection in Summarization.</strong> Laban, P. et al., submitted 2021, published 2022, TACL. arXiv:2111.09525. https://arxiv.org/abs/2111.09525</li>
+<li>Borrow: run NLI at sentence level. Build a matrix of entailment scores (source sentences × claim sentences). SummaC-ZS takes the maximum over source sentences for each claim sentence, then averages over claim sentences. SummaC-Conv learns a 1-D convolution over a histogram of the scores. This is the zero-shot baseline we can run with any NLI cross-encoder.</li>
+<li>Verified via: https://arxiv.org/abs/2111.09525</li>
+<li><strong>Generic NLI cross-encoder (not a paper, model card only):</strong> HF <code>cross-encoder/nli-deberta-v3-base</code>. Trained on SNLI and MultiNLI, Apache-2.0. Output label order is <strong>0 = contradiction, 1 = entailment, 2 = neutral</strong>. Hard-code this mapping in the code, because other NLI models order their labels differently. The model card does not mention xsmall, small or large siblings, so check those IDs before using them.</li>
+<li>Verified via: https://huggingface.co/cross-encoder/nli-deberta-v3-base</li>
+</ul>
+<h2 id="9-calibrated-per-claim-confidence">9. Calibrated per-claim confidence</h2>
+<ul>
+<li><strong>Language Models (Mostly) Know What They Know.</strong> Kadavath, S. et al., 2022, arXiv preprint (Anthropic). arXiv:2207.05221. https://arxiv.org/abs/2207.05221</li>
+<li>Borrow: self-evaluation with P(True). The model proposes an answer, then is asked whether the answer is True or False, and we read the probability of "True" as the confidence. The paper also trains a P(IK) ("I know") head.</li>
+<li>Verified via: https://arxiv.org/abs/2207.05221</li>
+<li><strong>Can LLMs Express Their Uncertainty? An Empirical Evaluation of Confidence Elicitation in LLMs.</strong> Xiong, M. et al., 2023, ICLR 2024. arXiv:2306.13063. https://arxiv.org/abs/2306.13063</li>
+<li>Borrow: a three-part recipe of prompting for a stated confidence, sampling several answers, and combining them by consistency. Report ECE and AUROC. We use the stated confidence combined with sample agreement where we can only reach the LLM through an API (NIM) and have no logits.</li>
+<li>Verified via: https://arxiv.org/abs/2306.13063</li>
+<li><strong>Detecting hallucinations in large language models using semantic entropy.</strong> Farquhar, S. et al., 2024, <em>Nature</em> 630(8017):625–630. DOI 10.1038/s41586-024-07421-0. https://doi.org/10.1038/s41586-024-07421-0</li>
+<li>Borrow: sample N answers and group them into meaning clusters using bidirectional entailment (A entails B and B entails A, judged by an NLI model or LLM). Compute the entropy over the clusters. High entropy flags a likely confabulation. We can reuse the feature-8 NLI cross-encoder for the clustering.</li>
+<li>Verified via: https://api.crossref.org/works/10.1038/s41586-024-07421-0</li>
+<li><strong>On Calibration of Modern Neural Networks.</strong> Guo, C. et al., 2017, ICML 2017. arXiv:1706.04599. https://arxiv.org/abs/1706.04599</li>
+<li>Borrow: temperature scaling, which fits one scalar T on a held-out set by minimising NLL and then uses softmax(z/T). Measure with ECE (equal-width bins) and reliability diagrams. We apply it to the logits from the NLI/MiniCheck verifier.</li>
+<li>Verified via: https://arxiv.org/abs/1706.04599</li>
+<li><strong>Conformal Language Modeling.</strong> Quach, V. et al., 2023, ICLR 2024. arXiv:2306.10193. https://arxiv.org/abs/2306.10193</li>
+<li>Borrow: sample candidates, reject low-quality ones, and stop once a calibrated rule is met, so that the returned set contains an acceptable answer with probability at least 1−ε. It can also pick out individual components (sentences) that are confidently correct.</li>
+<li>Verified via: https://arxiv.org/abs/2306.10193</li>
+<li><strong>Language Models with Conformal Factuality Guarantees.</strong> Mohri, C. &amp; Hashimoto, T., 2024, ICML 2024, PMLR 235:36029–36047. arXiv:2402.10978. https://proceedings.mlr.press/v235/mohri24a.html</li>
+<li>Borrow: split the output into sub-claims and score each one. Compute a split-conformal threshold on a calibration set, then drop sub-claims below it ("back-off"). This gives a guarantee that the remaining text is correct with probability at least 1−α (80–90% in the paper). This matches our per-claim pipeline from feature 8.</li>
+<li>Verified via: https://arxiv.org/abs/2402.10978 and https://proceedings.mlr.press/v235/mohri24a.html</li>
+</ul>
+<h2 id="11-sbml-model-calibration-parameter-estimation-and-identifiability">11. SBML model calibration, parameter estimation and identifiability</h2>
+<ul>
+<li><strong>COPASI—a COmplex PAthway SImulator.</strong> Hoops, S. et al., 2006, <em>Bioinformatics</em> 22(24):3067–3074. DOI 10.1093/bioinformatics/btl485. https://doi.org/10.1093/bioinformatics/btl485</li>
+<li>Borrow: COPASI's parameter-estimation task, with its choice of local and global optimisers (e.g. Levenberg–Marquardt, particle swarm, evolutionary programming), and its sensitivity tasks. We drive these through basico.</li>
+<li>Verified via: https://api.crossref.org/works/10.1093/bioinformatics/btl485</li>
+<li><strong>BASICO: A simplified Python interface to COPASI.</strong> Bergmann, F. T. et al., 2023, <em>Journal of Open Source Software</em> 8(90):5553. DOI 10.21105/joss.05553. https://doi.org/10.21105/joss.05553</li>
+<li>Borrow (functions confirmed in the basico API docs): <code>load_biomodel</code>, <code>run_time_course</code>, <code>get_parameters</code>. From <code>basico.task_parameterestimation</code>: <code>add_experiment</code>, <code>set_fit_parameters</code>, <code>run_parameter_estimation</code>, <code>get_fit_statistic</code>, <code>get_parameters_solution</code>. From <code>basico.task_sensitivities</code>: <code>run_sensitivities</code>. I found no built-in profile-likelihood helper in basico. Use pyPESTO for profiles, or write a loop that fixes one parameter at a time and re-runs <code>run_parameter_estimation</code>.</li>
+<li>Verified via: https://api.crossref.org/works/10.21105/joss.05553 and https://basico.readthedocs.io/en/latest/API/basico.html</li>
+<li><strong>Structural and practical identifiability analysis of partially observed dynamical models by exploiting the profile likelihood.</strong> Raue, A. et al., 2009, <em>Bioinformatics</em> 25(15):1923–1929. DOI 10.1093/bioinformatics/btp358. https://doi.org/10.1093/bioinformatics/btp358</li>
+<li>Borrow: the profile likelihood PL(θ_i) = min over θ_{j≠i} of χ²(θ). The confidence interval is where PL rises less than the χ²(α, df) quantile above the optimum (3.84 for a pointwise 95% interval with df = 1). A profile that stays flat means the parameter is structurally non-identifiable. A profile that is open on one side means it is practically non-identifiable.</li>
+<li>Verified via: https://api.crossref.org/works/10.1093/bioinformatics/btp358</li>
+<li><strong>pyPESTO: a modular and scalable tool for parameter estimation for dynamic models.</strong> Schälte, Y. et al., 2023, <em>Bioinformatics</em> 39(11):btad711. DOI 10.1093/bioinformatics/btad711. https://doi.org/10.1093/bioinformatics/btad711</li>
+<li>Borrow: multi-start optimisation, the <code>pypesto.profile</code> module for profiles, sampling for posterior uncertainty, and the PEtab problem format. Use it if we export the basico problem to PEtab.</li>
+<li>Verified via: https://api.crossref.org/works/10.1093/bioinformatics/btad711</li>
+<li><strong>Benchmark problems for dynamic modeling of intracellular processes.</strong> Hass, H. et al. (with Kreutz, C.), 2019, <em>Bioinformatics</em> 35(17):3073–3082. DOI 10.1093/bioinformatics/btz020. https://doi.org/10.1093/bioinformatics/btz020</li>
+<li>Borrow: a set of curated ODE models with real data, which we use as regression tests for the calibration agent (does our pipeline recover published fits and identifiability results?).</li>
+<li>Verified via: https://api.crossref.org/works/10.1093/bioinformatics/btz020</li>
+</ul>
+<h2 id="12-structure-and-chemistry-agents">12. Structure and chemistry agents</h2>
+<ul>
+<li><strong>Highly accurate protein structure prediction with AlphaFold.</strong> Jumper, J. et al., 2021, <em>Nature</em> 596(7873):583–589. DOI 10.1038/s41586-021-03819-2. https://doi.org/10.1038/s41586-021-03819-2</li>
+<li>Borrow: per-residue confidence pLDDT (0–100, with bands below 50, 50–70, 70–90 and above 90) and PAE. The agent should report both alongside any structure-based claim.</li>
+<li>Verified via: https://api.crossref.org/works/10.1038/s41586-021-03819-2</li>
+<li><strong>AlphaFold Protein Structure Database: massively expanding the structural coverage of protein-sequence space with high-accuracy models.</strong> Varadi, M. et al., 2022 (online Nov 2021), <em>Nucleic Acids Res.</em> 50(D1):D439–D444. DOI 10.1093/nar/gkab1061.</li>
+<li>Verified via: https://api.crossref.org/works/10.1093/nar/gkab1061</li>
+<li><strong>AlphaFold Protein Structure Database in 2024: providing structure coverage for over 214 million protein sequences.</strong> Varadi, M. et al., 2024, <em>Nucleic Acids Res.</em> 52(D1):D368–D375. DOI 10.1093/nar/gkad1011.</li>
+<li>API: <code>GET https://alphafold.ebi.ac.uk/api/prediction/{UniProt accession}</code>. Live check on P04637 returned 200 with a JSON array containing <code>modelEntityId</code> "AF-P04637-F1", <code>toolUsed</code> and related fields. The response also links to PDB/mmCIF/PAE files.</li>
+<li>Verified via: https://api.crossref.org/works/10.1093/nar/gkad1011 and a live call to https://alphafold.ebi.ac.uk/api/prediction/P04637</li>
+<li><strong>Evolutionary-scale prediction of atomic-level protein structure with a language model (ESMFold / ESM-2).</strong> Lin, Z. et al., 2023, <em>Science</em> 379(6637):1123–1130. DOI 10.1126/science.ade2574.</li>
+<li>NIM: <code>POST https://health.api.nvidia.com/v1/biology/nvidia/esmfold</code>. An unauthenticated call returned 401 "authorization missing", while a made-up path under the same host returned 404, so the route exists. I could not fetch an official docs page for the request schema, so the body field name is UNVERIFIED (commonly <code>{"sequence": "..."}</code>). Check it on build.nvidia.com/meta/esmfold before coding against it.</li>
+<li>Verified via: https://api.crossref.org/works/10.1126/science.ade2574 and a live endpoint probe</li>
+<li><strong>DiffDock: Diffusion Steps, Twists, and Turns for Molecular Docking.</strong> Corso, G. et al., 2022 (arXiv), ICLR 2023. arXiv:2210.01776. https://arxiv.org/abs/2210.01776</li>
+<li>Borrow: a generative docking model that ranks poses with a confidence model. NIM: <code>POST https://health.api.nvidia.com/v1/biology/mit/diffdock</code> (OpenAPI path <code>/molecular-docking/diffdock/generate</code>). It needs a Bearer <code>NVIDIA_API_KEY</code>. Body fields: <code>protein</code> (PDB text), <code>ligand</code> (text), <code>ligand_file_type</code> (mol2, sdf or txt), <code>num_poses</code> (default 10, max 100), <code>time_divisions</code> (≤20), <code>steps</code> (≤18), <code>save_trajectory</code>, <code>skip_gen_conformer</code>, <code>is_staged</code>.</li>
+<li>Verified via: https://arxiv.org/abs/2210.01776 and https://docs.api.nvidia.com/nim/reference/mit-diffdock-infer (live probe returned 401)</li>
+<li><strong>Improving Small Molecule Generation using Mutual Information Machine (MolMIM).</strong> Reidenbach, D. et al., 2022 (v2 2023), MLDD workshop at ICLR 2023. arXiv:2208.09016. https://arxiv.org/abs/2208.09016</li>
+<li>Borrow: generate molecules in latent space, steered by CMA-ES. NIM endpoints (self-hosted, all POST): <code>/generate</code>, <code>/embedding</code>, <code>/hidden</code>, <code>/decode</code>, <code>/sampling</code>. <code>/generate</code> takes <code>smi</code> (seed SMILES), <code>algorithm</code> ("CMA-ES" or "none"), <code>num_molecules</code> (1–100), <code>property_name</code> ("QED" or "plogP"), <code>min_similarity</code> (0–0.7). Hosted: <code>POST https://health.api.nvidia.com/v1/biology/nvidia/molmim/generate</code> (live probe returned 401, so the route exists).</li>
+<li>Verified via: https://arxiv.org/abs/2208.09016 and https://docs.nvidia.com/nim/bionemo/molmim/latest/endpoints.html</li>
+<li><strong>RCSB Protein Data Bank (RCSB.org): delivery of experimentally-determined PDB structures alongside one million computed structure models of proteins from artificial intelligence/machine learning.</strong> Burley, S. K. et al., 2023, <em>Nucleic Acids Res.</em> 51(D1):D488–D508. DOI 10.1093/nar/gkac1077.</li>
+<li>API: Data API <code>GET https://data.rcsb.org/rest/v1/core/entry/{PDB_ID}</code> (live 200 for 4HHB). Search API <code>https://search.rcsb.org/rcsbsearch/v2/query?json=...</code> (live 200 for a full_text "TP53" query).</li>
+<li>Verified via: https://api.crossref.org/works/10.1093/nar/gkac1077 and live calls</li>
+</ul>
+<h2 id="13-durable-long-running-agent-jobs-and-living-literature-monitoring">13. Durable long-running agent jobs and living literature monitoring</h2>
+<ul>
+<li><strong>LangGraph Persistence (docs, not a paper).</strong> https://docs.langchain.com/oss/python/langgraph/persistence</li>
+<li>Borrow: checkpointers that save graph state for each <code>thread_id</code>, passed as <code>{"configurable": {"thread_id": ...}}</code>. Options are <code>InMemorySaver</code> (development only, lost on restart), <code>SqliteSaver</code> (local file) and <code>PostgresSaver</code>/<code>AsyncPostgresSaver</code> (production). <code>thread_id</code> must be 255 characters or fewer with Postgres. The checkpoints also support human-in-the-loop interrupts and resume. The old <code>/durable-execution</code> URL now loads this Persistence page (it has a <code>#durability-modes</code> anchor with no visible text), so cite the Persistence URL. Related page: https://docs.langchain.com/oss/python/langgraph/checkpointers</li>
+<li>Verified via: https://docs.langchain.com/oss/python/langgraph/persistence</li>
+<li><strong>Living Systematic Reviews: An Emerging Opportunity to Narrow the Evidence-Practice Gap.</strong> Elliott, J. H. et al., 2014, <em>PLoS Medicine</em> 11(2):e1001603. DOI 10.1371/journal.pmed.1001603.</li>
+<li>Borrow: the idea of a review that is updated continuously as new evidence is published. This justifies scheduled EuropePMC and bioRxiv re-queries that update a saved project's claims.</li>
+<li>Verified via: https://api.crossref.org/works/10.1371/journal.pmed.1001603</li>
+<li><strong>Living systematic review: 1. Introduction—the why, what, when, and how.</strong> Elliott, J. H. et al., 2017, <em>J. Clin. Epidemiol.</em> 91:23–30. DOI 10.1016/j.jclinepi.2017.08.010.</li>
+<li>Borrow: the operational rules. Search on a fixed, stated schedule (e.g. monthly). Fold new evidence in promptly. Say up front when the review is updated and when it stops being "living".</li>
+<li>Verified via: https://api.crossref.org/works/10.1016/j.jclinepi.2017.08.010</li>
+<li>I did not verify a peer-reviewed paper on durable execution for LLM agents specifically, so none is listed.</li>
+</ul>
+<h2 id="16-project-level-and-agent-memory">16. Project-level and agent memory</h2>
+<ul>
+<li><strong>MemGPT: Towards LLMs as Operating Systems.</strong> Packer, C. et al., 2023, arXiv. arXiv:2310.08560. https://arxiv.org/abs/2310.08560</li>
+<li>Borrow: memory split into tiers like an operating system. "Main context" is the working memory inside the prompt, and archival and recall storage live outside it. The agent moves information between tiers with function calls (it "pages" memory in and out).</li>
+<li>Verified via: https://arxiv.org/abs/2310.08560</li>
+<li><strong>Generative Agents: Interactive Simulacra of Human Behavior.</strong> Park, J. S. et al., 2023, UIST '23 (ACM), pp. 1–22. arXiv:2304.03442; DOI 10.1145/3586183.3606763.</li>
+<li>Borrow: a memory stream ranked by a weighted sum of recency (exponential decay), importance (an LLM-rated score from 1 to 10) and relevance (embedding cosine). The agent also periodically writes "reflections" that summarise higher-level insights.</li>
+<li>Verified via: https://arxiv.org/abs/2304.03442 and https://api.crossref.org/works/10.1145/3586183.3606763</li>
+<li><strong>Mem0: Building Production-Ready AI Agents with Scalable Long-Term Memory.</strong> Chhikara, P. et al., 2025, arXiv. arXiv:2504.19413. https://arxiv.org/abs/2504.19413</li>
+<li>Borrow: an extract-then-update loop. Pull candidate memories out of each exchange, then have an LLM choose ADD, UPDATE, DELETE or NOOP against similar existing memories. There is also a graph variant.</li>
+<li>Verified via: https://arxiv.org/abs/2504.19413</li>
+<li><strong>Zep: A Temporal Knowledge Graph Architecture for Agent Memory.</strong> Rasmussen, P. et al., 2025, arXiv. arXiv:2501.13956. https://arxiv.org/abs/2501.13956</li>
+<li>Borrow: Graphiti's bi-temporal edges. Each fact records when it was true and when it was ingested. When a new fact contradicts an old one, the old fact is marked invalid rather than deleted. This suits project memory where findings get revised over time.</li>
+<li>Verified via: https://arxiv.org/abs/2501.13956</li>
+<li><strong>HippoRAG: Neurobiologically Inspired Long-Term Memory for Large Language Models.</strong> Gutiérrez, B. J. et al., 2024, NeurIPS 2024. arXiv:2405.14831. https://arxiv.org/abs/2405.14831</li>
+<li>Borrow: an LLM extracts an open knowledge graph, and Personalized PageRank is run from the entities in the query to retrieve across multiple hops. This fits well with our PrimeKG graph.</li>
+<li>Verified via: https://arxiv.org/abs/2405.14831</li>
+<li><strong>A-MEM: Agentic Memory for LLM Agents.</strong> Xu, W. et al., 2025, NeurIPS 2025. arXiv:2502.12110. https://arxiv.org/abs/2502.12110</li>
+<li>Borrow: memory notes in the Zettelkasten style, each with keywords, tags and links. The links are created and updated by the LLM, and the notes evolve as new memories arrive.</li>
+<li>Verified via: https://arxiv.org/abs/2502.12110</li>
+</ul>
+<h2 id="17-mcp-server-and-agent-interoperability">17. MCP server and agent interoperability</h2>
+<ul>
+<li><strong>Model Context Protocol specification (not a paper).</strong> The current version is <strong>2026-07-28</strong>: https://modelcontextprotocol.io/specification/2026-07-28/</li>
+<li>Note: this version uses per-request version negotiation through <code>_meta["io.modelcontextprotocol/protocolVersion"]</code> and the <code>MCP-Protocol-Version</code> header on Streamable HTTP, plus a required <code>server/discover</code> RPC. Revisions <code>2025-11-25</code> and earlier use the initialize-handshake model and have a backward-compatibility section. If we pin an older SDK, cite https://modelcontextprotocol.io/specification/2025-11-25/ instead.</li>
+<li>Verified via: https://modelcontextprotocol.io/specification/versioning</li>
+<li><strong>Agent2Agent (A2A) Protocol specification (not a paper).</strong> Latest released version is <strong>1.0.0</strong> (earlier: 0.3.0, 0.2.6, 0.1.0). The page says A2A has joined the Agentic AI Foundation. https://a2a-protocol.org/latest/specification/</li>
+<li>Borrow: an Agent Card served at <code>https://{domain}/.well-known/agent-card.json</code>. Bindings: JSON-RPC, gRPC and HTTP+JSON/REST. Methods: <code>SendMessage</code>, <code>SendStreamingMessage</code>, <code>GetTask</code>, <code>ListTasks</code>, <code>CancelTask</code>, <code>SubscribeToTask</code>, the push-notification config CRUD methods, and <code>GetExtendedAgentCard</code>. In v1.0 these names are PascalCase; the older slash names such as <code>message/send</code> came from versions before 1.0.</li>
+<li>Verified via: https://a2a-protocol.org/latest/specification/</li>
+<li><strong>Model Context Protocol (MCP): Landscape, Security Threats, and Future Research Directions.</strong> Hou, X. et al., 2025, arXiv. arXiv:2503.23278. https://arxiv.org/abs/2503.23278</li>
+<li>Borrow: the paper's threat taxonomy across the MCP server lifecycle (creation, operation, update), covering risks such as tool poisoning, name collisions, and configuration drift or privilege persistence. We use it as a checklist when exposing Tribos tools as an MCP server.</li>
+<li>Verified via: https://arxiv.org/abs/2503.23278</li>
+</ul>
+<h2 id="18-tool-retrieval-and-selection-from-a-large-tool-catalogue">18. Tool retrieval and selection from a large tool catalogue</h2>
+<ul>
+<li><strong>ToolLLM: Facilitating Large Language Models to Master 16000+ Real-world APIs.</strong> Qin, Y. et al., 2023 (arXiv), ICLR 2024. arXiv:2307.16789. https://proceedings.iclr.cc/paper_files/paper/2024/hash/28e50ee5b72e90b50e7196fde8ea260e-Abstract-Conference.html</li>
+<li>Borrow: a neural API retriever that picks the top-k tools for each instruction, DFSDT (depth-first search over a decision tree, which lets the agent back off from failed tool paths), and ToolEval pass/win rates.</li>
+<li>Verified via: https://arxiv.org/abs/2307.16789 and the ICLR proceedings link above</li>
+<li><strong>Gorilla: Large Language Model Connected with Massive APIs.</strong> Patil, S. G. et al., 2023 (arXiv), NeurIPS 2024. arXiv:2305.15334. https://proceedings.neurips.cc/paper_files/paper/2024/file/e4c61f578ff07830f5c37378dd3ecb0d-Paper-Conference.pdf</li>
+<li>Borrow: retriever-aware training, meaning the retrieved API documentation is put in the prompt so the model stays correct when the docs change. Also the AST sub-tree matching check for hallucinated API calls.</li>
+<li>Verified via: https://arxiv.org/abs/2305.15334 and https://neurips.cc/virtual/2024/poster/93353</li>
+<li><strong>Democratizing AI scientists using ToolUniverse.</strong> Gao, S. et al. (with Zitnik, M.), 2025, arXiv. arXiv:2509.23426. https://arxiv.org/abs/2509.23426</li>
+<li>Borrow: a standard tool specification over more than 600 biomedical tools, with "Tool Finder" retrieval, and tools that can be refined or generated from natural-language descriptions. Code is at github.com/mims-harvard/ToolUniverse. It already wraps DepMap and NVIDIA NIM tools, which we can use as a reference implementation.</li>
+<li>Verified via: https://arxiv.org/abs/2509.23426v1</li>
+<li><strong>Re-Invoke: Tool Invocation Rewriting for Zero-Shot Tool Retrieval.</strong> Chen, Y. et al., 2024, Findings of EMNLP 2024. arXiv:2408.01875. https://arxiv.org/abs/2408.01875</li>
+<li>Borrow: at indexing time, an LLM writes synthetic queries for each tool document. At query time, the user's intent is extracted and tools are ranked across intents. No training is needed.</li>
+<li>Verified via: https://arxiv.org/abs/2408.01875</li>
+<li><strong>Toolshed: Scale Tool-Equipped Agents with Advanced RAG-Tool Fusion and Tool Knowledge Bases.</strong> Lumer, E. et al., 2024, arXiv. arXiv:2410.14594. https://arxiv.org/abs/2410.14594</li>
+<li>Borrow: three stages. Before retrieval, enrich each tool document (questions, keywords). During retrieval, rewrite and expand the query. After retrieval, rerank the results.</li>
+<li>Verified via: https://arxiv.org/abs/2410.14594</li>
+<li><strong>Retrieval Models Aren't Tool-Savvy: Benchmarking Tool Retrieval for Large Language Models (ToolRet).</strong> Shi, Z. et al., 2025, ACL 2025. arXiv:2503.01763. https://arxiv.org/abs/2503.01763</li>
+<li>Borrow: an evaluation benchmark and method (code: github.com/mangopy/tool-retrieval-benchmark). Its finding is that generic IR embedders do badly on tool retrieval, so we should measure recall@k on our own catalogue.</li>
+<li>Verified via: https://arxiv.org/abs/2503.01763</li>
+</ul>
+<h2 id="19-tool-reliability-retries-caching-circuit-breakers">19. Tool reliability (retries, caching, circuit breakers)</h2>
+<ul>
+<li><strong>Identifying the Risks of LM Agents with an LM-Emulated Sandbox (ToolEmu).</strong> Ruan, Y. et al., 2023 (arXiv), ICLR 2024 (Spotlight). arXiv:2309.15817. https://arxiv.org/abs/2309.15817</li>
+<li>Borrow: an LLM emulates tool execution, including adversarial edge cases, so the agent can be tested without calling the real API. An LLM safety evaluator scores the risk. We use this as a test harness for failure handling.</li>
+<li>Verified via: https://arxiv.org/abs/2309.15817 and https://iclr.cc/virtual/2024/poster/19037</li>
+<li><strong>ToolSword: Unveiling Safety Issues of Large Language Models in Tool Learning Across Three Stages.</strong> Ye, J. et al., 2024, ACL 2024 (Long Papers). arXiv:2402.10753. https://arxiv.org/abs/2402.10753</li>
+<li>Borrow: test scenarios grouped by stage. Input stage: malicious queries and jailbreaks. Execution stage: noisy misdirection and risky cues. Output stage: harmful feedback and error conflicts. Noisy or erroneous tool output is the case most relevant to our retry and validation layer.</li>
+<li>Verified via: https://arxiv.org/abs/2402.10753</li>
+<li><strong>API-Bank: A Comprehensive Benchmark for Tool-Augmented LLMs.</strong> Li, M. et al., 2023, EMNLP 2023. arXiv:2304.08244. https://arxiv.org/abs/2304.08244</li>
+<li>Borrow: an error taxonomy for API calls (no call, wrong API name, bad parameters, hallucinated response). Use it to label failures in our tool-call telemetry.</li>
+<li>Verified via: https://arxiv.org/abs/2304.08244</li>
+<li><strong>Circuit Breaker (article, not a paper).</strong> Fowler, M., 6 March 2014. https://martinfowler.com/bliki/CircuitBreaker.html</li>
+<li>Borrow: three states. Closed: calls go through and failures are counted. Open: after a failure threshold, calls fail fast. Half-open: after a timeout, one trial call is allowed; success closes the breaker and failure re-opens it. Fowler credits Michael Nygard's <em>Release It!</em> for popularising the pattern. I did not separately verify the book's edition or ISBN.</li>
+<li>Verified via: https://martinfowler.com/bliki/CircuitBreaker.html</li>
+</ul>
+<h2 id="20-new-data-sources-paper-and-live-rest-base-url">20. New data sources (paper and live REST base URL)</h2>
+<ul>
+<li><strong>GWAS Catalog.</strong> Sollis, E. et al., 2023, "The NHGRI-EBI GWAS Catalog: knowledgebase and deposition resource", <em>Nucleic Acids Res.</em> 51(D1):D977–D985, DOI 10.1093/nar/gkac1010. Newer paper: Cerezo, M. et al., 2025, "The NHGRI-EBI GWAS Catalog: standards for reusability, sustainability and diversity", <em>Nucleic Acids Res.</em> 53(D1):D998–D1005, DOI 10.1093/nar/gkae1070. The Cerezo record is verified from search and abstract mirrors only; I did not check it on Crossref.</li>
+<li>API: <strong>use v2 only: <code>https://www.ebi.ac.uk/gwas/rest/api/v2</code></strong>. The legacy <code>https://www.ebi.ac.uk/gwas/rest/api/...</code> now returns <strong>HTTP 410 Gone</strong>, and the docs say "V1 was retired in August 2026". The summary-statistics API has also been retired and has no replacement. Live check: <code>GET /gwas/rest/api/v2/studies/GCST000854</code> returned 200. Reference: https://www.ebi.ac.uk/gwas/rest/api/v2/docs/reference. The docs also list an official GWAS Catalog MCP server.</li>
+<li>Verified via: https://api.crossref.org/works/10.1093/nar/gkac1010, https://www.ebi.ac.uk/gwas/docs/programmatic-access/rest-api, and live calls</li>
+<li><strong>DepMap.</strong> Tsherniak, A. et al., 2017, "Defining a Cancer Dependency Map", <em>Cell</em> 170(3):564–576.e16, DOI 10.1016/j.cell.2017.06.010. Arafeh, R. et al., 2025 (online Oct 2024), "The present and future of the Cancer Dependency Map", <em>Nat. Rev. Cancer</em> 25(1):59–73, DOI 10.1038/s41568-024-00763-x.</li>
+<li>API: <code>https://depmap.org/portal/api/</code> exists, but scripted clients get a bot-verification ("DepMap — Verification") HTML page, including on <code>/portal/api/download/files</code>. A DepMap forum reply says all releases are published on Figshare (e.g. https://figshare.com/articles/dataset/DepMap_23Q2_Public/22765112), and Figshare has its own API. The safer plan is to download release CSVs (CRISPRGeneEffect etc.) from Figshare or the portal and cache them locally, rather than query per gene. The Sanger side, Cell Model Passports, has a separate documented JSON:API at <code>https://api.cellmodelpassports.sanger.ac.uk</code> (non-commercial use). Per-gene portal routes are UNVERIFIED.</li>
+<li>Verified via: https://api.crossref.org/works/10.1016/j.cell.2017.06.010, https://api.crossref.org/works/10.1038/s41568-024-00763-x, live probe</li>
+<li><strong>GTEx.</strong> GTEx Consortium, 2020, "The GTEx Consortium atlas of genetic regulatory effects across human tissues", <em>Science</em> 369(6509):1318–1330, DOI 10.1126/science.aaz1776.</li>
+<li>API: <code>https://gtexportal.org/api/v2/</code>. Live check: <code>GET /api/v2/reference/gene?geneId=TP53</code> returned 200 with gencodeId ENSG00000141510.16.</li>
+<li>Verified via: https://api.crossref.org/works/10.1126/science.aaz1776 and live call</li>
+<li><strong>STRING.</strong> Szklarczyk, D. et al., 2023, "The STRING database in 2023: protein–protein association networks and functional enrichment analyses for any sequenced genome of interest", <em>Nucleic Acids Res.</em> 51(D1):D638–D646, DOI 10.1093/nar/gkac1000. Newer paper: Szklarczyk, D. et al., 2025, "The STRING database in 2025: protein networks with directionality of regulation", <em>Nucleic Acids Res.</em> 53(D1):D730–D737, DOI 10.1093/nar/gkae1113.</li>
+<li>API: <code>https://string-db.org/api/{format}/{method}</code>. Live: <code>/api/json/version</code> returned 12.5 (stable address https://version-12-5.string-db.org). <code>/api/json/network?identifiers=TP53&amp;species=9606</code> returned 200 with a combined <code>score</code> per edge. Pin the stable versioned address so results are reproducible.</li>
+<li>Verified via: Crossref (both DOIs) and live calls</li>
+<li><strong>Reactome.</strong> Milacic, M. et al., 2024, "The Reactome Pathway Knowledgebase 2024", <em>Nucleic Acids Res.</em> 52(D1):D672–D678, DOI 10.1093/nar/gkad1025.</li>
+<li>API: <code>https://reactome.org/ContentService/</code>. Live: <code>/ContentService/data/database/version</code> returned 97.</li>
+<li>Verified via: https://api.crossref.org/works/10.1093/nar/gkad1025 and live call</li>
+<li><strong>DrugBank 6.0.</strong> Knox, C. et al., 2024, "DrugBank 6.0: the DrugBank Knowledgebase for 2024", <em>Nucleic Acids Res.</em> 52(D1):D1265–D1275, DOI 10.1093/nar/gkad976.</li>
+<li>Licence: the full data and the API need a DrugBank account and licence (free academic licence for non-commercial use, paid for commercial use), so we cannot ship or redistribute DrugBank data by default. I did not re-check the licence terms page in this pass, so this is from background knowledge. Make DrugBank an opt-in, bring-your-own-key connector, and use ChEMBL and PubChem as the default sources.</li>
+<li>Verified via: https://api.crossref.org/works/10.1093/nar/gkad976</li>
+<li><strong>PubChem.</strong> Kim, S. et al., 2025, "PubChem 2025 update", <em>Nucleic Acids Res.</em> 53(D1):D1516–D1525, DOI 10.1093/nar/gkae1059.</li>
+<li>API (PUG-REST): <code>https://pubchem.ncbi.nlm.nih.gov/rest/pug/&lt;domain&gt;/&lt;namespace&gt;/&lt;identifiers&gt;/&lt;operation&gt;/&lt;output&gt;</code>. Live: <code>/compound/name/aspirin/property/MolecularFormula,CanonicalSMILES/JSON</code> returned 200 with CID 2244. <strong>Implementation note:</strong> the response key is now <code>ConnectivitySMILES</code>, not <code>CanonicalSMILES</code>, so parsers must accept both names (or request <code>SMILES</code> / <code>ConnectivitySMILES</code> explicitly).</li>
+<li>Verified via: https://api.crossref.org/works/10.1093/nar/gkae1059 and live call</li>
+<li><strong>bioRxiv / medRxiv API (no database paper verified).</strong> <code>https://api.biorxiv.org/</code></li>
+<li>Endpoints: <code>/details/[server]/[interval]/[cursor]/[format]</code> (30 results per page), <code>/pubs/...</code> (100 per page; preprint-to-published links), <code>/publisher/...</code>, <code>/funder/...</code>, <code>/sum/...</code>, <code>/usage/...</code>. The interval can be <code>YYYY-MM-DD/YYYY-MM-DD</code>, <code>N</code> (most recent N items) or <code>Nd</code> (last N days). Live: <code>/details/biorxiv/2024-01-01/2024-01-02/0</code> returned 200 with <code>messages[0].total</code>. Page through results by increasing the cursor. This is the source for the living-review monitor in feature 13.</li>
+<li>Verified via: https://api.biorxiv.org/ and live call</li>
+</ul>
+<h2 id="guardrails-prompt-injection-from-retrieved-content-and-the-code-sandbox">Guardrails: prompt injection from retrieved content and the code sandbox</h2>
+<ul>
+<li><strong>Not What You've Signed Up For: Compromising Real-World LLM-Integrated Applications with Indirect Prompt Injection.</strong> Greshake, K. et al., 2023, AISec '23 (16th ACM Workshop on AI and Security), pp. 79–90. arXiv:2302.12173; DOI 10.1145/3605764.3623985.</li>
+<li>Borrow: the threat model. Any text we retrieve (abstracts, web pages, tool outputs) can carry hidden instructions. Treat all of it as data, never as instructions, especially before passing it to the code sandbox or any tool that has side effects.</li>
+<li>Verified via: https://arxiv.org/abs/2302.12173 and https://api.crossref.org/works/10.1145/3605764.3623985</li>
+<li><strong>Defending Against Indirect Prompt Injection Attacks With Spotlighting.</strong> Hines, K. et al., 2024, arXiv (Microsoft). arXiv:2403.14720. https://arxiv.org/abs/2403.14720</li>
+<li>Borrow: three transforms applied to untrusted text. (1) Delimiting: wrap it in markers. This is the weakest option because an attacker who knows the markers can get around them. (2) <strong>Datamarking</strong>: replace whitespace with a special token such as <code>ˆ</code> and tell the model that marked text is data. This cut ASR from about 50% to under 3% for summarisation on GPT-3.5. (3) Encoding: base64-encode the text. This gives the best ASR but hurts task quality on weaker models. Overall the paper reports ASR falling from over 50% to under 2%. Datamarking is cheap and model-agnostic, so it is our default.</li>
+<li>Verified via: https://arxiv.org/html/2403.14720</li>
+<li><strong>StruQ: Defending Against Prompt Injection with Structured Queries.</strong> Chen, S. et al., 2024, USENIX Security 2025. arXiv:2402.06363. https://arxiv.org/abs/2402.06363</li>
+<li>Borrow: keep the prompt and the data in separate channels, using reserved delimiter tokens that are stripped from the data, and fine-tune the model to follow instructions only from the prompt channel. Fine-tuning is out of scope for NIM models, but the front-end idea still applies: separate channels and filter reserved tokens out of retrieved text.</li>
+<li>Verified via: https://arxiv.org/abs/2402.06363</li>
+</ul>
+<hr />
+<h3 id="items-left-out-or-flagged">Items left out or flagged</h3>
+<ul>
+<li>MultiVerS checkpoints on HuggingFace: I did not verify a HuggingFace model ID for them, so none is given.</li>
+<li>NLI cross-encoder siblings (<code>cross-encoder/nli-deberta-v3-xsmall</code>, <code>-small</code>, <code>-large</code>): the base model card does not mention them, so check each ID before use.</li>
+<li>ESMFold NIM request body schema: the route was confirmed with a live 401/404 comparison, but I could not load the docs page.</li>
+<li>DepMap per-gene REST routes: the portal API is behind bot verification from scripted clients.</li>
+<li>No peer-reviewed paper on durable execution for agents was verified. The LangGraph docs are the reference.</li>
+<li>DrugBank licence details come from background knowledge and were not re-checked.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+        <script src="../../javascripts/mathjax.js"></script>
+      
+        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>

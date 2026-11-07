@@ -1,0 +1,3840 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Your research partner for engineering and science.">
+      
+      
+      
+        <link rel="canonical" href="https://github.com/AtlasRoX/TribosAI/configuration/">
+      
+      
+        <link rel="prev" href="../physis/">
+      
+      
+        <link rel="next" href="../evals/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/logo.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>Configuration Reference - Tribos</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#configuration-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Tribos" class="md-header__button md-logo" aria-label="Tribos" data-md-component="logo">
+      
+  <img src="../assets/logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Tribos
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Configuration Reference
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="cyan"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/AtlasRoX/TribosAI" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    AtlasRoX/TribosAI
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Overview
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../agentic/" class="md-tabs__link">
+          
+  
+  
+  Architecture & Reasoning
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../archivon/" class="md-tabs__link">
+          
+  
+  
+  Specialist Agents
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Configuration Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../evals/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation Harness
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../developer/" class="md-tabs__link">
+          
+  
+  
+  Developer & Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../CONTRIBUTING/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Tribos" class="md-nav__button md-logo" aria-label="Tribos" data-md-component="logo">
+      
+  <img src="../assets/logo.png" alt="logo">
+
+    </a>
+    Tribos
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/AtlasRoX/TribosAI" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    AtlasRoX/TribosAI
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture & Reasoning
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture & Reasoning
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agentic/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agentic System Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agentic/auto-routing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Auto-Routing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agentic/references-agent-loop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reasoning Loop & References
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agentic/references-verification-tools-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Verification & Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agentic/platform-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Platform API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agentic/sandbox-security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sandbox Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Specialist Agents
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Specialist Agents
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../archivon/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Archivon (Literature & Theorems)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../axiom/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Axiom (Symbolic Mathematics)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dynamis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dynamis (Dynamics & Simulation)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../calcula/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Calcula (Computation & Data)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../physis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Physis (Physical & Materials Reference)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration Reference
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#state-directories" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        State directories
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#retention-and-maintenance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retention and maintenance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authentication
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#api-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API server
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tribos_mcp_-mcp-and-a2a-endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TRIBOS_MCP_*: MCP and A2A endpoints
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tribos_job_-background-jobs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TRIBOS_JOB_*: Background jobs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#models-and-llm-providers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Models and LLM providers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tribos_agent_-agentic-runtime" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TRIBOS_AGENT_*: Agentic runtime
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tribos_mem0_-research-memory-mem0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TRIBOS_MEM0_*: Research memory (Mem0)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tribos_nli_-claim-verification-nli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TRIBOS_NLI_*: Claim verification (NLI)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tribos_confidence_-confidence-calibration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TRIBOS_CONFIDENCE_*: Confidence calibration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#query-planning-and-synthesis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Query planning and synthesis
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tool-reliability-and-cache" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tool reliability and cache
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#web-search" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Web search
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data sources
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tribos_upload_-uploads-and-datasets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TRIBOS_UPLOAD_*: Uploads and datasets
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#simulation-and-single-cell-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Simulation and single-cell analysis
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tribos_sandbox_-code-sandbox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TRIBOS_SANDBOX_*: Code sandbox
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tribos_math_-mathematics-agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TRIBOS_MATH_*: Mathematics agent
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tribos_vision_-image-input-ocr-and-vision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TRIBOS_VISION_*: Image input (OCR and vision)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tribos_eval_-evaluations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TRIBOS_EVAL_*: Evaluations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../evals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation Harness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer & Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer & Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../developer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../developer/TESTING_LINTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing & Linting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../developer/WORKFLOWS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflows & CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cloud/CLOUD_DEPLOYMENT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cloud Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../developer/AZURE_DEPLOYMENT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../developer/SONARCLOUD_SETUP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SonarCloud Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#state-directories" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        State directories
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#retention-and-maintenance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retention and maintenance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authentication
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#api-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API server
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tribos_mcp_-mcp-and-a2a-endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TRIBOS_MCP_*: MCP and A2A endpoints
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tribos_job_-background-jobs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TRIBOS_JOB_*: Background jobs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#models-and-llm-providers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Models and LLM providers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tribos_agent_-agentic-runtime" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TRIBOS_AGENT_*: Agentic runtime
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tribos_mem0_-research-memory-mem0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TRIBOS_MEM0_*: Research memory (Mem0)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tribos_nli_-claim-verification-nli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TRIBOS_NLI_*: Claim verification (NLI)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tribos_confidence_-confidence-calibration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TRIBOS_CONFIDENCE_*: Confidence calibration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#query-planning-and-synthesis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Query planning and synthesis
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tool-reliability-and-cache" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tool reliability and cache
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#web-search" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Web search
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data sources
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tribos_upload_-uploads-and-datasets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TRIBOS_UPLOAD_*: Uploads and datasets
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#simulation-and-single-cell-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Simulation and single-cell analysis
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tribos_sandbox_-code-sandbox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TRIBOS_SANDBOX_*: Code sandbox
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tribos_math_-mathematics-agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TRIBOS_MATH_*: Mathematics agent
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tribos_vision_-image-input-ocr-and-vision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TRIBOS_VISION_*: Image input (OCR and vision)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tribos_eval_-evaluations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TRIBOS_EVAL_*: Evaluations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="configuration-reference">Configuration reference</h1>
+<!-- Generated by scripts/gen_env_reference.py; do not edit by hand. -->
+
+<p>Every environment variable read by <code>tribos/</code> and <code>app/</code> (tests excluded). Types, defaults and descriptions
+come from the settings registry (<code>tribos/config/settings.py</code>); the "Read at" column comes from scanning the
+code. Regenerate with <code>python scripts/gen_env_reference.py</code>; CI can run it with <code>--check</code>, which also fails when a
+variable read in the code is not registered. A commented template is in
+<a href="https://github.com/AtlasRoX/TribosAI/blob/main/.env.example"><code>.env.example</code></a>.</p>
+<p>At startup the API validates the environment (<code>tribos.config.validate_environment</code>): unparsable or
+out-of-range numbers, unknown choices, non-boolean flags and <code>TRIBOS_*</code> names that no code reads (likely
+typos) are logged as warnings, counted in <code>config_problems</code> on <code>/api/health</code>, and fail startup only with
+<code>TRIBOS_STRICT_CONFIG=1</code>. Invalid values fall back to the default.</p>
+<p>Precedence for state directories: a specific variable (<code>TRIBOS_MEMORY_DIR</code>, <code>TRIBOS_RUNS_DIR</code>,
+<code>TRIBOS_UPLOAD_ROOT</code>, <code>TRIBOS_JOBS_DIR</code>, <code>TRIBOS_TOOL_CACHE_DIR</code>) wins over <code>TRIBOS_DATA_DIR</code>; with
+neither set, every store keeps its historical location under the workspace.</p>
+<p>243 variables.</p>
+<h2 id="state-directories">State directories</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Type</th>
+<th>Default</th>
+<th>Read at</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TRIBOS_CAMPAIGNS_DIR</code></td>
+<td>path</td>
+<td>unset</td>
+<td><code>tribos/agentic/campaign.py</code></td>
+<td>Research-project (campaign) store directory (default <jobs dir>/campaigns).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_DATASET_ROOTS</code></td>
+<td>list</td>
+<td>unset</td>
+<td><code>tribos/datasets/paths.py</code></td>
+<td>Directories (os.pathsep-separated) that typed dataset paths may point into; <cwd>/data when unset.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_DATA_DIR</code></td>
+<td>path</td>
+<td>unset</td>
+<td><code>tribos/utils/paths.py</code></td>
+<td>One data root (<code>~</code> expanded): memory/, runs/, uploads/, jobs/, tool_cache/ default under it.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_FEEDBACK_DIR</code></td>
+<td>path</td>
+<td>unset</td>
+<td><code>app/backend/routers/feedback.py</code></td>
+<td>Where answer ratings (thumbs up/down) are recorded as JSON lines (default <data>/feedback).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_FILES_DIR</code></td>
+<td>path</td>
+<td>unset</td>
+<td><code>tribos/files/store.py</code></td>
+<td>Where files an answer produced on request (Word, PDF, Python, CSV, Excel, ...) are kept (default <data>/files).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_JOBS_DIR</code></td>
+<td>path</td>
+<td>unset</td>
+<td><code>tribos/agentic/jobs.py</code></td>
+<td>Background-job SQLite store directory (wins over TRIBOS_RUNS_DIR/jobs).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_MEMORY_DIR</code></td>
+<td>path</td>
+<td>unset</td>
+<td><code>tribos/utils/memory/project_store.py</code><br><code>tribos/utils/memory/research_memory.py</code></td>
+<td>Research memory vault directory (wins over TRIBOS_DATA_DIR); also the projects store fallback.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_PROJECTS_DIR</code></td>
+<td>path</td>
+<td>unset</td>
+<td><code>tribos/utils/memory/project_store.py</code></td>
+<td>Projects store directory (wins over TRIBOS_MEMORY_DIR and TRIBOS_DATA_DIR).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_RUNS_DIR</code></td>
+<td>path</td>
+<td>unset</td>
+<td><code>tribos/agentic/jobs.py</code><br><code>tribos/agentic/router_store.py</code><br><code>tribos/provenance/run_store.py</code> (+1)</td>
+<td>Run-manifest store (wins over TRIBOS_DATA_DIR; also hosts jobs/ and tool_cache/).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_TOOL_CACHE_DIR</code></td>
+<td>path</td>
+<td>unset</td>
+<td><code>tribos/tools/reliability.py</code></td>
+<td>Tool-result SQLite cache directory (wins over TRIBOS_RUNS_DIR/tool_cache).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_UPLOAD_ROOT</code></td>
+<td>path</td>
+<td>unset</td>
+<td><code>tribos/datasets/store.py</code></td>
+<td>Uploaded datasets directory (wins over TRIBOS_DATA_DIR).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="retention-and-maintenance">Retention and maintenance</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Type</th>
+<th>Default</th>
+<th>Read at</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TRIBOS_FILES_TTL_DAYS</code></td>
+<td>float (0 to 36500)</td>
+<td><code>30.0</code></td>
+<td><code>tribos/files/store.py</code></td>
+<td>Files answers produced are deleted after this many days (0 keeps them).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_JOB_TTL_DAYS</code></td>
+<td>float (0 to 36500)</td>
+<td><code>30.0</code></td>
+<td><code>tribos/agentic/jobs.py</code></td>
+<td>Finished jobs older than this many days are purged (0 keeps them).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_MAINTENANCE</code></td>
+<td>off | auto | on</td>
+<td><code>auto</code></td>
+<td><code>tribos/utils/maintenance.py</code></td>
+<td>Retention sweep switch: off, auto (off under pytest) or on.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_MAINTENANCE_INTERVAL_H</code></td>
+<td>float (&gt;= 0)</td>
+<td><code>6.0</code></td>
+<td><code>tribos/utils/maintenance.py</code></td>
+<td>Hours between retention sweeps.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_MAX_RUNS</code></td>
+<td>int (&gt;= 0)</td>
+<td><code>500</code></td>
+<td><code>tribos/provenance/run_store.py</code></td>
+<td>Newest run manifests kept across users (0 = unlimited).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_MAX_RUNS_PER_USER</code></td>
+<td>int (&gt;= 0)</td>
+<td><code>500</code></td>
+<td><code>tribos/provenance/run_store.py</code></td>
+<td>Maximum stored run manifests kept per user (0 = unlimited).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_USER_HASH_SALT</code></td>
+<td>str</td>
+<td>(secret, unset)</td>
+<td><code>tribos/provenance/run_manifest.py</code></td>
+<td>Deployment salt for hashing user identifiers in exported run manifests.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="authentication">Authentication</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Type</th>
+<th>Default</th>
+<th>Read at</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TRIBOS_ALLOW_INSECURE</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td><code>app/backend/security.py</code></td>
+<td>Allow non-loopback connections when authentication is disabled (unsafe).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_API_TOKENS</code></td>
+<td>list</td>
+<td>(secret, unset)</td>
+<td><code>app/backend/auth.py</code></td>
+<td>Static bearer tokens as comma-separated <code>token:user_id</code> pairs.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_AUTH_MODE</code></td>
+<td>disabled | bearer</td>
+<td>unset</td>
+<td><code>tribos/extensions/sandbox.py</code><br><code>app/backend/auth.py</code></td>
+<td><code>disabled</code> runs every request as one local user (development only); otherwise bearer auth is required.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_JWT_AUDIENCE</code></td>
+<td>str</td>
+<td>unset</td>
+<td><code>app/backend/auth.py</code></td>
+<td>Required JWT <code>aud</code> claim when set.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_JWT_ISSUER</code></td>
+<td>str</td>
+<td>unset</td>
+<td><code>app/backend/auth.py</code></td>
+<td>Required JWT <code>iss</code> claim when set.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_JWT_SECRET</code></td>
+<td>str</td>
+<td>(secret, unset)</td>
+<td><code>app/backend/auth.py</code></td>
+<td>HS256 secret for bearer JWTs (<code>sub</code> = user id, <code>exp</code> required).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="api-server">API server</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Type</th>
+<th>Default</th>
+<th>Read at</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TRIBOS_ALLOWED_HOSTS</code></td>
+<td>list</td>
+<td>unset</td>
+<td><code>app/backend/security.py</code></td>
+<td>Allowed HTTP Host header values (comma-separated; defaults to loopback when auth is disabled).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_CORS_ORIGINS</code></td>
+<td>list</td>
+<td><code>http://localhost:3000,http://127.0.0.1:3000</code></td>
+<td><code>app/backend/routers/mcp.py</code><br><code>app/backend/security.py</code></td>
+<td>Comma-separated browser origins allowed by CORS (also allowed by the MCP endpoint).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_HEALTH_CACHE_S</code></td>
+<td>float (&gt;= 0)</td>
+<td><code>60.0</code></td>
+<td><code>app/backend/main.py</code></td>
+<td>Seconds the upstream readiness probes of /api/health are cached.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_MAX_BODY_MB</code></td>
+<td>float (&gt;= 0.01)</td>
+<td><code>2.0</code></td>
+<td><code>app/backend/security.py</code></td>
+<td>Largest request body in MB (larger requests get 413).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_MAX_CONCURRENT_CHATS_PER_USER</code></td>
+<td>int (&gt;= 1)</td>
+<td><code>2</code></td>
+<td><code>app/backend/main.py</code></td>
+<td>Questions one user may have running at once (over it the request is refused).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_MAX_CONCURRENT_TITLES_PER_USER</code></td>
+<td>int (&gt;= 1)</td>
+<td><code>2</code></td>
+<td><code>app/backend/main.py</code></td>
+<td>Model-generated thread titles per user at once (over it a heuristic title is used).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_MAX_EXPORT_BODY_MB</code></td>
+<td>float (&gt;= 0.01)</td>
+<td><code>16.0</code></td>
+<td><code>app/backend/security.py</code></td>
+<td>Largest request body in MB for the export and report endpoints.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_PUBLIC_URL</code></td>
+<td>str</td>
+<td>unset</td>
+<td><code>app/backend/routers/a2a.py</code></td>
+<td>Public base URL of the API (e.g. https://tribos.example.org) used in the A2A Agent Card; default: the request's own base URL.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SSE_HEARTBEAT_S</code></td>
+<td>float (&gt;= 0.05)</td>
+<td><code>15.0</code></td>
+<td><code>app/backend/main.py</code><br><code>app/backend/routers/jobs.py</code></td>
+<td>Seconds between keep-alive comments on chat and job event streams.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_STRICT_CONFIG</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td><code>app/backend/main.py</code></td>
+<td>Fail startup when configuration validation reports a problem instead of only logging it.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_STRICT_ROUTERS</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td><code>app/backend/main.py</code></td>
+<td>Fail startup when an optional API router cannot be imported instead of disabling it.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_WEB_URL</code></td>
+<td>str</td>
+<td><code>http://localhost:3000</code></td>
+<td><code>app/backend/main.py</code></td>
+<td>Address of the web app, linked from the backend's own status page at /.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="tribos_mcp_-mcp-and-a2a-endpoints">TRIBOS_MCP_*: MCP and A2A endpoints</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Type</th>
+<th>Default</th>
+<th>Read at</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TRIBOS_A2A_BLOCKING_TIMEOUT_S</code></td>
+<td>float (&gt;= 0)</td>
+<td><code>300.0</code></td>
+<td><code>app/backend/routers/a2a.py</code></td>
+<td>Seconds a blocking A2A message/send waits for its job before returning the task.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_MCP_ALLOWED_ORIGINS</code></td>
+<td>list</td>
+<td>unset</td>
+<td><code>app/backend/routers/mcp.py</code><br><code>app/backend/security.py</code></td>
+<td>Extra comma-separated origins the MCP endpoint accepts besides TRIBOS_CORS_ORIGINS.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_MCP_CLIENT_SERVERS</code></td>
+<td>str</td>
+<td>``</td>
+<td><code>tribos/tools/mcp_client.py</code></td>
+<td>External MCP tool servers Tribos may call, as JSON {"name": {"command": [...], "tools": [...]}} (stdio transport; tools list optional).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_MCP_MAX_CONCURRENT</code></td>
+<td>int (&gt;= 1)</td>
+<td><code>2</code></td>
+<td><code>app/backend/routers/mcp.py</code></td>
+<td>Concurrent MCP research calls per user.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_MCP_RESEARCH_TIMEOUT_S</code></td>
+<td>float (&gt;= 0)</td>
+<td><code>900.0</code></td>
+<td><code>app/backend/routers/mcp.py</code></td>
+<td>Seconds an MCP research call may run before it is cancelled.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_MCP_TOOLS</code></td>
+<td>list</td>
+<td>unset</td>
+<td><code>app/backend/routers/mcp.py</code></td>
+<td>Comma-separated registry tools exposed over MCP (default: the built-in allowlist).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="tribos_job_-background-jobs">TRIBOS_JOB_*: Background jobs</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Type</th>
+<th>Default</th>
+<th>Read at</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TRIBOS_CAMPAIGN_AUTO_RESUME</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td><code>tribos/agentic/campaign.py</code></td>
+<td>Research projects interrupted by a server stop continue on their own when the server starts again (at most 3 times each).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_CAMPAIGN_CONTEXT_CHARS</code></td>
+<td>int (500 to 40000)</td>
+<td><code>3500</code></td>
+<td><code>tribos/agentic/campaign.py</code></td>
+<td>Characters of each earlier stage a research-project stage is given (twice this for the report).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_CAMPAIGN_MAX_ACTIVE</code></td>
+<td>int (1 to 8)</td>
+<td><code>1</code></td>
+<td><code>tribos/agentic/campaign.py</code></td>
+<td>Research projects run at once per server process; further ones wait in a queue.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_CAMPAIGN_MAX_PER_USER</code></td>
+<td>int (1 to 50)</td>
+<td><code>3</code></td>
+<td><code>tribos/agentic/campaign.py</code></td>
+<td>Queued + running research projects per user; over it a new, resumed or continued project is refused (429).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_CAMPAIGN_STAGE_RETRIES</code></td>
+<td>int (0 to 5)</td>
+<td><code>1</code></td>
+<td><code>tribos/agentic/campaign.py</code></td>
+<td>Times a failed research-project stage is run again before the project stops.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_JOB_CANCEL_GRACE_S</code></td>
+<td>float (0 to 600)</td>
+<td><code>20.0</code></td>
+<td><code>tribos/agentic/jobs.py</code></td>
+<td>Seconds a cancelled job may take to stop before it is marked cancelled anyway.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_JOB_MAX_EVENTS</code></td>
+<td>int (100 to 1000000)</td>
+<td><code>20000</code></td>
+<td><code>tribos/agentic/jobs.py</code></td>
+<td>Progress events kept per job; older ones are dropped.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_JOB_WORKERS</code></td>
+<td>int (1 to 16)</td>
+<td><code>2</code></td>
+<td><code>tribos/agentic/jobs.py</code></td>
+<td>Background-job worker tasks.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_MAX_JOBS_PER_USER</code></td>
+<td>int (1 to 100)</td>
+<td><code>3</code></td>
+<td><code>tribos/agentic/jobs.py</code></td>
+<td>Queued + running background jobs per user.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_RESEARCH_CODEACT_STEPS</code></td>
+<td>int (2 to 30)</td>
+<td><code>10</code></td>
+<td><code>tribos/agentic/research/loop.py</code></td>
+<td>Python cells one research experiment may run.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_RESEARCH_CROSS_CHECK</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td><code>tribos/agentic/research/loop.py</code></td>
+<td>Re-implement each numeric research result independently and compare (the 'replicated' verification tier).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_RESEARCH_MAX_HOURS</code></td>
+<td>int (1 to 72)</td>
+<td><code>8</code></td>
+<td><code>tribos/agentic/research/loop.py</code></td>
+<td>Safety ceiling on a research project's wall-clock hours before it writes its thesis with what it has.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_RESEARCH_MAX_ROUNDS</code></td>
+<td>int (1 to 40)</td>
+<td><code>12</code></td>
+<td><code>tribos/agentic/research/loop.py</code></td>
+<td>Safety ceiling on research-loop rounds; a project normally stops earlier, when it reaches a conclusion or stops making progress.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_RESEARCH_MAX_TEST_RUNS</code></td>
+<td>int (5 to 1000)</td>
+<td><code>120</code></td>
+<td><code>tribos/agentic/research/loop.py</code></td>
+<td>Safety ceiling on test runs (experiments, proofs, literature checks) in one research project.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_RESEARCH_PARALLEL_TESTS</code></td>
+<td>int (1 to 8)</td>
+<td><code>2</code></td>
+<td><code>tribos/agentic/research/loop.py</code></td>
+<td>Research-project tests run at once.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_RESEARCH_REPLICATION_MODEL</code></td>
+<td>str</td>
+<td>``</td>
+<td><code>tribos/agentic/research/manifest.py</code><br><code>tribos/agentic/research/runner.py</code></td>
+<td>Model that re-implements numeric research results (must be in the allowed model list); empty means the research model, in a separate session.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_RESEARCH_SANDBOX_TIMEOUT_S</code></td>
+<td>int (30 to 1800)</td>
+<td><code>300</code></td>
+<td><code>tribos/agentic/research/loop.py</code><br><code>tribos/agentic/sandbox/__init__.py</code></td>
+<td>Seconds one sandboxed cell of a research-project experiment may run (chat cells keep TRIBOS_SANDBOX_TIMEOUT_S).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_RESEARCH_STAGNATION_ROUNDS</code></td>
+<td>int (1 to 6)</td>
+<td><code>2</code></td>
+<td><code>tribos/agentic/research/loop.py</code></td>
+<td>Consecutive research rounds without progress after which the project stops and writes its thesis.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_RESEARCH_TEST_RETRIES</code></td>
+<td>int (0 to 5)</td>
+<td><code>2</code></td>
+<td><code>tribos/agentic/research/loop.py</code></td>
+<td>Times a failed research test is retried with a different method before it is marked blocked.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_THESIS_PDF_ENGINE</code></td>
+<td>auto | chromium | fpdf</td>
+<td><code>auto</code></td>
+<td><code>tribos/export/thesis.py</code></td>
+<td>Thesis PDF renderer: chromium (typeset HTML with KaTeX, via Playwright), fpdf (built-in fallback) or auto.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="models-and-llm-providers">Models and LLM providers</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Type</th>
+<th>Default</th>
+<th>Read at</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>LLM_DEEP_REASONING_TIMEOUT</code></td>
+<td>float (&gt;= 60)</td>
+<td><code>900.0</code></td>
+<td><code>tribos/utils/llm/llm_factory.py</code></td>
+<td>Seconds of silence allowed between bytes when a model reasons deeply (high effort or above) before answering; LLM_TIMEOUT applies otherwise.</td>
+</tr>
+<tr>
+<td><code>LLM_STREAM_TIMEOUT</code></td>
+<td>float</td>
+<td><code>120.0</code></td>
+<td><code>tribos/utils/llm/llm_factory.py</code></td>
+<td>Read timeout in seconds between streamed completion chunks.</td>
+</tr>
+<tr>
+<td><code>LLM_STREAM_TOTAL_TIMEOUT</code></td>
+<td>float</td>
+<td><code>1800.0</code></td>
+<td><code>tribos/utils/llm/llm_factory.py</code></td>
+<td>Wall-clock cap in seconds on one streamed completion.</td>
+</tr>
+<tr>
+<td><code>LLM_TIMEOUT</code></td>
+<td>float</td>
+<td><code>60.0</code></td>
+<td><code>tribos/utils/llm/llm_factory.py</code></td>
+<td>Per-request LLM client timeout in seconds.</td>
+</tr>
+<tr>
+<td><code>META_API_BASE</code></td>
+<td>str</td>
+<td><code>https://api.meta.ai/v1</code></td>
+<td><code>tribos/utils/llm/llm_factory.py</code></td>
+<td>Base URL for the Meta Model API.</td>
+</tr>
+<tr>
+<td><code>META_API_KEY</code></td>
+<td>str</td>
+<td>(secret, unset)</td>
+<td><code>tribos/utils/llm/llm_factory.py</code><br><code>app/backend/main.py</code></td>
+<td>Meta Model API models (such as Muse Spark).</td>
+</tr>
+<tr>
+<td><code>NVIDIA_API_KEY</code></td>
+<td>str</td>
+<td>(secret, unset)</td>
+<td><code>tribos/utils/llm/llm_factory.py</code><br><code>app/backend/main.py</code></td>
+<td>NVIDIA NIM models (default LLM provider) and the NIM structure tools.</td>
+</tr>
+<tr>
+<td><code>NVIDIA_NIM_API_KEY</code></td>
+<td>str</td>
+<td>(secret, unset)</td>
+<td><code>tribos/utils/llm/llm_factory.py</code><br><code>app/backend/main.py</code></td>
+<td>Alternative name for NVIDIA_API_KEY (used when that one is unset).</td>
+</tr>
+<tr>
+<td><code>OPENAI_API_KEY</code></td>
+<td>str</td>
+<td>(secret, unset)</td>
+<td><code>tribos/utils/llm/llm_factory.py</code><br><code>app/backend/main.py</code></td>
+<td>OpenAI models; also the fallback when no NVIDIA key is set.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_ALLOWED_MODELS</code></td>
+<td>list</td>
+<td>unset</td>
+<td><code>tribos/utils/llm/llm_factory.py</code></td>
+<td>Extra comma-separated model ids callers may select besides the built-in catalog.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_LLM_FALLBACK</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td><code>tribos/utils/llm/llm_factory.py</code></td>
+<td>Allow fallback to an available provider when the requested model key is unset (off: only Meta models are offered).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_LLM_MODEL</code></td>
+<td>str</td>
+<td>unset</td>
+<td><code>tribos/evals/cassette.py</code><br><code>tribos/evals/runner.py</code><br><code>tribos/utils/llm/llm_factory.py</code></td>
+<td>Default model id when a request names none (the orchestrator default when unset).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_LLM_RETRY_ATTEMPTS</code></td>
+<td>int (1 to 5)</td>
+<td><code>3</code></td>
+<td><code>tribos/utils/llm/provider_retry.py</code></td>
+<td>Attempts per NVIDIA NIM model request on a transient provider failure (408/409/429/5xx or no connection); replaces the SDK's own retry, so attempts are not multiplied.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_LLM_RETRY_DEADLINE_S</code></td>
+<td>float (0 to 120)</td>
+<td><code>20.0</code></td>
+<td><code>tribos/utils/llm/provider_retry.py</code></td>
+<td>Seconds from a model request's first attempt after which no further transient-failure retry starts.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SYNTHESIS_MODEL</code></td>
+<td>str</td>
+<td>unset</td>
+<td><code>tribos/agentic/campaign.py</code><br><code>tribos/agentic/research/model.py</code><br><code>tribos/agents/orchestration/draft.py</code> (+2)</td>
+<td>Model that writes the final answer (default: the turn's model).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="tribos_agent_-agentic-runtime">TRIBOS_AGENT_*: Agentic runtime</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Type</th>
+<th>Default</th>
+<th>Read at</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TRIBOS_AGENT_APPROVAL_TIMEOUT</code></td>
+<td>float (5 to 3600)</td>
+<td><code>300.0</code></td>
+<td><code>tribos/agentic/plan_execute.py</code></td>
+<td>Seconds a plan waits for the user's approval before running as proposed.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_AGENT_CALL_TIMEOUT</code></td>
+<td>float</td>
+<td><code>180.0</code></td>
+<td><code>tribos/agentic/llm.py</code></td>
+<td>Seconds one agent model call (plan, critique, verdict) may take.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_AGENT_DECOMPOSE</code></td>
+<td>off | auto | on</td>
+<td><code>auto</code></td>
+<td><code>tribos/agentic/decompose.py</code></td>
+<td>Sub-question decomposition: off, auto (complex questions only) or on (always).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_AGENT_FINAL_RESERVE_CALLS</code></td>
+<td>int (&gt;= 0)</td>
+<td><code>2</code></td>
+<td><code>tribos/agentic/budget.py</code></td>
+<td>Agent model calls kept for the final rewrite and verifier revision (0 when the call budget is below 6).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_AGENT_FINAL_RESERVE_TOKENS</code></td>
+<td>int (&gt;= 0)</td>
+<td><code>default_reserve</code></td>
+<td><code>tribos/agentic/budget.py</code></td>
+<td>Run budget tokens kept for the final rewrite and verifier revision; optional agent work stops before them (unset = 12% of the token budget, at least 20k, at most 30%).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_AGENT_MAX_DRAFT_ROUNDS</code></td>
+<td>int (0 to 5)</td>
+<td><code>2</code></td>
+<td><code>tribos/agentic/budget.py</code></td>
+<td>Run budget: draft/critique/revise rounds.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_AGENT_MAX_LLM_CALLS</code></td>
+<td>int (1 to 120)</td>
+<td><code>40</code></td>
+<td><code>tribos/agentic/budget.py</code></td>
+<td>Run budget: agent model calls.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_AGENT_MAX_OUTPUT_TOKENS</code></td>
+<td>int (&gt;= 0)</td>
+<td><code>0</code></td>
+<td><code>tribos/agentic/llm.py</code></td>
+<td>Explicit per-reply output token cap for agent calls (0/unset = budget-derived only).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_AGENT_MAX_PLAN_NODES</code></td>
+<td>int (1 to 40)</td>
+<td><code>12</code></td>
+<td><code>tribos/agentic/budget.py</code></td>
+<td>Run budget: nodes in one plan.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_AGENT_MAX_REPLANS</code></td>
+<td>int (0 to 3)</td>
+<td><code>1</code></td>
+<td><code>tribos/agentic/budget.py</code></td>
+<td>Run budget: replans after failed or missing evidence.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_AGENT_MAX_SECONDS</code></td>
+<td>float (0 to 7200)</td>
+<td><code>0.0</code></td>
+<td><code>tribos/agentic/budget.py</code></td>
+<td>Run budget: wall-clock seconds (0 = no limit).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_AGENT_MAX_TOKENS</code></td>
+<td>int (1000 to 2000000)</td>
+<td><code>250000</code></td>
+<td><code>tribos/agentic/budget.py</code></td>
+<td>Run budget: model tokens.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_AGENT_MAX_TOOL_CALLS</code></td>
+<td>int (1 to 200)</td>
+<td><code>40</code></td>
+<td><code>tribos/agentic/budget.py</code></td>
+<td>Run budget: tool calls.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_AGENT_MODEL</code></td>
+<td>str</td>
+<td>unset</td>
+<td><code>tribos/agentic/config.py</code><br><code>tribos/utils/llm/llm_factory.py</code></td>
+<td>Model for agentic planning/critique calls (default: the turn's model).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_AGENT_OUTPUT_RESERVE_TOKENS</code></td>
+<td>int (&gt;= 1)</td>
+<td><code>4096</code></td>
+<td><code>tribos/agentic/llm.py</code></td>
+<td>Output tokens admitted per agent model call; also its max_tokens, so concurrent calls cannot overshoot the budget together.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_AGENT_PLAN</code></td>
+<td>off | auto | on</td>
+<td><code>auto</code></td>
+<td><code>tribos/agentic/plan_execute.py</code></td>
+<td>Plan-and-execute phase: off disables it.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_AGENT_PLAN_CONCURRENCY</code></td>
+<td>int (1 to 16)</td>
+<td><code>4</code></td>
+<td><code>tribos/agentic/executor.py</code></td>
+<td>Plan nodes executed in parallel.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_AGENT_PLAN_MODE</code></td>
+<td>dag | react</td>
+<td><code>dag</code></td>
+<td><code>tribos/agentic/plan_execute.py</code></td>
+<td>Plan execution: dag (one plan, parallel nodes) or react (step-by-step tool rounds).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_AGENT_REACT_STEPS</code></td>
+<td>int (1 to 12)</td>
+<td><code>4</code></td>
+<td><code>tribos/agentic/plan_execute.py</code></td>
+<td>Maximum tool rounds in react plan mode.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_AGENT_THINKING</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td><code>tribos/agentic/llm.py</code></td>
+<td>Keep model reasoning on for short agent calls (plans, critiques, JSON verdicts).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_APPROVAL_ON_TIMEOUT</code></td>
+<td>withhold_expensive | reject</td>
+<td><code>withhold_expensive</code></td>
+<td><code>tribos/agentic/approval.py</code></td>
+<td>Action on approval timeout: withhold_expensive (default) or reject.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_APPROVAL_TIMEOUT_S</code></td>
+<td>float (5 to 3600)</td>
+<td><code>300.0</code></td>
+<td><code>tribos/agentic/approval.py</code></td>
+<td>Seconds a tool-approval request waits for the user before it is denied.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_APPROVE_EXPENSIVE</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td><code>tribos/agentic/approval.py</code><br><code>tribos/agentic/plan_execute.py</code></td>
+<td>Ask before a simulation, parameter scan, calibration or sandboxed code run starts (interactive chats). Off: it runs at once; agent_options.require_plan_approval still asks.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_CANCEL_GRACE_S</code></td>
+<td>float (&gt;= 0)</td>
+<td><code>2.0</code></td>
+<td><code>tribos/agents/orchestration/context.py</code></td>
+<td>Seconds a cancelled or deadline-expired model call is waited for before it is abandoned.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_COUNTER_EVIDENCE</code></td>
+<td>off | auto | on</td>
+<td><code>auto</code></td>
+<td><code>tribos/agentic/counter_evidence.py</code></td>
+<td>Counter-evidence search for research answers: off disables it.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_DEFAULT_FRAMEWORK</code></td>
+<td>auto | authoritative-react-compiler | agentic-plan-execute | multi-agent-supervisor | multi-agent-swarm | multi-agent-debate</td>
+<td>unset</td>
+<td><code>tribos/agentic/config.py</code><br><code>app/backend/main.py</code></td>
+<td>Orchestration framework used when a request names none or an unknown one (default: auto routing for API requests; the classic pipeline for direct orchestrator calls).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_ESCALATE_ON_WEAK_SIGNALS</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td><code>tribos/agentic/router.py</code></td>
+<td>Auto runs: also escalate to the critic debate on an uncertain route, a fallen-back core step or open sub-questions (off: only contradicting evidence or safety-critical questions do).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_FIRST_DRAFT_MAX_OUTPUT_TOKENS</code></td>
+<td>int (&gt;= 256)</td>
+<td><code>16000</code></td>
+<td><code>tribos/agents/orchestration/draft.py</code></td>
+<td>Output tokens (reasoning included) admitted for the first draft of an agentic run and sent as its max_tokens.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_PROGRESS_HEARTBEAT_S</code></td>
+<td>float (&gt;= 0)</td>
+<td><code>5.0</code></td>
+<td><code>tribos/agents/orchestration/context.py</code></td>
+<td>Seconds between liveness re-emits of a step waiting on a long model call (0 disables).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_REWRITE_MAX_OUTPUT_TOKENS</code></td>
+<td>int (&gt;= 1)</td>
+<td><code>8192</code></td>
+<td><code>tribos/agents/orchestration/agent_rounds.py</code></td>
+<td>Most output tokens one answer rewrite or verifier revision may produce (never more than the run budget has left; a rewrite that would be cut off is skipped).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_ROUTER_DIR</code></td>
+<td>path</td>
+<td>unset</td>
+<td><code>tribos/agentic/router_store.py</code></td>
+<td>Auto routing outcome store (default <TRIBOS_RUNS_DIR>/router, else <TRIBOS_DATA_DIR>/router, else data/router).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_ROUTER_LEARNING</code></td>
+<td>off | auto | on</td>
+<td><code>auto</code></td>
+<td><code>tribos/agentic/router_store.py</code></td>
+<td>Auto routing outcome learning: off, auto (off under pytest) or on.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_ROUTER_LLM</code></td>
+<td>off | auto | on</td>
+<td><code>auto</code></td>
+<td><code>tribos/agentic/router.py</code></td>
+<td>Auto routing: off scores the deterministic signals only; auto/on add the model's semantic features.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_ROUTER_SAMPLES</code></td>
+<td>int (1 to 5)</td>
+<td><code>1</code></td>
+<td><code>tribos/agentic/router.py</code></td>
+<td>Auto routing: semantic feature samples averaged per question (self-consistency).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SKILLS_DIR</code></td>
+<td>str</td>
+<td>``</td>
+<td><code>tribos/skills/__init__.py</code></td>
+<td>Folder of SKILL.md files (procedures added to the drafting prompt when a question matches); empty means the built-in skills.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_TOOL_EMBEDDINGS</code></td>
+<td>str</td>
+<td>unset</td>
+<td><code>tribos/agentic/tool_retrieval.py</code></td>
+<td>Local sentence-transformers model id for embedding-based tool retrieval (unset = lexical only).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="tribos_mem0_-research-memory-mem0">TRIBOS_MEM0_*: Research memory (Mem0)</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Type</th>
+<th>Default</th>
+<th>Read at</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TRIBOS_MEM0_DIR</code></td>
+<td>path</td>
+<td>unset</td>
+<td><code>tribos/agentic/mem0_adapter.py</code></td>
+<td>Persistent directory for Mem0 Qdrant vector DB and SQLite history.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_MEM0_EMBEDDER_PROVIDER</code></td>
+<td>mock | huggingface | openai | gemini | langchain</td>
+<td><code>mock</code></td>
+<td><code>tribos/agentic/mem0_adapter.py</code></td>
+<td>Embedder provider for Mem0 vector store.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_MEM0_ENABLED</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td><code>tribos/agentic/mem0_adapter.py</code></td>
+<td>Enable persistent Mem0 memory integration for factual recall.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_MEM0_LLM_PROVIDER</code></td>
+<td>mock | openai | gemini | anthropic | langchain</td>
+<td><code>mock</code></td>
+<td><code>tribos/agentic/mem0_adapter.py</code></td>
+<td>LLM provider for Mem0 extraction and consolidation.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="tribos_nli_-claim-verification-nli">TRIBOS_NLI_*: Claim verification (NLI)</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Type</th>
+<th>Default</th>
+<th>Read at</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TRIBOS_NLI</code></td>
+<td>off | auto | model | llm</td>
+<td><code>auto</code></td>
+<td><code>tribos/agentic/nli.py</code></td>
+<td>Claim-vs-evidence NLI: off, auto (cross-encoder, else LLM), model (cross-encoder only) or llm.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_NLI_BATCH</code></td>
+<td>int (1 to 128)</td>
+<td><code>16</code></td>
+<td><code>tribos/agentic/nli.py</code></td>
+<td>Cross-encoder batch size.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_NLI_CHUNK_WORDS</code></td>
+<td>int (20 to 400)</td>
+<td><code>120</code></td>
+<td><code>tribos/agentic/nli.py</code></td>
+<td>Words per evidence window scored against a claim.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_NLI_CONTRADICT</code></td>
+<td>float (0.3 to 0.999)</td>
+<td><code>0.8</code></td>
+<td><code>tribos/agentic/nli.py</code></td>
+<td>Contradiction probability at or above which a claim is contradicted.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_NLI_ENTAIL</code></td>
+<td>float (0.05 to 0.99)</td>
+<td><code>0.5</code></td>
+<td><code>tribos/agentic/nli.py</code></td>
+<td>Entailment probability at or above which a claim is supported.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_NLI_LLM_BATCH</code></td>
+<td>int (1 to 8)</td>
+<td><code>4</code></td>
+<td><code>tribos/agentic/nli.py</code></td>
+<td>Claims per LLM NLI call.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_NLI_MAX_LLM_CALLS</code></td>
+<td>int (0 to 12)</td>
+<td><code>12</code></td>
+<td><code>tribos/agentic/nli.py</code></td>
+<td>LLM NLI calls per run (hard ceiling 12).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_NLI_MODEL</code></td>
+<td>str</td>
+<td><code>cross-encoder/nli-deberta-v3-base</code></td>
+<td><code>tribos/agentic/nli.py</code></td>
+<td>Hugging Face cross-encoder used for NLI.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_NLI_UNSUPPORTED</code></td>
+<td>float (0 to 0.9)</td>
+<td><code>0.15</code></td>
+<td><code>tribos/agentic/nli.py</code></td>
+<td>Entailment probability below which a claim is unsupported.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="tribos_confidence_-confidence-calibration">TRIBOS_CONFIDENCE_*: Confidence calibration</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Type</th>
+<th>Default</th>
+<th>Read at</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TRIBOS_CONFIDENCE_CALIBRATION</code></td>
+<td>path</td>
+<td>unset</td>
+<td><code>tribos/agentic/confidence.py</code></td>
+<td>JSON file with a fitted temperature, conformal threshold and feature weights.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_CONFIDENCE_ELICIT</code></td>
+<td>off | auto | on</td>
+<td><code>auto</code></td>
+<td><code>tribos/agentic/confidence.py</code></td>
+<td>Model-elicited confidence for claims: off disables it.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_CONFIDENCE_T</code></td>
+<td>float (0.05 to 20)</td>
+<td>unset</td>
+<td><code>tribos/agentic/confidence.py</code></td>
+<td>Confidence temperature override (positive; clamped to 0.05-20).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="query-planning-and-synthesis">Query planning and synthesis</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Type</th>
+<th>Default</th>
+<th>Read at</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TRIBOS_ANSWER_STYLE</code></td>
+<td>concise | full</td>
+<td><code>concise</code></td>
+<td><code>tribos/agents/prompts.py</code></td>
+<td>Answer length: <code>concise</code> answers only what was asked (direct answer first, no unrequested sections); <code>full</code> is the longer report format.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_CONTEXT_GATE</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td><code>tribos/agents/prompts.py</code></td>
+<td>Context gate: only query-relevant sentences with Lumo admission score K &gt;= 1 (source-weighted, corroborated) reach the answer model.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_CONTEXT_GATE_CHARS</code></td>
+<td>int (1000 to 60000)</td>
+<td><code>6000</code></td>
+<td><code>tribos/agents/prompts.py</code></td>
+<td>Characters of literature evidence the context gate admits (the most relevant sentences first).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_NORMALIZER_BUDGET_S</code></td>
+<td>float (&gt;= 0.1)</td>
+<td>unset</td>
+<td><code>tribos/agents/query_planner.py</code></td>
+<td>Seconds for query normalization when the caller keeps the 3.5 s default.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_PLANNER</code></td>
+<td>off | auto | always</td>
+<td><code>auto</code></td>
+<td><code>tribos/agents/query_planner.py</code></td>
+<td>LLM query planner: off, auto (when heuristics are unsure) or always.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_RESOLVER_DISABLED</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td><code>tribos/agents/query_planner.py</code></td>
+<td>Skip the entity resolver in query normalization (1/true/yes).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SEARCH_PLAN_WAIT_S</code></td>
+<td>float (&gt;= 0)</td>
+<td><code>6.0</code></td>
+<td><code>tribos/agents/query_planner.py</code></td>
+<td>Seconds the pipeline waits for the LLM search plan before using the heuristic one.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SHOW_REASONING</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td><code>tribos/agents/authoritative_orchestrator.py</code></td>
+<td>Stream raw model reasoning to the client (it is not checked by the verifier).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="tool-reliability-and-cache">Tool reliability and cache</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Type</th>
+<th>Default</th>
+<th>Read at</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TRIBOS_BREAKER_COOLDOWN_S</code></td>
+<td>float (0 to 3600)</td>
+<td><code>60.0</code></td>
+<td><code>tribos/tools/reliability.py</code></td>
+<td>Seconds an open circuit breaker waits before a trial call.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_BREAKER_THRESHOLD</code></td>
+<td>int (1 to 100)</td>
+<td><code>5</code></td>
+<td><code>tribos/tools/reliability.py</code></td>
+<td>Consecutive failures that open an adapter's circuit breaker.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_NATIVE_WORKERS</code></td>
+<td>int (&gt;= 1)</td>
+<td><code>4</code></td>
+<td><code>tribos/tools/registry.py</code></td>
+<td>Thread pool size for CPU-bound native tools.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_NETWORK_WORKERS</code></td>
+<td>int (&gt;= 1)</td>
+<td><code>16</code></td>
+<td><code>tribos/tools/registry.py</code></td>
+<td>Thread pool size for synchronous networked tools.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_RELIABILITY</code></td>
+<td>off | auto | on</td>
+<td><code>auto</code></td>
+<td><code>tribos/tools/reliability.py</code></td>
+<td>Tool retry/breaker/cache policies: off, auto (off under pytest) or on.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_TOOL_CACHE</code></td>
+<td>off | auto | on</td>
+<td><code>auto</code></td>
+<td><code>tribos/tools/reliability.py</code></td>
+<td>Tool-result cache (needs TRIBOS_RELIABILITY): off, auto (off under pytest) or on.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_TOOL_CACHE_TTL_S</code></td>
+<td>float (&gt;= 0)</td>
+<td>unset</td>
+<td><code>tribos/tools/reliability.py</code></td>
+<td>Overrides the per-adapter tool-cache TTL (seconds).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_TOOL_RETRIES</code></td>
+<td>int (0 to 5)</td>
+<td><code>2</code></td>
+<td><code>tribos/tools/reliability.py</code></td>
+<td>Retries of a networked tool after a transient failure.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="web-search">Web search</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Type</th>
+<th>Default</th>
+<th>Read at</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TAVILY_API_KEY</code></td>
+<td>str</td>
+<td>(secret, unset)</td>
+<td><code>tribos/tools/web_search.py</code></td>
+<td>Tavily web search (first provider when set).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SEARXNG_URL</code></td>
+<td>str</td>
+<td>unset</td>
+<td><code>tribos/tools/web_search.py</code></td>
+<td>Base URL of a SearXNG instance with the JSON format enabled (used after Tavily).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="data-sources">Data sources</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Type</th>
+<th>Default</th>
+<th>Read at</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>NCBI_API_KEY</code></td>
+<td>str</td>
+<td>(secret, unset)</td>
+<td><code>tribos/utils/http_limits.py</code></td>
+<td>NCBI E-utilities key (raises the rate limit from 3 to 10 requests/s).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_ADS_API_TOKEN</code></td>
+<td>str</td>
+<td>(secret, unset)</td>
+<td><code>tribos/archivon/clients.py</code></td>
+<td>Optional NASA ADS Bearer API token for astrophysics literature search in Archivon.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_ARCHIVON_FULLTEXT</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td><code>tribos/archivon/engine.py</code></td>
+<td>Archivon: add body paragraphs of the top arXiv papers (arxiv.org/html) so claims are checked against full text, not abstracts only.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_ARCHIVON_PDF_FULLTEXT</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td><code>tribos/archivon/engine.py</code></td>
+<td>Archivon: for top papers without arXiv HTML, read open-access PDFs (size-capped) for full-text passages.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_CONTACT_EMAIL</code></td>
+<td>str</td>
+<td><code>contact@tribos.science</code></td>
+<td><code>tribos/archivon/clients.py</code><br><code>tribos/archivon/integrity.py</code><br><code>tribos/physis/clients.py</code></td>
+<td>Polite-pool contact e-mail sent in User-Agent headers for arXiv, Crossref, OpenAlex, and Wikipedia.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_CROSSREF_MAILTO</code></td>
+<td>str</td>
+<td>unset</td>
+<td><code>tribos/archivon/clients.py</code><br><code>tribos/archivon/integrity.py</code></td>
+<td>Contact e-mail for the Crossref polite pool (citation integrity checks).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_MP_API_KEY</code></td>
+<td>str</td>
+<td>(secret, unset)</td>
+<td><code>tribos/physis/clients.py</code></td>
+<td>Optional Materials Project API v2 key for live crystalline/electronic material queries in Physis.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_OPENALEX_API_KEY</code></td>
+<td>str</td>
+<td>(secret, unset)</td>
+<td><code>tribos/archivon/clients.py</code></td>
+<td>Optional OpenAlex API key for polite/premium pool requests in Archivon.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_PROVENANCE_PROBES</code></td>
+<td>off | auto | on</td>
+<td><code>auto</code></td>
+<td><code>tribos/provenance/source_versions.py</code></td>
+<td>Live source-version probes for run manifests: off, auto (off under pytest) or on.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_S2_API_KEY</code></td>
+<td>str</td>
+<td>(secret, unset)</td>
+<td><code>tribos/archivon/clients.py</code></td>
+<td>Optional Semantic Scholar API key for higher rate limits in Archivon.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_WOLFRAM_APPID</code></td>
+<td>str</td>
+<td>(secret, unset)</td>
+<td><code>tribos/physis/clients.py</code></td>
+<td>Optional Wolfram|Alpha LLM API AppID for Physis external reference queries.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="tribos_upload_-uploads-and-datasets">TRIBOS_UPLOAD_*: Uploads and datasets</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Type</th>
+<th>Default</th>
+<th>Read at</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TRIBOS_UPLOAD_MAX_DATASETS</code></td>
+<td>int</td>
+<td><code>50</code></td>
+<td><code>tribos/datasets/store.py</code></td>
+<td>Uploaded datasets kept per user.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_UPLOAD_MAX_MB_CSV</code></td>
+<td>float</td>
+<td><code>100.0</code></td>
+<td><code>tribos/datasets/store.py</code></td>
+<td>Largest table (CSV/TSV) upload in MB.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_UPLOAD_MAX_MB_H5AD</code></td>
+<td>float</td>
+<td><code>500.0</code></td>
+<td><code>tribos/datasets/store.py</code></td>
+<td>Deprecated: fallback for TRIBOS_UPLOAD_MAX_MB_HDF5.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_UPLOAD_MAX_MB_HDF5</code></td>
+<td>float</td>
+<td><code>500.0</code></td>
+<td><code>tribos/datasets/store.py</code></td>
+<td>Largest HDF5 (.h5/.hdf5) upload in MB.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_UPLOAD_MAX_MB_MAT</code></td>
+<td>float</td>
+<td><code>100.0</code></td>
+<td><code>tribos/datasets/store.py</code></td>
+<td>Largest MATLAB (.mat) upload in MB.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_UPLOAD_MAX_MB_PDF</code></td>
+<td>float</td>
+<td><code>25.0</code></td>
+<td><code>tribos/datasets/store.py</code></td>
+<td>Largest paper (.pdf) upload in MB.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_UPLOAD_MAX_PDF_PAGES</code></td>
+<td>int (1 to 5000)</td>
+<td><code>300</code></td>
+<td><code>tribos/datasets/validators.py</code></td>
+<td>Most pages an uploaded paper may have.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_UPLOAD_MAX_TOTAL_MB</code></td>
+<td>float</td>
+<td><code>2048.0</code></td>
+<td><code>tribos/datasets/store.py</code></td>
+<td>Total upload storage per user in MB.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="simulation-and-single-cell-analysis">Simulation and single-cell analysis</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Type</th>
+<th>Default</th>
+<th>Read at</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TRIBOS_PDE_MAX_CONVERGENCE_LEVELS</code></td>
+<td>int (2 to 4)</td>
+<td><code>3</code></td>
+<td><code>tribos/dynamis/pde/__init__.py</code></td>
+<td>Nested grids of the PDE mesh-convergence study.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_PDE_MAX_GRID_1D</code></td>
+<td>int (100 to 1000000)</td>
+<td><code>20000</code></td>
+<td><code>tribos/dynamis/pde/__init__.py</code></td>
+<td>Largest number of grid points in a 1D PDE solve.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_PDE_MAX_GRID_2D</code></td>
+<td>int (100 to 1000000)</td>
+<td><code>6400</code></td>
+<td><code>tribos/dynamis/pde/__init__.py</code></td>
+<td>Largest number of grid points in a 2D PDE solve (80 x 80).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_PDE_MAX_SECONDS</code></td>
+<td>float (1 to 600)</td>
+<td><code>20.0</code></td>
+<td><code>tribos/dynamis/pde/__init__.py</code></td>
+<td>Wall-clock limit of one PDE solve, convergence study included.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_PDE_MAX_SNAPSHOTS</code></td>
+<td>int (2 to 200)</td>
+<td><code>25</code></td>
+<td><code>tribos/dynamis/pde/__init__.py</code></td>
+<td>Snapshots one PDE solve returns.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SIMULATE_MAX_CONCURRENT</code></td>
+<td>int (1 to 32)</td>
+<td><code>2</code></td>
+<td><code>app/backend/routers/simulate.py</code></td>
+<td>Interactive simulation calls one user may have running at once.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SIMULATE_RATE_PER_MIN</code></td>
+<td>int (1 to 10000)</td>
+<td><code>60</code></td>
+<td><code>app/backend/routers/simulate.py</code></td>
+<td>Interactive simulation calls one user may make per minute.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SIMULATE_TIMEOUT_S</code></td>
+<td>float (1 to 60)</td>
+<td><code>10.0</code></td>
+<td><code>app/backend/routers/simulate.py</code></td>
+<td>Seconds one interactive simulate, bifurcation or vector-field call may run.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="tribos_sandbox_-code-sandbox">TRIBOS_SANDBOX_*: Code sandbox</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Type</th>
+<th>Default</th>
+<th>Read at</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TRIBOS_PYTHON_WORKER_CONCURRENCY</code></td>
+<td>int (1 to 32)</td>
+<td><code>4</code></td>
+<td><code>tribos/scientific/worker.py</code></td>
+<td>Maximum concurrent scientific Python worker jobs.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_PYTHON_WORKER_CONTAINER_ENGINE</code></td>
+<td>auto | subprocess | docker | podman</td>
+<td><code>auto</code></td>
+<td><code>tribos/scientific/worker.py</code></td>
+<td>Execution isolation engine for Python worker: auto, subprocess, docker, podman.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_PYTHON_WORKER_MEMORY_MB</code></td>
+<td>int (256 to 16384)</td>
+<td><code>2048</code></td>
+<td><code>tribos/scientific/worker.py</code></td>
+<td>Memory limit for scientific Python worker in MB.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_PYTHON_WORKER_TIMEOUT_S</code></td>
+<td>float (5 to 300)</td>
+<td><code>60.0</code></td>
+<td><code>tribos/scientific/worker.py</code></td>
+<td>Timeout for scientific Python worker jobs in seconds.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SANDBOX</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td><code>tribos/agentic/sandbox/__init__.py</code></td>
+<td>Code-execution sandbox tool; on by default, off/0/false/no disables it.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SANDBOX_ALLOW_UNISOLATED</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td><code>tribos/agentic/sandbox/__init__.py</code></td>
+<td>In strict mode, still allow the subprocess backend (no OS-level isolation boundary). Development only. Without strict mode, auto mode falls back to it whenever no container runtime is available.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SANDBOX_BACKEND</code></td>
+<td>auto | subprocess | container</td>
+<td><code>auto</code></td>
+<td><code>tribos/agentic/sandbox/__init__.py</code></td>
+<td>Isolation backend for model-written code: auto (container when available, else subprocess), subprocess (defence in depth only), container (OS-level boundary).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SANDBOX_CONTAINER_ENGINE</code></td>
+<td>auto | docker | podman</td>
+<td><code>auto</code></td>
+<td><code>tribos/agentic/sandbox/__init__.py</code></td>
+<td>Container CLI the sandbox backend uses: auto (docker or podman, whichever is on PATH), docker, podman.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SANDBOX_FIGURE_DPI</code></td>
+<td>int (72 to 300)</td>
+<td><code>120</code></td>
+<td><code>tribos/agentic/sandbox/container.py</code><br><code>tribos/agentic/sandbox/runner.py</code></td>
+<td>DPI for captured sandbox Matplotlib figures.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SANDBOX_IMAGE</code></td>
+<td>str</td>
+<td><code>tribos-sandbox:local</code></td>
+<td><code>tribos/agentic/sandbox/__init__.py</code></td>
+<td>Container image the container backend runs model-written code in; pin it by digest in production.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SANDBOX_MAX_ARRAY_ITEMS</code></td>
+<td>int (200 to 100000)</td>
+<td><code>25000</code></td>
+<td><code>tribos/agentic/sandbox/container.py</code><br><code>tribos/agentic/sandbox/runner.py</code></td>
+<td>Maximum array items in sandbox JSON output before truncation.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SANDBOX_MAX_CONCURRENCY</code></td>
+<td>int (1 to 32)</td>
+<td><code>2</code></td>
+<td><code>tribos/agentic/sandbox/__init__.py</code><br><code>tribos/agentic/sandbox/runner.py</code></td>
+<td>How many sandboxed executions may run at the same time.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SANDBOX_MAX_DISK_MB</code></td>
+<td>int (16 to 4096)</td>
+<td><code>256</code></td>
+<td><code>tribos/agentic/sandbox/__init__.py</code></td>
+<td>Write budget of one sandboxed execution, in MB.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SANDBOX_MAX_FIGURES</code></td>
+<td>int (1 to 20)</td>
+<td><code>6</code></td>
+<td><code>tribos/agentic/sandbox/runner.py</code></td>
+<td>Maximum number of Matplotlib figures captured from one sandboxed run.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SANDBOX_MAX_FIGURE_BYTES</code></td>
+<td>int (100000 to 20000000)</td>
+<td><code>3500000</code></td>
+<td><code>tribos/agentic/sandbox/container.py</code><br><code>tribos/agentic/sandbox/runner.py</code></td>
+<td>Maximum byte size of a captured figure PNG.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SANDBOX_MAX_OUTPUT_KB</code></td>
+<td>int (16 to 4096)</td>
+<td><code>256</code></td>
+<td><code>tribos/agentic/sandbox/__init__.py</code></td>
+<td>Cap on the stdout and stderr of one sandboxed execution, in KB.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SANDBOX_MAX_PROCESSES</code></td>
+<td>int (1 to 512)</td>
+<td><code>64</code></td>
+<td><code>tribos/agentic/sandbox/__init__.py</code></td>
+<td>Process-count cap of one sandboxed execution.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SANDBOX_MAX_RESULT_BYTES</code></td>
+<td>int (100000 to 50000000)</td>
+<td><code>3000000</code></td>
+<td><code>tribos/agentic/sandbox/__init__.py</code></td>
+<td>Aggregate cap of one execution's result payload (result, tables and figures together), in bytes.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SANDBOX_MEMORY_MB</code></td>
+<td>int (256 to 16384)</td>
+<td><code>2048</code></td>
+<td><code>tribos/agentic/sandbox/__init__.py</code></td>
+<td>Memory limit of one sandboxed execution in MB.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SANDBOX_SAGE_ALLOW_WSL</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td><code>tribos/agentic/sandbox/__init__.py</code></td>
+<td>Allow SageMath to run inside WSL, where the Python-level sandbox guards do not apply.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SANDBOX_SAGE_ENABLED</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td><code>tribos/agentic/sandbox/__init__.py</code></td>
+<td>Offer the SageMath tools. TRIBOS_SANDBOX=off overrides this.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SANDBOX_SAGE_TIMEOUT_S</code></td>
+<td>int (10 to 600)</td>
+<td><code>120</code></td>
+<td><code>tribos/agentic/sandbox/__init__.py</code></td>
+<td>Wall-clock limit of one SageMath execution, in seconds.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SANDBOX_STRICT_LIMITS</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td><code>tribos/agentic/sandbox/__init__.py</code></td>
+<td>Fail a sandboxed execution whose resource limits could not be applied instead of running it degraded.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SANDBOX_TIMEOUT_S</code></td>
+<td>int (5 to 110)</td>
+<td><code>60</code></td>
+<td><code>tribos/agentic/sandbox/__init__.py</code></td>
+<td>Seconds one sandboxed execution may run.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="tribos_math_-mathematics-agent">TRIBOS_MATH_*: Mathematics agent</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Type</th>
+<th>Default</th>
+<th>Read at</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TRIBOS_CHEM_AGENT</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td><code>tribos/agentic/chem_agent.py</code></td>
+<td>Run the chemistry agent on organic-chemistry questions: the model works the reaction as SMILES, code checks each structure and matches the target to the options, one repair on a mismatch.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_CODEACT</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td><code>tribos/agents/orchestration/codeact_stage.py</code></td>
+<td>Work computational questions in a persistent Python session, the model writing and fixing code step by step (CodeAct).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_CODEACT_MAX_STEPS</code></td>
+<td>int (1 to 20)</td>
+<td><code>6</code></td>
+<td><code>tribos/agents/orchestration/codeact_stage.py</code></td>
+<td>Python cells one CodeAct session may run.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_CONSTRUCT</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td><code>tribos/agents/orchestration/construct_stage.py</code></td>
+<td>Construct mode: evolutionary search for constructions that beat a known bound, scored exactly by code.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_CONSTRUCT_GENERATIONS</code></td>
+<td>int (1 to 200)</td>
+<td><code>10</code></td>
+<td><code>tribos/agents/orchestration/construct_stage.py</code></td>
+<td>Programs one construct-mode search writes (each is one model call and one sandbox run; two at a time).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_CROSS_CHECK</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td><code>tribos/agents/orchestration/cross_check.py</code></td>
+<td>Check a self-contained, multiple-choice or yes/no answer no code computed against an independent solution; adjudicate and rewrite on disagreement (1 model call, 2 more if they disagree).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_FORMAL</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td><code>tribos/verify/formal/prove.py</code></td>
+<td>Formal Lean 4 checking of 'prove ...' questions (used only when Lean is installed).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_FORMAL_BACKGROUND</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td><code>tribos/agentic/formal_proof.py</code></td>
+<td>Run the Lean formal proof beside the rest of the run; the answer waits for it only when it is written.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_FORMAL_BLUEPRINT</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td><code>tribos/verify/formal/prove.py</code></td>
+<td>When a direct Lean proof fails (Mathlib projects): split it into lemmas, prove each, and check the assembled file.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_FORMAL_BUDGET_S</code></td>
+<td>float (20 to 3600)</td>
+<td><code>150.0</code></td>
+<td><code>tribos/agentic/formal_proof.py</code></td>
+<td>Seconds the Lean formal-proof stage may take in all (attempts, repairs, lemma blueprint); then the answer says it did not finish.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_FORMAL_MAX_REPAIRS</code></td>
+<td>int (0 to 10)</td>
+<td><code>2</code></td>
+<td><code>tribos/verify/formal/prove.py</code></td>
+<td>Repairs of a Lean formalisation after compiler errors.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_FORMAL_MODE</code></td>
+<td>explicit | auto</td>
+<td><code>explicit</code></td>
+<td><code>tribos/agentic/formal_proof.py</code></td>
+<td>When Lean runs: <code>explicit</code> only when a formal (machine-checked, Lean) proof is asked for; <code>auto</code> for every 'prove ...' question.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_FORMAL_TIMEOUT_S</code></td>
+<td>float (1 to 600)</td>
+<td><code>60.0</code></td>
+<td><code>tribos/verify/formal/runner.py</code></td>
+<td>Seconds one Lean check may run.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_LEAN_FULL_MATHLIB</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td><code>tribos/verify/formal/runner.py</code></td>
+<td>Allow a bare <code>import Mathlib</code> (several GB of memory); off replaces it with a default set of Mathlib modules.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_LEAN_PATH</code></td>
+<td>str</td>
+<td>``</td>
+<td><code>tribos/verify/formal/runner.py</code></td>
+<td>Path of the lean (or lake) executable; empty means lean on PATH.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_LEAN_PREMISE_SEARCH</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td><code>tribos/verify/formal/premises.py</code></td>
+<td>Lean repairs: look up Mathlib lemmas for the failing names with Loogle (loogle.lean-lang.org) and show them to the model.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_LEAN_PROJECT</code></td>
+<td>str</td>
+<td>``</td>
+<td><code>tribos/agentic/research/manifest.py</code><br><code>tribos/verify/formal/prove.py</code><br><code>tribos/verify/formal/runner.py</code></td>
+<td>A Lean project with Mathlib; proofs are checked with lake env lean there.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_LEAN_PROVER_MODEL</code></td>
+<td>str</td>
+<td>``</td>
+<td><code>tribos/agentic/formal_proof.py</code></td>
+<td>Model for Lean proof attempts (e.g. a served Goedel-Prover); empty means the synthesis model.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_LEMMA_LIBRARY</code></td>
+<td>str</td>
+<td>``</td>
+<td><code>tribos/verify/formal/premises.py</code></td>
+<td>JSON file of kernel-checked lemmas reused as premises in later proofs; empty means data/lemma_library.json.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_MATH_AGENT</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td><code>tribos/agentic/math_agent.py</code></td>
+<td>Run the verified mathematics agent (bounded ReAct loop over the Axiom tools with an independent verifier) on mathematical questions.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_MATH_AGENT_MAX_REPAIRS</code></td>
+<td>int (0 to 10)</td>
+<td><code>4</code></td>
+<td><code>tribos/axiom/agent.py</code></td>
+<td>Local repairs of one failed step before the agent switches strategy.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_MATH_AGENT_MAX_STEPS</code></td>
+<td>int (2 to 40)</td>
+<td><code>12</code></td>
+<td><code>tribos/axiom/agent.py</code></td>
+<td>Tool calls one mathematics-agent run may make.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_MATH_TRAJECTORY_DIR</code></td>
+<td>path</td>
+<td>unset</td>
+<td><code>tribos/axiom/agent.py</code></td>
+<td>Append every mathematics-agent trajectory here as JSONL (tool calls, observations, verification labels) for evaluation and fine-tuning data.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_MC_VOTES</code></td>
+<td>int (1 to 9)</td>
+<td><code>1</code></td>
+<td><code>tribos/agents/orchestration/mc_vote.py</code></td>
+<td>Drafts that vote on a choose-one question's option (self-consistency); 1 is off, 3 or 5 multiply the drafting cost and keep the majority option.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_SAGEMATH_PATH</code></td>
+<td>str</td>
+<td>unset</td>
+<td><code>tribos/axiom/sagemath.py</code></td>
+<td>SageMath executable, or <code>wsl:&lt;wsl.exe arguments&gt;</code> to run it inside WSL; discovered on PATH and in WSL when unset.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="tribos_vision_-image-input-ocr-and-vision">TRIBOS_VISION_*: Image input (OCR and vision)</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Type</th>
+<th>Default</th>
+<th>Read at</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TRIBOS_VISION</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td><code>tribos/vision/reader.py</code><br><code>app/backend/main.py</code><br><code>app/backend/routers/vision.py</code></td>
+<td>Accept images attached to questions (POST /api/vision/read); they are read into text before the question is solved.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_VISION_CROSSCHECK</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td><code>tribos/vision/reader.py</code></td>
+<td>Read each image twice with the vision model (once from the image alone, once with the OCR drafts); readings that differ are settled by a third look at the image.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_VISION_MAX_IMAGES</code></td>
+<td>int (1 to 10)</td>
+<td><code>4</code></td>
+<td><code>app/backend/main.py</code></td>
+<td>Images one question may carry.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_VISION_MAX_MB</code></td>
+<td>int (1 to 50)</td>
+<td><code>10</code></td>
+<td><code>tribos/vision/reader.py</code><br><code>app/backend/routers/vision.py</code></td>
+<td>Largest image upload in MB.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_VISION_MAX_PAGES</code></td>
+<td>int (1 to 20)</td>
+<td><code>4</code></td>
+<td><code>tribos/vision/reader.py</code></td>
+<td>Pages of an attached PDF that are read (each like one image).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_VISION_MODEL</code></td>
+<td>str</td>
+<td><code>muse-spark-1.3</code></td>
+<td><code>tribos/vision/vlm.py</code></td>
+<td>Cloud vision model for <code>remote</code> (must be in the allowed model list).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_VISION_OCR_MATH</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td><code>tribos/vision/ocr.py</code></td>
+<td>Load Indra OCR's math models so formulas are read as LaTeX (about 60% slower OCR on math lines).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_VISION_OLLAMA_MODEL</code></td>
+<td>str</td>
+<td>unset</td>
+<td><code>tribos/vision/vlm.py</code></td>
+<td>Ollama vision model for <code>ollama</code> (e.g. qwen2.5vl:7b); the first installed vision-family model when unset.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_VISION_OLLAMA_URL</code></td>
+<td>str</td>
+<td><code>http://127.0.0.1:11434</code></td>
+<td><code>tribos/vision/vlm.py</code></td>
+<td>Base URL of the local Ollama server.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_VISION_PROVIDER</code></td>
+<td>remote | nim | ollama | ocr</td>
+<td><code>remote</code></td>
+<td><code>tribos/vision/vlm.py</code></td>
+<td>Model that corrects the OCR draft: <code>remote</code> (cloud, TRIBOS_VISION_MODEL; <code>nim</code> is its old name), <code>ollama</code> (local), or <code>ocr</code> (OCR only; the image stays on this machine).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_VISION_TESSERACT</code></td>
+<td>str</td>
+<td>unset</td>
+<td><code>tribos/vision/tesseract.py</code></td>
+<td>Tesseract executable, the second text recognizer (its confident words are what a transcription is checked against); found on PATH, in Scoop or in Program Files when unset; <code>off</code> disables it.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_VISION_TESSERACT_LANG</code></td>
+<td>str</td>
+<td><code>eng</code></td>
+<td><code>tribos/vision/tesseract.py</code></td>
+<td>Tesseract language models to read with (e.g. <code>eng+deu</code>); each must be installed.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_VISION_TIMEOUT_S</code></td>
+<td>int (10 to 1800)</td>
+<td><code>300</code></td>
+<td><code>tribos/vision/vlm.py</code></td>
+<td>Seconds one vision-model transcription may take (CPU inference of a 7B model can need minutes).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="tribos_eval_-evaluations">TRIBOS_EVAL_*: Evaluations</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Type</th>
+<th>Default</th>
+<th>Read at</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>HF_TOKEN</code></td>
+<td>str</td>
+<td>(secret, unset)</td>
+<td><code>tribos/evals/datasets.py</code></td>
+<td>Hugging Face user access token for gated benchmark downloads (GPQA Diamond).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_CASSETTE_PROMPTS</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td><code>tribos/evals/cassette.py</code></td>
+<td>Store full normalised prompts in recorded eval cassettes (easier miss diagnosis, larger files).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_EVAL_CACHE</code></td>
+<td>path</td>
+<td>unset</td>
+<td><code>tribos/evals/datasets.py</code></td>
+<td>Downloaded benchmark datasets cache (default ~/.cache/tribos/evals).</td>
+</tr>
+<tr>
+<td><code>TRIBOS_EVAL_JUDGE_MODEL</code></td>
+<td>str</td>
+<td>unset</td>
+<td><code>tribos/utils/llm/llm_factory.py</code></td>
+<td>Model id of the evaluation judge; also added to the models callers may select.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_EVAL_TOKEN</code></td>
+<td>str</td>
+<td>(secret, unset)</td>
+<td><code>tribos/evals/runner.py</code></td>
+<td>Bearer token the eval runner sends to a remote Tribos API.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="testing">Testing</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Type</th>
+<th>Default</th>
+<th>Read at</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>PYTEST_CURRENT_TEST</code></td>
+<td>str</td>
+<td>unset</td>
+<td><code>tribos/agentic/jobs.py</code><br><code>tribos/agentic/router_store.py</code><br><code>tribos/agentic/sandbox/runner.py</code> (+8)</td>
+<td>Set by pytest; <code>auto</code> switches and default stores treat its presence as a test run. Never set it yourself.</td>
+</tr>
+<tr>
+<td><code>TRIBOS_LOAD_DOTENV</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td><code>app/backend/main.py</code></td>
+<td>Load the workspace <code>.env</code> when the API module is imported; tests/conftest.py sets 0 so a developer <code>.env</code> never reaches pytest.</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+        <script src="../javascripts/mathjax.js"></script>
+      
+        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>

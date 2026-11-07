@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Changelog · Tribos</title>
+<meta name="description" content="What changed in Tribos, release by release.">
+<meta name="theme-color" content="#ffffff">
+<meta name="color-scheme" content="light">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Changelog · Tribos">
+<meta property="og:description" content="What changed in Tribos, release by release.">
+<meta property="og:image" content="assets/s3-overview.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="assets/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/icon-32.png">
+<link rel="apple-touch-icon" href="assets/apple-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=GFS+Didot&family=Geist+Mono:wght@400;500&family=Geist:wght@300..700&display=swap">
+<link rel="stylesheet" href="assets/katex/katex.min.css">
+<link rel="stylesheet" href="assets/site.css">
+<script>document.documentElement.classList.add("js")</script>
+
+</head>
+<body class="min-h-dvh overflow-x-hidden">
+<a href="#main" class="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[60] focus:rounded-full focus:bg-cream focus:px-4 focus:py-2 focus:text-white">Skip to content</a>
+<header class="fixed inset-x-0 top-0 z-50 border-b border-smoke/0 bg-white/80 backdrop-blur-xl transition-colors" data-header>
+  <nav class="mx-auto flex h-16 max-w-[84rem] items-center gap-6 px-5 sm:px-10" aria-label="Main">
+    <a href="index.html" class="flex shrink-0 items-center gap-2 text-cream" aria-label="Tribos home">
+      <span class="mark size-[1.35rem]"></span>
+      <span class="wordmark h-[18px]"></span>
+    </a>
+    <div class="ml-auto hidden items-center gap-6 text-[0.92rem] text-sand lg:flex">
+      <a class="transition hover:text-cream" href="index.html#product">Product</a>
+      <a class="transition hover:text-cream" href="index.html#trust">Trust</a>
+      <a class="transition hover:text-cream" href="index.html#benchmarks">Benchmarks</a>
+      <a class="transition hover:text-cream" href="index.html#research">Research</a>
+      <a class="transition hover:text-cream" href="index.html#start">Get started</a>
+      <a class="transition hover:text-cream" href="changelog.html">Changelog</a>
+    </div>
+    <div class="ml-auto flex items-center gap-1.5 lg:ml-2">
+      <a href="https://github.com/AtlasRoX/TribosAI" target="_blank" rel="noopener" class="hidden size-9 items-center justify-center rounded-full text-cream transition hover:bg-ash sm:inline-flex" aria-label="Source code">
+        <svg class="size-[1.1rem]" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.69 0-1.26.45-2.29 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.8 1.19 1.83 1.19 3.09 0 4.42-2.7 5.4-5.27 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+      </a>
+      <a href="https://youtu.be/yac5XH8Yyl8" target="_blank" rel="noopener" class="btn-ember inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium">
+        <svg class="size-3" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15L20 12z"/></svg>Demo
+      </a>
+      <button type="button" class="inline-flex size-9 items-center justify-center rounded-full text-cream hover:bg-ash lg:hidden" aria-expanded="false" aria-controls="mobile-menu" data-menu-toggle>
+        <span class="sr-only">Menu</span>
+        <svg class="size-[1.1rem]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 8h16M4 16h16"/></svg>
+      </button>
+    </div>
+  </nav>
+  <div id="mobile-menu" class="hidden border-t border-smoke bg-white px-3 pb-3 lg:hidden" data-menu>
+    <a class="block rounded-xl px-3 py-3 hover:bg-ash" href="index.html#product">Product</a>
+    <a class="block rounded-xl px-3 py-3 hover:bg-ash" href="index.html#trust">Trust</a>
+    <a class="block rounded-xl px-3 py-3 hover:bg-ash" href="index.html#benchmarks">Benchmarks</a>
+    <a class="block rounded-xl px-3 py-3 hover:bg-ash" href="index.html#research">Research</a>
+    <a class="block rounded-xl px-3 py-3 hover:bg-ash" href="index.html#start">Get started</a>
+    <a class="block rounded-xl px-3 py-3 hover:bg-ash" href="changelog.html">Changelog</a>
+    <a class="block rounded-xl px-3 py-3 hover:bg-ash" href="https://github.com/AtlasRoX/TribosAI" target="_blank" rel="noopener">Source code</a>
+  </div>
+</header>
+
+
+<main id="main">
+  <section class="relative pt-32 pb-12 sm:pt-40">
+    <div class="mx-auto max-w-4xl px-5 sm:px-8">
+      <h1 class="rise display text-[clamp(3rem,8vw,6rem)] leading-[0.95]" style="animation-delay:.15s">Every step of the <em>worn path</em>.</h1>
+      <p class="rise mt-6 max-w-2xl text-lg leading-relaxed text-sand" style="animation-delay:.3s">What changed in Tribos, release by release.</p>
+      <nav class="rise mt-8 flex flex-wrap gap-2" style="animation-delay:.45s" aria-label="Versions">
+        <a href="#v1-4-0" class="filter !text-sm">v1.4.0</a>
+        <a href="#v1-3-0" class="filter !text-sm">v1.3.0</a>
+        <a href="#v1-2-1" class="filter !text-sm">v1.2.1</a>
+        <a href="#v1-2-0" class="filter !text-sm">v1.2.0</a>
+        <a href="#v1-1-1" class="filter !text-sm">v1.1.1</a>
+        <a href="#v1-1-0" class="filter !text-sm">v1.1.0</a>
+        <a href="#v1-0-0" class="filter !text-sm">v1.0.0</a>
+      </nav>
+    </div>
+  </section>
+
+  <section class="mx-auto max-w-4xl px-5 pb-28 sm:px-8">
+    <ol class="relative border-l border-smoke">
+      <li id="v1-4-0" class="reveal relative scroll-mt-28 pb-14 pl-8 sm:pl-12">
+        <span class="absolute top-2 -left-[7px] size-3.5 rounded-full border-2 border-iris bg-coal shadow-[0_0_14px_rgb(174_159_255/.6)]"></span>
+        <div class="flex flex-wrap items-baseline gap-x-4 gap-y-2">
+          <h2 class="display text-4xl">v1.4.0</h2>
+          <time class="font-mono text-xs text-dust" datetime="2026-11-07">7 November 2026</time>
+          <span class="chip chip-ok">latest</span>
+        </div>
+        <div class="mt-6"><h3 class="font-mono text-xs font-medium tracking-[0.14em] uppercase text-ember">Bug Fixes</h3><ul class="mt-3 space-y-2.5 text-[0.98rem]"><li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">website</span>The changelog page names no outside library</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">website</span>The benchmark table shows one complete run of the current version</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">agents</span>&quot;the difference between&quot; two quantities is a positive amount</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">verify</span>Values at two named points are not a contradiction</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">writer</span>A named system is integrated within the facts time limit</li></ul></div>
+<div class="mt-6"><h3 class="font-mono text-xs font-medium tracking-[0.14em] uppercase text-dust">Build System</h3><ul class="mt-3 space-y-2.5 text-[0.98rem]"><li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">web</span>The web app's linter moves to its current major version</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">deps</span>The language-model client libraries and file locking move to releases without known advisories</li></ul></div>
+<div class="mt-6"><h3 class="font-mono text-xs font-medium tracking-[0.14em] uppercase text-dust">Continuous Integration</h3><ul class="mt-3 space-y-2.5 text-[0.98rem]"><li class="log-item leading-relaxed text-cream/90">Align the workflows with the public repository</li></ul></div>
+<div class="mt-6"><h3 class="font-mono text-xs font-medium tracking-[0.14em] uppercase text-iris">Documentation</h3><ul class="mt-3 space-y-2.5 text-[0.98rem]"><li class="log-item leading-relaxed text-cream/90">Roadmap T15, point groups and names, the public mirror sync</li></ul></div>
+<div class="mt-6"><h3 class="font-mono text-xs font-medium tracking-[0.14em] uppercase text-mint">Features</h3><ul class="mt-3 space-y-2.5 text-[0.98rem]"><li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">scripts</span>Build the public mirror from main</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">agents</span>Opt-in majority voting for choose-one questions</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">physis</span>Point groups, bridged and spiro names, option SMILES numbered alike</li></ul></div>
+<div class="mt-6"><h3 class="font-mono text-xs font-medium tracking-[0.14em] uppercase text-dust">Testing</h3><ul class="mt-3 space-y-2.5 text-[0.98rem]"><li class="log-item leading-relaxed text-cream/90">Build the sync test's fake key at run time</li>
+<li class="log-item leading-relaxed text-cream/90">Second round of fixes and enhancements</li></ul></div>
+      </li>
+      <li id="v1-3-0" class="reveal relative scroll-mt-28 pb-14 pl-8 sm:pl-12">
+        <span class="absolute top-2 -left-[7px] size-3.5 rounded-full border-2 border-iris bg-coal shadow-[0_0_14px_rgb(174_159_255/.6)]"></span>
+        <div class="flex flex-wrap items-baseline gap-x-4 gap-y-2">
+          <h2 class="display text-4xl">v1.3.0</h2>
+          <time class="font-mono text-xs text-dust" datetime="2026-11-07">7 November 2026</time>
+          
+        </div>
+        <div class="mt-6"><h3 class="font-mono text-xs font-medium tracking-[0.14em] uppercase text-ember">Bug Fixes</h3><ul class="mt-3 space-y-2.5 text-[0.98rem]"><li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">website</span>The changelog page names no outside product</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">website</span>The footer links to the hosted documentation</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">evals</span>Fairer grading and eight more flawed benchmark items set aside</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">verify</span>No false contradictions for congruence chains, unit prefixes or case lists</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">routing</span>Words that narrate an exercise no longer require literature search</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">planner</span>Answer options are never requests, and stem letters are not options</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">install</span>Install the vision extra in the Docker image and the README quick start</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">mcp</span>Drop the retired gene-pathway tool from the MCP allowlist</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">engcalc</span>Accept the input names model planners send, and say how to retry</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">router</span>STEM routing examples and no biomedical intents in the query planner</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">evals</span>An exact answer followed by its approximation is graded on the exact part</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">web</span>Label legacy tool names by their current engine or as retired</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">deps</span>Pin pyarrow to 23.0.1 and relock with the project version</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">evals</span>Benchmark the app's default pipeline and grade both systems fairly</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">writer</span>Answer the intended reading, keep computed precision, prefer given data</li></ul></div>
+<div class="mt-6"><h3 class="font-mono text-xs font-medium tracking-[0.14em] uppercase text-dust">Build System</h3><ul class="mt-3 space-y-2.5 text-[0.98rem]"><li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">deps</span>Add a cheminformatics toolkit for organic structure checks</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">deps</span>Minor and patch upgrades from the Dependabot group</li></ul></div>
+<div class="mt-6"><h3 class="font-mono text-xs font-medium tracking-[0.14em] uppercase text-dust">Chores</h3><ul class="mt-3 space-y-2.5 text-[0.98rem]"><li class="log-item leading-relaxed text-cream/90">One name, tagline and version across the API, web app, docs and release</li></ul></div>
+<div class="mt-6"><h3 class="font-mono text-xs font-medium tracking-[0.14em] uppercase text-dust">Continuous Integration</h3><ul class="mt-3 space-y-2.5 text-[0.98rem]"><li class="log-item leading-relaxed text-cream/90">Stop Dependabot version updates</li></ul></div>
+<div class="mt-6"><h3 class="font-mono text-xs font-medium tracking-[0.14em] uppercase text-iris">Documentation</h3><ul class="mt-3 space-y-2.5 text-[0.98rem]"><li class="log-item leading-relaxed text-cream/90">Link source files by GitHub URL so mkdocs --strict builds</li></ul></div>
+<div class="mt-6"><h3 class="font-mono text-xs font-medium tracking-[0.14em] uppercase text-mint">Features</h3><ul class="mt-3 space-y-2.5 text-[0.98rem]"><li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">website</span>GPQA with the chemistry agent, changelog and Physis card</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">agents</span>Chemeia, a chemistry agent for organic questions</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">physis</span>Organic structure facts and stereodescriptors as geometry</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">website</span>Homepage and changelog</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">physis</span>Real-fluid properties from reference equations of state</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">agents</span>Field conventions for exercises, and an opt-in independent cross-check</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">evals</span>Paired benchmark against the base model, fair grading, report</li></ul></div>
+<div class="mt-6"><h3 class="font-mono text-xs font-medium tracking-[0.14em] uppercase text-dust">Testing</h3><ul class="mt-3 space-y-2.5 text-[0.98rem]"><li class="log-item leading-relaxed text-cream/90">Regression tests for the failure-analysis fixes</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">router</span>STEM routing benchmark and held-out set replace the biomedical questions</li></ul></div>
+      </li>
+      <li id="v1-2-1" class="reveal relative scroll-mt-28 pb-14 pl-8 sm:pl-12">
+        <span class="absolute top-2 -left-[7px] size-3.5 rounded-full border-2 border-iris bg-coal shadow-[0_0_14px_rgb(174_159_255/.6)]"></span>
+        <div class="flex flex-wrap items-baseline gap-x-4 gap-y-2">
+          <h2 class="display text-4xl">v1.2.1</h2>
+          <time class="font-mono text-xs text-dust" datetime="2026-11-05">5 November 2026</time>
+          
+        </div>
+        <div class="mt-6"><h3 class="font-mono text-xs font-medium tracking-[0.14em] uppercase text-ember">Bug Fixes</h3><ul class="mt-3 space-y-2.5 text-[0.98rem]"><li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">context</span>Abbreviations no longer split sentences in the Lumo gate</li></ul></div>
+<div class="mt-6"><h3 class="font-mono text-xs font-medium tracking-[0.14em] uppercase text-dust">Testing</h3><ul class="mt-3 space-y-2.5 text-[0.98rem]"><li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">context</span>Sentences keep abbreviations and decimals together</li></ul></div>
+      </li>
+      <li id="v1-2-0" class="reveal relative scroll-mt-28 pb-14 pl-8 sm:pl-12">
+        <span class="absolute top-2 -left-[7px] size-3.5 rounded-full border-2 border-iris bg-coal shadow-[0_0_14px_rgb(174_159_255/.6)]"></span>
+        <div class="flex flex-wrap items-baseline gap-x-4 gap-y-2">
+          <h2 class="display text-4xl">v1.2.0</h2>
+          <time class="font-mono text-xs text-dust" datetime="2026-11-05">5 November 2026</time>
+          
+        </div>
+        <div class="mt-6"><h3 class="font-mono text-xs font-medium tracking-[0.14em] uppercase text-iris">Documentation</h3><ul class="mt-3 space-y-2.5 text-[0.98rem]"><li class="log-item leading-relaxed text-cream/90">Remove biomedical-era leftovers and another project's template docs</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">readme</span>Anti-hallucination and context sections, YouTube demo thumbnail</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">readme</span>Link the demo video on YouTube</li>
+<li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">readme</span>Link the demo video release</li></ul></div>
+<div class="mt-6"><h3 class="font-mono text-xs font-medium tracking-[0.14em] uppercase text-mint">Features</h3><ul class="mt-3 space-y-2.5 text-[0.98rem]"><li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">context</span>Name the admission gate the Lumo Admission Gate</li></ul></div>
+      </li>
+      <li id="v1-1-1" class="reveal relative scroll-mt-28 pb-14 pl-8 sm:pl-12">
+        <span class="absolute top-2 -left-[7px] size-3.5 rounded-full border-2 border-iris bg-coal shadow-[0_0_14px_rgb(174_159_255/.6)]"></span>
+        <div class="flex flex-wrap items-baseline gap-x-4 gap-y-2">
+          <h2 class="display text-4xl">v1.1.1</h2>
+          <time class="font-mono text-xs text-dust" datetime="2026-11-05">5 November 2026</time>
+          
+        </div>
+        <div class="mt-6"><h3 class="font-mono text-xs font-medium tracking-[0.14em] uppercase text-ember">Bug Fixes</h3><ul class="mt-3 space-y-2.5 text-[0.98rem]"><li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">web</span>Research charts render at full size and in colour on the Findings tab</li></ul></div>
+<div class="mt-6"><h3 class="font-mono text-xs font-medium tracking-[0.14em] uppercase text-iris">Documentation</h3><ul class="mt-3 space-y-2.5 text-[0.98rem]"><li class="log-item leading-relaxed text-cream/90"><span class="mr-2 rounded-md bg-cream/[0.07] px-1.5 py-0.5 font-mono text-[0.72rem] text-iris">readme</span>New README with cover banner, demo, screenshots</li></ul></div>
+      </li>
+      <li id="v1-1-0" class="reveal relative scroll-mt-28 pb-14 pl-8 sm:pl-12">
+        <span class="absolute top-2 -left-[7px] size-3.5 rounded-full border-2 border-iris bg-coal shadow-[0_0_14px_rgb(174_159_255/.6)]"></span>
+        <div class="flex flex-wrap items-baseline gap-x-4 gap-y-2">
+          <h2 class="display text-4xl">v1.1.0</h2>
+          <time class="font-mono text-xs text-dust" datetime="2026-11-04">4 November 2026</time>
+          
+        </div>
+        <p class="mt-4 text-sand">Release with no user-facing changes listed.</p>
+      </li>
+      <li id="v1-0-0" class="reveal relative scroll-mt-28 pb-14 pl-8 sm:pl-12">
+        <span class="absolute top-2 -left-[7px] size-3.5 rounded-full border-2 border-iris bg-coal shadow-[0_0_14px_rgb(174_159_255/.6)]"></span>
+        <div class="flex flex-wrap items-baseline gap-x-4 gap-y-2">
+          <h2 class="display text-4xl">v1.0.0</h2>
+          <time class="font-mono text-xs text-dust" datetime="2026-11-04">4 November 2026</time>
+          
+        </div>
+        <p class="mt-4 text-sand">Initial Release</p>
+      </li>
+    </ol>
+  </section>
+</main>
+
+<footer class="relative overflow-hidden border-t border-smoke bg-soot">
+  <div class="relative mx-auto max-w-6xl px-5 pt-16 pb-10 sm:px-8">
+    <div class="flex flex-col gap-10 md:flex-row md:items-start md:justify-between">
+      <div class="max-w-sm">
+        <a href="index.html" class="inline-flex items-center gap-2.5 text-cream" aria-label="Tribos home">
+          <span class="mark size-7"></span>
+          <span class="wordmark h-[22px]"></span>
+        </a>
+        <p class="mt-4 text-[0.95rem] leading-relaxed text-sand">
+          <span class="font-greek text-lg text-cream">τρίβος</span>, a worn path; diligent inquiry. A research partner for
+          engineering, physics and mathematics that shows which claims were checked, and how.
+        </p>
+      </div>
+      <div class="grid grid-cols-2 gap-x-14 gap-y-3 text-[0.93rem] sm:grid-cols-3">
+        <a class="link-u text-sand hover:text-cream" href="index.html#product">Product</a>
+        <a class="link-u text-sand hover:text-cream" href="index.html#trust">Trust</a>
+        <a class="link-u text-sand hover:text-cream" href="index.html#benchmarks">Benchmarks</a>
+        <a class="link-u text-sand hover:text-cream" href="index.html#research">Research</a>
+        <a class="link-u text-sand hover:text-cream" href="index.html#start">Get started</a>
+        <a class="link-u text-sand hover:text-cream" href="changelog.html">Changelog</a>
+        <a class="link-u text-sand hover:text-cream" href="https://github.com/AtlasRoX/TribosAI" target="_blank" rel="noopener">Source code</a>
+        <a class="link-u text-sand hover:text-cream" href="docs/" target="_blank" rel="noopener">Documentation</a>
+        <a class="link-u text-sand hover:text-cream" href="https://youtu.be/yac5XH8Yyl8" target="_blank" rel="noopener">Demo video</a>
+      </div>
+    </div>
+    <div class="mt-14 flex flex-col gap-2 border-t border-smoke pt-6 text-xs text-dust sm:flex-row sm:items-center sm:justify-between">
+      <p>© 2026 ChronoStrider Engineering</p>
+      <p class="font-mono">v1.4.0</p>
+    </div>
+  </div>
+</footer>
+<script src="assets/site.js" defer></script>
+
+</body>
+</html>

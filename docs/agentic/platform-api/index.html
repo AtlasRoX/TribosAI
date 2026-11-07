@@ -1,0 +1,1942 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Your research partner for engineering and science.">
+      
+      
+      
+        <link rel="canonical" href="https://github.com/AtlasRoX/TribosAI/agentic/platform-api/">
+      
+      
+        <link rel="prev" href="../references-verification-tools-data/">
+      
+      
+        <link rel="next" href="../sandbox-security/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/logo.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>Platform API - Tribos</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#agent-platform-api" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Tribos" class="md-header__button md-logo" aria-label="Tribos" data-md-component="logo">
+      
+  <img src="../../assets/logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Tribos
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Platform API
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="cyan"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/AtlasRoX/TribosAI" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    AtlasRoX/TribosAI
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Overview
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+  Architecture & Reasoning
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../archivon/" class="md-tabs__link">
+          
+  
+  
+  Specialist Agents
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../configuration/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Configuration Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../evals/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation Harness
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../developer/" class="md-tabs__link">
+          
+  
+  
+  Developer & Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../CONTRIBUTING/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Tribos" class="md-nav__button md-logo" aria-label="Tribos" data-md-component="logo">
+      
+  <img src="../../assets/logo.png" alt="logo">
+
+    </a>
+    Tribos
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/AtlasRoX/TribosAI" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    AtlasRoX/TribosAI
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture & Reasoning
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture & Reasoning
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agentic System Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../auto-routing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Auto-Routing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../references-agent-loop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reasoning Loop & References
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../references-verification-tools-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Verification & Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Platform API
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Platform API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#sse-events-added-by-agentic-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SSE events added by agentic runs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#run-control-apiagentrunsrun_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run control: /api/agent/runs/{run_id}
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#background-jobs-apijobs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Background jobs: /api/jobs
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Background jobs: /api/jobs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#retries-client_request_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retries: client_request_id
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#research-projects-apiprojects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Research projects: /api/projects
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mcp-server-post-mcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP server: POST /mcp
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a2a-well-knownagent-cardjson-and-post-a2a" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A2A: /.well-known/agent-card.json and POST /a2a
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#references" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        References
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sandbox-security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sandbox Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Specialist Agents
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Specialist Agents
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../archivon/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Archivon (Literature & Theorems)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../axiom/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Axiom (Symbolic Mathematics)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../dynamis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dynamis (Dynamics & Simulation)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../calcula/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Calcula (Computation & Data)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../physis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Physis (Physical & Materials Reference)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../evals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation Harness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer & Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer & Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/TESTING_LINTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing & Linting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/WORKFLOWS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflows & CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cloud/CLOUD_DEPLOYMENT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cloud Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/AZURE_DEPLOYMENT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/SONARCLOUD_SETUP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SonarCloud Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#sse-events-added-by-agentic-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SSE events added by agentic runs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#run-control-apiagentrunsrun_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run control: /api/agent/runs/{run_id}
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#background-jobs-apijobs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Background jobs: /api/jobs
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Background jobs: /api/jobs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#retries-client_request_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retries: client_request_id
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#research-projects-apiprojects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Research projects: /api/projects
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mcp-server-post-mcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP server: POST /mcp
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a2a-well-knownagent-cardjson-and-post-a2a" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A2A: /.well-known/agent-card.json and POST /a2a
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#references" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        References
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="agent-platform-api">Agent platform API</h1>
+<p>Run control, background jobs, research projects, the MCP server and the A2A endpoint (features 13, 15, 16, 17
+of <code>docs/plans/agentic-system.md</code>). All routes use the same bearer authentication as <code>/api/chat</code>
+(<code>TRIBOS_API_TOKENS</code>, <code>TRIBOS_JWT_SECRET</code>, or <code>TRIBOS_AUTH_MODE=disabled</code> for local development) and
+are scoped to the authenticated user: another user's run, job, project or task id answers exactly like an
+unknown one (404, or JSON-RPC <code>-32001</code> for A2A).</p>
+<p>The examples use <code>TOKEN</code> for a bearer token and <code>http://localhost:8000</code> for the backend.</p>
+<h2 id="sse-events-added-by-agentic-runs">SSE events added by agentic runs</h2>
+<p>Agentic frameworks (<code>agentic-plan-execute</code>, <code>multi-agent-supervisor</code>, <code>multi-agent-swarm</code>,
+<code>multi-agent-debate</code>) add two event types to the chat stream (<code>POST /api/chat/stream</code>) and to job event logs.
+All other event types (<code>init</code>, <code>thought</code>, <code>reasoning_delta</code>, <code>content_delta</code>, <code>content_reset</code>, <code>done</code>,
+<code>error</code>) are unchanged.</p>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>When</th>
+<th>Shape</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>run_control</code></td>
+<td>first event of an agentic run</td>
+<td><code>{"type":"run_control","run_id":"run_…","framework":"agentic-plan-execute","interactive":true}</code></td>
+</tr>
+<tr>
+<td><code>approval_request</code></td>
+<td>a phase waits for the researcher</td>
+<td><code>{"type":"approval_request","run_id","approval_id":"apr_…","kind":"plan"\|"dag","payload":{…}}</code></td>
+</tr>
+<tr>
+<td><code>job</code></td>
+<td>job status change (job logs only)</td>
+<td><code>{"type":"job","job_id","status","run_id"?,"resumed"?}</code></td>
+</tr>
+</tbody>
+</table>
+<p>A plan approval payload:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="p">{</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">"sources"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="p">{</span><span class="nt">"key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"archivon"</span><span class="p">,</span><span class="w"> </span><span class="nt">"label"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Scholarly literature search (Archivon, arXiv, Europe PMC)"</span><span class="p">,</span><span class="w"> </span><span class="nt">"run"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="nt">"reason"</span><span class="p">:</span><span class="w"> </span><span class="s2">""</span><span class="p">},</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="p">{</span><span class="nt">"key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"websurfer"</span><span class="p">,</span><span class="w"> </span><span class="nt">"label"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Web search"</span><span class="p">,</span><span class="w"> </span><span class="nt">"run"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="nt">"reason"</span><span class="p">:</span><span class="w"> </span><span class="s2">""</span><span class="p">},</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="p">{</span><span class="nt">"key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"dynamis"</span><span class="p">,</span><span class="w"> </span><span class="nt">"label"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Dynamical simulation (Dynamis, SciPy)"</span><span class="p">,</span><span class="w"> </span><span class="nt">"run"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span><span class="w"> </span><span class="nt">"reason"</span><span class="p">:</span><span class="w"> </span><span class="s2">"no simulation requested"</span><span class="p">}</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span><span class="p">],</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span><span class="nt">"expensive"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"parameter scan"</span><span class="p">],</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">  </span><span class="nt">"question"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="p">}</span>
+</code></pre></div>
+<p>Legacy alias keys (<code>lithoscribe</code>, <code>vivarix</code>) and tools this installation does not have are never listed; switching a
+source off also switches off its alias. A source the plan skipped (<code>run: false</code>) cannot be switched on from the card.</p>
+<p>Plan approval runs on interactive runs when <code>agent_options.require_plan_approval</code> is set or expensive work is
+routed (simulation, parameter scan, single-cell analysis, calibration, docking, sandboxed analysis). A
+non-interactive run with <code>require_plan_approval</code> is approved automatically and recorded as <code>auto</code>. With no
+answer within <code>TRIBOS_APPROVAL_TIMEOUT_S</code> (default 300 s) the plan runs as proposed (<code>timeout</code>).</p>
+<p>A clarifying question ends the turn instead: the response is the question with numbered options,
+<code>task_status.task_status</code> is <code>needs_input</code>, and the artifact <code>clarification</code> is
+<code>{"question","options","reason","signals"}</code>. The next message in the thread is treated as the answer ("2" or
+the option text): it is merged with the original question, and the agent never asks twice in a row.</p>
+<h2 id="run-control-apiagentrunsrun_id">Run control: <code>/api/agent/runs/{run_id}</code></h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Body</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/api/agent/runs/{run_id}</code></td>
+<td></td>
+<td><code>{"run_id","interactive","cancelled","pending":[{approval_id,kind,payload,created}],"decisions":[…],"queued_steering"}</code></td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/agent/runs/{run_id}/approve</code></td>
+<td><code>{"approval_id","approved",payload?,message?}</code></td>
+<td><code>{"success":true,…}</code>; 409 if the approval is no longer pending</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/agent/runs/{run_id}/steer</code></td>
+<td><code>{"message"}</code> (at most 2000 characters)</td>
+<td><code>{"success":true,"queued_steering":n}</code></td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/agent/runs/{run_id}/cancel</code></td>
+<td><code>{"reason"?}</code></td>
+<td><code>{"success":true,"cancelled":true}</code></td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/agent/reliability</code></td>
+<td></td>
+<td>tool reliability snapshot (circuit breakers, retries, cache) when available</td>
+</tr>
+</tbody>
+</table>
+<p>Editing the plan can only switch sources off. Send the payload back with <code>"run": false</code> on the rows to drop
+(or <code>{"sources": {"websurfer": false}}</code>). Rejecting the plan (<code>"approved": false</code>) keeps only the literature
+search. The artifact <code>plan_approval</code> records <code>{"approval_id","status":"approved|edited|rejected|auto|timeout",
+"sources","switched_off"}</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># approve the plan but switch the web search off</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:8000/api/agent/runs/run_0123456789abcdef/approve<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">"</span><span class="w"> </span>-H<span class="w"> </span><span class="s2">"Content-Type: application/json"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"approval_id":"apr_0123456789","approved":true,"payload":{"sources":{"websurfer":false}}}'</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="c1"># add an instruction while the run is in progress (read before synthesis and after each draft)</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:8000/api/agent/runs/run_0123456789abcdef/steer<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">"</span><span class="w"> </span>-H<span class="w"> </span><span class="s2">"Content-Type: application/json"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"message":"Focus on pancreatic ductal adenocarcinoma"}'</span>
+</code></pre></div>
+<p>Run controls live in the server process; they disappear when the run ends.</p>
+<h2 id="background-jobs-apijobs">Background jobs: <code>/api/jobs</code></h2>
+<p>A job runs one question without a client attached. The event log is durable (SQLite), ordered by <code>seq</code>,
+and can be replayed and followed.</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>POST</td>
+<td><code>/api/jobs</code></td>
+<td>body = the <code>/api/chat</code> request fields → <code>201 {"job_id","run_id","status":"queued","thread_id"}</code>; 429 over the per-user limit; a repeated <code>client_request_id</code> returns the same job (see below)</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/jobs</code></td>
+<td><code>?status=&amp;thread_id=&amp;limit=</code> → <code>{"jobs":[…]}</code> (no results in the list)</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/jobs/{id}</code></td>
+<td>the job with <code>result</code> (the chat response object), <code>pending_approvals</code>, <code>watchers</code>, <code>last_seq</code></td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/jobs/{id}/events</code></td>
+<td>SSE: replay <code>?after=N</code> then follow; <code>Last-Event-ID</code> works; <code>?stream=false</code> returns JSON</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/jobs/{id}/cancel</code></td>
+<td>queued: cancelled at once; running: cancelled at the next checkpoint</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/jobs/{id}/resume</code></td>
+<td>interrupted, failed or cancelled jobs run again (new <code>run_id</code>; tool calls hit the result cache)</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/api/jobs/{id}</code></td>
+<td>cancels if needed, then deletes the job and its log</td>
+</tr>
+</tbody>
+</table>
+<p>Statuses: <code>queued</code>, <code>running</code>, <code>waiting_approval</code>, <code>succeeded</code>, <code>failed</code>, <code>cancelled</code>, <code>interrupted</code>. Jobs
+left running when the server stops are marked <code>interrupted</code> at the next start. Each SSE frame is
+<code>id: &lt;seq&gt;</code> plus <code>data: &lt;event JSON with "seq"&gt;</code>. A <code>: ping</code> comment is sent while idle. The stream ends after
+the current attempt's <code>done</code> or <code>error</code> event. While a client is attached the run is interactive, so plan
+approvals wait for an answer through <code>/api/agent/runs/{run_id}/approve</code>. When the last watcher leaves, a
+pending approval is approved automatically.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:8000/api/jobs<span class="w"> </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">"</span><span class="w"> </span>-H<span class="w"> </span><span class="s2">"Content-Type: application/json"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"message":"Simulate a damped oscillator with m=1, c=0.4, k=4 and find its decay time.","framework":"agentic-plan-execute","agent_options":{"require_plan_approval":true}}'</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># reattach after event 42</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>curl<span class="w"> </span>-N<span class="w"> </span><span class="s2">"http://localhost:8000/api/jobs/job_0123456789abcdef/events?after=42"</span><span class="w"> </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">"</span>
+</code></pre></div>
+<p>A runtime <code>api_key</code> sent with a job is kept in memory only, never written to the job store. After a
+restart, a resumed job runs with the server's keys.</p>
+<p>The stored <code>request</code> keeps <code>message</code> (the question as solved, with the transcriptions of attached images) and
+<code>display_message</code> (what the user typed): clients compare the thread's last user message with
+<code>request.display_message ?? request.message</code> when they reopen a job, so the question is not shown twice.</p>
+<h3 id="retries-client_request_id">Retries: <code>client_request_id</code></h3>
+<p><code>POST /api/chat</code>, <code>POST /api/chat/stream</code> and <code>POST /api/jobs</code> accept an optional <code>client_request_id</code>
+(1-100 characters of <code>A-Z a-z 0-9 _ . : -</code>, e.g. a UUID). A client generates one per question and sends the same
+id when it retries that question (for example the web app's JSON fallback after a dropped stream):</p>
+<ul>
+<li>Chat: while a request with the same id is still running for the same user, the duplicate is refused with
+  <code>409</code> (<code>"This question is already running …"</code>) and takes no chat slot. The id is released when the run ends,
+  so a retry after the first run finished or failed runs normally.</li>
+<li>Jobs: a duplicate within 10 minutes returns the job the first request created (<code>200</code>, same <code>job_id</code>, plus
+  <code>"duplicate": true</code>) instead of queueing the question twice; <code>409</code> while the first submission is still
+  being stored.</li>
+</ul>
+<p>Ids are kept per user in a bounded in-memory table (at most 32 ids per user, entries expire), so they are not
+shared between server processes and are forgotten on restart.</p>
+<h2 id="research-projects-apiprojects">Research projects: <code>/api/projects</code></h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Body / query</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>POST</td>
+<td><code>/api/projects</code></td>
+<td><code>{"name","description"}</code> → <code>201</code> project (<code>id</code> = <code>prj_…</code>)</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/projects</code></td>
+<td>list with fact counts</td>
+</tr>
+<tr>
+<td>GET / PATCH / DELETE</td>
+<td><code>/api/projects/{id}</code></td>
+<td>PATCH <code>{"name"?,"description"?}</code>; DELETE removes the project and its facts</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/projects/{id}/memory</code></td>
+<td><code>?query=</code> ranked recall (what the agent would get), else newest first; <code>include_invalid=true</code> shows history</td>
+</tr>
+<tr>
+<td>PATCH</td>
+<td><code>/api/projects/{id}/memory/{fact_id}</code></td>
+<td><code>{"invalidate":true,"reason"}</code> or an edit <code>{"object"?,"value"?,"confidence"?,"verified"?,"tags"?}</code>; unknown fields are refused with 422</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/api/projects/{id}/memory/{fact_id}</code></td>
+<td>hard delete</td>
+</tr>
+</tbody>
+</table>
+<p>Send <code>project_id</code> with a chat or job request to use the project's memory. A fact is
+<code>{"id":"fct_…","subject","relation","object","value","valid_from","invalid_at","recorded_at","source":{"thread_id","run_id","tool"},"confidence","verified","tags"}</code>.
+A contradiction (a new classification, mechanism or association score) invalidates the old fact and does not
+delete it. Editing an object or value creates a new version of the fact. Facts from turns that failed
+verification are tagged <code>unverified</code>. The artifact <code>project_memory</code> is
+<code>{"project_id","recalled":[…],"written","invalidated"}</code>.</p>
+<h2 id="mcp-server-post-mcp">MCP server: <code>POST /mcp</code></h2>
+<p>JSON-RPC 2.0 over Streamable HTTP. Responses are always JSON; <code>GET /mcp</code> returns 405. Supported protocol
+versions are <code>2026-07-28</code>, <code>2025-11-25</code>, <code>2025-06-18</code> and <code>2025-03-26</code>. <code>initialize</code> echoes a supported
+client version and otherwise answers <code>2025-11-25</code>. An unsupported <code>MCP-Protocol-Version</code> header (or
+<code>_meta["io.modelcontextprotocol/protocolVersion"]</code>) is rejected with <code>-32600</code>.</p>
+<p>Methods: <code>initialize</code>, <code>notifications/initialized</code> (202, no body), <code>ping</code>, <code>server/discover</code>, <code>tools/list</code>,
+<code>tools/call</code>. Error codes: <code>-32700</code> parse error, <code>-32600</code> invalid request, <code>-32601</code> method not found,
+<code>-32602</code> invalid params or unknown tool, <code>-32603</code> internal error. A tool that runs and fails returns
+<code>isError: true</code>.</p>
+<p>Tools:
+- <code>tribos_research</code> <code>{question, framework?, enable_web_search?, thread_id?}</code> runs the full orchestrator
+  non-interactively. It returns the answer as text plus <code>structuredContent</code>
+  <code>{answer, citations, verification, task_status, framework, thread_id}</code>.
+- Read-only registry tools from <code>TRIBOS_MCP_TOOLS</code> (comma-separated). The default list
+  (<code>DEFAULT_TOOLS</code> in <code>app/backend/routers/mcp.py</code>) is the Archivon literature tools, the Axiom computer-algebra
+  tools, the Dynamis simulation tools and the Physis reference-data tools, each when it is registered. Each
+  <code>inputSchema</code> is the tool's pydantic schema. Tools whose names suggest writes, uploads, code execution,
+  docking or generation are never exposed.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:8000/mcp<span class="w"> </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">"</span><span class="w"> </span>-H<span class="w"> </span><span class="s2">"Content-Type: application/json"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">"MCP-Protocol-Version: 2025-11-25"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"axiom_solve","arguments":{"equations":"x^2 - 2 = 0","variables":"x","domain":"real"}}}'</span>
+</code></pre></div>
+<p>Client configuration (Claude Desktop, Claude Code or any client that supports remote Streamable HTTP servers):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="p">{</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">"mcpServers"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">    </span><span class="nt">"tribos"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">      </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"http"</span><span class="p">,</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">      </span><span class="nt">"url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"http://localhost:8000/mcp"</span><span class="p">,</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">      </span><span class="nt">"headers"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"Authorization"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Bearer YOUR_TRIBOS_TOKEN"</span><span class="p">}</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="p">}</span>
+</code></pre></div>
+<p>Security, following Hou et al. 2025 (arXiv:2503.23278):
+- The tool allowlist is fixed.
+- No write tools are exposed.
+- Tool descriptions are static.
+- Bearer authentication is required.
+- <code>Origin</code> is checked against <code>TRIBOS_CORS_ORIGINS</code> plus <code>TRIBOS_MCP_ALLOWED_ORIGINS</code> (DNS-rebinding
+  protection).
+- Each user can run at most <code>TRIBOS_MCP_MAX_CONCURRENT</code> (default 2) <code>tools/call</code> requests at once.
+- The server is stateless: no sessions and no sampling.</p>
+<h2 id="a2a-well-knownagent-cardjson-and-post-a2a">A2A: <code>/.well-known/agent-card.json</code> and <code>POST /a2a</code></h2>
+<p>The A2A v1.0.0 JSON-RPC binding (https://a2a-protocol.org/latest/specification/). The Agent Card is public.
+It lists the skills <code>stem-research</code> and <code>symbolic-numerical-simulation</code>, a bearer security scheme, and
+<code>capabilities.streaming = false</code>. Its URLs use <code>TRIBOS_PUBLIC_URL</code> when it is set (an <code>http(s)://</code> base URL,
+e.g. behind a reverse proxy), else the base URL of the request.</p>
+<p>Methods: <code>SendMessage</code>, <code>GetTask</code>, <code>ListTasks</code> and <code>CancelTask</code>. The pre-1.0 aliases <code>message/send</code>,
+<code>tasks/get</code>, <code>tasks/list</code> and <code>tasks/cancel</code> are also accepted. Every message becomes a background job:
+- The task <code>id</code> is the job id and <code>contextId</code> is the thread.
+- <code>status.state</code> is one of <code>submitted</code>, <code>working</code>, <code>input-required</code>, <code>completed</code>, <code>failed</code> or <code>canceled</code>.
+- A completed task carries the answer as a text artifact.
+- <code>configuration.blocking: true</code> waits for the answer, up to <code>TRIBOS_A2A_BLOCKING_TIMEOUT_S</code> (default
+  300 s).</p>
+<p>Errors: <code>-32001</code> task not found, <code>-32002</code> task not cancelable.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:8000/a2a<span class="w"> </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">"</span><span class="w"> </span>-H<span class="w"> </span><span class="s2">"Content-Type: application/json"</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">'{</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="s1">  "jsonrpc":"2.0","id":1,"method":"SendMessage",</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="s1">  "params":{"message":{"role":"user","messageId":"m1","parts":[{"kind":"text","text":"What is the period of a 2 kg mass on a 50 N/m spring?"}]},</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="s1">            "configuration":{"blocking":true}}}'</span>
+</code></pre></div>
+<h2 id="environment">Environment</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TRIBOS_APPROVAL_TIMEOUT_S</code></td>
+<td>300</td>
+<td>how long a plan approval waits</td>
+</tr>
+<tr>
+<td><code>TRIBOS_JOBS_DIR</code></td>
+<td><code>$TRIBOS_RUNS_DIR/jobs</code>, else <code>data/jobs</code></td>
+<td>job store</td>
+</tr>
+<tr>
+<td><code>TRIBOS_JOB_WORKERS</code></td>
+<td>2</td>
+<td>asyncio job workers</td>
+</tr>
+<tr>
+<td><code>TRIBOS_MAX_JOBS_PER_USER</code></td>
+<td>3</td>
+<td>queued + running jobs per user</td>
+</tr>
+<tr>
+<td><code>TRIBOS_JOB_MAX_EVENTS</code></td>
+<td>20000</td>
+<td>log cap (token deltas are dropped past it)</td>
+</tr>
+<tr>
+<td><code>TRIBOS_JOB_CANCEL_GRACE_S</code></td>
+<td>20</td>
+<td>after this long a cancelled agentic job's task is cancelled outright</td>
+</tr>
+<tr>
+<td><code>TRIBOS_PROJECTS_DIR</code></td>
+<td>next to the research memory store</td>
+<td>project store</td>
+</tr>
+<tr>
+<td><code>TRIBOS_MCP_TOOLS</code></td>
+<td>built-in read-only list</td>
+<td>MCP registry-tool allowlist</td>
+</tr>
+<tr>
+<td><code>TRIBOS_MCP_MAX_CONCURRENT</code></td>
+<td>2</td>
+<td>concurrent MCP <code>tools/call</code> per user</td>
+</tr>
+<tr>
+<td><code>TRIBOS_MCP_ALLOWED_ORIGINS</code></td>
+<td>(none)</td>
+<td>extra allowed <code>Origin</code> values for <code>/mcp</code></td>
+</tr>
+<tr>
+<td><code>TRIBOS_MCP_RESEARCH_TIMEOUT_S</code></td>
+<td>900</td>
+<td><code>tribos_research</code> timeout</td>
+</tr>
+<tr>
+<td><code>TRIBOS_A2A_BLOCKING_TIMEOUT_S</code></td>
+<td>300</td>
+<td>blocking <code>SendMessage</code> wait</td>
+</tr>
+<tr>
+<td><code>TRIBOS_PUBLIC_URL</code></td>
+<td>(request base URL)</td>
+<td>base URL in the A2A Agent Card</td>
+</tr>
+</tbody>
+</table>
+<p>Jobs and run controls assume one server process per jobs directory. Startup recovery marks every running job
+interrupted.</p>
+<h2 id="references">References</h2>
+<ul>
+<li>CLAM (arXiv:2212.07769), Clarify When Necessary (arXiv:2311.09469), Aliannejadi et al. (arXiv:1907.06554):
+  clarification.</li>
+<li>Magentic-UI (arXiv:2507.22358): co-planning and action guards.</li>
+<li>LangGraph persistence (https://docs.langchain.com/oss/python/langgraph/persistence): durable jobs. Living
+  systematic reviews (Elliott et al. 2014, doi:10.1371/journal.pmed.1001603) motivate long-running research.</li>
+<li>Zep (arXiv:2501.13956), Mem0 (arXiv:2504.19413), HippoRAG (arXiv:2405.14831), Generative Agents
+  (arXiv:2304.03442), MemGPT (arXiv:2310.08560), A-MEM (arXiv:2502.12110): project memory.</li>
+<li>MCP specification (https://modelcontextprotocol.io/specification/2025-11-25/,
+  https://modelcontextprotocol.io/specification/2026-07-28/), A2A specification
+  (https://a2a-protocol.org/latest/specification/), Hou et al. 2025 (arXiv:2503.23278): interoperability and
+  security.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+        <script src="../../javascripts/mathjax.js"></script>
+      
+        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>

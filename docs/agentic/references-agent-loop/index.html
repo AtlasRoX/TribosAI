@@ -1,0 +1,1913 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Your research partner for engineering and science.">
+      
+      
+      
+        <link rel="canonical" href="https://github.com/AtlasRoX/TribosAI/agentic/references-agent-loop/">
+      
+      
+        <link rel="prev" href="../auto-routing/">
+      
+      
+        <link rel="next" href="../references-verification-tools-data/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/logo.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>Reasoning Loop & References - Tribos</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#tribos-agentic-features-verified-literature-agent-loop-and-reasoning" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Tribos" class="md-header__button md-logo" aria-label="Tribos" data-md-component="logo">
+      
+  <img src="../../assets/logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Tribos
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Reasoning Loop & References
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="cyan"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/AtlasRoX/TribosAI" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    AtlasRoX/TribosAI
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Overview
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+  Architecture & Reasoning
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../archivon/" class="md-tabs__link">
+          
+  
+  
+  Specialist Agents
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../configuration/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Configuration Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../evals/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation Harness
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../developer/" class="md-tabs__link">
+          
+  
+  
+  Developer & Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../CONTRIBUTING/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Tribos" class="md-nav__button md-logo" aria-label="Tribos" data-md-component="logo">
+      
+  <img src="../../assets/logo.png" alt="logo">
+
+    </a>
+    Tribos
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/AtlasRoX/TribosAI" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    AtlasRoX/TribosAI
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture & Reasoning
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture & Reasoning
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agentic System Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../auto-routing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Auto-Routing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reasoning Loop & References
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reasoning Loop & References
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-dynamic-plan-and-execute-dag-of-tool-calls-parallel-execution-replanning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Dynamic plan-and-execute (DAG of tool calls, parallel execution, replanning)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-gap-driven-iterative-re-retrieval-find-unanswered-sub-questions-after-a-draft-retrieve-again-within-a-budget" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Gap-driven iterative re-retrieval (find unanswered sub-questions after a draft, retrieve again within a budget)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-question-decomposition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Question decomposition
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-multi-agent-topologies-supervisor-swarmhandoffs-debate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Multi-agent topologies (supervisor, swarm/handoffs, debate)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-budget-and-stopping-control-token-cost-and-latency-budgets-adaptive-compute" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Budget and stopping control (token, cost and latency budgets; adaptive compute)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-hypothesis-to-experiment-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Hypothesis-to-experiment loop
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-adversarial-counter-evidence-and-contradiction-search" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Adversarial counter-evidence and contradiction search
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-sandboxed-code-execution-agent-for-data-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Sandboxed code-execution agent for data analysis
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#15-human-in-the-loop-clarifying-questions-plan-approval" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15. Human-in-the-loop (clarifying questions, plan approval)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="15. Human-in-the-loop (clarifying questions, plan approval)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#venue-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Venue notes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../references-verification-tools-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Verification & Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../platform-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Platform API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sandbox-security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sandbox Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Specialist Agents
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Specialist Agents
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../archivon/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Archivon (Literature & Theorems)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../axiom/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Axiom (Symbolic Mathematics)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../dynamis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dynamis (Dynamics & Simulation)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../calcula/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Calcula (Computation & Data)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../physis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Physis (Physical & Materials Reference)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../evals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation Harness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer & Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer & Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/TESTING_LINTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing & Linting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/WORKFLOWS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflows & CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cloud/CLOUD_DEPLOYMENT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cloud Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/AZURE_DEPLOYMENT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/SONARCLOUD_SETUP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SonarCloud Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-dynamic-plan-and-execute-dag-of-tool-calls-parallel-execution-replanning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Dynamic plan-and-execute (DAG of tool calls, parallel execution, replanning)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-gap-driven-iterative-re-retrieval-find-unanswered-sub-questions-after-a-draft-retrieve-again-within-a-budget" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Gap-driven iterative re-retrieval (find unanswered sub-questions after a draft, retrieve again within a budget)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-question-decomposition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Question decomposition
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-multi-agent-topologies-supervisor-swarmhandoffs-debate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Multi-agent topologies (supervisor, swarm/handoffs, debate)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-budget-and-stopping-control-token-cost-and-latency-budgets-adaptive-compute" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Budget and stopping control (token, cost and latency budgets; adaptive compute)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-hypothesis-to-experiment-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Hypothesis-to-experiment loop
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-adversarial-counter-evidence-and-contradiction-search" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Adversarial counter-evidence and contradiction search
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-sandboxed-code-execution-agent-for-data-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Sandboxed code-execution agent for data analysis
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#15-human-in-the-loop-clarifying-questions-plan-approval" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15. Human-in-the-loop (clarifying questions, plan approval)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="15. Human-in-the-loop (clarifying questions, plan approval)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#venue-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Venue notes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="tribos-agentic-features-verified-literature-agent-loop-and-reasoning">Tribos agentic features: verified literature (agent loop and reasoning)</h1>
+<p>Every paper below was checked against its arXiv abstract or HTML page, an official proceedings page (PMLR, ICLR, ACL Anthology), or the bioRxiv PDF. Specific numbers (thresholds, prompts, counts) were read from the paper's full text, not just the abstract. Details marked "(confirm in PDF)" come from the paper body and were not re-read in this session. Check those before hard-coding them.</p>
+<hr />
+<h2 id="1-dynamic-plan-and-execute-dag-of-tool-calls-parallel-execution-replanning">1. Dynamic plan-and-execute (DAG of tool calls, parallel execution, replanning)</h2>
+<ul>
+<li><strong>An LLM Compiler for Parallel Function Calling</strong>: Sehoon Kim et al., 2023 (v1 Dec 2023), ICML 2024. arXiv:2312.04511. https://arxiv.org/abs/2312.04511</li>
+<li>Technique to borrow: this is the core design. A Planner LLM outputs numbered tasks forming a DAG. A dependent task refers to an earlier result with a placeholder (<code>$1</code>, <code>$2</code>). A Task Fetching Unit, which needs no LLM, sends out each task as soon as its dependencies resolve (greedy) and fills in the placeholders. An Executor runs ready tasks concurrently. For dynamic replanning, the Executor's results go back to the Planner, which emits a new task set, and this repeats until the final answer. Reported speedups over ReAct are 1.8x on HotpotQA, 3.74x on Movie Recommendation and 2.15x on ParallelQA (GPT). This maps directly onto parallel calls to EuropePMC, OpenTargets, ChEMBL and ClinicalTrials.gov.</li>
+<li>
+<p>Verified via: https://arxiv.org/abs/2312.04511 and https://arxiv.org/html/2312.04511</p>
+</li>
+<li>
+<p><strong>ReWOO: Decoupling Reasoning from Observations for Efficient Augmented Language Models</strong>: Binfeng Xu et al., 2023, arXiv preprint (no venue listed). arXiv:2305.18323. https://arxiv.org/abs/2305.18323</p>
+</li>
+<li>Technique to borrow: plan the whole tool chain up front, without waiting for observations. Planner, Worker and Solver are separate modules, with evidence variables <code>#E1</code>, <code>#E2</code> (confirm in PDF). Reported results are about 5x token efficiency and +4% accuracy on HotpotQA. It also holds up when tools fail, and planning can be offloaded to a smaller model. Use it as the low-cost path when the query is predictable.</li>
+<li>
+<p>Verified via: https://arxiv.org/abs/2305.18323</p>
+</li>
+<li>
+<p><strong>Plan-and-Solve Prompting: Improving Zero-Shot Chain-of-Thought Reasoning by Large Language Models</strong>: Lei Wang et al., 2023, ACL 2023. arXiv:2305.04091. https://arxiv.org/abs/2305.04091</p>
+</li>
+<li>Technique to borrow: the zero-shot planning trigger for the planner system prompt. PS: "Let's first understand the problem and devise a plan to solve the problem. Then, let's carry out the plan and solve the problem step by step." PS+ adds "extract relevant variables and their corresponding numerals" and "calculate intermediate variables (pay attention to correct numerical calculation and commonsense)".</li>
+<li>
+<p>Verified via: https://arxiv.org/html/2305.04091</p>
+</li>
+<li>
+<p><strong>ReAct: Synergizing Reasoning and Acting in Language Models</strong>: Shunyu Yao et al., 2022, ICLR 2023. arXiv:2210.03629. https://arxiv.org/abs/2210.03629</p>
+</li>
+<li>Technique to borrow: an interleaved Thought, Action, Observation loop. Use it as the fallback executor for steps whose next action depends on the last observation, and as the baseline that LLMCompiler and ReWOO are measured against. It cuts hallucination and error propagation compared with chain-of-thought (CoT) on HotpotQA and FEVER.</li>
+<li>Verified via: https://arxiv.org/abs/2210.03629</li>
+</ul>
+<hr />
+<h2 id="2-gap-driven-iterative-re-retrieval-find-unanswered-sub-questions-after-a-draft-retrieve-again-within-a-budget">2. Gap-driven iterative re-retrieval (find unanswered sub-questions after a draft, retrieve again within a budget)</h2>
+<ul>
+<li><strong>Active Retrieval Augmented Generation (FLARE)</strong>: Zhengbao Jiang et al., 2023, EMNLP 2023. arXiv:2305.06983. https://arxiv.org/abs/2305.06983</li>
+<li>Technique to borrow: forward-looking active retrieval. The model generates a tentative next sentence. If that sentence contains any low-confidence tokens (token probability below a threshold theta), the sentence is used as the query, or the low-confidence spans are masked or turned into questions (confirm in PDF). The system then retrieves and regenerates the sentence. Apply this per draft sentence to spot "gaps".</li>
+<li>
+<p>Verified via: https://arxiv.org/abs/2305.06983</p>
+</li>
+<li>
+<p><strong>Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection</strong>: Akari Asai et al., 2023, ICLR 2024 (oral). arXiv:2310.11511. https://arxiv.org/abs/2310.11511</p>
+</li>
+<li>Technique to borrow: the reflection-token rubric, used as an LLM-judge schema without fine-tuning.<ul>
+<li><code>Retrieve</code> = {yes, no, continue}</li>
+<li><code>IsRel</code> = {relevant, irrelevant}</li>
+<li><code>IsSup</code> = {fully, partially, no support}</li>
+<li><code>IsUse</code> = {1..5}</li>
+<li>Segment score = p(segment) + sum of w_G * s_G over the critique tokens. Default weights are IsRel 1.0, IsSup 1.0 and IsUse 0.5.</li>
+<li>A hard filter drops segments rated "no support".</li>
+<li>A "partially/no support" verdict on a claim means a gap, which triggers another retrieval.</li>
+</ul>
+</li>
+<li>
+<p>Verified via: https://arxiv.org/html/2310.11511 and https://proceedings.iclr.cc/paper_files/paper/2024/hash/25f7be9694d7b32d5cc670927b8091e1-Abstract-Conference.html</p>
+</li>
+<li>
+<p><strong>Corrective Retrieval Augmented Generation (CRAG)</strong>: Shi-Qi Yan et al., 2024, arXiv preprint (no venue listed). arXiv:2401.15884. https://arxiv.org/abs/2401.15884</p>
+</li>
+<li>Technique to borrow: a three-way action rule driven by a retrieval evaluator. The evaluator is a fine-tuned T5-large that scores each document from -1 to 1, compared against an upper and a lower threshold.<ul>
+<li><strong>Correct:</strong> any document scores above the upper threshold. Refine the retrieved documents.</li>
+<li><strong>Incorrect:</strong> every document scores below the lower threshold. Discard them and fall back to web search.</li>
+<li><strong>Ambiguous:</strong> otherwise. Combine both sources.</li>
+<li>Example thresholds: PopQA (0.59, -0.99); PubHealth (0.5, -0.91).</li>
+<li>Decompose-then-recompose: split documents into strips, filter strips scoring below -0.5, keep the top 5, and concatenate them in order.</li>
+</ul>
+</li>
+<li>In Tribos, swap web search for a reformulated EuropePMC query.</li>
+<li>
+<p>Verified via: https://arxiv.org/html/2401.15884</p>
+</li>
+<li>
+<p><strong>Language agents achieve superhuman synthesis of scientific knowledge (PaperQA2)</strong>: Michael D. Skarlinski et al., 2024, arXiv preprint. arXiv:2409.13740. https://arxiv.org/abs/2409.13740</p>
+</li>
+<li>Technique to borrow: an agentic literature loop with four tools.<ul>
+<li><strong>Paper Search:</strong> a keyword query returning 12 papers by default, then chunked and embedded.</li>
+<li><strong>Gather Evidence:</strong> dense top-k of 30 chunks, followed by RCS (reranking and contextual summarization). An LLM writes a short query-specific summary of each chunk and scores its relevance, and chunks are reranked by that score.</li>
+<li><strong>Citation Traversal:</strong> one hop to citing and cited papers, starting from papers whose summary scored 8 or higher, capped at 12 papers.</li>
+<li><strong>Generate Answer:</strong> uses the top 15 summaries by default. The authors found 5 gave the best accuracy.</li>
+</ul>
+</li>
+<li>The agent keeps calling Search, Gather and Traverse until it judges the evidence sufficient. This is the template for a budgeted re-retrieval loop over EuropePMC.</li>
+<li>
+<p>Verified via: https://arxiv.org/html/2409.13740</p>
+</li>
+<li>
+<p>Also verified, as a supporting reference: <strong>Interleaving Retrieval with Chain-of-Thought Reasoning for Knowledge-Intensive Multi-Step Questions (IRCoT)</strong>: Harsh Trivedi et al., 2022, ACL 2023. arXiv:2212.10509. https://arxiv.org/abs/2212.10509</p>
+</li>
+<li>Technique to borrow: each new CoT sentence becomes the next retrieval query, and the retrieved passages feed the next reasoning step. This gives a simple per-step re-retrieval baseline.</li>
+<li>Verified via: https://arxiv.org/abs/2212.10509</li>
+</ul>
+<hr />
+<h2 id="3-question-decomposition">3. Question decomposition</h2>
+<ul>
+<li><strong>Least-to-Most Prompting Enables Complex Reasoning in Large Language Models</strong>: Denny Zhou et al., 2022, ICLR 2023. arXiv:2205.10625. https://arxiv.org/abs/2205.10625</li>
+<li>Technique to borrow: two stages. First decompose the problem into an ordered list of simpler subproblems. Then solve them in order, adding each answer to the context for the next one. Use this for sequential biomedical chains, for example target, then pathway, then compound, then trial.</li>
+<li>
+<p>Verified via: https://arxiv.org/abs/2205.10625</p>
+</li>
+<li>
+<p><strong>Measuring and Narrowing the Compositionality Gap in Language Models (Self-Ask)</strong>: Ofir Press et al., 2022, Findings of EMNLP 2023. arXiv:2210.03350. https://arxiv.org/abs/2210.03350</p>
+</li>
+<li>Technique to borrow: the model explicitly asks and answers follow-up questions before giving the final answer. The scaffold is "Are follow up questions needed here: / Follow up: / Intermediate answer: / So the final answer is:" (confirm in PDF). Because the follow-ups are explicit, each "Follow up:" can go to a search tool, here EuropePMC or OpenTargets.</li>
+<li>
+<p>Verified via: https://arxiv.org/abs/2210.03350</p>
+</li>
+<li>
+<p><strong>Decomposed Prompting: A Modular Approach for Solving Complex Tasks</strong>: Tushar Khot et al., 2022, ICLR 2023. arXiv:2210.02406. https://arxiv.org/abs/2210.02406</p>
+</li>
+<li>Technique to borrow: a decomposer prompt sends sub-tasks to a library of sub-task handlers. Each handler can be another prompt, a further decomposition, a trained model or a symbolic function. Long inputs can be reduced recursively. This matches routing sub-questions to typed Tribos tools (ChEMBL lookup, COPASI simulation, Scanpy analysis).</li>
+<li>Verified via: https://arxiv.org/abs/2210.02406</li>
+</ul>
+<hr />
+<h2 id="4-multi-agent-topologies-supervisor-swarmhandoffs-debate">4. Multi-agent topologies (supervisor, swarm/handoffs, debate)</h2>
+<ul>
+<li><strong>Improving Factuality and Reasoning in Language Models through Multiagent Debate</strong>: Yilun Du et al., 2023, ICML 2024 (PMLR 235:11733-11763). arXiv:2305.14325. https://arxiv.org/abs/2305.14325</li>
+<li>Technique to borrow: the debate topology. By default, 3 agents debate for 2 rounds. In round 2 and later each agent sees: "These are the solutions to the problem from other agents: ... Using the opinion of other agents as additional advice, can you give an updated response ...". Rounds continue until the agents converge on a common answer. The method works with black-box models and uses the same prompts across tasks.</li>
+<li>
+<p>Verified via: https://arxiv.org/html/2305.14325 and https://proceedings.mlr.press/v235/du24e.html</p>
+</li>
+<li>
+<p><strong>Magentic-One: A Generalist Multi-Agent System for Solving Complex Tasks</strong>: Adam Fourney et al., 2024, arXiv preprint. arXiv:2411.04468. https://arxiv.org/abs/2411.04468</p>
+</li>
+<li>Technique to borrow: the supervisor pattern with two ledgers.<ul>
+<li><strong>Outer loop, Task Ledger:</strong> given or verified facts, facts to look up, facts to derive, educated guesses, and a plan.</li>
+<li><strong>Inner loop, Progress Ledger:</strong> answers five questions each step: (1) is the request satisfied, (2) are we looping, (3) are we making progress, (4) which agent speaks next, (5) what instruction to give it.</li>
+<li><strong>Stall counter:</strong> goes up on a loop or no progress. Above a threshold of 2, the orchestrator reflects, updates the Task Ledger and replans, and all agents reset their context.</li>
+</ul>
+</li>
+<li>
+<p>Verified via: https://arxiv.org/html/2411.04468</p>
+</li>
+<li>
+<p><strong>AutoGen: Enabling Next-Gen LLM Applications via Multi-Agent Conversation</strong>: Qingyun Wu et al., 2023, COLM 2024 (per Microsoft Research and AG2 listings; arXiv shows no journal-ref). arXiv:2308.08155. https://arxiv.org/abs/2308.08155</p>
+</li>
+<li>Technique to borrow: "conversable" agents that combine an LLM, tools and human input, with interaction patterns defined in code and natural language (group chat with a speaker selector, two-agent chats). This is the reference design for swarm and handoff-style topologies and human-proxy agents.</li>
+<li>
+<p>Verified via: https://arxiv.org/abs/2308.08155 and https://www.microsoft.com/en-us/research/publication/autogen-enabling-next-gen-llm-applications-via-multi-agent-conversation-framework/</p>
+</li>
+<li>
+<p><strong>MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework</strong>: Sirui Hong et al., 2023, ICLR 2024 (oral). arXiv:2308.00352. https://arxiv.org/abs/2308.00352</p>
+</li>
+<li>Technique to borrow: Standardized Operating Procedures (SOPs) written into role prompts, in an assembly-line split where each role produces a structured intermediate artifact that the next role checks. The paper says this reduces cascading hallucination. Use it for fixed roles such as Literature Analyst, Target Assessor and Modeler, with schema-validated handoffs.</li>
+<li>
+<p>Verified via: https://arxiv.org/abs/2308.00352 and https://proceedings.iclr.cc/paper_files/paper/2024/hash/6507b115562bb0a305f1958ccc87355a-Abstract-Conference.html</p>
+</li>
+<li>
+<p>Also verified, optional: <strong>More Agents Is All You Need</strong>: Junyou Li et al., 2024, TMLR. arXiv:2402.05120. https://arxiv.org/abs/2402.05120</p>
+</li>
+<li>Technique to borrow: sampling and voting ("Agent Forest"). Sample N agent answers and take a majority vote. Gains grow with N and with task difficulty, and the method works alongside debate or CoT.</li>
+<li>Verified via: https://arxiv.org/abs/2402.05120</li>
+</ul>
+<hr />
+<h2 id="5-budget-and-stopping-control-token-cost-and-latency-budgets-adaptive-compute">5. Budget and stopping control (token, cost and latency budgets; adaptive compute)</h2>
+<ul>
+<li><strong>Budget-Aware Tool-Use Enables Effective Agent Scaling (BATS)</strong>: Tengxiao Liu et al., 2025, arXiv preprint. arXiv:2511.17006. https://arxiv.org/abs/2511.17006</li>
+<li>Technique to borrow:<ul>
+<li><strong>Budget Tracker:</strong> a <code>&lt;budget&gt;</code> block appended after every tool response, for example <code>Query Budget Used/Remaining</code>, <code>URL Budget Used/Remaining</code>, plus "Make the best use of the available resources". It defines tiers: HIGH at 70% or more remaining, MEDIUM 30-70%, LOW 10-30%, CRITICAL below 10%.</li>
+<li><strong>Self-verification step:</strong> labels each constraint satisfied, contradicted or unverifiable, then decides SUCCESS, CONTINUE (dig deeper) or PIVOT (on a contradiction or when budget is insufficient), and replaces the raw trajectory with a summary.</li>
+<li><strong>Unified cost:</strong> C = c_token + sum over tools of c_i * P_i.</li>
+</ul>
+</li>
+<li>
+<p>Verified via: https://arxiv.org/html/2511.17006v1</p>
+</li>
+<li>
+<p><strong>FrugalGPT: How to Use Large Language Models While Reducing Cost and Improving Performance</strong>: Lingjiao Chen et al., 2023, arXiv preprint (no venue found). arXiv:2305.05176. https://arxiv.org/abs/2305.05176</p>
+</li>
+<li>Technique to borrow: an LLM cascade. Query an ordered list of models. A learned scorer g(q, a) in [0, 1] (DistilBERT regression in the paper) accepts the answer at stage i if g &gt; tau_i, otherwise the next model is called. The list and thresholds are optimized to maximize expected reward subject to expected cost staying within budget b. Example thresholds: GPT-J 0.96, J1-L 0.37, with GPT-4 as the final fallback. Reported up to 98% cost reduction at GPT-4 accuracy.</li>
+<li>
+<p>Verified via: https://arxiv.org/html/2305.05176</p>
+</li>
+<li>
+<p><strong>Token-Budget-Aware LLM Reasoning (TALE)</strong>: Tingxu Han et al., 2024, Findings of ACL 2025. arXiv:2412.18547. DOI 10.18653/v1/2025.findings-acl.1274. https://arxiv.org/abs/2412.18547</p>
+</li>
+<li>Technique to borrow: estimate a per-query token budget from the problem's complexity and state it in the prompt, for example "use less than N tokens". This shortens reasoning with a modest accuracy cost. Use it to set per-node reasoning budgets inside the plan.</li>
+<li>
+<p>Verified via: https://arxiv.org/abs/2412.18547 and https://aclanthology.org/2025.findings-acl.1274/</p>
+</li>
+<li>
+<p><strong>Adaptive-RAG: Learning to Adapt Retrieval-Augmented Large Language Models through Question Complexity</strong>: Soyeong Jeong et al., 2024, NAACL 2024. arXiv:2403.14403. https://arxiv.org/abs/2403.14403</p>
+</li>
+<li>Technique to borrow: a small classifier predicts query complexity and routes the query to one of three strategies: no retrieval, single-step RAG, or iterative multi-step RAG. Training labels are collected automatically. Use this as the entry gate that picks between the quick-answer path, the plan-and-execute path and the deep-research path.</li>
+<li>Verified via: https://arxiv.org/abs/2403.14403</li>
+</ul>
+<hr />
+<h2 id="6-hypothesis-to-experiment-loop">6. Hypothesis-to-experiment loop</h2>
+<ul>
+<li><strong>Towards an AI co-scientist</strong> (v1 title; v2 retitled "Accelerating scientific discovery with Co-Scientist"): Juraj Gottweis et al., 2025. arXiv:2502.18864. The arXiv comments note Nature (2026), DOI 10.1038/s41586-026-10644-y. https://arxiv.org/abs/2502.18864</li>
+<li>Technique to borrow:<ul>
+<li>A Supervisor runs an asynchronous queue over seven agents: Generation, Reflection (peer review, optionally with web search), Ranking, Proximity (similarity graph for dedup and pairing), Evolution, Meta-review, and the Supervisor itself.</li>
+<li>Ranking is an Elo tournament. New hypotheses start at Elo 1200. Top-ranked pairs get multi-turn simulated debates and lower-ranked pairs get single-turn comparisons.</li>
+<li>Meta-review feedback is appended to the other agents' prompts. This gives test-time improvement without fine-tuning.</li>
+</ul>
+</li>
+<li>
+<p>Verified via: https://arxiv.org/abs/2502.18864 and https://arxiv.org/html/2502.18864v1</p>
+</li>
+<li>
+<p><strong>DiscoveryAgent: An AI Agent for Designing Genetic Perturbation Experiments</strong>: Yusuf Roohani et al., 2024, ICLR 2025. arXiv:2405.17631. https://arxiv.org/abs/2405.17631</p>
+</li>
+<li>Technique to borrow: a closed-loop experiment design.<ul>
+<li>Each round the prompt holds the research problem, the measurement definition, results from previous rounds and an exclusion list ("Do not include any genes from this prompt (since they're already tested)").</li>
+<li>The agent returns a Reflection, a Research Plan (at most 5 sentences) and a Solution (a batch of 128 genes, or 32 for small screens). Invalid or repeated genes trigger re-prompting.</li>
+<li>A critic LLM can replace genes in the batch.</li>
+<li>Tools: PubMed search (summarizes the top 5 papers) and Reactome enrichment over hit genes.</li>
+<li>Evaluated over 5 rounds.</li>
+</ul>
+</li>
+<li>
+<p>Verified via: https://arxiv.org/html/2405.17631 and https://mlanthology.org/iclr/2025/roohani2025iclr-biodiscoveryagent</p>
+</li>
+<li>
+<p><strong>Robin: A multi-agent system for automating scientific discovery</strong>: Ali Essam Ghareeb et al., 2025, arXiv preprint (FutureHouse). arXiv:2505.13400. https://arxiv.org/abs/2505.13400</p>
+</li>
+<li>Technique to borrow: a lab-in-the-loop pipeline.<ul>
+<li>Crow, a PaperQA2-based concise literature agent, proposes 10 candidate disease mechanisms and writes assay reports, which are ranked.</li>
+<li>Robin proposes 30 candidates, and Falcon, the deep-report agent, writes a report on each.</li>
+<li>Ranking uses an LLM-judge pairwise tournament: full round robin up to 25 items, otherwise 300 random pairs, fitted with a Bradley-Terry-Luce model.</li>
+<li>Finch, the Jupyter data-analysis agent, runs up to 10 independent analysis trajectories, and a meta-analysis forms a consensus.</li>
+<li>The resulting insights seed the next hypothesis cycle.</li>
+</ul>
+</li>
+<li>
+<p>Verified via: https://arxiv.org/html/2505.13400</p>
+</li>
+<li>
+<p><strong>Large Language Models for Automated Open-domain Scientific Hypotheses Discovery</strong>: Zonglin Yang et al., 2023, Findings of ACL 2024. arXiv:2309.02726. https://arxiv.org/abs/2309.02726</p>
+</li>
+<li>Technique to borrow: a multi-module hypothesis generator with three feedback mechanisms that critique and refine hypotheses for validity, novelty and helpfulness (confirm in PDF). Use these as the scoring axes in the Reflection step.</li>
+<li>Verified via: https://arxiv.org/abs/2309.02726</li>
+</ul>
+<hr />
+<h2 id="7-adversarial-counter-evidence-and-contradiction-search">7. Adversarial counter-evidence and contradiction search</h2>
+<ul>
+<li><strong>PaperQA2 / ContraCrow</strong>, from "Language agents achieve superhuman synthesis of scientific knowledge": Skarlinski et al., 2024. arXiv:2409.13740. https://arxiv.org/abs/2409.13740</li>
+<li>Technique to borrow: the ContraCrow pipeline.<ul>
+<li>An LLM extracts claims from each section chunk of a paper.</li>
+<li>A filter LLM scores each claim 0-10 for quality and generalizability, and only claims scoring 8 or higher are kept.</li>
+<li>Each claim goes to PaperQA2 with a contradiction prompt that searches the literature for opposing evidence. The answer is on an 11-point Likert scale mapped to 0-10, with "lack of evidence" scored 5.</li>
+<li>A claim is flagged as contradicted at a score of 8 or higher.</li>
+<li>Results: 2.34 ± 1.99 contradictions per biology paper, 70% validated by experts.</li>
+</ul>
+</li>
+<li>
+<p>Verified via: https://arxiv.org/html/2409.13740</p>
+</li>
+<li>
+<p><strong>CRITIC: Large Language Models Can Self-Correct with Tool-Interactive Critiquing</strong>: Zhibin Gou et al., 2023, ICLR 2024. arXiv:2305.11738. https://arxiv.org/abs/2305.11738</p>
+</li>
+<li>Technique to borrow: a verify-then-correct loop. Produce an initial output, call external tools (search, code interpreter) to check specific claims, write a critique, revise, and repeat until the critique passes or an iteration cap is reached. The paper's point is that critique grounded in external tools is what makes self-correction work.</li>
+<li>
+<p>Verified via: https://arxiv.org/abs/2305.11738</p>
+</li>
+<li>
+<p><strong>Chain-of-Verification Reduces Hallucination in Large Language Models (CoVe)</strong>: Shehzaad Dhuliawala et al., 2023, Findings of ACL 2024. arXiv:2309.11495. DOI 10.18653/v1/2024.findings-acl.212. https://arxiv.org/abs/2309.11495</p>
+</li>
+<li>Technique to borrow: (1) write a draft, (2) plan verification questions, (3) answer each one independently. In the factored variant the verifier cannot see the draft, which avoids copying its errors. (4) Write the final revised answer. Use step (3) with "find evidence against X" queries as the counter-evidence pass.</li>
+<li>
+<p>Verified via: https://arxiv.org/abs/2309.11495 and https://aclanthology.org/2024.findings-acl.212/</p>
+</li>
+<li>
+<p><strong>SciFact-Open: Towards open-domain scientific claim verification</strong>: David Wadden et al., 2022, Findings of EMNLP 2022. arXiv:2210.13777. https://arxiv.org/abs/2210.13777</p>
+</li>
+<li>Technique to borrow: an evaluation set and label scheme for verifying claims against about 500K abstracts, with SUPPORT/REFUTE labels and rationales. Systems built on small corpora lose 15 or more F1 at this scale. Use it to benchmark the contradiction search and to model "supports only a special case" outcomes.</li>
+<li>Verified via: https://arxiv.org/abs/2210.13777</li>
+</ul>
+<hr />
+<h2 id="10-sandboxed-code-execution-agent-for-data-analysis">10. Sandboxed code-execution agent for data analysis</h2>
+<ul>
+<li><strong>Executable Code Actions Elicit Better LLM Agents (CodeAct)</strong>: Xingyao Wang et al., 2024, ICML 2024. arXiv:2402.01030. https://arxiv.org/abs/2402.01030</li>
+<li>Technique to borrow: Python code as the single action space instead of JSON tool calls. The agent emits code, the interpreter runs it, and stdout or errors come back as the observation over multiple turns. The agent self-debugs from these observations. Up to 20% higher success than JSON or text actions across 17 LLMs.</li>
+<li>
+<p>Verified via: https://arxiv.org/abs/2402.01030</p>
+</li>
+<li>
+<p><strong>Biomni: A General-Purpose Biomedical AI Agent</strong>: Kexin Huang et al., 2025, bioRxiv preprint (posted 2 Jun 2025). DOI 10.1101/2025.05.30.656746. https://doi.org/10.1101/2025.05.30.656746</p>
+</li>
+<li>Technique to borrow: Biomni-A1 is built on CodeAct.<ul>
+<li>It first writes a numbered-list plan and keeps track of progress against it.</li>
+<li>A separate prompt-based LLM retriever picks the relevant subset of tools, databases and libraries, which keeps the context short.</li>
+<li>It then generates code, runs it in Python, R or Bash, and feeds the observation back until it converges.</li>
+<li>Biomni-E1 contains 150 tools, 105 software packages and 59 databases. Each database is wrapped as one unified query function.</li>
+<li>An ablation that swaps code-based planning for ReAct chaining performs worse.</li>
+</ul>
+</li>
+<li>
+<p>Verified via: bioRxiv PDF (https://cs.stanford.edu/people/jure/pubs/biomni-biorxiv25.pdf) and https://pubmed.ncbi.nlm.nih.gov/40501924/</p>
+</li>
+<li>
+<p><strong>BixBench: a Comprehensive Benchmark for LLM-based Agents in Computational Biology</strong>: Ludovico Mitchener et al., 2025, arXiv preprint (FutureHouse). arXiv:2503.00096. https://arxiv.org/abs/2503.00096</p>
+</li>
+<li>Technique to borrow: the notebook-sandbox harness and the evaluation.<ul>
+<li>The agent runs in Docker (<code>BixBench-env</code>, with Python, R and Bash bioinformatics packages) and has 3 tools: <code>edit_cell</code> (edit and run a Jupyter cell, which reruns the notebook), <code>list_workdir</code> and <code>submit_answer</code>. R and Bash run through <code>%%R</code> and <code>%%bash</code>.</li>
+<li>The benchmark has 61 capsules and 205 open-answer questions.</li>
+<li>Scoring: an LLM judge grades open answers 0/1. The multiple-choice variant includes an "Insufficient information" refusal option and takes a majority vote over 5 runs.</li>
+</ul>
+</li>
+<li>
+<p>Verified via: https://arxiv.org/html/2503.00096</p>
+</li>
+<li>
+<p><strong>Data Interpreter: An LLM Agent For Data Science</strong>: Sirui Hong et al., 2024, arXiv preprint. arXiv:2402.18679. https://arxiv.org/abs/2402.18679</p>
+</li>
+<li>Technique to borrow: hierarchical graph modeling. A data-science task becomes a task graph of subproblems that is refined as dependencies change. Programmable node generation refines and verifies the code for each node. Reported results: InfiAgent-DABench 75.9% to 94.9%. A good fit for multi-step Scanpy pipelines.</li>
+<li>Verified via: https://arxiv.org/abs/2402.18679</li>
+</ul>
+<hr />
+<h2 id="15-human-in-the-loop-clarifying-questions-plan-approval">15. Human-in-the-loop (clarifying questions, plan approval)</h2>
+<ul>
+<li><strong>CLAM: Selective Clarification for Ambiguous Questions with Generative Language Models</strong>: Lorenz Kuhn et al., 2022, arXiv preprint. arXiv:2212.07769. https://arxiv.org/abs/2212.07769</li>
+<li>Technique to borrow: a selective clarification pipeline. (1) Prompt the LLM to decide whether the question is ambiguous. (2) Only if it is, generate a clarifying question for the user. (3) Answer using the clarified question.</li>
+<li>
+<p>Verified via: https://arxiv.org/abs/2212.07769</p>
+</li>
+<li>
+<p><strong>Clarify When Necessary: Resolving Ambiguity Through Interaction with LMs</strong>: Michael J.Q. Zhang and Eunsol Choi, 2023, Findings of NAACL 2025 (pp. 5526-5543, per a citing paper and the author page). arXiv:2311.09469. https://arxiv.org/abs/2311.09469</p>
+</li>
+<li>Technique to borrow: INTENT-SIM. Simulate several plausible user intents for the query, estimate the entropy over those intents, and ask for clarification only when entropy is high. With clarification limited to 10% of examples, it roughly doubles the gain of random selection. This gives a principled threshold for when to ask.</li>
+<li>
+<p>Verified via: https://arxiv.org/abs/2311.09469 and https://www.cs.utexas.edu/~mjqzhang/</p>
+</li>
+<li>
+<p><strong>Asking Clarifying Questions in Open-Domain Information-Seeking Conversations</strong>: Mohammad Aliannejadi et al., 2019, SIGIR 2019. arXiv:1907.06554. DOI 10.1145/3331184.3331265. https://arxiv.org/abs/1907.06554</p>
+</li>
+<li>Technique to borrow: a three-stage pipeline: question retrieval (candidate clarifying questions), question selection (conditioned on the query and earlier Q/A turns), then document retrieval using the answers. Use it to pick from a curated bank of biomedical clarifiers (species, tissue, disease subtype, endpoint).</li>
+<li>
+<p>Verified via: https://arxiv.org/abs/1907.06554</p>
+</li>
+<li>
+<p><strong>Magentic-UI: Towards Human-in-the-loop Agentic Systems</strong>: Hussein Mozannar et al., 2025, arXiv preprint (Microsoft Research). arXiv:2507.22358. https://arxiv.org/abs/2507.22358</p>
+</li>
+<li>Technique to borrow:<ul>
+<li><strong>Co-planning:</strong> the user edits the plan in a plan editor, or gives text feedback, before anything runs.</li>
+<li><strong>Action guards:</strong> the system asks for approval before potentially irreversible actions, and the user sets how often it asks.</li>
+<li>Also co-tasking, multi-tasking and long-term memory. The paper says there are six mechanisms; only these five were confirmed on the abstract page.</li>
+<li>It builds on Magentic-One and AutoGen.</li>
+</ul>
+</li>
+<li>This is the direct template for plan approval before expensive COPASI or Scanpy runs.</li>
+<li>Verified via: https://arxiv.org/abs/2507.22358</li>
+</ul>
+<hr />
+<h3 id="venue-notes">Venue notes</h3>
+<ul>
+<li>arXiv-only, no peer-reviewed venue found: ReWOO, CRAG, PaperQA2, Magentic-One, Magentic-UI, FrugalGPT, BATS, Robin, BixBench, Data Interpreter, CLAM.</li>
+<li>bioRxiv preprint: Biomni.</li>
+<li>AI co-scientist: the arXiv comments field cites Nature (2026) and gives a related DOI. The Nature page itself was not opened.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+        <script src="../../javascripts/mathjax.js"></script>
+      
+        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
