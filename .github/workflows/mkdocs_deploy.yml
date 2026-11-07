@@ -1,4 +1,5 @@
 name: mkdocs-deploy
+# GitHub Pages: the homepage (website/) at the site root and the documentation (MkDocs) under /docs/.
 on:
   push:
     branches:
@@ -8,6 +9,8 @@ on:
       - "mkdocs.yml"
       - "tribos/**"
       - "pyproject.toml"
+      - "website/**"
+      - "CHANGELOG.md"
   workflow_dispatch:
 permissions:
   contents: write
@@ -31,6 +34,13 @@ jobs:
       - name: Install project dependencies (including MkDocs)
         run: uv sync --frozen --extra docs
 
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
       - name: Cache MkDocs materials
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
@@ -39,8 +49,18 @@ jobs:
           restore-keys: |
             mkdocs-material-${{ runner.os }}-
 
-      - name: Deploy documentation
+      - name: Build the homepage
         run: |
-          echo "Deploying to GitHub Pages..."
-          uv run mkdocs gh-deploy --clean --force --verbose
-          echo "Deployment completed!"
+          cd web && npm ci && cd ..
+          node website/build.mjs
+
+      - name: Build the documentation
+        run: uv run mkdocs build --clean --site-dir site-docs
+
+      - name: Deploy to GitHub Pages
+        run: |
+          rm -rf pages && mkdir pages
+          cp -r website/dist/. pages/
+          mkdir pages/docs && cp -r site-docs/. pages/docs/
+          touch pages/.nojekyll
+          uv run ghp-import --no-jekyll --push --force --message "Deploy the homepage and documentation" pages

@@ -1,5 +1,5 @@
 {
-  "_about": "Benchmark items whose reference answer is wrong. They are excluded from accuracy and listed in the report, for every system alike. Each entry states the evidence; add one only when the error is demonstrable: the reference's own working shows it, or an exact computation refutes the reference value.",
+  "_about": "Benchmark items whose reference answer is wrong, or that cannot be graded fairly: the item needs a figure its text does not include, or it has several correct answers and the reference accepts one. They are excluded from accuracy and listed in the report, for every system alike. Each entry states the evidence; add one only when the problem is demonstrable: the reference's own working shows it, or an exact computation refutes the reference value.",
   "gsm8k-454": {
     "question": "Marin and his neighbor Nancy each eat 4 apples a day. How many apples do they eat in 30 days?",
     "reference_answer": "150",
@@ -27,5 +27,61 @@
     "correct_answer": "435",
     "evidence": "p = nRT/V = (1.25/28.013 mol)(8.3145 J/(mol K))(293.15 K)/(2.50e-4 m^3) = 4.35e5 Pa = 435 kPa; 1.27 kPa is off by a factor of about 340.",
     "found": "2026-11-05 analysis: both systems answered 435 kPa and were graded wrong"
+  },
+  "scibench-e2.12(a)(a) ": {
+    "question": "229 J supplied as heat to 3.0 mol Ar(g) at constant pressure raises its temperature by 2.55 K. Calculate the molar heat capacity at constant volume.",
+    "reference_answer": "30",
+    "correct_answer": "21.6",
+    "evidence": "The reference is C_p,m = 229/(3.0 x 2.55) = 29.9 J/(K mol), the constant-pressure value; the question asks for C_V,m = C_p,m - R = 29.9 - 8.31 = 21.6 J/(K mol).",
+    "found": "2026-11-06 failure analysis: Tribos and the direct model both graded wrong"
+  },
+  "theoremqa-782": {
+    "question": "If x = 4 cost(t) and y = 8 sin(x), what is y''_xx at t = pi/3?",
+    "reference_answer": "-4",
+    "correct_answer": "-8 sin 2 = -7.274 (as written); -4 sqrt(3)/9 = -0.770 (if y = 8 sin t was meant)",
+    "evidence": "As written, y = 8 sin x gives d2y/dx2 = -8 sin x, and x = 4 cos(pi/3) = 2, so -8 sin 2 = -7.2744. Read as the parametric ellipse x = 4 cos t, y = 8 sin t, d2y/dx2 = -1/(2 sin^3 t) = -4 sqrt(3)/9 = -0.7698 at t = pi/3 (SymPy, exact). No reading gives -4.",
+    "found": "2026-11-06 failure analysis: Tribos and the direct model both graded wrong"
+  },
+  "theoremqa-2": {
+    "question": "Consider the following graph, with link costs listed ... What distance does C advertise to B?",
+    "reference_answer": "5",
+    "correct_answer": "undetermined without the missing figure",
+    "evidence": "The question refers to a graph with link costs that the dataset text does not include; without the figure the distance cannot be determined.",
+    "found": "2026-11-06 failure analysis: Tribos and the direct model both graded wrong"
+  },
+  "theoremqa-780": {
+    "question": "x and y are both 2-d random variables, x = ((1,2),(2,3),(3,3),(4,4)), y = ((3,4),(1,5),(5,3),(3,3)). What is the sum of the eigenvalues of their covariance matrix?",
+    "reference_answer": "2.767",
+    "correct_answer": "71/12 = 5.917",
+    "evidence": "With x and y 2-d, (x, y) is a 4-d variable observed 4 times; its sample covariance matrix has trace 71/12 = 5.9167 (NumPy, ddof = 1), the sum of its eigenvalues. The reference 2.7679 is the trace of the 2 x 2 covariance of the eight pooled components of x against those of y, which treats each 2-d variable as a scalar and contradicts the question.",
+    "found": "2026-11-06 failure analysis: Tribos and the direct model both graded wrong"
+  },
+  "theoremqa-325": {
+    "question": "Unpolarized light passes through a polarizer, then another at 30 degrees to the first, then another at 50 degrees to the second. What percentage of the original intensity comes out of the third?",
+    "reference_answer": "31",
+    "correct_answer": "15.5",
+    "evidence": "Unpolarized light loses half its intensity at the first polarizer: I = I0 x 1/2 x cos^2 30 x cos^2 50 = 0.1549 I0, 15.5%. The reference 31.0% is cos^2 30 x cos^2 50, which omits the factor 1/2 the question's own premise (unpolarized light) requires.",
+    "found": "2026-11-06 failure analysis: Tribos and the direct model both graded wrong"
+  },
+  "theoremqa-9": {
+    "question": "Let M be the set of bounded functions in C[0,1]. Is {F(x) = int_0^x f(t) dt | f in M} sequentially compact? ... Return [yes/no, theorem].",
+    "reference_answer": "[1, 1]",
+    "correct_answer": "[0, 4]",
+    "evidence": "Every continuous function on [0,1] is bounded, so M = C[0,1]. f_n = n is in M and F_n(x) = n x has sup norm n, an unbounded sequence with no convergent subsequence, so the set is not sequentially compact. The reference assumes M is a uniformly bounded set, which the question does not say.",
+    "found": "2026-11-06 failure analysis: Tribos and the direct model both graded wrong"
+  },
+  "theoremqa-566": {
+    "question": "Undirected graph G with edges {<2,6>,<2,8>,<2,5>,<6,5>,<5,8>,<6,10>,<10,8>}. What is the shortest path from node 2 to node 10?",
+    "reference_answer": "[2, 8, 10]",
+    "correct_answer": "[2, 8, 10] or [2, 6, 10]",
+    "evidence": "Breadth-first search finds two shortest paths of length 2, [2, 6, 10] and [2, 8, 10]; the reference accepts only one of them.",
+    "found": "2026-11-06 failure analysis: Tribos and the direct model both graded wrong"
+  },
+  "theoremqa-693": {
+    "question": "A farsighted student's glasses let him read at 20 cm from his eyes; his near point is 63 cm; the glasses are 1.5 cm from his eyes. What is the refractive power of the lenses?",
+    "reference_answer": "3.846",
+    "correct_answer": "3.78",
+    "evidence": "The book is 20 - 1.5 = 18.5 cm from the lens and the virtual image must sit at the near point, 63 - 1.5 = 61.5 cm from the lens: P = 1/0.185 - 1/0.615 = 3.779 D. The reference matches 1/0.185 - 1/0.645 = 3.855 D, which puts the image 1.5 cm beyond the near point instead of in front of it.",
+    "found": "2026-11-06 failure analysis: Tribos and the direct model both graded wrong"
   }
 }

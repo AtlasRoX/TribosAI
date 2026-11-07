@@ -177,6 +177,7 @@ class _Statement:
     source: str = ""
     lead: str = ""
     around: str = ""  # the words just before and after the math ("for odd $n$", "(even $n$)")
+    after: str = ""  # the text right after the math ("$W = 2$: 4 ms" -> ": 4 ms")
     domain: str = ""
     assumptions: list[str] = field(default_factory=list)
     quantifiers: list[str] = field(default_factory=list)
@@ -439,6 +440,7 @@ def _split_relations(tokens: list[Tok]) -> tuple[list[list[Tok]], list[str]] | N
     """Terms and the relations between them; None when the statement has unhandled relations or uses +-."""
     terms: list[list[Tok]] = [[]]
     rels: list[str] = []
+    equiv_at: list[int] = []  # the relations written \equiv: "a \equiv b \equiv c \pmod{n}" is a chain mod n
     depth = 0
     for tok in tokens:
         if tok.kind == "sym" and tok.value in ("(", "[", "{"):
@@ -458,6 +460,8 @@ def _split_relations(tokens: list[Tok]) -> tuple[list[list[Tok]], list[str]] | N
             elif (tok.kind == "sym" and tok.value in INEQUALITIES) or (tok.kind == "cmd" and tok.value in INEQUALITIES):
                 return None
             if rel is not None:
+                if tok.kind == "cmd" and tok.value == "equiv":
+                    equiv_at.append(len(rels))
                 rels.append(rel)
                 terms.append([])
                 continue
@@ -470,6 +474,9 @@ def _split_relations(tokens: list[Tok]) -> tuple[list[list[Tok]], list[str]] | N
         if mod_toks is not None and i > 0:
             mod_text = _tex(mod_toks)
             rels[i - 1] = f"equiv_mod:{mod_text}"
+            for j in equiv_at:
+                if rels[j] == "eq":
+                    rels[j] = f"equiv_mod:{mod_text}"
         cleaned_terms.append(stripped)
     terms = cleaned_terms
     if any(not t for t in terms):
@@ -931,6 +938,25 @@ def _heading_of(claim: MathClaim) -> str:
     return claim.context.split(" · ")[0]
 
 
+# A case label: the math is followed by a colon ("$W = 2$: 4 ms", "$n = 3$:" in a list of cases).
+_CASE_LABEL_AFTER_RE = re.compile(r"^[^$\n:]{0,4}\$+\s*[:→]|^\s*[:→]|^[^$\n:]{0,4}\$*\s*(?:gives|yields)\b")
+# A value given with a unit, plain or in LaTeX: "100 g", "2.5 kJ", "100 \mathrm{~g}", "4\,\text{ms}".
+_GIVEN_WITH_UNIT_RE = re.compile(
+    r"\d\s*(?:\\[,;:!]|~|\\(?:mathrm|text|rm|mbox)\s*\{?\s*~?)*\s*(?:[a-zµμ]?[A-Za-zΩ°]{1,3})\b")
+
+
+def _prefix_factor(lv: complex, rv: complex, tol: float) -> bool:
+    """Whether two real values differ by a factor 10^(3k), k = +-1..+-3 (an SI prefix: milli, kilo, mega ...)."""
+    if abs(lv.imag) > 1e-12 or abs(rv.imag) > 1e-12 or lv.real == 0 or rv.real == 0 or (lv.real > 0) != (rv.real > 0):
+        return False
+    ratio = abs(lv.real / rv.real)
+    for k in (3, 6, 9, -3, -6, -9):
+        f = 10.0 ** k
+        if abs(lv.real - rv.real * f) <= max(tol * abs(f), 1e-9 * abs(lv.real)) or abs(ratio / f - 1.0) <= 1e-6:
+            return True
+    return False
+
+
 def _short(text: str, limit: int = 70) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
@@ -1293,6 +1319,13 @@ class _Auditor:
 
             if abs(lv - rv) <= tol and not self._misrounded(a, b, lv, rv, tol):
                 return PASSED, ""
+            implied_unit = (bool(a.unit) != bool(b.unit)) or (not a.unit and not b.unit and self._bound_with_units(a, b))
+            if implied_unit and _prefix_factor(lv, rv, tol):
+                # "17 x 16 + 8 = 280 ms" (280 ms read as 0.28 s) or "m1 m2/(m1 + m2) = 1/15 kg" with masses given in
+                # grams: the two sides are the same quantity in units a power of 1000 apart, which the unitless side
+                # does not state. Not checkable as written, never a contradiction. Two sides that both state their
+                # units ("1 mm = 1 m") are compared as written.
+                return INCONCLUSIVE, "the two sides differ by a unit-prefix factor (a unit conversion)"
             case_info = f" (case: {self.current_case})" if self.current_case else ""
             used = {k: v for k, v in self.env.values.items() if (a.expr and sp.Symbol(k) in a.expr.free_symbols) or (b.expr and sp.Symbol(k) in b.expr.free_symbols)}
             substs = used if used else self.env.values
@@ -1827,14 +1860,20 @@ class _Auditor:
     _EVALUATION_CUE_RE = re.compile(r"(?i)\b(?:at|when|for|setting|taking|evaluat\w*\s+(?:\w+\s+){0,6}at)\s*\$?\s*$")
 
     def _new_evaluation_point(self, head: tuple[str, str, tuple[sp.Symbol, ...]], terms: list[_Term], st: _Statement) -> bool:
-        """A symbol the answer introduced, set to a plain number right after "at"/"when"/"for": a new evaluation point."""
+        """A symbol the answer introduced, set to a plain number right after "at"/"when"/"for", or as a case label
+        followed by a colon ("$W = 2$: 4 ms" after "$W = 1$: 20 ms"): a new evaluation point."""
         c = canonical_name(head[1])
         if c in self.env.params or c not in self.env.values or len(terms) != 2:
             return False
         value = terms[1]
         if value.expr is None or value.expr.free_symbols or not value.expr.is_number:
             return False
-        return bool(self._EVALUATION_CUE_RE.search(st.lead[-80:]))
+        return bool(self._EVALUATION_CUE_RE.search(st.lead[-80:]) or _CASE_LABEL_AFTER_RE.match(st.after))
+
+    def _bound_with_units(self, a: _Term, b: _Term) -> bool:
+        """A side uses a value the question gives with a unit ("m1 = 100 g"), whose unit the comparison does not track."""
+        names = {canonical_name(s.name) for t in (a, b) if t.expr is not None for s in t.expr.free_symbols}
+        return bool(names & set(self.env.params)) and bool(_GIVEN_WITH_UNIT_RE.search(self.query or ""))
 
     def _is_bound(self, head: tuple[str, str, tuple[sp.Symbol, ...]]) -> bool:
         kind, name, _ = head
@@ -2399,6 +2438,7 @@ def audit_answer(
                 source=body,
                 lead=prefix[-160:],
                 around=around,
+                after=suffix,
                 domain=domain,
                 assumptions=list(assumptions),
                 quantifiers=list(quantifiers),

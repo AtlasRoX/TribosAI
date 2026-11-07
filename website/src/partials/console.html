@@ -1,0 +1,86 @@
+  <!-- The console: a run, played step by step. -->
+  <div class="relative mx-auto max-w-3xl" data-console>
+    <div class="glass overflow-hidden rounded-[1.5rem] text-left">
+      <div class="flex items-center gap-1 overflow-x-auto border-b border-smoke px-2 py-2" role="tablist" aria-label="Example runs">
+        <button class="tab shrink-0 rounded-full px-3.5 py-1.5 text-sm" role="tab" id="tab-eng" aria-controls="sc-eng" aria-selected="true" data-tab="eng">Engineering<span class="progress"></span></button>
+        <button class="tab shrink-0 rounded-full px-3.5 py-1.5 text-sm" role="tab" id="tab-photo" aria-controls="sc-photo" aria-selected="false" tabindex="-1" data-tab="photo">From a photo<span class="progress"></span></button>
+        <button class="tab shrink-0 rounded-full px-3.5 py-1.5 text-sm" role="tab" id="tab-research" aria-controls="sc-research" aria-selected="false" tabindex="-1" data-tab="research">Research<span class="progress"></span></button>
+        <button class="tab shrink-0 rounded-full px-3.5 py-1.5 text-sm" role="tab" id="tab-proof" aria-controls="sc-proof" aria-selected="false" tabindex="-1" data-tab="proof">Proof<span class="progress"></span></button>
+        <span class="ml-auto hidden shrink-0 items-center gap-2 pr-3 font-mono text-[0.7rem] text-dust sm:flex"><span class="pulse size-1.5 rounded-full bg-mint"></span>live run</span>
+      </div>
+
+      <div class="relative min-h-[23rem] p-5 sm:p-7">
+        <!-- Engineering -->
+        <div class="scenario" role="tabpanel" id="sc-eng" aria-labelledby="tab-eng" data-scenario="eng">
+          <div class="step flex items-start gap-3">
+            <span class="grid size-8 shrink-0 place-items-center rounded-full bg-cream/10 font-mono text-[0.65rem] text-sand">you</span>
+            <p class="rounded-2xl rounded-tl-md bg-cream/[0.06] px-4 py-2.5 text-[0.97rem]">A 30 mm steel shaft transmits 15 kW at 1500 rpm. What is the peak shear stress?</p>
+          </div>
+          <ol class="timeline mt-6 space-y-3.5">
+            <li class="step flex gap-3"><span class="node iris"></span><div class="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2"><span class="text-sand">Planned 3 steps: torque, stress, units</span><span class="chip chip-iris">plan</span></div></li>
+            <li class="step flex gap-3"><span class="node ok"></span><div class="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2"><span class="overflow-x-auto"><tex>T = P/\omega = 95.5\ \mathrm{N\,m}</tex></span><span class="chip chip-ok">✓ computed</span></div></li>
+            <li class="step flex gap-3"><span class="node ok"></span><div class="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2"><span class="overflow-x-auto"><tex>\tau_{\max} = 16T/\pi d^{3} = 18.0\ \mathrm{MPa}</tex></span><span class="chip chip-ok">✓ re-evaluated</span></div></li>
+            <li class="step flex gap-3"><span class="node bad"></span><div class="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2"><span class="text-dust line-through decoration-rose/70">“as reported by Smith et al. (2019)”</span><span class="chip chip-bad">✗ not in evidence</span></div></li>
+          </ol>
+          <div class="step mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-mint/25 bg-mint/[0.06] px-4 py-3">
+            <span class="flex items-center gap-3"><span class="font-mono text-[0.68rem] tracking-wider text-mint">ANSWER</span><tex>\tau_{\max} = 18.0\ \mathrm{MPa}</tex></span>
+            <span class="chip chip-ok">verified · 3 checks · 1 removed</span>
+          </div>
+        </div>
+
+        <!-- Photo -->
+        <div class="scenario" role="tabpanel" id="sc-photo" aria-labelledby="tab-photo" data-scenario="photo" hidden>
+          <div class="step flex items-start gap-3">
+            <span class="grid size-8 shrink-0 place-items-center rounded-full bg-cream/10 font-mono text-[0.65rem] text-sand">you</span>
+            <div class="rounded-2xl rounded-tl-md bg-cream/[0.06] px-4 py-2.5 text-[0.97rem]"><span class="mr-2 inline-flex items-center gap-1.5 rounded-lg bg-cream/10 px-2 py-0.5 font-mono text-xs text-sand"><svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2"/><path d="m21 17-5-5-8 7"/></svg>problem.jpg</span>Solve the problem in this photo.</div>
+          </div>
+          <ol class="timeline mt-6 space-y-3.5">
+            <li class="step flex gap-3"><span class="node iris"></span><div class="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2"><span class="text-sand">Read four ways: two text readers, two vision readings</span><span class="chip chip-iris">4 readings agree</span></div></li>
+            <li class="step flex gap-3"><span class="node ok"></span><div class="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2"><span class="overflow-x-auto"><tex>x^{4} - 5x^{2} + 4 = 0,\ \ x \in \mathbb{R}</tex></span><span class="chip chip-ok">✓ transcribed</span></div></li>
+            <li class="step flex gap-3"><span class="node ok"></span><div class="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2"><span class="overflow-x-auto"><tex>(x^{2}-1)(x^{2}-4) = 0</tex></span><span class="chip chip-ok">✓ factored exactly</span></div></li>
+            <li class="step flex gap-3"><span class="node ok"></span><div class="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2"><span class="text-sand">All four roots substituted back</span><span class="chip chip-ok">✓ checked</span></div></li>
+          </ol>
+          <div class="step mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-mint/25 bg-mint/[0.06] px-4 py-3">
+            <span class="flex items-center gap-3"><span class="font-mono text-[0.68rem] tracking-wider text-mint">ANSWER</span><tex>x \in \{-2,\,-1,\,1,\,2\}</tex></span>
+            <span class="chip chip-ok">verified · exact</span>
+          </div>
+        </div>
+
+        <!-- Research -->
+        <div class="scenario" role="tabpanel" id="sc-research" aria-labelledby="tab-research" data-scenario="research" hidden>
+          <div class="step flex items-start gap-3">
+            <span class="grid size-8 shrink-0 place-items-center rounded-full bg-cream/10 font-mono text-[0.65rem] text-sand">you</span>
+            <p class="rounded-2xl rounded-tl-md bg-cream/[0.06] px-4 py-2.5 text-[0.97rem]">Investigate the stopping time of the Collatz map.</p>
+          </div>
+          <ol class="timeline mt-6 space-y-3.5">
+            <li class="step flex gap-3"><span class="node iris"></span><div class="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2"><span class="text-sand">Charter: 3 hypotheses, 8 tests</span><span class="chip chip-iris">plan</span></div></li>
+            <li class="step flex gap-3"><span class="node ok"></span><div class="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2"><span class="text-sand">Rounds 1–5: tests in parallel, failures retried</span><span class="chip chip-ok">✓ 12 findings</span></div></li>
+            <li class="step flex gap-3"><span class="node ok"></span><div class="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2"><span class="text-sand">F39 · fluctuation test, two independent codes</span><span class="chip chip-ok">✓ replicated</span></div></li>
+            <li class="step flex gap-3"><span class="node iris"></span><div class="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2"><span class="text-sand">Theorem 3 formalised</span><span class="chip chip-iris">✓ proof-checked</span></div></li>
+          </ol>
+          <div class="step mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-mint/25 bg-mint/[0.06] px-4 py-3">
+            <span class="flex items-center gap-3"><span class="font-mono text-[0.68rem] tracking-wider text-mint">THESIS</span><span>Concluded after 5 rounds</span></span>
+            <span class="flex gap-1.5"><span class="chip chip-dim">PDF</span><span class="chip chip-dim">Word</span><span class="chip chip-dim">Markdown</span></span>
+          </div>
+        </div>
+
+        <!-- Proof -->
+        <div class="scenario" role="tabpanel" id="sc-proof" aria-labelledby="tab-proof" data-scenario="proof" hidden>
+          <div class="step flex items-start gap-3">
+            <span class="grid size-8 shrink-0 place-items-center rounded-full bg-cream/10 font-mono text-[0.65rem] text-sand">you</span>
+            <p class="rounded-2xl rounded-tl-md bg-cream/[0.06] px-4 py-2.5 text-[0.97rem]">Prove that the sum of two odd integers is even.</p>
+          </div>
+          <ol class="timeline mt-6 space-y-3.5">
+            <li class="step flex gap-3"><span class="node iris"></span><div class="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2"><span class="text-sand">Statement formalised for the proof checker</span><span class="chip chip-iris">formal</span></div></li>
+            <li class="step flex gap-3"><span class="node ok"></span><div class="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2"><span class="text-sand">The formal statement says what was asked</span><span class="chip chip-ok">✓ matches</span></div></li>
+            <li class="step flex gap-3"><span class="node ok"></span><div class="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2"><span class="text-sand">Proof compiles, with no gaps left open</span><span class="chip chip-ok">✓ compiles</span></div></li>
+            <li class="step flex gap-3"><span class="node ok"></span><div class="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2"><span class="text-sand">Only standard axioms used</span><span class="chip chip-ok">✓ audited</span></div></li>
+          </ol>
+          <div class="step mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-iris/30 bg-iris/[0.07] px-4 py-3">
+            <span class="flex items-center gap-3"><span class="font-mono text-[0.68rem] tracking-wider text-iris">PROOF</span><tex>(2a+1)+(2b+1) = 2(a+b+1)</tex></span>
+            <span class="chip chip-iris">proof-checked</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>

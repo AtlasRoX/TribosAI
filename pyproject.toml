@@ -23,6 +23,10 @@ dependencies = [
   "langchain-openai==0.3.0",
   "matplotlib==3.11.2",
   "cvxpy==1.7.5",
+  # Reference equations of state for real-fluid properties (physis_fluid_properties).
+  "CoolProp==8.0.0",
+  # Cheminformatics: structure facts and stereodescriptors from SMILES (physis_molecule, physis_stereo).
+  "rdkit==2026.3.6",
   "mpmath==1.3.0",
   "networkx==3.7",
   "numpy==1.26.4",

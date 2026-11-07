@@ -457,3 +457,83 @@ Members may use project files owned by other members, with read-only access chec
 Open follow-ups:
 - Certified-tier findings (interval or exhaustive checks wired into the test runner automatically).
 - A per-project choice of the sandbox time ceiling in the app.
+
+---
+
+## T12: Accuracy fixes from a failure analysis
+
+**Status (2026-11-06): DONE.** Every wrong answer in a paired run against the base model was read in full and traced to
+its cause; each fix is general, never written for one problem.
+
+- **Real-fluid properties.** `physis_fluid_properties` (`tribos/physis/fluids.py`, CoolProp 8.0.0): reference
+  equations of state for 130+ fluids; state properties, throttling (Joule-Thomson), isentropic expansion, saturation.
+  Planned when a question names a fluid process.
+- **Field conventions** (`tribos/agents/conventions.py`): Lah numbers for "ordered subsets", bond quoting, annualised
+  term rates with continuous discounting, the IUPAC sign of work, the textbook TCP latency model. Matched on the
+  question's own words and passed to the writer.
+- **Evidence gate.** Words that narrate an exercise ("published", "according to", "a survey", "a recent graduate",
+  "in 1976") no longer send a self-contained calculation to literature search; explicit requests still do.
+- **Multiple choice.** Options are found at line starts first (stem letters such as "compound B." are not options), and
+  the options of a choose-one question are never read as requests (a simulation, a plot).
+- **Claim auditor.** No false "Verification found errors" banner for congruence chains, unit-prefix conversions or
+  case lists.
+- **Independent cross-check** (`tribos/agents/orchestration/cross_check.py`, `TRIBOS_CROSS_CHECK`): opt-in; off by
+  default because, measured, it overturned correct answers more often than wrong ones.
+
+Open follow-ups:
+- CIP stereodescriptors from a built stereo-SMILES (needs a cheminformatics toolkit such as RDKit).
+- The auditor still compares "z = 0" written for a level set of a surface as a value.
+
+## T13: Cheminformatics for structure questions
+
+**Status (2026-11-07): DONE.** After T12, every remaining GPQA failure in the
+paired run was an organic-chemistry item, and Tribos had no chemistry tooling. The clearest failure was
+stereodescriptors: the model had a product's geometry right and still wrote the wrong R/S labels.
+
+- **Structure facts** (`physis_molecule`, `tribos/physis/chemistry.py`, RDKit 2026.3.6):
+  - formula, masses and degree of unsaturation;
+  - stereocentres with CIP labels (r/s included), chiral or meso;
+  - stereoisomer counts as enantiomer pairs and achiral forms;
+  - distinct H and C environments;
+  - the relation between two structures.
+- **Descriptors to geometry** (`physis_stereo`): a descriptor set is assigned with the CIP rules and embedded in 3D.
+  For every ring, the tool lists which substituents share a face (cis/trans, syn/anti, endo/exo).
+- **Option names to structures** (`tribos/physis/names.py`): a parser for substituted chains and carbocycles.
+  - In live runs the planner wrote unusable SMILES: it dropped substituents and left out locant numbers.
+  - So, before drafting, code now builds each option's structure from its name and attaches its ring faces
+    (`presentation.option_stereo`, result key `chemistry`). The planner is then not offered `physis_stereo`.
+- **Numbered atoms written without hydrogens** (`[C:4]`) are read as `[CH:4]`, not as radicals. Every planner call in
+  the first live run had this problem.
+- **Routing:** `is_structure_question` plans both tools. A writer note (`stereodescriptor_options`) tells the writer
+  to match the mechanism's geometry to the computed faces instead of assigning R/S by hand.
+- **Evidence gate:** in a choose-one question, narrating words ("preliminary studies", "typically", "measured") no
+  longer trigger literature search. Explicit requests ("cite papers", "according to") still do.
+
+Open follow-ups:
+
+- Fused and bridged names: either an OPSIN-class parser or a validated model transcription. The planned tool now
+  reports a model-written constitution's bonds by locant, and the tool description tells the planner to write atoms
+  in locant order. A fused, bridged name still failed in 3 of 3 re-runs, because the planner's SMILES for it were
+  invalid: a bad valence, and one locant given to two atoms. Such names need a real name parser.
+- Options given as SMILES carry no locants, so their face tables name atoms by index.
+- `tests/test_audit_regressions.py::test_explicit_simulation_request_still_runs` also fails on `main` before this
+  change (no `computed_results`); not investigated here.
+
+## T14: Chemeia, a chemistry agent
+
+**Status (2026-11-07): DONE.** `tribos/agentic/chem_agent.py`
+(`TRIBOS_CHEM_AGENT`, on by default) is an augment-stage phase for organic-chemistry questions
+(`is_organic_question`).
+
+How a run goes:
+
+1. The model works the reaction as JSON: each intermediate and the target compound as SMILES (the target may be the
+   product, a starting material or a reagent), the geometry, the chosen answer and the decisive chemistry.
+2. Code (RDKit) parses every structure and computes formulas and counts.
+3. Code matches the target to the answer options: exactly when configurations are written, otherwise by
+   constitution. Options are built from SMILES or from their names (`tribos/physis/names.py`).
+4. An invalid structure, a target that matches no option, or a target that is a different option from the one chosen
+   gets one repair round with the specific discrepancy.
+
+The `<chem_agent>` evidence states that code checked the structures, not the chemistry. With the agent on, structure
+questions no longer force a tool plan.

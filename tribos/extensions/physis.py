@@ -308,9 +308,220 @@ def execute_physis_uncertainty(
         )
 
 
+class PhysisFluidInput(BaseModel):
+    fluid: str = Field(
+        ...,
+        min_length=1,
+        max_length=80,
+        description="Fluid name, formula, CAS number or refrigerant number (e.g. 'Water', 'steam', 'CO2', 'Nitrogen', "
+                    "'R134a', 'R-123', 'HCFC-22', 'Ammonia', 'Air').",
+    )
+    operation: str = Field(
+        default="state",
+        description="'state' (properties at T and P, or at T and a vapour quality), 'throttle' (isenthalpic Joule-"
+                    "Thomson expansion from T, P to final_pressure: final temperature and temperature change), "
+                    "'isentropic' (reversible adiabatic expansion or compression to final_pressure), or 'saturation' "
+                    "(saturation pressure at T, or temperature at P, with latent heat).",
+    )
+    temperature: str | float | None = Field(
+        default=None, description="Temperature with its unit ('50 degC', '323.15 K', '77 degF'); a bare number is kelvin.")
+    pressure: str | float | None = Field(
+        default=None, description="Pressure with its unit ('1.5 bar', '101.325 kPa', '2 atm', '30 psi'); a bare number is Pa.")
+    final_pressure: str | float | None = Field(
+        default=None, description="End pressure of a 'throttle' or 'isentropic' process, with its unit.")
+    quality: float | None = Field(default=None, ge=0.0, le=1.0, description="Vapour quality 0..1 for a two-phase state.")
+    outputs: list[str] | None = Field(
+        default=None,
+        description="Properties to report at the state: density, molar_density, molar_volume, cp, cp_molar, cv, "
+                    "cv_molar, enthalpy, enthalpy_molar, entropy, entropy_molar, internal_energy, "
+                    "compressibility_factor, speed_of_sound, viscosity, thermal_conductivity, joule_thomson, "
+                    "isothermal_compressibility, expansion_coefficient, molar_mass, quality.",
+    )
+
+
+def execute_physis_fluid_properties(
+    fluid: str,
+    operation: str = "state",
+    temperature: str | float | None = None,
+    pressure: str | float | None = None,
+    final_pressure: str | float | None = None,
+    quality: float | None = None,
+    outputs: list[str] | None = None,
+) -> Any:
+    from tribos.physis.fluids import fluid_properties
+    from tribos.tools.registry import ErrorType, ToolResult
+
+    try:
+        data = fluid_properties(fluid, operation, temperature, pressure, final_pressure, quality, outputs)
+    except ValueError as exc:
+        return ToolResult(success=False, tool_name="physis_fluid_properties", error=str(exc),
+                          error_type=ErrorType.VALIDATION_ERROR)
+    except Exception as exc:  # noqa: BLE001 - CoolProp raises plain exceptions for states outside an EOS's range
+        return ToolResult(success=False, tool_name="physis_fluid_properties", error=f"{type(exc).__name__}: {exc}"[:500],
+                          error_type=ErrorType.VALIDATION_ERROR)
+    return ToolResult(
+        success=True,
+        tool_name="physis_fluid_properties",
+        data=data,
+        canonical_ids={},
+        metadata={"engine": data["method"], "eos_reference": data["eos_reference"], "verified": True},
+    )
+
+
+_SMILES_HELP = (
+    "Write each structure as SMILES. To name atoms by their IUPAC locants, give them atom-map numbers equal to the "
+    "locants, e.g. 2,3-dimethylcyclohexan-1-ol as [CH:1]1(O)[CH:2](C)[CH:3](C)[CH2:4][CH2:5][CH2:6]1."
+)
+_LOCANTS_HELP = ('Atom-map number -> locant label for locants that are not plain numbers, e.g. {"31": "3a", '
+                 '"71": "7a"}.')
+
+
+class PhysisMoleculeInput(BaseModel):
+    smiles: list[str] = Field(
+        ...,
+        min_length=1,
+        max_length=8,
+        description="One to eight structures as SMILES (stereo marks @/@@ and bond marks / and \\ optional). "
+                    + _SMILES_HELP,
+    )
+    names: list[str] | None = Field(default=None, description="A short name for each structure, in the same order "
+                                                              "(e.g. the answer options 'A', 'B', or 'product 3').")
+    locants: dict[str, str] | None = Field(default=None, description=_LOCANTS_HELP)
+
+
+def execute_physis_molecule(smiles: list[str], names: list[str] | None = None,
+                            locants: dict[str, str] | None = None) -> Any:
+    from tribos.physis.chemistry import molecule_facts
+    from tribos.tools.registry import ErrorType, ToolResult
+
+    try:
+        data = molecule_facts(smiles, names, locants)
+    except ValueError as exc:
+        return ToolResult(success=False, tool_name="physis_molecule", error=str(exc), error_type=ErrorType.VALIDATION_ERROR)
+    except Exception as exc:  # noqa: BLE001 - RDKit raises its own exception types for malformed structures
+        return ToolResult(success=False, tool_name="physis_molecule", error=f"{type(exc).__name__}: {exc}"[:500],
+                          error_type=ErrorType.VALIDATION_ERROR)
+    return ToolResult(success=True, tool_name="physis_molecule", data=data, canonical_ids={},
+                      metadata={"engine": data["method"], "verified": True})
+
+
+class PhysisStereoInput(BaseModel):
+    smiles: list[str] = Field(
+        ...,
+        min_length=1,
+        max_length=8,
+        description="With descriptor_sets: one SMILES of the constitution (stereo marks not needed) whose atoms carry "
+                    "atom-map numbers equal to their IUPAC locants, so that '5S' means the atom mapped :5; every locant "
+                    "in the descriptor sets needs a numbered atom, and the constitution must match the named "
+                    "compound (check the returned formula and bonds). Write the ring atoms in locant order "
+                    "(1, 2, 3, 3a, 4, ... 7a) so that each written bond joins consecutive locants, then close the "
+                    "fusion bond and add bridge atoms between the bridgeheads the name gives ('4,7-methano': atom 8 "
+                    "bonded to 4 and 7). Without "
+                    "descriptor_sets: isomeric SMILES whose configurations are to be described. " + _SMILES_HELP,
+    )
+    descriptor_sets: list[str] | None = Field(
+        default=None,
+        max_length=12,
+        description="Stereodescriptor sets to translate, one per configuration, e.g. the answer options "
+                    "['(1R,2S,3R)', '(1R,2R,3S)'] or whole names '(1R,2S)-2-methylcyclohexan-1-ol'. Lower-case "
+                    "r/s (pseudoasymmetric) and E/Z are accepted. Options with a different constitution need their "
+                    "own call.",
+    )
+    locants: dict[str, str] | None = Field(default=None, description=_LOCANTS_HELP)
+    distance_pairs: list[list[str]] | None = Field(
+        default=None, description='Optional locant pairs whose 3D distance (angstrom) to report in each configuration, '
+                                  'e.g. [["9", "5"]] for a substituent atom mapped :9 and ring atom :5.')
+
+
+def execute_physis_stereo(smiles: list[str], descriptor_sets: list[str] | None = None,
+                          locants: dict[str, str] | None = None, distance_pairs: list[list[str]] | None = None) -> Any:
+    from tribos.physis.chemistry import stereo_configurations
+    from tribos.tools.registry import ErrorType, ToolResult
+
+    try:
+        data = stereo_configurations(smiles, descriptor_sets, locants, distance_pairs)
+    except ValueError as exc:
+        return ToolResult(success=False, tool_name="physis_stereo", error=str(exc), error_type=ErrorType.VALIDATION_ERROR)
+    except Exception as exc:  # noqa: BLE001 - RDKit raises its own exception types for malformed structures
+        return ToolResult(success=False, tool_name="physis_stereo", error=f"{type(exc).__name__}: {exc}"[:500],
+                          error_type=ErrorType.VALIDATION_ERROR)
+    return ToolResult(success=True, tool_name="physis_stereo", data=data, canonical_ids={},
+                      metadata={"engine": data["method"], "verified": True})
+
+
 def register_tools(registry: Any) -> None:
-    """Register all 7 Physis physical/mathematical reference tools in the ToolRegistry."""
+    """Register the Physis physical/mathematical reference tools in the ToolRegistry."""
     from tribos.tools.registry import AdapterType, ToolUniverseEntry
+
+    registry.register(
+        ToolUniverseEntry(
+            name="physis_fluid_properties",
+            description=(
+                "Thermophysical properties of real fluids (water/steam, refrigerants such as R134a or R123, CO2, air, "
+                "nitrogen, ammonia, hydrocarbons; 130+ fluids) from their reference equations of state via CoolProp: "
+                "density, heat capacities, enthalpy, entropy, compressibility factor, speed of sound, viscosity, "
+                "thermal conductivity and the Joule-Thomson coefficient at a temperature and pressure; the final "
+                "temperature of a throttling (isenthalpic, Joule-Thomson) or isentropic expansion; saturation "
+                "pressure or temperature and latent heat."
+            ),
+            domain="physis",
+            adapter_type=AdapterType.LOCAL_COMPUTE,
+            input_schema=PhysisFluidInput,
+            canonical_id_types=[],
+            timeout_seconds=20.0,
+            tags=["thermodynamics", "fluids", "coolprop", "equation_of_state", "refrigerant", "steam", "joule_thomson",
+                  "enthalpy", "entropy", "saturation", "thermophysical_properties"],
+            is_async=False,
+        ),
+        executor=execute_physis_fluid_properties,
+    )
+
+    registry.register(
+        ToolUniverseEntry(
+            name="physis_molecule",
+            description=(
+                "Exact structure facts for organic molecules given as SMILES (RDKit): molecular formula, molecular "
+                "weight and monoisotopic mass, degree of unsaturation, stereocentres and double bonds with CIP "
+                "R/S/E/Z labels, whether the molecule is chiral or meso, the number of stereoisomers of the "
+                "constitution (enantiomer pairs and achiral forms, e.g. peaks on chiral and achiral HPLC), the number "
+                "of chemically distinct hydrogen and carbon environments (1H and 13C NMR signal counts), and whether "
+                "two structures are identical, enantiomers, diastereomers or constitutional isomers."
+            ),
+            domain="physis",
+            adapter_type=AdapterType.LOCAL_COMPUTE,
+            input_schema=PhysisMoleculeInput,
+            canonical_id_types=[],
+            timeout_seconds=30.0,
+            tags=["chemistry", "organic_chemistry", "smiles", "molecular_formula", "stereochemistry", "nmr",
+                  "stereoisomers", "chirality", "rdkit"],
+            is_async=False,
+        ),
+        executor=execute_physis_molecule,
+    )
+
+    registry.register(
+        ToolUniverseEntry(
+            name="physis_stereo",
+            description=(
+                "Translate stereodescriptors into 3D geometry (RDKit CIP labeler and 3D embedding): give the "
+                "constitution as SMILES with atom-map numbers equal to the IUPAC locants and the descriptor sets of "
+                "the candidate structures (e.g. answer options '(1R,2S,3R)', '(2R,3S,4r)'); for each it "
+                "returns which substituents lie on the same face of every ring (cis/trans, syn/anti, endo/exo) and "
+                "whether two sets are the same compound or enantiomers. Use it to pick the option whose descriptors "
+                "match the geometry a reaction gives (cis addition, the endo rule, facial selectivity) instead of "
+                "assigning R/S by hand."
+            ),
+            domain="physis",
+            adapter_type=AdapterType.LOCAL_COMPUTE,
+            input_schema=PhysisStereoInput,
+            canonical_id_types=[],
+            timeout_seconds=30.0,
+            tags=["chemistry", "organic_chemistry", "stereochemistry", "cip", "stereodescriptors", "endo", "exo",
+                  "cis", "trans", "diels_alder", "rdkit"],
+            is_async=False,
+        ),
+        executor=execute_physis_stereo,
+    )
 
     registry.register(
         ToolUniverseEntry(

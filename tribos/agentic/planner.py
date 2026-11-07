@@ -203,6 +203,14 @@ def select_tools(state: Any, sub_questions: Sequence[Any], k: int = 8, per_sub: 
         required.append("dynamis_solve_pde")
     if re.search(r"\bRK4\b|fourth[ -]order\s+Runge", query, re.I):
         required.append("dynamis_simulate_ode")
+    from ..physis.chemistry import is_structure_question
+
+    if is_structure_question(query):
+        required.extend(["physis_stereo", "physis_molecule"])
+    if (getattr(state, "tool_results", None) or {}).get("chemistry") is not None:
+        # Code already built the options' structures from their names and translated their descriptors
+        # (presentation.option_stereo); a model-written SMILES of the same compounds could only contradict it.
+        excluded.append("physis_stereo")
     add([e for name in required if name not in excluded and (e := registry.get_entry(name)) is not None])
 
     # The literature tool is always offered, unless the policy rules it out (evidence_need.skip_retrieval, "no web"...).

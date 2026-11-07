@@ -221,7 +221,7 @@ async def request_dag_approval(state: Any, graph: PlanGraph, round_no: int) -> d
 # when it parses as a closed computation, or the symbolic answer would stand in for the requested numerical check.
 SPECIALISED_TOOLS = frozenset({
     "dynamis_solve_pde", "dynamis_monte_carlo_integrate", "physis_engineering_calc", "physis_propagate_uncertainty", "archivon_read_paper",
-    "archivon_reproduce_paper",
+    "archivon_reproduce_paper", "physis_fluid_properties", "physis_molecule", "physis_stereo",
 })
 
 
@@ -257,6 +257,16 @@ def needs_specialised_tool(state: Any) -> bool:
     if (re.search(r"\bRK4\b|fourth[ -]order\s+Runge", query, re.I) and registry.get_entry("dynamis_simulate_ode") is not None
             and not _rk4_computed_by_code(query)):
         return True
+    if registry.get_entry("physis_stereo") is not None:
+        from ..physis.chemistry import is_structure_question
+        from .chem_agent import chem_agent_enabled
+
+        # Stereodescriptors, stereoisomer counts and NMR environments are exact given a structure; written by hand,
+        # the CIP labels were wrong even when the geometry was right (benchmark failure analysis, items 17-18). The
+        # chemistry agent (chem_agent.py) checks its own structures with the same code, so the plan is only needed
+        # when it is off.
+        if is_structure_question(query) and not chem_agent_enabled():
+            return True
     try:
         from .tool_retrieval import retrieve_tools
 
@@ -284,7 +294,18 @@ def needs_specialised_tool(state: Any) -> bool:
         )
         if not any(k in query_lower for k in eng_keywords):
             return False
+    if hits == ["physis_fluid_properties"]:
+        # Words such as "pressure" or "density" alone do not make a question about a real fluid's equation of state.
+        if not _FLUID_QUESTION_RE.search(state.clean_query or state.query or ""):
+            return False
     return True
+
+
+# A question about a real fluid's state: a named fluid or refrigerant with a process or property that needs its EOS.
+_FLUID_QUESTION_RE = re.compile(
+    r"\b(?:joule[\s-]*thomson|throttl\w*|isenthalp\w*|refrigerant\w*|R-?\d{2,4}[a-z]?\b|steam\b|"
+    r"saturat\w+\s+(?:pressure|temperature|vapou?r|liquid)|latent\s+heat|compressibility\s+factor|"
+    r"thermophysical|real[\s-]gas|equation\s+of\s+state|coolprop)", re.I)
 
 class PlanExecutePhase(AgentPhase):
     key = "plan_execute"

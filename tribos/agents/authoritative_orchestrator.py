@@ -1292,6 +1292,15 @@ class AuthoritativeOrchestrator:
                 "MULTIPLE CHOICE: open with the correct option, letter and value (\"(b) 55 m\"), then show the working "
                 "as one solution. Do not write a section for each option, and do not discuss the wrong options beyond "
                 "one line if a common mistake leads to one of them.")
+        # The field conventions the exercise assumes (a bond's semiannual coupons, an annualised term rate, the
+        # chemist's sign of w): the reading to use, stated in the answer.
+        from .conventions import conventions_for
+
+        conventions = conventions_for(run.clean_query or run.query or "")
+        if conventions:
+            run.gather_notes.extend(c.note for c in conventions)
+            await run.emit("conventions", f"Applied {len(conventions)} field convention(s)",
+                           ", ".join(c.key.replace("_", " ") for c in conventions), status="done")
         broken = malformed_latex(run.clean_query or run.query or "")
         if broken:
             # A formula that lost part of itself (copied math often drops a fraction's braces) is read literally and
@@ -1418,6 +1427,10 @@ class AuthoritativeOrchestrator:
         from .orchestration.best_of_n import best_of_n
 
         await run.timed("best_of_n", best_of_n(run))
+        # A problem with its own data that no code computed: its answer against an independent solution.
+        from .orchestration.cross_check import cross_check
+
+        await run.timed("cross_check", cross_check(run))
         await agent_rounds.draft_rounds(run)  # records rewrite_1, rewrite_2, ... itself
         await run.timed("presentation", presentation_stage.polish(run))
 

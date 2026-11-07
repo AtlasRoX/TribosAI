@@ -66,6 +66,8 @@ the arithmetic, so the answer is **derived, not guessed**:
 - engineering calculators for beams, columns, pressure vessels (ASME VIII-1), shafts, bolts, fatigue, pipe flow and
   heat exchangers, each with its reference and validity limits;
 - unit and dimension checks on the written answer, and every equation in it re-evaluated before you see it;
+- organic-chemistry questions worked by a chemistry agent, with every structure checked by code (formula,
+  stereodescriptors, NMR environments) and matched to the answer options;
 - a plan panel that shows each step and how it was checked.
 
 </td>
@@ -263,7 +265,7 @@ flowchart LR
 | **Axiom** | Exact symbolic mathematics: solving, calculus, ODEs, linear algebra, number theory, identities | SymPy, mpmath |
 | **Dynamis** | Simulation and analysis: ODE/IVP, PDEs, stability, continuation, fitting, optimisation | SciPy |
 | **Calcula** | Sandboxed Python and dataset profiling (CSV, TSV, HDF5, MAT, Parquet, XLSX) | NumPy, Pandas, Matplotlib |
-| **Physis** | CODATA 2022 constants, units and dimensional checks, materials data, engineering calculators | Pint, NIST CODATA |
+| **Physis** | CODATA 2022 constants, units and dimensional checks, materials data, engineering calculators, real-fluid properties, organic structures and stereochemistry | Pint, NIST CODATA, CoolProp, RDKit |
 | **Archivon** | Literature search and citation grounding, papers read and reproduced | arXiv, zbMATH, Crossref, OpenAlex, Semantic Scholar, NASA ADS |
 | **Formal** | Proof formalisation and checking with an axiom audit | Lean 4 |
 
@@ -335,7 +337,7 @@ commented template.
 
 ## Quality
 
-- **2,000+ automated tests**, run offline with fakes (no network, no model calls): `uv run pytest -q`.
+- **2,800+ automated tests**, run offline with fakes (no network, no model calls): `uv run pytest -q`.
 - Blocking CI gates: `ruff`, `bandit`, `mypy` on the typed core, generated-config drift check, and for the web app
   `typecheck`, `eslint`, unit tests and a production build.
 - A hardened sandbox: model-written code runs in a container when Docker or Podman is available

@@ -15,6 +15,7 @@ from typing import Any
 from .result_keys import (
     AXIOM,
     CALCULA,
+    CHEMISTRY,
     CODEACT,
     COMPUTED_RESULTS,
     DYNAMIS,
@@ -884,6 +885,7 @@ def render_codeact(res: Any) -> list[str]:
 _RENDERERS = {
     CODEACT: render_codeact,
     COMPUTED_RESULTS: render_computed_results,
+    CHEMISTRY: lambda res: render_chemistry(res),  # defined below, with the per-tool renderers
     DYNAMIS: render_dynamis,
     DYNAMIS_EQUILIBRIUM: render_dynamis,
     DYNAMIS_SCAN: render_dynamis,
@@ -895,8 +897,89 @@ _RENDERERS = {
 }
 
 
+def render_chemistry(res: Any) -> list[str]:
+    """physis_molecule / physis_stereo: structure facts and, per configuration, the ring faces of its substituents."""
+    d, tool = _data(res), str(getattr(res, "tool_name", "") or "physis_molecule")
+    out = [f'<chemistry tool="{_attr(tool)}" method="{_attr(d.get("method") or "RDKit")}">']
+    for m in (d.get("molecules") or [])[:LIST_ITEMS]:
+        if not isinstance(m, dict):
+            continue
+        if m.get("error"):
+            out.append(f'<molecule name="{_attr(m.get("name"))}" error="{_attr(m["error"])}"/>')
+            continue
+        iso = m.get("stereoisomers_of_constitution") or {}
+        facts = {k: m.get(k) for k in ("smiles", "formula", "molecular_weight", "monoisotopic_mass",
+                                       "degree_of_unsaturation", "formal_charge", "rings", "aromatic_rings", "stereo",
+                                       "chiral", "meso", "h_environments", "h_environments_on_carbon",
+                                       "h_environment_sizes", "c_environments", "c_environment_sizes", "note")
+                 if m.get(k) not in (None, "", [], {})}
+        facts["stereoisomers_of_constitution"] = iso
+        out.append(f'<molecule name="{_attr(m.get("name"))}">{_json(facts)}</molecule>')
+    for c in (d.get("comparisons") or [])[:LIST_ITEMS]:
+        if isinstance(c, dict):
+            out.append(f'<relation a="{_attr(c.get("a"))}" b="{_attr(c.get("b"))}">{_text(c.get("relation"), 80)}</relation>')
+    if d.get("source"):
+        out.append(f"<source>{_text(d['source'], 120)}</source>")
+    constitutions = d.get("constitutions") or ([d["constitution"]] if isinstance(d.get("constitution"), dict) else [])
+    for constitution in constitutions[:8]:
+        if not isinstance(constitution, dict):
+            continue
+        options = f' options="{_attr(", ".join(constitution["options"]))}"' if constitution.get("options") else ""
+        out.append(f'<constitution{options} smiles="{_attr(constitution.get("smiles"))}" '
+                   f'formula="{_attr(constitution.get("formula"))}" '
+                   f'stereo_elements="{_attr(", ".join(constitution.get("stereo_elements") or []))}"/>')
+        numbered = constitution.get("numbered_atoms")
+        if isinstance(numbered, dict) and not constitution.get("options"):
+            # A model-written constitution: its bonds are checked against the name before its faces are trusted.
+            gaps = ", ".join(numbered.get("consecutive_not_bonded") or []) or "none"
+            out.append(f'<bonds_by_locant consecutive_not_bonded="{_attr(gaps)}">'
+                       f'{_text(", ".join(numbered.get("bonds") or []), 600)}</bonds_by_locant>')
+            out.append("<note>This structure was written by a model. Check these bonds against the name (fusion "
+                       "atoms such as 3a-7a, bridges such as 4-8-7) before using the faces below; with a wrong bond "
+                       "every face is wrong. Consecutive locants are bonded except where a bridge begins.</note>")
+    for i, c in enumerate((d.get("configurations") or [])[:16], start=1):
+        if not isinstance(c, dict):
+            continue
+        head = f'<configuration n="{i}" requested="{_attr(c.get("requested") or c.get("source") or "")}"'
+        if c.get("error"):
+            out.append(f'{head} error="{_attr(c["error"])}"/>')
+            continue
+        out.append(f'{head} descriptors="{_attr(c.get("descriptors"))}" smiles="{_attr(c.get("smiles"))}">')
+        for key, label in (("same_compound_as", "same compound as"), ("enantiomer_of", "enantiomer of")):
+            if c.get(key):
+                refs = ", ".join(f"configuration {x}" if isinstance(x, int) else str(x) for x in c[key])
+                out.append(f"<note>{label} {_text(refs, 120)}</note>")
+        if c.get("achiral"):
+            out.append("<note>achiral (meso): identical to its mirror image</note>")
+        if c.get("unspecified"):
+            out.append(f"<note>left unspecified: {_text(', '.join(c['unspecified']), 200)}</note>")
+        if c.get("geometry"):
+            out.append(f"<note>{_text(c['geometry'], 200)}</note>")
+        for ring in (c.get("rings") or [])[:8]:
+            if not isinstance(ring, dict):
+                continue
+            out.append(f'<ring atoms="{_attr(ring.get("ring"))}" face_a="{_attr("; ".join(ring.get("face_a") or []))}" '
+                       f'face_b="{_attr("; ".join(ring.get("face_b") or []))}"/>')
+            pairs = [f"{p.get('a')} / {p.get('b')}: {p.get('relation')}" for p in (ring.get("pairs") or [])[:15]]
+            if pairs:
+                out.append(f"<pairs>{_text('; '.join(pairs), 1200)}</pairs>")
+        for dist in (c.get("distances") or [])[:10]:
+            if isinstance(dist, dict):
+                out.append(f'<distance a="{_attr(dist.get("a"))}" b="{_attr(dist.get("b"))}">'
+                           f'{_attr(dist.get("distance_angstrom", dist.get("error", "")))}</distance>')
+        out.append("</configuration>")
+    for note in (d.get("notes") or [])[:4]:
+        out.append(f"<note>{_text(note, 300)}</note>")
+    if d.get("how_to_read"):
+        out.append(f"<how_to_read>{_text(d['how_to_read'], 500)}</how_to_read>")
+    out.append("</chemistry>")
+    return out
+
+
 # Tools rendered by their own renderer wherever their result appears (see render_tool_result).
 TOOL_RENDERERS = {
+    "physis_molecule": render_chemistry,
+    "physis_stereo": render_chemistry,
     "calcula_run_python": render_calcula,
     "analysis_run_python": render_calcula,
     "dynamis_monte_carlo_integrate": render_dynamis,

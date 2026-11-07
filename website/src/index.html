@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+{{> head}}
+</head>
+<body class="min-h-dvh overflow-x-hidden">
+{{> nav}}
+
+<main id="main">
+
+<!-- ================================================================ HERO -->
+<section class="mx-auto max-w-[84rem] px-5 pt-28 pb-16 sm:px-10 sm:pt-36">
+  <div class="grid items-center gap-12 lg:grid-cols-[1.25fr_0.75fr] lg:gap-16">
+    <div class="min-w-0">
+      <p class="rise flex items-baseline gap-3 text-sand" style="animation-delay:.05s">
+        <span class="font-greek text-[1.5rem] leading-none text-cream">τρίβος</span>
+        <span class="text-[0.95rem]">a worn path, diligent inquiry</span>
+      </p>
+      <h1 class="rise display mt-5 text-[clamp(2.7rem,6.2vw,4.9rem)] leading-[1.02]" style="animation-delay:.12s">
+        Hard questions.<br>
+        <span class="relative inline-block"><span class="checked">Checked</span> answers.<svg class="tick absolute -top-[0.22em] -right-[0.5em] hidden h-[0.5em] w-[0.5em] sm:block" viewBox="0 0 100 100" aria-hidden="true"><path d="M18 54 L42 76 L84 26"/></svg></span>
+      </h1>
+      <p class="rise mt-6 max-w-xl text-lg leading-relaxed text-sand" style="animation-delay:.22s">
+        A research partner for engineering, physics and mathematics. It does the work with real tools, then shows you
+        which claims were checked, and how.
+      </p>
+      <div class="rise mt-8 flex max-w-xl gap-2" style="animation-delay:.32s">
+        <code class="flex min-w-0 flex-1 items-center overflow-hidden rounded-xl bg-ash px-4 font-mono text-[0.86rem] text-sand"><span class="truncate" id="clone-cmd">git clone https://github.com/AtlasRoX/TribosAI</span></code>
+        <button type="button" class="btn-ember shrink-0 rounded-xl px-5 py-3 font-medium" data-copy="#clone-cmd">Copy</button>
+      </div>
+      <p class="rise mt-3 text-sm text-sand" style="animation-delay:.38s">Then <a class="link-u text-cream" href="#start">four commands</a> to run it on your machine.</p>
+      <a href="changelog.html#unreleased" class="rise group mt-7 inline-flex items-center gap-2 text-[0.95rem] font-medium" style="animation-delay:.44s">
+        <svg class="size-4 text-ember" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+        New: real-fluid properties and field conventions
+        <svg class="size-4 transition group-hover:translate-x-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </a>
+    </div>
+
+    <!-- Featured: the demo -->
+    <div class="rise glass min-w-0 rounded-[1.4rem] p-2" style="animation-delay:.3s" id="demo" data-video="yac5XH8Yyl8">
+      <a href="https://youtu.be/yac5XH8Yyl8" target="_blank" rel="noopener" class="group relative block aspect-video overflow-hidden rounded-[1rem] bg-cream" data-video-play aria-label="Play the 3-minute Tribos demo">
+        <img src="assets/s3-findings.jpg" alt="" class="size-full object-cover object-top opacity-45 transition duration-700 group-hover:scale-[1.03] group-hover:opacity-55" loading="eager">
+        <span class="absolute top-3 left-3 rounded-full bg-white/95 px-2.5 py-1 text-xs font-medium text-cream">Demo</span>
+        <span class="absolute inset-0 grid place-items-center">
+          <span class="grid size-16 place-items-center rounded-full bg-white text-cream shadow-xl transition group-hover:scale-110"><svg class="size-6 translate-x-0.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15L20 12z"/></svg></span>
+        </span>
+      </a>
+      <div class="flex items-center gap-3 px-2 pt-3 pb-1.5">
+        <span class="grid size-10 shrink-0 place-items-center rounded-xl bg-cream text-white"><span class="mark size-5"></span></span>
+        <span class="min-w-0 leading-tight"><span class="block font-medium">See Tribos work</span><span class="block truncate text-sm text-sand">Three minutes, from the running app</span></span>
+        <a href="https://youtu.be/yac5XH8Yyl8" target="_blank" rel="noopener" class="btn-ember ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium">Watch <svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg></a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================ GALLERY -->
+<section id="product" class="mx-auto max-w-[84rem] px-5 pb-24 sm:px-10">
+  <div class="flex flex-wrap items-center gap-2" role="group" aria-label="Filter the gallery">
+    <span class="mr-1 text-sand">Filter:</span>
+    <button type="button" class="filter" aria-pressed="true" data-filter="all">All <small>8</small></button>
+    <button type="button" class="filter" aria-pressed="false" data-filter="research">Research <small>4</small></button>
+    <button type="button" class="filter" aria-pressed="false" data-filter="answers">Answers <small>1</small></button>
+    <button type="button" class="filter" aria-pressed="false" data-filter="photos">Photos <small>1</small></button>
+    <button type="button" class="filter" aria-pressed="false" data-filter="proofs">Proofs <small>1</small></button>
+    <button type="button" class="filter" aria-pressed="false" data-filter="simulation">Simulation <small>2</small></button>
+    <button type="button" class="filter" aria-pressed="false" data-filter="exports">Exports <small>1</small></button>
+  </div>
+
+  <div class="mt-7 columns-1 gap-5 sm:columns-2 lg:columns-3 xl:columns-4" data-gallery>
+    <figure class="card mb-9 break-inside-avoid" data-tags="answers">
+      <div class="media aspect-[4/5]"><img src="assets/s1-formulas.jpg" alt="An engineering answer with every formula worked out" loading="lazy" class="size-full object-cover object-[30%_0%]"></div>
+      <figcaption class="mt-3"><span class="flex items-center gap-2"><span class="font-medium">Every formula, worked</span><span class="ml-auto rounded-full border border-smoke px-2 py-0.5 text-xs text-sand">Answer</span></span><span class="mt-1 block text-sm text-sand">Engineering answers, each number re-checked before you read it.</span></figcaption>
+    </figure>
+    <figure class="card mb-9 break-inside-avoid" data-tags="photos">
+      <div class="media aspect-video"><img src="assets/s2-read.jpg" alt="A photographed problem transcribed to mathematics" loading="lazy" class="size-full object-cover"></div>
+      <figcaption class="mt-3"><span class="flex items-center gap-2"><span class="font-medium">Read from a photo</span><span class="ml-auto rounded-full border border-smoke px-2 py-0.5 text-xs text-sand">Photo</span></span><span class="mt-1 block text-sm text-sand">Four readings must agree before anything is solved.</span></figcaption>
+    </figure>
+    <figure class="card mb-9 break-inside-avoid" data-tags="research">
+      <div class="media aspect-[4/5]"><img src="assets/s3-overview.jpg" alt="A research project with its loop, status and findings" loading="lazy" class="size-full object-cover object-[45%_0%]"></div>
+      <figcaption class="mt-3"><span class="flex items-center gap-2"><span class="font-medium">A research project</span><span class="ml-auto rounded-full border border-smoke px-2 py-0.5 text-xs text-sand">Research</span></span><span class="mt-1 block text-sm text-sand">Rounds of tests until the question is settled.</span></figcaption>
+    </figure>
+    <figure class="card mb-9 break-inside-avoid" data-tags="research proofs">
+      <div class="media aspect-video"><img src="assets/s3-proof.jpg" alt="A proof-checked theorem with its proof" loading="lazy" class="size-full object-cover object-top"></div>
+      <figcaption class="mt-3"><span class="flex items-center gap-2"><span class="font-medium">A proof-checked theorem</span><span class="ml-auto rounded-full border border-smoke px-2 py-0.5 text-xs text-sand">Proof</span></span><span class="mt-1 block text-sm text-sand">Accepted by a formal proof checker, axioms audited.</span></figcaption>
+    </figure>
+    <figure class="card mb-9 break-inside-avoid" data-tags="simulation">
+      <div class="media aspect-[4/3]"><img src="assets/s4-plot.jpg" alt="A damped oscillator simulated and plotted" loading="lazy" class="size-full object-cover object-[60%_20%]"></div>
+      <figcaption class="mt-3"><span class="flex items-center gap-2"><span class="font-medium">A simulation, plotted</span><span class="ml-auto rounded-full border border-smoke px-2 py-0.5 text-xs text-sand">Simulation</span></span><span class="mt-1 block text-sm text-sand">The code behind the chart is one click away.</span></figcaption>
+    </figure>
+    <figure class="card mb-9 break-inside-avoid" data-tags="research">
+      <div class="media aspect-[3/4]"><img src="assets/s3-findings.jpg" alt="The findings wall with replicated results and charts" loading="lazy" class="size-full object-cover object-[40%_0%]"></div>
+      <figcaption class="mt-3"><span class="flex items-center gap-2"><span class="font-medium">The findings wall</span><span class="ml-auto rounded-full border border-smoke px-2 py-0.5 text-xs text-sand">Research</span></span><span class="mt-1 block text-sm text-sand">Every result with its numbers, chart and seal.</span></figcaption>
+    </figure>
+    <figure class="card mb-9 break-inside-avoid" data-tags="research exports">
+      <div class="media aspect-video"><img src="assets/s3-thesis.jpg" alt="The thesis reader with contents and export buttons" loading="lazy" class="size-full object-cover object-top"></div>
+      <figcaption class="mt-3"><span class="flex items-center gap-2"><span class="font-medium">The thesis</span><span class="ml-auto rounded-full border border-smoke px-2 py-0.5 text-xs text-sand">Export</span></span><span class="mt-1 block text-sm text-sand">PDF, Word, Markdown, HTML or a code bundle.</span></figcaption>
+    </figure>
+    <figure class="card mb-9 break-inside-avoid" data-tags="simulation">
+      <div class="media aspect-square"><img src="assets/s4-phase.jpg" alt="The oscillator's phase portrait in the explore panel" loading="lazy" class="size-full object-cover object-[55%_45%]"></div>
+      <figcaption class="mt-3"><span class="flex items-center gap-2"><span class="font-medium">Explore the dynamics</span><span class="ml-auto rounded-full border border-smoke px-2 py-0.5 text-xs text-sand">Simulation</span></span><span class="mt-1 block text-sm text-sand">Phase portraits and parameter sweeps, live.</span></figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ================================================================ A RUN -->
+<section class="border-y border-smoke bg-soot py-24">
+  <div class="mx-auto max-w-[84rem] px-5 sm:px-10">
+    <div class="reveal mx-auto max-w-2xl text-center">
+      <h2 class="display text-4xl leading-[1.05] sm:text-5xl">Watch a run. <em>Every check shows.</em></h2>
+      <p class="mt-4 text-lg text-sand">Four real kinds of work, played step by step.</p>
+    </div>
+    <div class="reveal mt-12">
+{{> console}}
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================ NUMBERS -->
+<section class="mx-auto max-w-[84rem] px-5 sm:px-10">
+  <dl class="grid grid-cols-2 border-b border-smoke md:grid-cols-5">
+    <div class="py-10"><dt class="sr-only">Tools</dt><dd class="display text-4xl sm:text-5xl">65</dd><dd class="mt-1 text-sm text-sand">tools it can call</dd></div>
+    <div class="py-10"><dt class="sr-only">Engines</dt><dd class="display text-4xl sm:text-5xl">6</dd><dd class="mt-1 text-sm text-sand">specialist engines</dd></div>
+    <div class="py-10"><dt class="sr-only">Checks</dt><dd class="display text-4xl sm:text-5xl">11</dd><dd class="mt-1 text-sm text-sand">independent checks</dd></div>
+    <div class="py-10"><dt class="sr-only">Seals</dt><dd class="display text-4xl sm:text-5xl">6</dd><dd class="mt-1 text-sm text-sand">verification seals</dd></div>
+    <div class="py-10"><dt class="sr-only">Tests</dt><dd class="display text-4xl sm:text-5xl">2,800+</dd><dd class="mt-1 text-sm text-sand">automated tests</dd></div>
+  </dl>
+</section>
+
+<!-- ================================================================ TRUST -->
+<section id="trust" class="mx-auto max-w-[84rem] px-5 py-24 sm:px-10">
+  <div class="grid gap-14 lg:grid-cols-[1fr_1.05fr] lg:items-center">
+    <div class="reveal">
+      <h2 class="display text-4xl leading-[1.05] sm:text-5xl">Checked, <em>not trusted.</em></h2>
+      <p class="mt-5 max-w-lg text-lg leading-relaxed text-sand">The draft is a set of claims to check, not the answer. Every citation, figure and equation is tested against what this run actually computed or retrieved. A judge can downgrade a verdict, never upgrade it.</p>
+    </div>
+    <ol class="reveal timeline space-y-3" aria-label="How an answer is checked">
+      <li class="spot flex gap-4 p-4"><span class="node iris mt-1"></span><div><p class="font-medium">Draft</p><p class="text-sm text-sand">Written from this run's evidence only.</p></div></li>
+      <li class="spot flex gap-4 p-4"><span class="node ok mt-1"></span><div><p class="font-medium">Claim and math audit</p><p class="text-sm text-sand">Citations, figures and units; every equation re-evaluated.</p></div></li>
+      <li class="spot flex gap-4 p-4"><span class="node bad mt-1"></span><div><p class="font-medium">One bounded revision</p><p class="text-sm text-sand">From the defect list, forbidden to add facts or numbers.</p></div></li>
+      <li class="spot flex gap-4 p-4"><span class="node ok mt-1"></span><div><p class="font-medium">Answer, with its status</p><p class="text-sm text-sand">Verified, checked, failed or not evaluated, kept apart.</p></div></li>
+    </ol>
+  </div>
+
+  <div class="reveal mt-20">
+    <h3 class="display text-3xl sm:text-4xl">Six seals. <em>Every result wears one.</em></h3>
+    <div class="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-3" data-spots>
+      <div class="spot p-6"><span class="chip chip-iris">proof-checked</span><p class="mt-4 text-sand">Accepted by a formal proof checker: no gaps, standard axioms only.</p></div>
+      <div class="spot p-6"><span class="chip chip-ok">certified</span><p class="mt-4 text-sand">Exact or interval arithmetic that rounding cannot fool.</p></div>
+      <div class="spot p-6"><span class="chip chip-ok">replicated</span><p class="mt-4 text-sand">Two independent implementations, agreeing on every number.</p></div>
+      <div class="spot p-6"><span class="chip chip-dim">computed</span><p class="mt-4 text-sand">Ran once in the sandbox, with its code kept beside it.</p></div>
+      <div class="spot p-6"><span class="chip chip-dim">sourced</span><p class="mt-4 text-sand">A citation this run actually retrieved, never one from memory.</p></div>
+      <div class="spot p-6"><span class="chip chip-dim">reasoned</span><p class="mt-4 text-sand">Argument only, and labelled so.</p></div>
+    </div>
+  </div>
+
+  <div class="reveal mt-16">
+    <p class="text-sm text-sand">Eleven independent checks</p>
+    <ul class="mt-4 flex flex-wrap gap-2">
+      <li class="filter !text-sm" title="Cite only what this run found; describe a check only if it passed">grounding rules</li>
+      <li class="filter !text-sm" title="Every identifier and figure must come from this run's evidence">claim audit</li>
+      <li class="filter !text-sm" title="Every equation and derivative re-evaluated with the question's values">math audit</li>
+      <li class="filter !text-sm" title="One revision from the defect list, no new facts">bounded revision</li>
+      <li class="filter !text-sm" title="Verified, checked, failed and not evaluated kept apart">honest status</li>
+      <li class="filter !text-sm" title="Searches for limitations and counterexamples before drafting">counter-evidence</li>
+      <li class="filter !text-sm" title="Unsupported sentences become new searches">gap re-retrieval</li>
+      <li class="filter !text-sm" title="An entailment check that can only downgrade">entailment judge</li>
+      <li class="filter !text-sm" title="Rewrites may not add a number that is not in the evidence">guarded rewrites</li>
+      <li class="filter !text-sm" title="Only evidence-backed identifiers become links">citation links</li>
+      <li class="filter !text-sm" title="A formal theorem must state the question before it is proof-checked">proof correspondence</li>
+    </ul>
+    <p class="mt-6 max-w-2xl text-sand">Memory can't launder a mistake either: unverified work is never stored as evidence, refuted claims are kept as do-not-reuse, and research runs isolated from your other chats.</p>
+  </div>
+</section>
+
+<!-- ================================================================ BENCHMARKS -->
+<section id="benchmarks" class="border-y border-smoke bg-soot py-24">
+  <div class="mx-auto max-w-[84rem] px-5 sm:px-10">
+    <div class="reveal max-w-3xl">
+      <h2 class="display text-4xl leading-[1.05] sm:text-5xl">Same model. <em>Better answers.</em></h2>
+      <p class="mt-5 text-lg text-sand">One language model, two ways: answering each problem alone, and inside Tribos. 238 problems from five public benchmarks, graded the same way for both.</p>
+    </div>
+
+    <dl class="reveal mt-12 grid gap-3 sm:grid-cols-2 lg:grid-cols-4" data-spots>
+      <div class="spot p-6">
+        <dt class="text-sm text-sand">Tribos</dt>
+        <dd class="display mt-2 text-6xl text-iris">98.3%</dd>
+        <dd class="mt-1 text-sm text-sand">234 of 238</dd>
+      </div>
+      <div class="spot p-6">
+        <dt class="text-sm text-sand">Same model, alone</dt>
+        <dd class="display mt-2 text-6xl text-dust">94.5%</dd>
+        <dd class="mt-1 text-sm text-sand">225 of 238</dd>
+      </div>
+      <div class="spot p-6">
+        <dt class="text-sm text-sand">Solved by only one</dt>
+        <dd class="display mt-2 text-6xl">10<span class="text-3xl text-dust"> to </span>1</dd>
+        <dd class="mt-1 text-sm text-sand">in Tribos's favour</dd>
+      </div>
+      <div class="spot p-6">
+        <dt class="text-sm text-sand">Paired test</dt>
+        <dd class="display mt-2 text-5xl">p = 0.012</dd>
+        <dd class="mt-2 text-sm text-sand">exact McNemar, two-sided</dd>
+      </div>
+    </dl>
+
+    <div class="reveal spot mt-4">
+      <div class="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-smoke px-5 py-4 text-sm sm:px-6">
+        <span class="font-medium">Accuracy by benchmark</span>
+        <span class="ml-auto inline-flex items-center gap-2 text-sand"><span class="size-2.5 rounded-full bg-[#b8892f]"></span>Same model, alone</span>
+        <span class="inline-flex items-center gap-2 text-sand"><span class="size-2.5 rounded-full bg-[#4a56c9]"></span>Tribos</span>
+      </div>
+      <div class="relative overflow-x-auto">
+        <table class="w-full text-left text-[0.95rem] md:min-w-[760px]">
+          <thead>
+            <tr class="border-b border-smoke text-xs text-sand">
+              <th scope="col" class="px-5 py-3 font-medium sm:px-6">Benchmark</th>
+              <th scope="col" class="hidden px-3 py-3 text-right font-medium sm:table-cell">Problems</th>
+              <th scope="col" class="px-3 py-3 text-right font-medium">Alone</th>
+              <th scope="col" class="py-3 pr-5 pl-3 text-right font-medium sm:pr-3">Tribos</th>
+              <th scope="col" class="hidden w-[34%] py-3 pr-5 pl-6 font-medium sm:pr-6 md:table-cell">
+                <span class="sr-only">Chart, 80 to 100 percent</span>
+                <span class="relative block h-4 font-mono" aria-hidden="true">
+                  <span class="absolute left-0 -translate-x-1/2">80%</span><span class="absolute left-1/4 -translate-x-1/2">85</span><span class="absolute left-1/2 -translate-x-1/2">90</span><span class="absolute left-3/4 -translate-x-1/2">95</span><span class="absolute left-full -translate-x-1/2">100</span>
+                </span>
+              </th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-smoke">
+{{benchmark_rows}}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <p class="reveal mt-5 max-w-4xl text-sm leading-relaxed text-sand">
+      Paired run, November 2026: 50 problems sampled from each benchmark (seed 1), each answered by the same language
+      model directly and through Tribos. Twelve items whose reference answer is demonstrably wrong, or that cannot be
+      answered from their text, are set aside for both. One grader for both: stated or boxed final answer, numeric
+      tolerance, symbolic equivalence. Four Tribos answers were re-run after an experimental check was switched off.
+      GPQA Diamond was run again on 7 November with the chemistry agent; the other four benchmarks are from the
+      run of 6 November, and the model alone is the same run throughout.
+      Per-benchmark differences are not significant on their own at 50 problems; the overall paired difference is.
+    </p>
+  </div>
+</section>
+
+<!-- ================================================================ RESEARCH LOOP + ENGINES -->
+<section id="research">
+  <div class="mx-auto grid max-w-[84rem] items-center gap-16 px-5 py-24 sm:px-10 lg:grid-cols-[1fr_1.05fr]">
+    <div class="reveal min-w-0">
+      <h2 class="display text-4xl leading-[1.05] sm:text-5xl">Round after round, <em>until it's settled.</em></h2>
+      <p class="mt-5 text-lg leading-relaxed text-sand">Tribos charters the work, runs the ready tests in parallel, keeps every finding in a ledger, and lets deterministic evidence rules decide what is done, refuted or still open. A live estimate shows the time left.</p>
+      <div class="mt-7 flex flex-wrap gap-2">
+        <span class="chip chip-dim">stops when concluded</span><span class="chip chip-dim">or stagnant</span><span class="chip chip-dim">or at a safety ceiling</span><span class="chip chip-dim">and says which</span>
+      </div>
+    </div>
+{{> loop}}
+  </div>
+
+{{> engines}}
+</section>
+
+<!-- ================================================================ GET STARTED -->
+<section id="start" class="border-y border-smoke bg-soot py-24">
+  <div class="mx-auto grid max-w-[84rem] gap-14 px-5 sm:px-10 lg:grid-cols-[0.85fr_1.15fr]">
+    <div class="reveal">
+      <h2 class="display text-4xl leading-[1.05] sm:text-5xl">Running in <em>four commands.</em></h2>
+      <p class="mt-5 text-lg leading-relaxed text-sand">Python 3.12+, uv, Node.js 22+ and a model API key. Optional: a proof checker for formal proofs, OCR for photos, Docker.</p>
+      <ul class="mt-8 grid grid-cols-2 gap-x-6 gap-y-3 text-[0.95rem]">
+        <li class="flex gap-2"><span class="text-mint">✓</span><span>Projects with roles</span></li>
+        <li class="flex gap-2"><span class="text-mint">✓</span><span>Six orchestration modes</span></li>
+        <li class="flex gap-2"><span class="text-mint">✓</span><span>Exports for every answer</span></li>
+        <li class="flex gap-2"><span class="text-mint">✓</span><span>Uploaded papers reproduced</span></li>
+        <li class="flex gap-2"><span class="text-mint">✓</span><span>Background jobs, steerable</span></li>
+        <li class="flex gap-2"><span class="text-mint">✓</span><span>Open agent interfaces</span></li>
+      </ul>
+    </div>
+    <div class="reveal min-w-0">
+      <div class="overflow-hidden rounded-[1.25rem] bg-cream text-white shadow-[0_30px_60px_-30px_rgb(0_0_0/.5)]">
+        <div class="flex items-center gap-2 border-b border-white/10 px-4 py-3">
+          <span class="size-2.5 rounded-full bg-white/20"></span><span class="size-2.5 rounded-full bg-white/20"></span><span class="size-2.5 rounded-full bg-white/20"></span>
+          <span class="ml-3 font-mono text-xs text-white/50">terminal</span>
+          <button type="button" class="ml-auto rounded-full bg-white/10 px-3 py-1 font-mono text-xs text-white/80 transition hover:bg-white/20" data-copy="#quickstart-code">Copy</button>
+        </div>
+<pre class="code overflow-x-auto p-5 sm:p-6"><code id="quickstart-code"><span class="c"># 1. Get the code and the dependencies</span>
+<span class="k">git</span> clone https://github.com/AtlasRoX/TribosAI.git <span class="k">&amp;&amp;</span> cd TribosAI
+<span class="k">uv</span> sync --extra dev --extra vision --frozen
+
+<span class="c"># 2. Configure: put your model API key in .env</span>
+<span class="k">cp</span> .env.example .env
+
+<span class="c"># 3. Start the API on http://127.0.0.1:8000</span>
+<span class="k">uv</span> run uvicorn app.backend.main:app --host 127.0.0.1 --port 8000
+
+<span class="c"># 4. In a second terminal, the web app on http://localhost:3000</span>
+<span class="k">cd</span> web <span class="k">&amp;&amp;</span> npm ci <span class="k">&amp;&amp;</span> npm run dev</code></pre>
+      </div>
+      <p class="mt-4 font-mono text-xs text-sand">or both at once: <span class="text-cream">docker compose -f docker/compose.yml up --build</span></p>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================ CHANGELOG -->
+<section id="changelog" class="mx-auto max-w-[84rem] px-5 py-24 sm:px-10">
+  <div class="reveal flex flex-wrap items-end justify-between gap-6">
+    <h2 class="display text-4xl leading-[1.05] sm:text-5xl">The path <em>so far.</em></h2>
+    <a href="changelog.html" class="btn-ghost inline-flex items-center gap-2 rounded-full px-5 py-2.5 font-medium">Full changelog <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+  </div>
+  <div class="reveal mt-10 grid gap-3 md:grid-cols-3" data-spots>
+{{changelog_teaser}}
+  </div>
+</section>
+
+<!-- ================================================================ CLOSING -->
+<section class="border-t border-smoke">
+  <div class="mx-auto max-w-4xl px-5 py-28 text-center sm:px-10">
+    <span class="mark reveal mx-auto block size-14 text-cream"></span>
+    <h2 class="reveal display mt-8 text-5xl leading-[1.02] sm:text-7xl">Walk the worn path. <em>Check every step.</em></h2>
+    <div class="reveal mt-10 flex flex-wrap justify-center gap-2">
+      <a href="https://github.com/AtlasRoX/TribosAI" target="_blank" rel="noopener" class="btn-ember inline-flex items-center gap-2 rounded-full px-6 py-3 font-medium">Get Tribos</a>
+      <a href="https://youtu.be/yac5XH8Yyl8" target="_blank" rel="noopener" class="btn-ghost inline-flex items-center gap-2 rounded-full px-6 py-3 font-medium">Watch the demo</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+{{> footer}}
+</body>
+</html>

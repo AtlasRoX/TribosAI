@@ -45,6 +45,22 @@ _TIME_RE = re.compile(
     r"world\s+record|market\s+prices?|(?:in|since|as\s+of|during|until)\s+(?:19|20)\d{2})\b",
     re.IGNORECASE,
 )
+# Words that ask for sources or for current facts only when they are not part of a problem's story. In a closed
+# problem they narrate it: "a survey was taken of a group's viewing habits", "W is adjusted according to TCP Reno",
+# "Younglove and McLinden published a compendium", "a recent college graduate borrows $100,000", "in 1976 it was
+# believed". "Give references", "recent papers" or "as of 2026" still ask, whatever else the question holds.
+_INCIDENTAL_LITERATURE_RE = re.compile(
+    r"(?:survey|published|reported\s+(?:in|by)|according\s+to|studies|study\s+(?:shows?|found|reports?)|"
+    r"historical(?:ly)?|history\s+of|publications?|journals?)",
+    re.IGNORECASE,
+)
+_INCIDENTAL_TIME_RE = re.compile(r"(?:recent(?:ly)?|(?:in|since|during|until)\s+(?:19|20)\d{2})", re.IGNORECASE)
+# The answer format of an exercise: "(Express the final numerical answer in kJ.)", "How long (in ms) ...".
+_FINAL_ANSWER_RE = re.compile(
+    r"\b(?:express|give|report|round)\s+(?:the\s+|your\s+)?(?:final\s+)?(?:numerical\s+)?answer\b"
+    r"|\(\s*in\s+[A-Za-zµΩ°$%/^·\-\s]{1,16}\)",
+    re.IGNORECASE,
+)
 # Values that come from measurement, tables or standards rather than from the question.
 _EMPIRICAL_RE = re.compile(
     # Not "standard deviation", "an experiment tosses a coin" or "the data set 1, 2, 3": statistics and probability
@@ -103,6 +119,8 @@ _MATH_OBJECT_RE = re.compile(
     r"integrals?|inequalit(?:y|ies)|equations?|roots?|digits?|numbers?)\b", re.I)
 # A quantity the question gives: a number with a unit ("120 L", "4 L/min", "3.2 kg").
 _GIVEN_QUANTITY_RE = re.compile(r"(?<![\w.])\d+(?:\.\d+)?\s*([A-Za-zµΩ°][A-Za-z/^0-9·*]{0,10})")
+# Data sizes and rates ("350 Kbytes", "20 KB", "10 Mbps", "1 Gbit/s"): quantities of a networking or storage problem.
+_DATA_UNIT_RE = re.compile(r"^(?:[kKMGT]i?)?(?:bytes?|bits?|B|bit/s|bps)$|^[kKMGT]b(?:it)?/?s$")
 _ASKS_VALUE_RE = re.compile(
     r"\b(?:how\s+(?:long|much|many|far|fast|big|high|large|often)|calculate|compute|find|determine|work\s+out|"
     r"what\s+(?:is|are|was|will\s+be)\s+the\s+(?:value|total|time|speed|rate|area|volume|mass|cost|force|energy|power|"
@@ -117,6 +135,9 @@ def _given_quantities(text: str) -> int:
     count = 0
     for m in _GIVEN_QUANTITY_RE.finditer(text or ""):
         unit_word = m.group(1).split("/")[0]
+        if _DATA_UNIT_RE.match(m.group(1)):
+            count += 1
+            continue
         if not is_unit_word(unit_word):
             continue
         if len(unit_word) == 1 and unit_word.isalpha():
@@ -176,6 +197,31 @@ def _numeric_multiple_choice(text: str) -> bool:
     return is_multiple_choice(text) and len(_OPTION_VALUE_RE.findall(text or "")) >= 3
 
 
+CHOICE_REASON = ("a choose-one question: the answer is one of the options given, decided by reasoning from the question "
+                 "and established knowledge, so no outside evidence is needed; ask for sources to search the literature")
+
+
+def _choice_item(text: str) -> bool:
+    """A multiple-choice question whose options are candidate answers (not a lettered list of tasks)."""
+    from .question_text import is_choice_question
+
+    return is_choice_question(text)
+
+
+_ASKS_WHEN_RE = re.compile(r"\bwhen\s+(?:will|would|does|do|is|are)\b|\bhow\s+soon\b", re.I)
+
+
+def is_closed_problem(text: str) -> bool:
+    """An exercise that carries its own data: it asks for a value ("how long", "calculate", "(in ms)", "Express the
+    final numerical answer in K") and gives the numbers to compute it from."""
+    t = text or ""
+    final = bool(_FINAL_ANSWER_RE.search(t))
+    if not (final or _ASKS_VALUE_RE.search(t) or _WORD_ASK_RE.search(t) or _ASKS_WHEN_RE.search(t)):
+        return False
+    numbers = len(_NUMBER_RE.findall(t))
+    return _given_quantities(t) >= 2 or numbers >= 3 or (final and numbers >= 1) or is_word_problem(t)
+
+
 def is_word_problem(text: str) -> bool:
     """A self-contained arithmetic word problem: one value asked for, at least three numbers, story arithmetic words.
     Callers check sources, dates, measured values and named real-world entities first."""
@@ -202,12 +248,24 @@ def assess_evidence_need(query: str, ctx: Any = None) -> EvidenceNeed:
     if contract.pure_copy:
         return EvidenceNeed("none", "format", FORMAT_REASON, "literal copy")
     text = mask_instructions(str(query or ""))
-    lit = _match(_LITERATURE_RE, text)
-    if lit:
-        return EvidenceNeed("required", "literature", "the question asks for published sources", lit)
-    when = _match(_TIME_RE, text)
-    if when:
-        return EvidenceNeed("required", "current", "the answer depends on recent or dated information", when)
+    closed = None  # computed only when an incidental source or time word needs it
+    lit_words = [m.group(0) for m in _LITERATURE_RE.finditer(text)]
+    if lit_words:
+        explicit = [w for w in lit_words if not _INCIDENTAL_LITERATURE_RE.fullmatch(w)]
+        closed = is_closed_problem(text)
+        if not explicit and not closed and _choice_item(text):
+            # "Preliminary studies indicate that X has multiple chiral centres. Which step is most crucial? (A) ...":
+            # in a choose-one item these words narrate it. Searching on them returned papers that argued for a
+            # wrong option (benchmark failure analysis, GPQA recf6ayQmL1SxKbvW). "According to" can still name a source.
+            closed = not any(re.match(r"according\s+to", w, re.I) for w in lit_words)
+        if explicit or not closed:
+            return EvidenceNeed("required", "literature", "the question asks for published sources", (explicit or lit_words)[0])
+    time_words = [m.group(0) for m in _TIME_RE.finditer(text)]
+    if time_words:
+        explicit = [w for w in time_words if not _INCIDENTAL_TIME_RE.fullmatch(w)]
+        closed = is_closed_problem(text) if closed is None else closed
+        if explicit or not closed:
+            return EvidenceNeed("required", "current", "the answer depends on recent or dated information", (explicit or time_words)[0])
     status = _match(_STATUS_NEED_RE, text)
     if status:
         # Audit I38: the accepted status of a named problem is a fact about the field, not about the question's own
@@ -216,11 +274,15 @@ def assess_evidence_need(query: str, ctx: Any = None) -> EvidenceNeed:
         if _PROOF_RE.search(text) or re.search(r"(?i)\b(?:attempt|investigat\w*|derive|prove|disprove)\b", text):
             return EvidenceNeed("optional", "current", STATUS_MIXED_REASON, status)
         return EvidenceNeed("required", "current", STATUS_REASON, status)
+    # A choose-one item: the answer is one of its options, decided by reasoning from what the question gives and from
+    # established knowledge. Retrieval on its words ("measured", "typically", named systems) added model calls and
+    # distracting passages, and in one case the wrong option (benchmark failure analysis, 2026-11-06).
+    choice = _choice_item(text)
     empirical = _match(_EMPIRICAL_RE, text)
-    if empirical:
+    if empirical and not choice:
         return EvidenceNeed("optional", "empirical", "the answer uses measured or tabulated values", empirical)
     entities = _domain_entities(ctx)
-    if entities:
+    if entities and not choice:
         models_only = all(kind == "systems" for kind, _ in entities)
         if models_only and (getattr(ctx, "is_simulation_intent", False) or _MATH_NOTATION_RE.search(text)):
             # A model the question states and asks to simulate or solve ("the damped oscillator x'' + 0.5x' + 4x = 0"):
@@ -267,6 +329,8 @@ def assess_evidence_need(query: str, ctx: Any = None) -> EvidenceNeed:
         return EvidenceNeed("none", "self_contained", SELF_CONTAINED_REASON, qtype)
     if qtype == "conceptual":
         return EvidenceNeed("none", "established_knowledge", ESTABLISHED_REASON, qtype)
+    if choice:
+        return EvidenceNeed("none", "self_contained", CHOICE_REASON, "choose-one question")
     return EvidenceNeed("optional", "open", "the answer may depend on published findings", qtype)
 
 

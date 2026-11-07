@@ -310,7 +310,15 @@ def _requests_simulation(text: str) -> bool:
     ..."), or in the subject of a negated predicate without a directive ("running simulations does not establish the
     claim"). Everything else, including declarative requests and fragments ("a 50 s simulation of the Lorenz
     system"), still counts, so a real request is never lost to this reading.
+
+    The options of a multiple-choice question are candidate answers, not requests: "(C) Focus on its ADME properties,
+    using molecular dynamics simulations" asks the reader to judge the option, not Tribos to run a simulation.
     """
+    from .question_text import is_choice_question, option_texts
+
+    if is_choice_question(text or ""):
+        for option in option_texts(text or ""):
+            text = text.replace(option, " ")
     for sentence in _SENTENCE_SPLIT_RE.split(text or ""):
         for m in _SIMULATION_INTENT_RE.finditer(sentence):
             prefix, suffix = sentence[: m.start()], sentence[m.end():]

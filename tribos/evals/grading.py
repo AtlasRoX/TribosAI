@@ -30,7 +30,9 @@ _EXTRACT_SYSTEM = (
 _FINAL_SYSTEM = (
     "You read an answer to a question and report the single final answer it commits to: the value, expression or "
     "option it gives as its answer to the question, exactly as written (LaTeX allowed), without units. Not an "
-    "intermediate value, not a restatement of given data. If the answer gives no final answer, reply with null. "
+    "intermediate value, not a restatement of given data. When the answer gives an exact form and its numerical value "
+    "(\"1-\\Phi(2/\\sqrt{5}) \\approx 0.186\"), report both as written, joined by \\approx. If the answer gives no "
+    "final answer, reply with null. "
     'Reply with JSON only: {"final": "<final answer>"} or {"final": null}'
 )
 

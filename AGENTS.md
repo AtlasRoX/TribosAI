@@ -67,6 +67,14 @@ Never commit `.env`. Tests must not need the network: use the fakes in `tests/fa
   - `tribos/verify/verifier.py` grounds citations and checks claims.
   - `tribos/verify/math_claims.py` re-evaluates the answer's equations.
   - The math agent (`tribos/axiom/agent.py`) has a zero-false-accept gate in `tests/test_math_agent.py`, which must stay green.
+  - The chemistry agent Chemeia (`tribos/agentic/chem_agent.py`, `TRIBOS_CHEM_AGENT`) runs on organic-chemistry
+    questions:
+    - the model writes each intermediate and the target compound as SMILES;
+    - RDKit checks every structure and matches the target to the answer options (`tribos/physis/chemistry.py`,
+      `tribos/physis/names.py`);
+    - a mismatch gets one repair round.
+
+    Its evidence says that code checked the structures, not the chemistry.
 - **Sandbox.** `tribos/agentic/sandbox/runner.py` and `policy.py` provide a runtime IO guard, SymPy parser hardening and resource limits. Any tool that executes code must be:
   - classified `executes_code` in `tribos/agentic/plan_graph.tool_capabilities`;
   - refused for replay in `tribos/provenance/rerun.py` (`UNSAFE_TOOL_RE`).

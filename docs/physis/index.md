@@ -232,6 +232,78 @@ Searches the Wikipedia REST API for definitions, theorems, and concepts across m
 
 ---
 
+### `physis_molecule`
+
+Exact structure facts for organic molecules given as SMILES, computed with RDKit (`tribos/physis/chemistry.py`).
+
+- **Domain**: `physis`
+- **Adapter Type**: `LOCAL_COMPUTE`
+- **Timeout**: 30.0 seconds
+
+| Field | Type | Required | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `smiles` | `list[str]` | Yes | — | One to eight structures as SMILES. Atom-map numbers may carry IUPAC locants. |
+| `names` | `list[str]` | No | — | A short name for each structure, such as the answer options. |
+| `locants` | `dict[str, str]` | No | — | Atom-map number to locant label for letter locants, e.g. `{"31": "3a"}`. |
+
+For each structure it returns:
+
+- the molecular formula, molecular weight and monoisotopic mass;
+- the degree of unsaturation;
+- the stereocentres and stereogenic double bonds with CIP labels (new CIP labeler, pseudoasymmetric r/s included);
+- whether the structure is chiral or meso;
+- the number of stereoisomers of its constitution, split into enantiomer pairs and achiral forms;
+- the number of topologically distinct H and C environments.
+
+For each pair of structures it says whether they are identical, enantiomers, diastereomers or constitutional isomers.
+Environments are graph-symmetry classes, so diastereotopic CH2 protons count as one class.
+
+### `physis_stereo`
+
+Translates stereodescriptor sets into 3D geometry. A model that has a product's geometry right can still write the
+wrong R/S labels. This tool is how Tribos avoids that.
+
+| Field | Type | Required | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `smiles` | `list[str]` | Yes | — | With `descriptor_sets`: one SMILES of the constitution, atoms mapped to their locants. Without: isomeric SMILES to describe. |
+| `descriptor_sets` | `list[str]` | No | — | e.g. `["(1R,2S)", "(1R,2R)"]` or whole names; R/S, r/s and E/Z. |
+| `locants` | `dict[str, str]` | No | — | Atom-map number to locant label for letter locants. |
+| `distance_pairs` | `list[list[str]]` | No | — | Locant pairs whose 3D distance to report. |
+
+How it works:
+
+1. Each descriptor set is assigned with the CIP rules. Mismatched centres are flipped until the labels hold; if that
+   does not settle, an exhaustive search over up to 2^12 assignments follows.
+2. The configuration is embedded in 3D (ETKDG with MMFF relaxation). The tool checks that the geometry keeps the
+   labels.
+3. For every ring that holds two or more stereocentres, it lists the substituents on each face of the ring's mean
+   plane, with cis/trans for each pair.
+
+In a bridged bicycle, a substituent on the same face of the ring through both bridgeheads as the other bridge is endo
+to that bridge.
+
+Both tools are planned for questions that turn on a structure: stereodescriptors in names, stereoisomers, chirality,
+NMR environments, molecular formulae, endo/exo (`is_structure_question`). The result reaches the writer as a
+`<chemistry>` evidence block.
+
+A planner transcribing names into SMILES is unreliable. In live runs it dropped substituents and left out locant
+numbers. So for a choose-one question whose options are named with stereodescriptors, code builds the structures
+itself before drafting:
+
+1. `tribos/physis/names.py` parses each option's name into a locant-numbered structure.
+2. `compute_option_stereo` translates each option's descriptors into ring faces.
+3. The result is stored under the `chemistry` result key. The planner is then not offered `physis_stereo`.
+
+The name grammar covers substituted chains and carbocycles:
+
+- C1 to C12 parents, with -ene/-yne locants;
+- the suffixes -ol, -one, -amine, -thiol and -al;
+- alkyl, halo, hydroxy, alkoxy, nitro, amino, oxo and similar prefixes.
+
+Fused, bridged and hetero ring names return nothing. Those are left to a planned tool call.
+
+---
+
 ## 3. Practical Usage Examples
 
 ### Example 1: Verifying Dimensional Homogeneity of Kinetic Energy

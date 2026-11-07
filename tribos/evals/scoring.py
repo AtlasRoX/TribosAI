@@ -5,6 +5,7 @@ LLM-based grading (benchmark labels, rubric judge) lives in grading.py and only 
 
 from __future__ import annotations
 
+import functools
 import math
 import random
 import re
@@ -269,11 +270,13 @@ def _replace_latex_sqrts(s: str) -> str:
 _LATEX_GREEK_AND_SYMBOLS: tuple[tuple[str, str], ...] = (
     (r"\\left\s*", ""),
     (r"\\right\s*", ""),
-    (r"\\(?:,|;|!|quad|qquad)\b", " "),
+    # Spacing: "\!" and "\," also before a backslash ("\sin\!\left(") or a brace, not only before a letter.
+    (r"\\(?:[,;:!]|qquad\b|quad\b)", " "),
     (r"\\cdot\b", "*"),
     (r"\\times\b", "*"),
     (r"\\div\b", "/"),
     (r"\\pi\b", "pi"),
+    (r"\\Phi\b", "Phi"),
     (r"\\hbar\b", "hbar"),
     (r"\\omega\b", "omega"),
     (r"\\delta\b", "delta"),
@@ -343,6 +346,19 @@ def latex_to_sympy_str(raw: str) -> str:
     return s.strip().rstrip(".,;:")
 
 
+@functools.lru_cache(maxsize=1)
+def _normal_cdf() -> Any:
+    """Phi, the standard normal CDF, as a SymPy function (the expression parser allows calls to SymPy functions only)."""
+    import sympy
+
+    class Phi(sympy.Function):
+        @classmethod
+        def eval(cls, x: Any) -> Any:
+            return (1 + sympy.erf(x / sympy.sqrt(2))) / 2
+
+    return Phi
+
+
 def parse_sympy_expr(raw: str) -> Any:
     """Parse a mathematical or LaTeX string into a SymPy expression, or return None on failure."""
     cleaned = latex_to_sympy_str(raw)
@@ -393,6 +409,8 @@ def parse_sympy_expr(raw: str) -> Any:
             "arccos": sympy.acos,
             "arctan": sympy.atan,
             "binomial": sympy.binomial,
+            # The standard normal CDF, as probability answers write it: 1 - \Phi(2/\sqrt{5}).
+            "Phi": _normal_cdf(),
         }
         # If 'E' is not used as a variable (like Young's modulus E*I), allow exp(1) when written as 'e'
         transformations = standard_transformations + (implicit_multiplication_application, convert_xor)
@@ -642,7 +660,7 @@ def numeric_list_check(
     items = _list_items(answer)
     got = [_parse_numeric_str(p) for p in items] if items else []
     ok = (len(got) == len(expected)
-          and all(numeric_within_tolerance(g, e, abs_tol=abs_tol, rel_tol=rel_tol) for g, e in zip(got, expected)))
+          and all(numeric_within_tolerance(g, e, abs_tol=abs_tol, rel_tol=rel_tol) for g, e in zip(got, expected, strict=True)))
     shown = ", ".join("?" if g is None else f"{g:g}" for g in got) if got else "no list found"
     detail = f"expected [{', '.join(f'{e:g}' for e in expected)}], got [{shown}]"
     return Check(name="answer.numeric_list", passed=ok, detail=detail), {"numeric_list_correct": ok}

@@ -1,0 +1,35 @@
+    <figure class="reveal relative mx-auto aspect-square w-full max-w-[540px]" aria-label="The research loop: a charter, rounds of tests, a findings ledger and a judge, round after round, until the work is settled and written up as a thesis">
+      <div class="pointer-events-none absolute inset-[30%] -z-10 rounded-full bg-[radial-gradient(circle,rgb(220_75_31/.14),transparent_70%)] blur-2xl"></div>
+      <svg viewBox="0 0 600 600" class="loop absolute inset-0 size-full" aria-hidden="true">
+        <circle cx="300" cy="300" r="150" fill="none" stroke="#e6e6e6" stroke-width="1.5"/>
+        <circle cx="300" cy="300" r="205" fill="none" stroke="#efefef" stroke-width="1" stroke-dasharray="2 8"/>
+        <!-- the light that travels round the loop: a fading trail and its head -->
+        <circle class="comet" style="--o0:0" cx="300" cy="300" r="150" fill="none" stroke="#4f46e5" stroke-opacity=".28" stroke-width="2" stroke-linecap="round" stroke-dasharray="150 792.48"/>
+        <circle class="comet" style="--o0:-146" cx="300" cy="300" r="150" fill="none" stroke="#4f46e5" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="4 938.48"/>
+        <!-- direction: clockwise -->
+        <g fill="none" stroke="#4f46e5" stroke-opacity=".45" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M443 293 L450 301 L457 293" transform="rotate(-45 300 300)"/>
+          <path d="M443 293 L450 301 L457 293" transform="rotate(45 300 300)"/>
+          <path d="M443 293 L450 301 L457 293" transform="rotate(135 300 300)"/>
+          <path d="M443 293 L450 301 L457 293" transform="rotate(225 300 300)"/>
+        </g>
+        <!-- settled: the judge sends the work to the thesis -->
+        <path d="M168 300 L236 300" stroke="#dc4b1f" stroke-width="1.5" stroke-dasharray="3 5" stroke-linecap="round"/>
+        <path d="M230 295 L237 300 L230 305" fill="none" stroke="#dc4b1f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="202" y="290" text-anchor="middle" fill="#dc4b1f" font-family="Geist Mono, monospace" font-size="11" letter-spacing="1">SETTLED</text>
+        <!-- the four stations -->
+        <g class="nodes">
+          <circle cx="300" cy="150" r="7" fill="#ffffff" stroke="#4f46e5" stroke-width="2.5"/>
+          <circle cx="450" cy="300" r="7" fill="#ffffff" stroke="#4f46e5" stroke-width="2.5"/>
+          <circle cx="300" cy="450" r="7" fill="#ffffff" stroke="#4f46e5" stroke-width="2.5"/>
+          <circle cx="150" cy="300" r="7" fill="#ffffff" stroke="#dc4b1f" stroke-width="2.5"/>
+        </g>
+      </svg>
+      <div class="absolute bottom-[78%] left-1/2 -translate-x-1/2 text-center"><p class="font-mono text-[0.68rem] tracking-[0.14em] text-iris uppercase">Charter</p><p class="mt-1 hidden text-sm whitespace-nowrap text-sand sm:block">hypotheses and tests</p></div>
+      <div class="absolute top-1/2 left-[78.5%] -translate-y-1/2 text-left"><p class="font-mono text-[0.68rem] tracking-[0.14em] text-iris uppercase">Rounds</p><p class="mt-1 hidden text-sm text-sand sm:block">tests run<br>in parallel</p></div>
+      <div class="absolute top-[78%] left-1/2 -translate-x-1/2 text-center"><p class="font-mono text-[0.68rem] tracking-[0.14em] text-iris uppercase">Ledger</p><p class="mt-1 hidden text-sm whitespace-nowrap text-sand sm:block">numbers, code and seals</p></div>
+      <div class="absolute top-1/2 right-[78.5%] -translate-y-1/2 text-right"><p class="font-mono text-[0.68rem] tracking-[0.14em] text-ember uppercase">Judge</p><p class="mt-1 hidden text-sm text-sand sm:block">evidence<br>rules</p></div>
+      <div class="absolute top-1/2 left-1/2 grid aspect-square w-[21%] -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-cream text-white shadow-[0_20px_50px_-18px_rgb(0_0_0/.45)]">
+        <div class="text-center"><span class="mark mx-auto block size-5 sm:size-7"></span><p class="mt-0.5 text-sm font-medium sm:mt-1 sm:text-base">thesis</p></div>
+      </div>
+    </figure>

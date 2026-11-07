@@ -22,6 +22,7 @@ DYNAMIS_PDE = "dynamis_pde"  # a solved partial differential equation (dynamis_s
 DYNAMIS_MONTE_CARLO = "dynamis_monte_carlo"  # reproducible sampled quadrature
 COMPUTED_RESULTS = "computed_results"  # values computed by code for the question (tribos.writer.facts)
 CODEACT = "codeact"  # the model's Python notebook for the question (tribos.agentic.codeact)
+CHEMISTRY = "chemistry"  # answer options' stereodescriptors as geometry (tribos.physis.chemistry.compute_option_stereo)
 
 # Legacy key -> the canonical key whose result it repeats.
 ALIAS_KEYS: dict[str, str] = {
@@ -31,8 +32,8 @@ ALIAS_KEYS: dict[str, str] = {
 }
 
 # The STEM computation results the evidence block renders, in prompt order.
-STEM_RESULT_KEYS = (COMPUTED_RESULTS, DYNAMIS, DYNAMIS_EQUILIBRIUM, DYNAMIS_SCAN, DYNAMIS_PDE, DYNAMIS_MONTE_CARLO, AXIOM, PHYSIS, CALCULA,
-                    CODEACT)
+STEM_RESULT_KEYS = (COMPUTED_RESULTS, CHEMISTRY, DYNAMIS, DYNAMIS_EQUILIBRIUM, DYNAMIS_SCAN, DYNAMIS_PDE, DYNAMIS_MONTE_CARLO, AXIOM,
+                    PHYSIS, CALCULA, CODEACT)
 
 
 def is_alias_duplicate(key: str, tool_results: dict[str, Any]) -> bool:
@@ -56,6 +57,7 @@ __all__ = [
     "CALCULA",
     "DYNAMIS",
     "COMPUTED_RESULTS",
+    "CHEMISTRY",
     "DYNAMIS_EQUILIBRIUM",
     "DYNAMIS_PDE",
     "DYNAMIS_MONTE_CARLO",

@@ -17,7 +17,7 @@ Precedence for state directories: a specific variable (`TRIBOS_MEMORY_DIR`, `TRI
 `TRIBOS_UPLOAD_ROOT`, `TRIBOS_JOBS_DIR`, `TRIBOS_TOOL_CACHE_DIR`) wins over `TRIBOS_DATA_DIR`; with
 neither set, every store keeps its historical location under the workspace.
 
-240 variables.
+242 variables.
 
 ## State directories
 
@@ -311,10 +311,12 @@ neither set, every store keeps its historical location under the workspace.
 
 | Variable | Type | Default | Read at | Description |
 | --- | --- | --- | --- | --- |
+| `TRIBOS_CHEM_AGENT` | bool | `true` | `tribos/agentic/chem_agent.py` | Run the chemistry agent on organic-chemistry questions: the model works the reaction as SMILES, code checks each structure and matches the target to the options, one repair on a mismatch. |
 | `TRIBOS_CODEACT` | bool | `true` | `tribos/agents/orchestration/codeact_stage.py` | Work computational questions in a persistent Python session, the model writing and fixing code step by step (CodeAct). |
 | `TRIBOS_CODEACT_MAX_STEPS` | int (1 to 20) | `6` | `tribos/agents/orchestration/codeact_stage.py` | Python cells one CodeAct session may run. |
 | `TRIBOS_CONSTRUCT` | bool | `true` | `tribos/agents/orchestration/construct_stage.py` | Construct mode: evolutionary search for constructions that beat a known bound, scored exactly by code. |
 | `TRIBOS_CONSTRUCT_GENERATIONS` | int (1 to 200) | `10` | `tribos/agents/orchestration/construct_stage.py` | Programs one construct-mode search writes (each is one model call and one sandbox run; two at a time). |
+| `TRIBOS_CROSS_CHECK` | bool | `false` | `tribos/agents/orchestration/cross_check.py` | Check a self-contained, multiple-choice or yes/no answer no code computed against an independent solution; adjudicate and rewrite on disagreement (1 model call, 2 more if they disagree). |
 | `TRIBOS_FORMAL` | bool | `true` | `tribos/verify/formal/prove.py` | Formal Lean 4 checking of 'prove ...' questions (used only when Lean is installed). |
 | `TRIBOS_FORMAL_BACKGROUND` | bool | `true` | `tribos/agentic/formal_proof.py` | Run the Lean formal proof beside the rest of the run; the answer waits for it only when it is written. |
 | `TRIBOS_FORMAL_BLUEPRINT` | bool | `true` | `tribos/verify/formal/prove.py` | When a direct Lean proof fails (Mathlib projects): split it into lemmas, prove each, and check the assembled file. |

@@ -28,7 +28,7 @@ from ...writer.pde_facts import compute_pde_facts
 from ...writer.poly_facts import compute_poly_facts
 from ...writer.roots_facts import compute_roots_facts
 from ...writer.system_facts import compute_system_facts
-from ..result_keys import COMPUTED_RESULTS
+from ..result_keys import CHEMISTRY, COMPUTED_RESULTS
 from .context import RunContext, orchestrator_module
 
 logger = logging.getLogger(__name__)
@@ -78,10 +78,30 @@ def _question(run: RunContext) -> str:
     return run.clean_query or run.resolved_query or run.query or ""
 
 
+async def option_stereo(run: RunContext, question: str) -> None:
+    """Answer options named with stereodescriptors, translated into geometry by code before drafting
+    (tribos.physis.chemistry.compute_option_stereo). Planned tool calls wrote these structures unreliably."""
+    from ...physis.chemistry import compute_option_stereo
+
+    try:
+        data = await asyncio.wait_for(asyncio.to_thread(compute_option_stereo, question), FACTS_TIMEOUT_S)
+    except Exception as exc:  # noqa: BLE001 - a missing fact never blocks the answer
+        logger.info("Option stereochemistry skipped: %s", exc)
+        return
+    if not data:
+        return
+    run.tool_results[CHEMISTRY] = ToolResult(success=True, tool_name="physis_stereo", data=data)
+    run.execution_artifacts[CHEMISTRY] = data
+    built = sum(1 for c in data.get("configurations") or [] if c.get("labels"))
+    await run.emit("computed_results", title="Translated the options' stereodescriptors into geometry",
+                   text=f"{built} option structures built from their names; ring faces computed with the CIP rules")
+
+
 async def compute_results(run: RunContext) -> None:
     """The user's outline and the code-computed results for the question, before the first draft."""
     question = _question(run)
     run.answer_outline = task_outline(question)
+    await option_stereo(run, question)
     try:
         # A gravitational N-body problem stated in full is integrated by code (tribos.writer.nbody_facts).
         data = await asyncio.wait_for(asyncio.to_thread(compute_nbody_facts, question), FACTS_TIMEOUT_S)

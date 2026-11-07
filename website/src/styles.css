@@ -1,0 +1,333 @@
+@import "tailwindcss";
+
+/* Tribos homepage: light and quiet. White and soft grey surfaces, near-black type in one family (Geist), black pill
+   buttons, rounded media cards with a caption row, and colour used only where it carries meaning: orange for the one
+   action or highlight, indigo for verification, green for what was checked, red for what was rejected. */
+
+@theme {
+  /* Token names are the page's roles: coal = page, soot = alternate band, ash = field, smoke = hairline,
+     cream = ink, sand = secondary ink, dust = tertiary ink. */
+  --color-coal: #ffffff;
+  --color-soot: #f7f7f7;
+  --color-ash: #f2f2f2;
+  --color-smoke: #ebebeb;
+  --color-haze: #dcdcdc;
+  --color-cream: #111111;
+  --color-sand: #6b6b6b;
+  --color-dust: #9a9a9a;
+  --color-ember: #dc4b1f;
+  --color-iris: #4f46e5;
+  --color-mint: #0f8a5f;
+  --color-rose: #d33b3b;
+
+  --font-display: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --font-greek: "GFS Didot", Georgia, serif;
+}
+
+@layer base {
+  :root {
+    /* Inlined as data URIs by build.mjs, once each. */
+    --mask-mark: url("mark.png");
+    --mask-wordmark: url("wordmark.png");
+    color-scheme: light;
+  }
+  html {
+    scroll-behavior: smooth;
+    scroll-padding-top: 5.5rem;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    background: var(--color-coal);
+    color: var(--color-cream);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  h1, h2, h3 { text-wrap: balance; }
+  p, li { text-wrap: pretty; }
+  ::selection { background: rgb(220 75 31 / 0.18); }
+  :focus-visible {
+    outline: 2px solid var(--color-iris);
+    outline-offset: 3px;
+    border-radius: 8px;
+  }
+}
+
+@layer components {
+  .display {
+    font-family: var(--font-display);
+    font-weight: 500;
+    letter-spacing: -0.045em;
+  }
+  /* Two-tone headings: the second phrase in secondary ink. */
+  .display em {
+    font-style: normal;
+    color: var(--color-sand);
+  }
+
+  /* Retired decoration from the dark design: kept harmless if any markup still carries it. */
+  .lamp, .dots { display: none; }
+
+  .glass {
+    background: rgb(255 255 255 / 0.86);
+    border: 1px solid var(--color-smoke);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 16px 40px -20px rgb(0 0 0 / 0.14);
+    backdrop-filter: blur(16px) saturate(1.4);
+  }
+
+  .mark {
+    display: inline-block;
+    background-color: currentColor;
+    -webkit-mask: var(--mask-mark) center / contain no-repeat;
+    mask: var(--mask-mark) center / contain no-repeat;
+  }
+  .wordmark {
+    display: inline-block;
+    background-color: currentColor;
+    -webkit-mask: var(--mask-wordmark) left center / contain no-repeat;
+    mask: var(--mask-wordmark) left center / contain no-repeat;
+    aspect-ratio: 620 / 199;
+  }
+
+  /* Primary: a black pill. Secondary: a grey pill. */
+  .btn-ember {
+    background: var(--color-cream);
+    color: #fff;
+    transition: background 0.2s ease, transform 0.2s ease;
+  }
+  .btn-ember:hover { background: #000; transform: translateY(-1px); }
+  .btn-ghost {
+    background: var(--color-ash);
+    color: var(--color-cream);
+    transition: background 0.2s ease;
+  }
+  .btn-ghost:hover { background: #e7e7e7; }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border-radius: 999px;
+    padding: 0.18rem 0.6rem;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    white-space: nowrap;
+    border: 1px solid transparent;
+  }
+  .chip-ok { color: var(--color-mint); background: rgb(15 138 95 / 0.08); }
+  .chip-bad { color: var(--color-rose); background: rgb(211 59 59 / 0.08); }
+  .chip-iris { color: var(--color-iris); background: rgb(79 70 229 / 0.08); }
+  .chip-dim { color: var(--color-sand); background: var(--color-ash); }
+
+  /* Filter chips (the gallery): outlined pills with a count. */
+  .filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    border-radius: 999px;
+    border: 1px solid var(--color-smoke);
+    padding: 0.4rem 0.95rem;
+    font-size: 0.92rem;
+    color: var(--color-cream);
+    transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+  }
+  .filter small { color: var(--color-dust); font-size: 0.82em; }
+  .filter:hover { background: var(--color-ash); }
+  .filter[aria-pressed="true"] { background: var(--color-cream); border-color: var(--color-cream); color: #fff; }
+  .filter[aria-pressed="true"] small { color: rgb(255 255 255 / 0.6); }
+
+  /* Cards. The light that follows the pointer stays faint on white. */
+  .spot {
+    position: relative;
+    isolation: isolate;
+    border-radius: 1.25rem;
+    background: #fff;
+    border: 1px solid var(--color-smoke);
+    overflow: hidden;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+  }
+  .spot::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background: radial-gradient(420px circle at var(--x, 50%) var(--y, -30%), rgb(220 75 31 / 0.06), transparent 60%);
+    opacity: 0;
+    transition: opacity 0.4s ease;
+  }
+  .spot:hover { border-color: var(--color-haze); box-shadow: 0 18px 40px -24px rgb(0 0 0 / 0.22); }
+  .spot:hover::before { opacity: 1; }
+
+  /* Media cards: rounded grey frame, caption row beneath. */
+  .media {
+    position: relative;
+    overflow: hidden;
+    border-radius: 0.9rem;
+    background: var(--color-ash);
+    border: 1px solid var(--color-smoke);
+  }
+  .media img { transition: transform 0.7s cubic-bezier(0.2, 0.8, 0.2, 1); }
+  .card:hover .media img { transform: scale(1.03); }
+  .shot {
+    border-radius: 0.9rem;
+    border: 1px solid var(--color-smoke);
+  }
+
+  /* The hero console: a run, played step by step. */
+  .js .step {
+    opacity: 0;
+    translate: 0 8px;
+    transition: opacity 0.45s ease, translate 0.45s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .js .step.on { opacity: 1; translate: 0 0; }
+  .tab {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    color: var(--color-sand);
+    transition: color 0.2s ease, background 0.2s ease;
+  }
+  .tab:hover { color: var(--color-cream); }
+  .tab[aria-selected="true"] { color: var(--color-cream); background: var(--color-ash); }
+  .tab .progress {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background: rgb(220 75 31 / 0.1);
+    transform: scaleX(0);
+    transform-origin: left;
+  }
+  .tab[aria-selected="true"] .progress.run { animation: fill var(--dur, 7s) linear forwards; }
+
+  .timeline li { position: relative; }
+  .timeline li::before {
+    content: "";
+    position: absolute;
+    left: 7px;
+    top: 22px;
+    bottom: -10px;
+    width: 1px;
+    background: linear-gradient(var(--color-haze), transparent);
+  }
+  .timeline li:last-child::before { display: none; }
+  .node {
+    display: grid;
+    place-items: center;
+    width: 15px;
+    height: 15px;
+    margin-top: 3px;
+    border-radius: 999px;
+    border: 1.5px solid var(--color-haze);
+    background: #fff;
+  }
+  .node.ok { border-color: var(--color-mint); }
+  .node.ok::after { content: ""; width: 5px; height: 5px; border-radius: 99px; background: var(--color-mint); }
+  .node.bad { border-color: var(--color-rose); }
+  .node.bad::after { content: ""; width: 5px; height: 5px; border-radius: 99px; background: var(--color-rose); }
+  .node.iris { border-color: var(--color-iris); }
+  .node.iris::after { content: ""; width: 5px; height: 5px; border-radius: 99px; background: var(--color-iris); }
+
+  .checked { color: var(--color-ember); }
+  .tick path {
+    fill: none;
+    stroke: var(--color-mint);
+    stroke-width: 9;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-dasharray: 160;
+    stroke-dashoffset: 160;
+    animation: draw 0.8s cubic-bezier(0.65, 0, 0.35, 1) 1s forwards;
+  }
+
+  .rise {
+    opacity: 0;
+    translate: 0 12px;
+    animation: rise 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+  }
+  .js .reveal {
+    opacity: 0;
+    translate: 0 18px;
+    transition: opacity 0.7s ease, translate 0.7s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .js .reveal.in { opacity: 1; translate: 0 0; }
+  .pulse { animation: pulse 2.4s ease-in-out infinite; }
+
+  .code { font-family: var(--font-mono); font-size: 0.84rem; line-height: 1.8; }
+  .code .c { color: var(--color-dust); }
+  .code .k { color: var(--color-ember); }
+
+  .link-u {
+    background-image: linear-gradient(currentColor, currentColor);
+    background-size: 0 1px;
+    background-repeat: no-repeat;
+    background-position: 0 100%;
+    transition: background-size 0.3s ease, color 0.2s ease;
+  }
+  .link-u:hover { background-size: 100% 1px; }
+
+  .katex { font-size: 1.05em; }
+
+  /* Engines: each card leads with what the engine produces. */
+  .engine-visual {
+    position: relative;
+    height: 9.5rem;
+    overflow: hidden;
+    border-radius: 0.9rem;
+    background:
+      radial-gradient(110% 90% at 0% 0%, rgb(79 70 229 / 0.05), transparent 60%),
+      radial-gradient(110% 90% at 100% 100%, rgb(220 75 31 / 0.05), transparent 60%),
+      var(--color-soot);
+    border: 1px solid var(--color-smoke);
+  }
+  .engine-glyph {
+    display: grid;
+    place-items: center;
+    width: 2.6rem;
+    height: 2.6rem;
+    flex-shrink: 0;
+    border-radius: 0.8rem;
+    color: var(--color-iris);
+    font-size: 1.3rem;
+    background: rgb(79 70 229 / 0.07);
+    border: 1px solid rgb(79 70 229 / 0.18);
+    transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .engine:hover .engine-glyph { transform: translateY(-2px) rotate(-4deg); }
+  .spark path[pathLength] {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+    transition: stroke-dashoffset 2.4s cubic-bezier(0.45, 0, 0.2, 1) 0.3s;
+  }
+  .reveal.in .spark path[pathLength], html:not(.js) .spark path[pathLength] { stroke-dashoffset: 0; }
+  .cursor { animation: blink 1.1s steps(1) infinite; }
+
+  /* The research loop: a light travelling round the ring. */
+  .comet { animation: comet 6.5s linear infinite; }
+
+  .log-item code {
+    font-family: var(--font-mono);
+    font-size: 0.86em;
+    padding: 0.05em 0.3em;
+    border-radius: 6px;
+    background: var(--color-ash);
+  }
+}
+
+@keyframes draw { to { stroke-dashoffset: 0; } }
+@keyframes rise { to { opacity: 1; translate: 0 0; } }
+@keyframes fill { to { transform: scaleX(1); } }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@keyframes blink { 50% { opacity: 0; } }
+@keyframes comet { from { stroke-dashoffset: var(--o0); } to { stroke-dashoffset: calc(var(--o0) - 942.48); } }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .rise { animation: none; opacity: 1; translate: 0 0; }
+  .pulse, .comet, .cursor { animation: none; }
+  .tick path { animation: none; stroke-dashoffset: 0; }
+  .spark path[pathLength] { stroke-dashoffset: 0; transition: none; }
+  .js .reveal, .js .step { opacity: 1; translate: 0 0; transition: none; }
+}

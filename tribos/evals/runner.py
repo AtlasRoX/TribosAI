@@ -503,7 +503,8 @@ class Evaluator:
         # The final answer to grade, found the same way for every system: the \boxed{} value when there is one, else
         # the grader model's reading of the stated final answer (kept, so rescore reuses it without asking again).
         final_source = None
-        if (expect.numeric_answer is not None or expect.symbolic_answer is not None) and response:
+        if (expect.numeric_answer is not None or expect.symbolic_answer is not None
+                or expect.numeric_list is not None) and response:
             if scoring.extract_boxed(response) is not None:
                 observed.pop("final_answer", None)
                 final_source = "boxed"
@@ -792,6 +793,8 @@ def observe(payload: dict[str, Any], latency: float, *, query: str = "") -> dict
         "task_status": dict(payload.get("task_status") or {}),
         "tool_calls": [{k: c.get(k) for k in ("tool_name", "success", "error_type", "inputs", "raw_inputs")} for c in calls],
         "artifact_keys": sorted(artifacts.keys()) if isinstance(artifacts, dict) else [],
+        # The independent cross-check of a problem's answer (agreed, corrected, draft kept), for failure analysis.
+        "cross_check": dict(artifacts.get("cross_check") or {}) if isinstance(artifacts, dict) else {},
         # Every identifier in the run's evidence (citation gate), plus the older canonical-id list.
         "evidence_ids": sorted(set(_evidence_ids(manifest, entries)) | set(scoring.collect_evidence_ids(payload))),
         # Run metrics (faithfulness, failed steps, calls, tokens).
