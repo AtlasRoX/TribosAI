@@ -111,6 +111,8 @@ const REDACT = [
   [/,?\s*and Meta Muse Spark overview/gi, ""],
   [/\bMeta Muse Spark\b/gi, "the model"],
   [/\bMuse Spark\b/gi, "the model"],
+  [/\bRDKit\b/g, "a cheminformatics toolkit"],
+  [/\bCoolProp\b/g, "reference equations of state"],
 ];
 const redact = (s) => REDACT.reduce((acc, [re, to]) => acc.replace(re, to), s);
 
